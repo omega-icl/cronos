@@ -31,7 +31,8 @@ namespace mc
 //! (ODEs) using continuous-time set-valued integration.
 ////////////////////////////////////////////////////////////////////////
 template <typename T, typename PMT, typename PVT>
-class ODEBND_BASE: public virtual BASE_DE
+class ODEBND_BASE:
+  public virtual BASE_DE
 {
  typedef Ellipsoid E;
 
@@ -722,9 +723,10 @@ ODEBND_BASE<T,PMT,PVT>::_I2vec
       vec[ivec++] = Op<T>::l( Ix[ix] );
       vec[ivec++] = Op<T>::u( Ix[ix] );
     }
-    else{
+  }
+  else
+    for( unsigned ix=0; ix<nx; ix++ )
       vec[ivec++] = 0.5*Op<T>::diam( Ix[ix] );
-    }
   return;
 }
 
@@ -956,7 +958,7 @@ ODEBND_BASE<T,PMT,PVT>::_RHS_I_STA
     return true;
    
   case OPT::DINEQ:
-    if( !_opRHSi ) return GSL_EBADFUNC;
+    if( !_opRHSi ) return false;
     _vec2I( x, _nx, _Ix );   // set current state bounds
     _IVAR[_nx+_npar] = t; // set current time
     _RHS_I_DI( _pDAG, _opRHSi, _IRHS, _nx, _pRHS, _nVAR-_nq, _pVAR, _IVAR, _Ixdot,
@@ -2434,7 +2436,7 @@ ODEBND_BASE<T,PMT,PVT>::_record
     for( unsigned ix=0; ix<it->nx; ix++ )
       ofile << std::setw(iprec+9) << mc::Op<T>::l( it->X[ix] )
             << std::setw(iprec+9) << mc::Op<T>::u( it->X[ix] );
-    ofiel << std::endl;
+    ofile << std::endl;
   }
 }
 

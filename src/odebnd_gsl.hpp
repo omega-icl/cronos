@@ -30,7 +30,10 @@ namespace mc
 //! integrator is gsl_odeiv2 in GSL.
 ////////////////////////////////////////////////////////////////////////
 template <typename T, typename PMT=mc::TModel<T>, typename PVT=mc::TVar<T> >
-class ODEBND_GSL: public ODEBND_BASE<T,PMT,PVT>, public virtual BASE_GSL
+class ODEBND_GSL:
+  public virtual BASE_DE,
+  public virtual BASE_GSL,
+  public virtual ODEBND_BASE<T,PMT,PVT>
 {
  typedef Ellipsoid E;
  typedef BASE_DE::STATUS STATUS;
@@ -38,14 +41,14 @@ class ODEBND_GSL: public ODEBND_BASE<T,PMT,PVT>, public virtual BASE_GSL
  using ODEBND_BASE<T,PMT,PVT>::FAILURE;
  using ODEBND_BASE<T,PMT,PVT>::FATAL;
 
- using ODEBND_BASE<T,PMT,PVT>::_nx;
- using ODEBND_BASE<T,PMT,PVT>::_np;
- using ODEBND_BASE<T,PMT,PVT>::_nq;
- using ODEBND_BASE<T,PMT,PVT>::_nf;
- using ODEBND_BASE<T,PMT,PVT>::_vRHS;
- using ODEBND_BASE<T,PMT,PVT>::_vQUAD;
- using ODEBND_BASE<T,PMT,PVT>::_vIC;
- using ODEBND_BASE<T,PMT,PVT>::_vFCT;
+ //using ODEBND_BASE<T,PMT,PVT>::_nx;
+ //using ODEBND_BASE<T,PMT,PVT>::_np;
+ //using ODEBND_BASE<T,PMT,PVT>::_nq;
+ //using ODEBND_BASE<T,PMT,PVT>::_nf;
+ //using ODEBND_BASE<T,PMT,PVT>::_vRHS;
+ //using ODEBND_BASE<T,PMT,PVT>::_vQUAD;
+ //using ODEBND_BASE<T,PMT,PVT>::_vIC;
+ //using ODEBND_BASE<T,PMT,PVT>::_vFCT;
 
  using ODEBND_BASE<T,PMT,PVT>::_Q;
  using ODEBND_BASE<T,PMT,PVT>::_Er;
@@ -344,7 +347,7 @@ template <typename T, typename PMT, typename PVT>
 template <typename T, typename PMT, typename PVT> inline
 ODEBND_GSL<T,PMT,PVT>::ODEBND_GSL
 ()
-: BASE_GSL(), ODEBND_BASE<T,PMT,PVT>(), _driver_sta(0),
+: BASE_DE(), BASE_GSL(), ODEBND_BASE<T,PMT,PVT>(), _driver_sta(0),
   _vec_sta(0), _vec_quad(0)
 {}
 

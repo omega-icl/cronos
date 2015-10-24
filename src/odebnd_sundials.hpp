@@ -29,7 +29,10 @@ namespace mc
 //! integrator is CVODE in SUNDIALS.
 ////////////////////////////////////////////////////////////////////////
 template <typename T, typename PMT=mc::TModel<T>, typename PVT=mc::TVar<T> >
-class ODEBND_SUNDIALS: public ODEBND_BASE<T,PMT,PVT>, public virtual BASE_SUNDIALS
+class ODEBND_SUNDIALS:
+  public virtual BASE_DE,
+  public virtual BASE_SUNDIALS,
+  public virtual ODEBND_BASE<T,PMT,PVT>
 {
  typedef Ellipsoid E;
  typedef BASE_DE::STATUS STATUS;
@@ -37,14 +40,14 @@ class ODEBND_SUNDIALS: public ODEBND_BASE<T,PMT,PVT>, public virtual BASE_SUNDIA
  using ODEBND_BASE<T,PMT,PVT>::FAILURE;
  using ODEBND_BASE<T,PMT,PVT>::FATAL;
 
- using ODEBND_BASE<T,PMT,PVT>::_nx;
- using ODEBND_BASE<T,PMT,PVT>::_np;
- using ODEBND_BASE<T,PMT,PVT>::_nq;
- using ODEBND_BASE<T,PMT,PVT>::_nf;
- using ODEBND_BASE<T,PMT,PVT>::_vRHS;
- using ODEBND_BASE<T,PMT,PVT>::_vQUAD;
- using ODEBND_BASE<T,PMT,PVT>::_vIC;
- using ODEBND_BASE<T,PMT,PVT>::_vFCT;
+ //using ODEBND_BASE<T,PMT,PVT>::_nx;
+ //using ODEBND_BASE<T,PMT,PVT>::_np;
+ //using ODEBND_BASE<T,PMT,PVT>::_nq;
+ //using ODEBND_BASE<T,PMT,PVT>::_nf;
+ //using ODEBND_BASE<T,PMT,PVT>::_vRHS;
+ //using ODEBND_BASE<T,PMT,PVT>::_vQUAD;
+ //using ODEBND_BASE<T,PMT,PVT>::_vIC;
+ //using ODEBND_BASE<T,PMT,PVT>::_vFCT;
 
  using ODEBND_BASE<T,PMT,PVT>::_Q;
  using ODEBND_BASE<T,PMT,PVT>::_Er;
@@ -320,7 +323,7 @@ template <typename T, typename PMT, typename PVT>
 template <typename T, typename PMT, typename PVT> inline
 ODEBND_SUNDIALS<T,PMT,PVT>::ODEBND_SUNDIALS
 ()
-: BASE_SUNDIALS(), ODEBND_BASE<T,PMT,PVT>(), _cv_mem(0), _cv_flag(0),
+: BASE_DE(), BASE_SUNDIALS(), ODEBND_BASE<T,PMT,PVT>(), _cv_mem(0), _cv_flag(0),
   _Nx(0), _Nq(0)
 {}
 

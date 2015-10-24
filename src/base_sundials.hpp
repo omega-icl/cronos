@@ -168,20 +168,20 @@ public:
   };
 
   //! @brief Return last successful integration time
-  double final_time() const
-    { return _t; }
+  //double final_time() const
+  //  { return _t; }
 
   //! @brief Return last successful integration stage
-  double final_stage() const
-    { return _istg; }
+  //double final_stage() const
+  //  { return _istg; }
   /** @} */
 
 protected:
   //! @brief current time
-  double _t;
+  //double _t;
 
   //! @brief current stage
-  unsigned _istg;
+  //unsigned _istg;
 
   //! @brief Function to initialize GSL statistics
   static void _init_stats

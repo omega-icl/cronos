@@ -116,6 +116,9 @@ class ODEBND_BASE:
   //! @brief pointer of variable bounds for DAG evaluation
   T *_IVAR;
 
+  //! @brief pointer to adjoint time **DO NOT FREE**
+  T *_It;
+
   //! @brief pointer to state interval bounds **DO NOT FREE**
   T *_Ix;
 
@@ -142,6 +145,9 @@ class ODEBND_BASE:
 
   //! @brief variable polynomial models for DAG evaluation
   PVT *_PMVAR;
+
+  //! @brief time polynomial model **DO NOT FREE**
+  PVT *_PMt;
 
   //! @brief state polynomial model **DO NOT FREE**
   PVT *_PMx;
@@ -217,6 +223,9 @@ class ODEBND_BASE:
 
   //! @brief polynomial models for variables in mean-value theorem
   PVT *_MVXPVAR;
+
+  //! @brief pointer to time polynomial model **DO NOT FREE**
+  PVT *_MVXPt;
 
   //! @brief pointer to state polynomial models **DO NOT FREE**
   PVT *_MVXPx;
@@ -840,7 +849,7 @@ ODEBND_BASE<T,PMT,PVT>::_CC_I_STA
   case OPT::NONE:
   case OPT::DINEQ:{
     _vec2I( vec, _nx, _Ix ); // current state bounds
-    _IVAR[_nx+_npar] = t; // current time
+    *_It = t; // current time
     _IIC = new T[_opIC.size()];
     _pDAG->eval( _opIC, _IIC, _nx, _pIC, _Ixdot, _nVAR-_nq, _pVAR, _IVAR );
     _I2vec( _nx, _Ixdot, vec );
@@ -854,7 +863,7 @@ ODEBND_BASE<T,PMT,PVT>::_CC_I_STA
     for( unsigned jp=0; jp<_npar; jp++ )
       _MVXPp[jp].set( _MVXPenv, _nx+jp, _Ip[jp] );
     _ep2x( _nx, _npar, _MVXPd, _pref, _MVXPp, _B, _xref, _MVXPx );
-    _MVXPVAR[_nx+_npar] = t; // current time
+    *_MVXPt = t; // current time
     _PMIC = new PVT[_opIC.size()];
     _CC_I_ELL( _pDAG, _opIC, _PMIC, _nx, _pIC, _nVAR-_nq, _pVAR, _MVXPVAR,
        _MVXPf, _Er, _A, _npar, _xrefdot, _Bdot, _Irdot, _Qdot, options.QTOL,
@@ -952,7 +961,7 @@ ODEBND_BASE<T,PMT,PVT>::_RHS_I_STA
   switch( options.WRAPMIT){
   case OPT::NONE:
     _vec2I( x, _nx, _Ix );   // set current state bounds
-    _IVAR[_nx+_npar] = t; // set current time
+    *_It = t; // set current time
     _RHS_I_NONE( _pDAG, _opRHS, _IRHS, _nx, _pRHS, _nVAR-_nq, _pVAR, _IVAR, _Ixdot );
     _I2vec( _nx, _Ixdot, xdot );
     return true;
@@ -960,7 +969,7 @@ ODEBND_BASE<T,PMT,PVT>::_RHS_I_STA
   case OPT::DINEQ:
     if( !_opRHSi ) return false;
     _vec2I( x, _nx, _Ix );   // set current state bounds
-    _IVAR[_nx+_npar] = t; // set current time
+    *_It = t; // set current time
     _RHS_I_DI( _pDAG, _opRHSi, _IRHS, _nx, _pRHS, _nVAR-_nq, _pVAR, _IVAR, _Ixdot,
                _xLdot, _xUdot );
     _I2vec( _nx, _xLdot, _xUdot, xdot );
@@ -995,7 +1004,7 @@ ODEBND_BASE<T,PMT,PVT>::_RHS_I_STA
       std::cout << "MVXPx[ " << ix << "] = " << _MVXPx[ix] << std::endl;
     { int dum; std::cin >> dum; }
 #endif
-    _MVXPVAR[_nx+_npar] = t; // set current time
+    *_MVXPt = t; // set current time
     _RHS_I_ELL( _pDAG, _opRHS, _PMRHS, _nx, _pRHS, _nVAR-_nq, _pVAR, _MVXPVAR,
        _MVXPf, _Q, _A, _npar, _xrefdot, _Bdot, _Irdot, _Qdot, options.QTOL,
        machprec() );
@@ -1138,7 +1147,7 @@ ODEBND_BASE<T,PMT,PVT>::_RHS_I_QUAD
     break;
   }
 
-  _IVAR[_nx+_npar] = t; // set current time
+  *_It = t; // set current time
   _QUAD_I( _pDAG, _opQUAD, _IRHS, _nq, _pQUAD, _nVAR-_nq, _pVAR, _IVAR, _Iqdot );
   _I2vec( _nq, _Iqdot, qdot );
     
@@ -1182,7 +1191,7 @@ ODEBND_BASE<T,PMT,PVT>::_FCT_I_STA
 {
   if( !_nf || !If ) return true;
 
-  _IVAR[_nx+_npar] = t; // set current time
+  *_It = t; // set current time
   const FFVar* pFCT = _vFCT.at( iFCT );
   _pDAG->eval( _nf, pFCT, If, _nVAR, _pVAR, _IVAR, iFCT?true:false );
   return true;
@@ -1207,8 +1216,9 @@ ODEBND_BASE<T,PMT,PVT>::_INI_I_STA
   for( unsigned iq=0; iq<_nq; iq++ ) _pVAR[_nx+_npar+1+iq] = _pQ?_pQ[iq]:0.;
   for( unsigned ip=0; ip<_npar; ip++ ) _IVAR[_nx+ip] = Ip[ip];
   _Ix = _IVAR;
-  _Ip = _IVAR + _nx;
-  _Iq = _IVAR + _nx+_npar+1;
+  _Ip = _Ix + _nx;
+  _It = _Ip + _npar;
+  _Iq = _It + 1;
 
   // Reset _MVXPVenv and related variables
   if( _MVXPenv && ( _MVXPenv->nord() != options.ORDMIT 
@@ -1255,8 +1265,9 @@ ODEBND_BASE<T,PMT,PVT>::_INI_I_STA
     delete[] _MVXPd;   _MVXPd   = new PVT[_nx];
     delete[] _MVXPf;   _MVXPf   = new PVT[_nx];
     delete[] _MVXPVAR; _MVXPVAR = new PVT[_nVAR-_nq];
-    _MVXPp = _MVXPVAR + _nx;
     _MVXPx = _MVXPVAR;
+    _MVXPp = _MVXPx + _nx;
+    _MVXPt = _MVXPp +1;
     delete   _MVPenv;  _MVPenv  = new PMT( _npar, 1 );
     _MVPenv->options = options.PMOPT;
     delete[] _MVPp;    _MVPp    = new PVT[_npar];
@@ -1560,7 +1571,7 @@ ODEBND_BASE<T,PMT,PVT>::_CC_PM_STA
   case OPT::NONE:
   case OPT::DINEQ:
     _vec2PMI( vec, _PMenv, _nx, _PMx ); // current state/quadrature polynomial model
-    _PMVAR[_nx+_npar] = t; // current time
+    *_PMt = t; // current time
     _PMIC = new PVT[_opIC.size()];
     _pDAG->eval( _opIC, _PMIC, _nx, _pIC, _PMxdot, _nVAR-_nq, _pVAR, _PMVAR );
     // Whether or not to ignore the remainder
@@ -1573,7 +1584,7 @@ ODEBND_BASE<T,PMT,PVT>::_CC_PM_STA
   case OPT::ELLIPS:
   default:{
     _vec2PME( vec, _PMenv, _nx, _PMx, _Q, _Er, _Ir ); // current state/quadrature polynomial model
-    _PMVAR[_nx+_npar] = t; // current time   
+    *_PMt = t; // current time   
     _PMIC = new PVT[_opIC.size()];
 
     // In this variant a bound on the Jacobian matrix is computed and the
@@ -1583,7 +1594,7 @@ ODEBND_BASE<T,PMT,PVT>::_CC_PM_STA
         _IVAR[ix] = _PMx[ix].bound(); // set current state bounds
         _PMVAR[ix].center().set( T(0.) ); // cancel remainder term
       }
-      _IVAR[_nx+_npar] = t; // current time
+      *_It = t; // current time
       _pDIC = _pDAG->FAD( _nx, _pIC, _nx, _pVAR );
       _opDIC = _pDAG->subgraph( _nx*_nx, _pDIC );
       _IDIC = new T[ _opDIC.size() ];
@@ -1607,7 +1618,7 @@ ODEBND_BASE<T,PMT,PVT>::_CC_PM_STA
         _PMx[jx].set( T(0.) );
       }
 #endif
-      _MVXPVAR[_nx+_npar] = t; // current time
+      *_MVXPt = t; // current time
       _pDIC = _pDAG->FAD( _nx, _pIC, _nx, _pVAR );
       _opDIC = _pDAG->subgraph( _nx*_nx, _pDIC );
       _PMDIC = new PVT[ _opDIC.size() ];
@@ -1624,7 +1635,7 @@ ODEBND_BASE<T,PMT,PVT>::_CC_PM_STA
         _MVXPx[jx].set( _MVXPenv ).set( _PMx[jx].center().set( T(0.) ), true );
       }
       _e2x( _nx, _MVXPd, _MVXPx, false );
-      _MVXPVAR[_nx+_npar] = t; // current time   
+      *_MVXPt = t; // current time   
       _RHS_PM_ELL2( _pDAG, _opIC, _PMIC, _nx, _pRHS, _nVAR-_nq, _pVAR,
                     _MVXPVAR, _PMenv, _PMxdot, _MVXPf, _npar, _Ir, _A, _Irdot );
     }
@@ -1689,7 +1700,7 @@ ODEBND_BASE<T,PMT,PVT>::_RHS_PM_STA
 #ifdef MC__ODEBND_BASE_DINEQPM_DEBUG
     _print_interm( t, _nx, _PMx, "PMx Intermediate", std::cerr );
 #endif
-    _PMVAR[_nx+_npar] = t; // set current time
+    *_PMt = t; // set current time
     _QUAD_PM( _pDAG, _opQUAD, _PMRHS, _nq, _pQUAD, _nVAR-_nq, _pVAR, _PMVAR,
               _PMqdot );
     _RHS_PM_NONE( _pDAG, _opRHS, _PMRHS, _nx, _pRHS, _nVAR-_nq, _pVAR, _PMVAR,
@@ -1711,7 +1722,7 @@ ODEBND_BASE<T,PMT,PVT>::_RHS_PM_STA
 #ifdef MC__ODEBND_BASE_DINEQPM_DEBUG
     _print_interm( t, _nx, _PMx, "PMx Intermediate", std::cerr );
 #endif
-    _PMVAR[_nx+_npar] = t; // set current time
+    *_PMt = t; // set current time
     _QUAD_PM( _pDAG, _opQUAD, _PMRHS, _nq, _pQUAD, _nVAR-_nq, _pVAR, _PMVAR,
               _PMqdot );
     _RHS_PM_DI( _pDAG, _opRHSi, _PMRHS, _nx, _pRHS, _nVAR-_nq, _pVAR, _PMVAR,
@@ -1730,7 +1741,7 @@ ODEBND_BASE<T,PMT,PVT>::_RHS_PM_STA
   case OPT::ELLIPS:
   default:{
     _vec2PME( x, _PMenv, _nx, _PMx, _Q, _Er, _Ir ); // set current state polynomial model
-    _PMVAR[_nx+_npar] = t; // set current time   
+    *_PMt = t; // set current time   
 #ifdef MC__ODEBND_BASE_DINEQPM_DEBUG
     _print_interm( t, _nx, _PMx, _Er, "PMx Intermediate", std::cerr );
 #endif
@@ -1744,7 +1755,7 @@ ODEBND_BASE<T,PMT,PVT>::_RHS_PM_STA
         _IVAR[ix] = _PMx[ix].bound(); // set current state bounds
         _PMVAR[ix].center().set( T(0.) ); // cancel remainder term
       }
-      _IVAR[_nx+_npar] = t; // set current time
+      *_It = t; // set current time
       _RHS_PM_ELL0( _pDAG, _opRHS, _PMRHS, _opJAC, _IJAC, _nx, _pRHS,
                     _pJAC, _nVAR-_nq, _pVAR, _PMVAR, _IVAR, _PMxdot, _Idfdx,
                     _Ir, _A, _Irdot );
@@ -1768,7 +1779,7 @@ ODEBND_BASE<T,PMT,PVT>::_RHS_PM_STA
 #ifdef MC__ODEBND_BASE_DINEQPM_DEBUG
       _print_interm( t, _nx, _MVXPx, "MVXPx Intermediate", std::cerr );
 #endif
-      _MVXPVAR[_nx+_npar] = t; // set current time
+      *_MVXPt = t; // set current time
       _RHS_PM_ELL1( _pDAG, _opRHS, _PMRHS, _opJAC, _PMJAC, _nx, _pRHS,
                     _pJAC, _nVAR-_nq, _pVAR, _PMVAR, _MVXPVAR, _PMxdot,
                     _MVXPdfdx, _Ir, _A, _Irdot );
@@ -1785,7 +1796,7 @@ ODEBND_BASE<T,PMT,PVT>::_RHS_PM_STA
 #ifdef MC__ODEBND_BASE_DINEQPM_DEBUG
       _print_interm( t, _nx, _MVXPx, "MVXPx Intermediate", std::cerr );
 #endif
-      _MVXPVAR[_nx+_npar] = t; // set current time   
+      *_MVXPt = t; // set current time   
       _RHS_PM_ELL2( _pDAG, _opRHS, _PMRHS, _nx, _pRHS, _nVAR-_nq, _pVAR,
                     _MVXPVAR, _PMenv, _PMxdot, _MVXPf, _npar, _Ir, _A, _Irdot );
     }
@@ -2004,7 +2015,7 @@ ODEBND_BASE<T,PMT,PVT>::_RHS_PM_QUAD
     break;
   }
 
-  _PMVAR[_nx+_npar] = t; // set current time
+  *_PMt = t; // set current time
   _QUAD_PM( _pDAG, _opQUAD, _PMRHS, _nq, _pQUAD, _nVAR-_nq, _pVAR, _PMVAR,
             _PMqdot );
 #ifdef MC__ODEBND_BASE_DINEQPM_DEBUG
@@ -2047,7 +2058,7 @@ ODEBND_BASE<T,PMT,PVT>::_FCT_PM_STA
 {
   if( !_nf || !PMf ) return true;
 
-  _PMVAR[_nx+_npar] = t; // set current time
+  *_PMt = t; // set current time
   const FFVar* pFCT = _vFCT.at( iFCT );
   _pDAG->eval( _nf, pFCT, PMf, _nVAR, _pVAR, _PMVAR, iFCT?true:false );
   return true;
@@ -2079,11 +2090,15 @@ ODEBND_BASE<T,PMT,PVT>::_INI_PM_STA
   _pVAR[_nx+_npar] = (_pT? *_pT: 0. );
   for( unsigned iq=0; iq<_nq; iq++ ) _pVAR[_nx+_npar+1+iq] = _pQ?_pQ[iq]:0.;
   for( unsigned ip=0; ip<_npar; ip++ ) _IVAR[_nx+ip] = PMp[ip].bound();
-  _Ix = _Ip = _Iq = 0; // not used
+  _Ix = _IVAR;
+  _Ip = _Ip + _nx;
+  _It = _Ip + _npar;
+  _Iq = _It + 1;
   for( unsigned ip=0; ip<_npar; ip++ ) _PMVAR[_nx+ip] = PMp[ip];
   _PMx = _PMVAR;
-  _PMp = _PMVAR + _nx;
-  _PMq = _PMVAR + _nx+_npar+1;
+  _PMp = _PMp + _nx;
+  _PMt = _PMp + _npar;
+  _PMq = _PMt + 1;
 
   // Reset _MVXPVenv and related variables
   unsigned MVXPsize = ( options.ORDMIT<_PMenv->nord()? options.ORDMIT: _PMenv->nord() ); 
@@ -2129,7 +2144,8 @@ ODEBND_BASE<T,PMT,PVT>::_INI_PM_STA
     delete[] _MVXPdfdx; _MVXPdfdx = new PVT[_nx*_nx];
     delete[] _MVXPVAR;  _MVXPVAR  = new PVT[_nVAR];
     _MVXPx = _MVXPVAR;
-    _MVXPp = _MVXPVAR + _nx;
+    _MVXPp = _MVXPx + _nx;
+    _MVXPt = _MVXPp + _npar;
     for( unsigned ip=0; ip<_npar; ip++ )
       _MVXPp[ip].set( _MVXPenv, ip, _PMp[ip].B() );
     break;
@@ -2245,11 +2261,11 @@ ODEBND_BASE<T,PMT,PVT>::_hausdorff
   unsigned nsf = dineq.final_stage();
 
   // Compute remainder bounds 
-  T* Ip = new T[_np];
-  for( unsigned ip=0; ip<_np; ip++ ) Ip[ip] = PMp[ip].B();
+  T* Ip = new T[_npar];
+  for( unsigned ip=0; ip<_npar; ip++ ) Ip[ip] = PMp[ip].B();
   T** Rxk = new T*[ns+1];
   for( unsigned is=0; is<ns+1; is++ ) Rxk[is] = new T[_nx];
-  _remainders( nsf, tk, _np, Ip, PMxk, Rxk, traj, nsamp, os );
+  _remainders( nsf, tk, _npar, Ip, PMxk, Rxk, traj, nsamp, os );
 
   dineq.options.DISPLAY = DISPLAY_ODEBND;
   traj.options.DISPLAY = DISPLAY_ODESLV;

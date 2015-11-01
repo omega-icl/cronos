@@ -36,18 +36,12 @@ class ODEBND_SUNDIALS:
 {
  typedef Ellipsoid E;
  typedef BASE_DE::STATUS STATUS;
+ typedef int (*CVRhsFn)( realtype t, N_Vector y, N_Vector ydot, void *user_data );
+
+protected:
  using ODEBND_BASE<T,PMT,PVT>::NORMAL;
  using ODEBND_BASE<T,PMT,PVT>::FAILURE;
  using ODEBND_BASE<T,PMT,PVT>::FATAL;
-
- //using ODEBND_BASE<T,PMT,PVT>::_nx;
- //using ODEBND_BASE<T,PMT,PVT>::_np;
- //using ODEBND_BASE<T,PMT,PVT>::_nq;
- //using ODEBND_BASE<T,PMT,PVT>::_nf;
- //using ODEBND_BASE<T,PMT,PVT>::_vRHS;
- //using ODEBND_BASE<T,PMT,PVT>::_vQUAD;
- //using ODEBND_BASE<T,PMT,PVT>::_vIC;
- //using ODEBND_BASE<T,PMT,PVT>::_vFCT;
 
  using ODEBND_BASE<T,PMT,PVT>::_Q;
  using ODEBND_BASE<T,PMT,PVT>::_Er;
@@ -90,16 +84,14 @@ class ODEBND_SUNDIALS:
  using ODEBND_BASE<T,PMT,PVT>::_remainders;
  using ODEBND_BASE<T,PMT,PVT>::_print_interm;
 
-typedef int (*CVRhsFn)( realtype t, N_Vector y, N_Vector ydot, void *user_data );
-
  private:
   //! @brief Pointer to the CVODE memory block
   void *_cv_mem;
 
+ protected:
   //! @brief Return flag for SUNDIALS methods
   int _cv_flag;
 
- protected:
   //! @brief N_Vector object holding current states
   N_Vector _Nx;
 
@@ -121,8 +113,8 @@ typedef int (*CVRhsFn)( realtype t, N_Vector y, N_Vector ydot, void *user_data )
   //! @brief position in _vFCT
   unsigned _pos_fct;
 
-  //! @brief Static const member for mesh type
-  static const int PMOFFSET = 10;
+  //! @brief checkpoints for (potential) adjoint integration
+  int _nchk;
 
   //! @brief static pointer to class
   static ODEBND_SUNDIALS<T,PMT,PVT> *_pODEBND;
@@ -300,6 +292,11 @@ protected:
   static int MC_CVQUADI__
     ( realtype t, N_Vector Nx, N_Vector Nqdot, void *user_data );
 
+  //! @brief Propagate state/quadrature interval bounds forward in time through every time stages
+  STATUS _bounds
+    ( const unsigned ns, const double*tk, const T*Ip, T**Ixk,
+      T*Iq, T*If, const bool asa, std::ostream&os );
+
   //! @brief Function to initialize GSL for state polynomial models
   bool _INI_PM_STA
     ( const unsigned np, const PVT*PMp, const unsigned ns );
@@ -311,6 +308,11 @@ protected:
   //! @brief Static wrapper to function computing the quadratures RHS in polynomial model arithmetic
   static int MC_CVQUADPM__
     ( realtype t, N_Vector Nx, N_Vector Nqdot, void *user_data );
+
+  //! @brief Propagate state/quadrature polynomial models forward in time through every time stages
+  STATUS _bounds
+    ( const unsigned ns, const double*tk, const PVT*PMp, PVT**PMxk,
+      PVT*PMq, PVT*PMf, const bool asa, std::ostream&os );
 
   //! @brief Private methods to block default compiler methods
   ODEBND_SUNDIALS(const ODEBND_SUNDIALS&);
@@ -505,26 +507,11 @@ ODEBND_SUNDIALS<T,PMT,PVT>::MC_CVQUADI__
   return( flag? 0: -1 );
 }
 
-//! @fn template <typename T, typename PMT, typename PVT> inline typename ODEBND_SUNDIALS<T,PMT,PVT>::STATUS ODEBND_SUNDIALS<T,PMT,PVT>::bounds(
-//! const unsigned ns, const double*tk, const T*Ip, T**Ixk=0, T*Iq=0, T*If=0,
-//! std::ostream&os=std::cout )
-//!
-//! This function computes an interval enclosure of the reachable set of 
-//! the parametric ODEs defined in IVP using equally spaced samples:
-//!   - <a>ns</a> [input] number of time stages
-//!   - <a>tk</a> [input] stage times, including the initial time
-//!   - <a>Ip</a> [input] interval parameter set
-//!   - <a>Ixk</a> [output] interval state enclosures at stage times (default: NULL)
-//!   - <a>Iq</a> [output] interval quadrature enclosures at final time (default: NULL)
-//!   - <a>If</a> [output] interval function enclosures (default: NULL)
-//!   - <a>os</a> [input] output stream (default: std::cout)
-//! .
-//! The return value is the status.
 template <typename T, typename PMT, typename PVT>
 inline typename ODEBND_SUNDIALS<T,PMT,PVT>::STATUS
-ODEBND_SUNDIALS<T,PMT,PVT>::bounds
+ODEBND_SUNDIALS<T,PMT,PVT>::_bounds
 ( const unsigned ns, const double*tk, const T*Ip, T**Ixk, T*Iq, T*If,
-  std::ostream&os )
+  const bool asa, std::ostream&os )
 {
   // Check size
   if( !tk || !Ixk || !Ip || (_nf && !If) ) return FATAL;
@@ -575,8 +562,11 @@ ODEBND_SUNDIALS<T,PMT,PVT>::bounds
       if( _check_cv_flag(&_cv_flag, "CVodeSetStopTime", 1) )
         { _END_STA(); return FATAL; }
       while( _t < tk[_istg+1] ){
-        _cv_flag = CVode( _cv_mem, tk[_istg+1], _Nx, &_t, CV_ONE_STEP );
-        if( _check_cv_flag(&_cv_flag, "CVode", 1)
+        if( !asa )
+          _cv_flag = CVode( _cv_mem, tk[_istg+1], _Nx, &_t, CV_ONE_STEP );
+        else
+          _cv_flag = CVodeF( _cv_mem, tk[_istg+1], _Nx, &_t, CV_ONE_STEP, &_nchk );
+        if( _check_cv_flag(&_cv_flag, asa?"CVodeF":"CVode", 1)
          || (options.NMAX && stats_sta.numSteps > options.NMAX)
          || _diam( _nx, _Ix ) > options.DMAX )
           throw Exceptions( Exceptions::INTERN );
@@ -632,6 +622,30 @@ ODEBND_SUNDIALS<T,PMT,PVT>::bounds
   _END_STA();
   if( options.DISPLAY >= 1 ) _print_stats( stats_sta, os );
   return NORMAL;
+}
+
+//! @fn template <typename T, typename PMT, typename PVT> inline typename ODEBND_SUNDIALS<T,PMT,PVT>::STATUS ODEBND_SUNDIALS<T,PMT,PVT>::bounds(
+//! const unsigned ns, const double*tk, const T*Ip, T**Ixk=0, T*Iq=0, T*If=0,
+//! std::ostream&os=std::cout )
+//!
+//! This function computes an interval enclosure of the reachable set of 
+//! the parametric ODEs defined in IVP using equally spaced samples:
+//!   - <a>ns</a> [input] number of time stages
+//!   - <a>tk</a> [input] stage times, including the initial time
+//!   - <a>Ip</a> [input] interval parameter set
+//!   - <a>Ixk</a> [output] interval state enclosures at stage times (default: NULL)
+//!   - <a>Iq</a> [output] interval quadrature enclosures at final time (default: NULL)
+//!   - <a>If</a> [output] interval function enclosures (default: NULL)
+//!   - <a>os</a> [input] output stream (default: std::cout)
+//! .
+//! The return value is the status.
+template <typename T, typename PMT, typename PVT>
+inline typename ODEBND_SUNDIALS<T,PMT,PVT>::STATUS
+ODEBND_SUNDIALS<T,PMT,PVT>::bounds
+( const unsigned ns, const double*tk, const T*Ip, T**Ixk, T*Iq, T*If,
+  std::ostream&os )
+{
+  return _bounds( ns, tk, Ip, Ixk, Iq, If, false, os );
 }
 
 //! @fn template <typename T, typename PMT, typename PVT> template<typename ODESLV> inline typename ODEBND_SUNDIALS<T,PMT,PVT>::STATUS ODEBND_SUNDIALS<T,PMT,PVT>::hausdorff(
@@ -720,26 +734,11 @@ ODEBND_SUNDIALS<T,PMT,PVT>::_INI_PM_STA
   return true;
 }
 
-//! @fn template <typename T, typename PMT, typename PVT> inline typename ODEBND_SUNDIALS<T,PMT,PVT>::STATUS ODEBND_SUNDIALS<T,PMT,PVT>::bounds(
-//! const unsigned ns, const double*tk, const PVT*PMp, PVT**PMxk=0, 
-//! PVT*PMq=0, PVT*PMf=0, std::ostream&os=std::cout )
-//!
-//! This function computes an enclosure of the reachable set of the parametric ODEs
-//! using propagation of polynomial models with convex remainders (intervals, ellipsoids):
-//!   - <a>ns</a> [input] number of time stages
-//!   - <a>tk</a> [input] stage times, including the initial time
-//!   - <a>PMp</a> [input] polynomial model of parameter set
-//!   - <a>PMxk</a> [output] polynomial model of state enclosures at stage times (default: NULL)
-//!   - <a>PMq</a> [output] polynomial model of quadrature variables (default: NULL)
-//!   - <a>PMf</a> [output] polynomial model of state/quadrature functionals (default: NULL)
-//!   - <a>os</a> [input] output stream (default: std::cout)
-//! .
-//! The return value is the status.
 template <typename T, typename PMT, typename PVT>
 inline typename ODEBND_SUNDIALS<T,PMT,PVT>::STATUS
-ODEBND_SUNDIALS<T,PMT,PVT>::bounds
+ODEBND_SUNDIALS<T,PMT,PVT>::_bounds
 ( const unsigned ns, const double*tk, const PVT*PMp, PVT**PMxk,
-  PVT*PMq, PVT*PMf, std::ostream&os )
+  PVT*PMq, PVT*PMf, const bool asa, std::ostream&os )
 {
   // Check arguments
   if( !tk || !PMxk || !PMp || (_nf && !PMf) ) return FATAL;
@@ -790,8 +789,11 @@ ODEBND_SUNDIALS<T,PMT,PVT>::bounds
       if( _check_cv_flag(&_cv_flag, "CVodeSetStopTime", 1) )
         { _END_STA(); return FATAL; }
       while( _t < tk[_istg+1] ){
-        _cv_flag = CVode( _cv_mem, tk[_istg+1], _Nx, &_t, CV_ONE_STEP );
-        if( _check_cv_flag(&_cv_flag, "CVode", 1)
+        if( !asa )
+          _cv_flag = CVode( _cv_mem, tk[_istg+1], _Nx, &_t, CV_ONE_STEP );
+        else
+          _cv_flag = CVodeF( _cv_mem, tk[_istg+1], _Nx, &_t, CV_ONE_STEP, &_nchk );
+        if( _check_cv_flag(&_cv_flag, asa?"CVodeF":"CVode", 1)
          || (options.NMAX && stats_sta.numSteps > options.NMAX)
          || _diam( _nx, _PMx ) > options.DMAX
          || _diam( _nx, _Ir  ) > options.DMAX )
@@ -849,6 +851,30 @@ ODEBND_SUNDIALS<T,PMT,PVT>::bounds
   _END_STA();
   if( options.DISPLAY >= 1 ) _print_stats( stats_sta, os );
   return NORMAL;
+}
+
+//! @fn template <typename T, typename PMT, typename PVT> inline typename ODEBND_SUNDIALS<T,PMT,PVT>::STATUS ODEBND_SUNDIALS<T,PMT,PVT>::bounds(
+//! const unsigned ns, const double*tk, const PVT*PMp, PVT**PMxk=0, 
+//! PVT*PMq=0, PVT*PMf=0, std::ostream&os=std::cout )
+//!
+//! This function computes an enclosure of the reachable set of the parametric ODEs
+//! using propagation of polynomial models with convex remainders (intervals, ellipsoids):
+//!   - <a>ns</a> [input] number of time stages
+//!   - <a>tk</a> [input] stage times, including the initial time
+//!   - <a>PMp</a> [input] polynomial model of parameter set
+//!   - <a>PMxk</a> [output] polynomial model of state enclosures at stage times (default: NULL)
+//!   - <a>PMq</a> [output] polynomial model of quadrature variables (default: NULL)
+//!   - <a>PMf</a> [output] polynomial model of state/quadrature functionals (default: NULL)
+//!   - <a>os</a> [input] output stream (default: std::cout)
+//! .
+//! The return value is the status.
+template <typename T, typename PMT, typename PVT>
+inline typename ODEBND_SUNDIALS<T,PMT,PVT>::STATUS
+ODEBND_SUNDIALS<T,PMT,PVT>::bounds
+( const unsigned ns, const double*tk, const PVT*PMp, PVT**PMxk,
+  PVT*PMq, PVT*PMf, std::ostream&os )
+{
+  return _bounds( ns, tk, PMp, PMxk, PMq, PMf, false, os );
 }
 
 //! @fn template <typename T, typename PMT, typename PVT> template<typename ODESLV> inline typename ODEBND_SUNDIALS<T,PMT,PVT>::STATUS ODEBND_SUNDIALS<T,PMT,PVT>::hausdorff(

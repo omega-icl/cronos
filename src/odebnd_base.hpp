@@ -2091,12 +2091,12 @@ ODEBND_BASE<T,PMT,PVT>::_INI_PM_STA
   for( unsigned iq=0; iq<_nq; iq++ ) _pVAR[_nx+_npar+1+iq] = _pQ?_pQ[iq]:0.;
   for( unsigned ip=0; ip<_npar; ip++ ) _IVAR[_nx+ip] = PMp[ip].bound();
   _Ix = _IVAR;
-  _Ip = _Ip + _nx;
+  _Ip = _Ix + _nx;
   _It = _Ip + _npar;
   _Iq = _It + 1;
   for( unsigned ip=0; ip<_npar; ip++ ) _PMVAR[_nx+ip] = PMp[ip];
   _PMx = _PMVAR;
-  _PMp = _PMp + _nx;
+  _PMp = _PMx + _nx;
   _PMt = _PMp + _npar;
   _PMq = _PMt + 1;
 

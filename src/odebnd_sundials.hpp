@@ -84,11 +84,10 @@ protected:
  using ODEBND_BASE<T,PMT,PVT>::_remainders;
  using ODEBND_BASE<T,PMT,PVT>::_print_interm;
 
- private:
+ protected:
   //! @brief Pointer to the CVODE memory block
   void *_cv_mem;
 
- protected:
   //! @brief Return flag for SUNDIALS methods
   int _cv_flag;
 
@@ -113,8 +112,11 @@ protected:
   //! @brief position in _vFCT
   unsigned _pos_fct;
 
-  //! @brief checkpoints for (potential) adjoint integration
+  //! @brief checkpoints for adjoint integration
   int _nchk;
+
+  //! @brief state parameterizations at time stages for adjoint integration
+  std::vector< std::vector<realtype> > _vec_sta;
 
   //! @brief static pointer to class
   static ODEBND_SUNDIALS<T,PMT,PVT> *_pODEBND;
@@ -269,7 +271,7 @@ public:
 protected:
 
   //! @brief Function to initialize CVode memory block
-  bool _INI_CVODE
+  virtual bool _INI_CVODE
     ( CVRhsFn MC_CVRHS, CVRhsFn MC_CVQUAD );
 
   //! @brief Function to reinitialize CVode memory block
@@ -293,9 +295,9 @@ protected:
     ( realtype t, N_Vector Nx, N_Vector Nqdot, void *user_data );
 
   //! @brief Propagate state/quadrature interval bounds forward in time through every time stages
-  STATUS _bounds
+  virtual STATUS _bounds
     ( const unsigned ns, const double*tk, const T*Ip, T**Ixk,
-      T*Iq, T*If, const bool asa, std::ostream&os );
+      T*Iq, T*If, const bool store, std::ostream&os );
 
   //! @brief Function to initialize GSL for state polynomial models
   bool _INI_PM_STA
@@ -310,9 +312,9 @@ protected:
     ( realtype t, N_Vector Nx, N_Vector Nqdot, void *user_data );
 
   //! @brief Propagate state/quadrature polynomial models forward in time through every time stages
-  STATUS _bounds
+  virtual STATUS _bounds
     ( const unsigned ns, const double*tk, const PVT*PMp, PVT**PMxk,
-      PVT*PMq, PVT*PMf, const bool asa, std::ostream&os );
+      PVT*PMq, PVT*PMf, const bool store, std::ostream&os );
 
   //! @brief Private methods to block default compiler methods
   ODEBND_SUNDIALS(const ODEBND_SUNDIALS&);
@@ -420,6 +422,10 @@ ODEBND_SUNDIALS<T,PMT,PVT>::_INI_CVODE
   _cv_flag = CVodeQuadSStolerances( _cv_mem, options.RTOL, options.ATOL );
   if( _check_cv_flag(&_cv_flag, "CVodeQuadSStolerances", 1) ) return false;
 
+  // Allocate memory for adjoint sensitivity analysis (if applicable)
+  //_cv_flag = CVodeAdjInit( _cv_mem, options.ASACHKPT, options.ASAINTERP );
+  //if( _check_cv_flag(&_cv_flag, "CVodeAdjInit", 1) ) return false;
+
   return true;
 }
 
@@ -476,6 +482,9 @@ ODEBND_SUNDIALS<T,PMT,PVT>::_INI_I_STA
     _Nq  = cv_Nq_size? N_VNew_Serial( cv_Nq_size ): 0;
   }
 
+  // Initialize state parameterization at time stages
+  _vec_sta.clear();
+
   // Reset result record and statistics
   results_sta.clear();
   _init_stats( stats_sta );
@@ -503,7 +512,6 @@ ODEBND_SUNDIALS<T,PMT,PVT>::MC_CVQUADI__
   bool flag = pODEBND->_RHS_I_QUAD( pODEBND->options, t, NV_DATA_S( y ),
     NV_DATA_S( qdot ) );
   ODEBND_SUNDIALS<T,PMT,PVT>::_pODEBND = pODEBND;
-  //pODEBND->stats_sta.numRHS++;
   return( flag? 0: -1 );
 }
 
@@ -511,7 +519,7 @@ template <typename T, typename PMT, typename PVT>
 inline typename ODEBND_SUNDIALS<T,PMT,PVT>::STATUS
 ODEBND_SUNDIALS<T,PMT,PVT>::_bounds
 ( const unsigned ns, const double*tk, const T*Ip, T**Ixk, T*Iq, T*If,
-  const bool asa, std::ostream&os )
+  const bool store, std::ostream&os )
 {
   // Check size
   if( !tk || !Ixk || !Ip || (_nf && !If) ) return FATAL;
@@ -531,6 +539,13 @@ ODEBND_SUNDIALS<T,PMT,PVT>::_bounds
     }
     if( Ixk && !Ixk[0] ) Ixk[0] = new T[_nx];
     for( unsigned ix=0; Ixk[0] && ix<_nx; ix++ ) Ixk[0][ix] = _Ix[ix];
+
+    // Store full state at initial time
+    if( store ){
+      realtype*vsta = NV_DATA_S(_Nx);
+      unsigned lsta = NV_LENGTH_S(_Nx);
+      _vec_sta.push_back( std::vector<realtype>( vsta, vsta+lsta ) );
+    }
 
     // Record initial results
     if( options.RESRECORD )
@@ -562,15 +577,22 @@ ODEBND_SUNDIALS<T,PMT,PVT>::_bounds
       if( _check_cv_flag(&_cv_flag, "CVodeSetStopTime", 1) )
         { _END_STA(); return FATAL; }
       while( _t < tk[_istg+1] ){
-        if( !asa )
+        if( !store )
           _cv_flag = CVode( _cv_mem, tk[_istg+1], _Nx, &_t, CV_ONE_STEP );
         else
           _cv_flag = CVodeF( _cv_mem, tk[_istg+1], _Nx, &_t, CV_ONE_STEP, &_nchk );
-        if( _check_cv_flag(&_cv_flag, asa?"CVodeF":"CVode", 1)
+        if( _check_cv_flag(&_cv_flag, store?"CVodeF":"CVode", 1)
          || (options.NMAX && stats_sta.numSteps > options.NMAX)
          || _diam( _nx, _Ix ) > options.DMAX )
           throw Exceptions( Exceptions::INTERN );
         stats_sta.numSteps++;
+      }
+
+      // Store full state at stage time
+      if( store ){
+        realtype*vsta = NV_DATA_S(_Nx);
+        unsigned lsta = NV_LENGTH_S(_Nx);
+        _vec_sta.push_back( std::vector<realtype>( vsta, vsta+lsta ) );
       }
 
       // Bounds on intermediate states
@@ -738,7 +760,7 @@ template <typename T, typename PMT, typename PVT>
 inline typename ODEBND_SUNDIALS<T,PMT,PVT>::STATUS
 ODEBND_SUNDIALS<T,PMT,PVT>::_bounds
 ( const unsigned ns, const double*tk, const PVT*PMp, PVT**PMxk,
-  PVT*PMq, PVT*PMf, const bool asa, std::ostream&os )
+  PVT*PMq, PVT*PMf, const bool store, std::ostream&os )
 {
   // Check arguments
   if( !tk || !PMxk || !PMp || (_nf && !PMf) ) return FATAL;
@@ -789,11 +811,11 @@ ODEBND_SUNDIALS<T,PMT,PVT>::_bounds
       if( _check_cv_flag(&_cv_flag, "CVodeSetStopTime", 1) )
         { _END_STA(); return FATAL; }
       while( _t < tk[_istg+1] ){
-        if( !asa )
+        if( !store )
           _cv_flag = CVode( _cv_mem, tk[_istg+1], _Nx, &_t, CV_ONE_STEP );
         else
           _cv_flag = CVodeF( _cv_mem, tk[_istg+1], _Nx, &_t, CV_ONE_STEP, &_nchk );
-        if( _check_cv_flag(&_cv_flag, asa?"CVodeF":"CVode", 1)
+        if( _check_cv_flag(&_cv_flag, store?"CVodeF":"CVode", 1)
          || (options.NMAX && stats_sta.numSteps > options.NMAX)
          || _diam( _nx, _PMx ) > options.DMAX
          || _diam( _nx, _Ir  ) > options.DMAX )

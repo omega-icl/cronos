@@ -45,17 +45,7 @@ class ODEBNDS_GSL:
   using ODEBND_BASE<T,PMT,PVT>::NORMAL; 
   using ODEBND_BASE<T,PMT,PVT>::FAILURE;
   using ODEBND_BASE<T,PMT,PVT>::FATAL;
-  //using ODEBND_BASE<T,PMT,PVT>::_nx;
-  //using ODEBND_BASE<T,PMT,PVT>::_np;
-  //using ODEBND_BASE<T,PMT,PVT>::_nq;
-  //using ODEBND_BASE<T,PMT,PVT>::_nf;
-  //using ODEBND_BASE<T,PMT,PVT>::_pDAG;
-  //using ODEBND_BASE<T,PMT,PVT>::_vRHS;
-  //using ODEBND_BASE<T,PMT,PVT>::_vQUAD;
-  //using ODEBND_BASE<T,PMT,PVT>::_vIC;
-  //using ODEBND_BASE<T,PMT,PVT>::_vFCT;
-  //using ODEBND_BASE<T,PMT,PVT>::_t;
-  //using ODEBND_BASE<T,PMT,PVT>::_istg;
+
   using ODEBND_BASE<T,PMT,PVT>::_Q;
   using ODEBND_BASE<T,PMT,PVT>::_Er;
   using ODEBND_BASE<T,PMT,PVT>::_Ir;
@@ -102,10 +92,10 @@ class ODEBNDS_GSL:
   using ODEBNDS_BASE<T,PMT,PVT>::_RHS_PM_QUAD;
 
   using ODEBND_GSL<T,PMT,PVT>::_vec_sta;
+  using ODEBND_GSL<T,PMT,PVT>::_mesh_sta;
   using ODEBND_GSL<T,PMT,PVT>::_pos_rhs;
   using ODEBND_GSL<T,PMT,PVT>::_pos_quad;
   using ODEBND_GSL<T,PMT,PVT>::_pos_fct;
-  using ODEBND_GSL<T,PMT,PVT>::_mesh_sta;
   using ODEBND_GSL<T,PMT,PVT>::_offset_quad;
   using ODEBND_GSL<T,PMT,PVT>::_init_stats;
   using ODEBND_GSL<T,PMT,PVT>::_final_stats;
@@ -203,9 +193,11 @@ public: // EVERYTHING to be called/used from outside (mostly functions and a few
     ( const unsigned ns, const double*tk, const PVT*PMp, PVT**PMxk,
       PVT*PMq, PVT*PMf, PVT**PMlk, PVT*PMdf, std::ostream&os=std::cout );
 
-  //! @brief Record results in file <a>bndrec</a>, with accuracy of <a>iprec</a> digits
+  //! @brief Record state and sensitivity bounds in files <a>obndsta</a> and <a>obndsa</a>, with accuracy of <a>iprec</a> digits
   void record
-    ( std::ofstream&bndsta, std::ofstream&bndadj, const unsigned iprec=5 ) const;
+    ( std::ofstream&obndsta, std::ofstream&obndsa, const unsigned iprec=5 ) const
+    { this->ODEBND_SUNDIALS<T,PMT,PVT>::record( obndsta, iprec );
+      this->ODEBND_BASE<T,PMT,PVT>::_record( obndsa, _results_adj, iprec ); }
 
 private:
 
@@ -223,7 +215,7 @@ private:
 
   //! @brief Function to initialize GSL for adjoint polynomial models
   bool _INI_PM_ADJ //split
-    ( const PVT*PMp );
+    ( const unsigned np, const PVT*PMp );
 
   //! @brief Function to initialize GSL numerical integration drivers
   void _INI_GSL
@@ -254,58 +246,6 @@ ODEBNDS_GSL<T,PMT,PVT>::~ODEBNDS_GSL
   // Free GSL arrays
   for( unsigned i=0; i<_driver_adj.size(); i++ )
     {if( _driver_adj[i] )  gsl_odeiv2_driver_free( _driver_adj[i] );}
-}
-
-template <typename T, typename PMT, typename PVT> inline int
-ODEBNDS_GSL<T,PMT,PVT>::MC_GSLADJRHSI__
-( double t, const double* y, double* ydot, void* user_data )
-{
-  ODEBNDS_GSL<T,PMT,PVT> *pODEBNDS = ODEBNDS_GSL<T,PMT,PVT>::pODEBNDS;
-  if( !pODEBNDS->_mesh_sta.eval( pODEBNDS->_istg, -t, pODEBNDS->_vec_sta ) )
-    { return GSL_EBADFUNC; } // set interpolated state
-  bool flag = pODEBNDS->_RHS_I_ADJ( pODEBNDS->options, t, y, ydot, pODEBNDS->_vec_sta );
-  if( flag ){
-    double* qdot = ydot + pODEBNDS->_offset_quad;
-    flag = pODEBNDS->_RHS_I_QUAD( pODEBNDS->options, t, y, qdot, pODEBNDS->_vec_sta );
-  }
-  pODEBNDS->stats_adj.numRHS++; // increment RHS counter
-  ODEBNDS_GSL<T,PMT,PVT>::pODEBNDS = pODEBNDS;
-  return ( flag? GSL_SUCCESS: GSL_EBADFUNC );
-}
-
-template <typename T, typename PMT, typename PVT> inline bool
-ODEBNDS_GSL<T,PMT,PVT>::_INI_I_ADJ
-( const unsigned np, const T* Ip )
-{ 
-  // Initialize bound propagation
-  if( !ODEBNDS_BASE<T,PMT,PVT>::_INI_I_ADJ( options, np, Ip ) )
-    return false;
-
-  // Define adjoint ODE system in GSL format
-  _sys_adj.function = MC_GSLADJRHSI__;
-  _sys_adj.params = 0;
-  switch( options.WRAPMIT){
-    case Options::NONE:
-    case Options::DINEQ:
-      _sys_adj.dimension = 2*_nx + 2*np;
-      break;
-    case Options::ELLIPS:
-    default:
-      _sys_adj.dimension = _nx*(1+_nz)+_nx*(_nx+1)/2 + 2*np;
-      break;
-  }
-
-  // Set GSL drivers for adjoint ODE integration
-  _INI_GSL( _sys_adj, _driver_adj );
-  delete [] _vec_adj;
-  _vec_adj  = new double[ _sys_adj.dimension*_nf ];
-  _offset_quad = _sys_adj.dimension - 2*np;
-
-  // Reset result record and statistics
-  _results_adj.clear();
-  _init_stats( stats_adj );
-
-  return true;
 }
 
 template <typename T, typename PMT, typename PVT> inline void
@@ -349,6 +289,60 @@ ODEBNDS_GSL<T,PMT,PVT>::_END_ADJ()
   _final_stats( stats_adj );
 }
 
+template <typename T, typename PMT, typename PVT> inline bool
+ODEBNDS_GSL<T,PMT,PVT>::_INI_I_ADJ
+( const unsigned np, const T* Ip )
+{ 
+  // Initialize bound propagation
+  if( !ODEBNDS_BASE<T,PMT,PVT>::_INI_I_ADJ( options, np, Ip ) )
+    return false;
+
+  // Define adjoint ODE system in GSL format
+  _sys_adj.function = MC_GSLADJRHSI__;
+  _sys_adj.params = 0;
+  switch( options.WRAPMIT){
+    case Options::NONE:
+    case Options::DINEQ:
+      _sys_adj.dimension = 2*_nx + 2*np;
+      break;
+    case Options::ELLIPS:
+    default:
+      _sys_adj.dimension = _nx*(1+_nz)+_nx*(_nx+1)/2 + 2*np;
+      break;
+  }
+
+  // Set GSL drivers for adjoint ODE integration
+  _INI_GSL( _sys_adj, _driver_adj );
+  delete [] _vec_adj;
+  _vec_adj  = new double[ _sys_adj.dimension*_nf ];
+  _offset_quad = _sys_adj.dimension - 2*np;
+
+  // Reset result record and statistics
+  _results_adj.clear();
+  _init_stats( stats_adj );
+
+  return true;
+}
+
+template <typename T, typename PMT, typename PVT> inline int
+ODEBNDS_GSL<T,PMT,PVT>::MC_GSLADJRHSI__
+( double t, const double* y, double* ydot, void* user_data )
+{
+  ODEBNDS_GSL<T,PMT,PVT> *pODEBNDS = ODEBNDS_GSL<T,PMT,PVT>::pODEBNDS;
+  if( !pODEBNDS->_mesh_sta.eval( pODEBNDS->_istg, -t, pODEBNDS->_vec_sta ) )
+    { return GSL_EBADFUNC; } // set interpolated state
+  bool flag = pODEBNDS->_RHS_I_ADJ( pODEBNDS->options, -t, y, ydot,
+                                    pODEBNDS->_vec_sta, pODEBNDS->_ifct );
+  if( flag ){
+    double* qdot = ydot + pODEBNDS->_offset_quad;
+    flag = pODEBNDS->_RHS_I_QUAD( pODEBNDS->options, -t, y, qdot,
+                                  pODEBNDS->_vec_sta, pODEBNDS->_ifct );
+  }
+  pODEBNDS->stats_adj.numRHS++; // increment RHS counter
+  ODEBNDS_GSL<T,PMT,PVT>::pODEBNDS = pODEBNDS;
+  return ( flag? GSL_SUCCESS: GSL_EBADFUNC );
+}
+
 //! @fn template <typename T, typename PMT, typename PVT> inline typename ODEBND_GSL<T,PMT,PVT>::STATUS ODEBND_GSL<T,PMT,PVT>::bounds_ASA
 //!( const unsigned ns, const double*tk, const T*Ip, T**Ixk,
 //!  T*Iq, T*If, T**Ilk, T*Idf, std::ostream&os=std::cout )
@@ -368,8 +362,8 @@ ODEBNDS_GSL<T,PMT,PVT>::_END_ADJ()
 template <typename T, typename PMT, typename PVT>
 inline typename ODEBNDS_GSL<T,PMT,PVT>::STATUS
 ODEBNDS_GSL<T,PMT,PVT>::bounds_ASA
-( const unsigned ns, const double*tk, const T*Ip, T**Ixk,
-  T*Iq, T*If, T**Ilk, T*Idf, std::ostream&os )
+( const unsigned ns, const double*tk, const T*Ip, T**Ixk, T*Iq, T*If,
+  T**Ilk, T*Idf, std::ostream&os )
 {
   // Compute state bounds and store intermediate results in _mesh_sta
   STATUS flag = NORMAL;
@@ -410,30 +404,37 @@ ODEBNDS_GSL<T,PMT,PVT>::bounds_ASA
     if( Ilk && !Ilk[ns] ) Ilk[ns] = new T[_nx*_nf];
     for( _ifct=_pos_adj=0; _ifct < _nf; _ifct++, _pos_adj+=_sys_adj.dimension ){
       _pos_fct = ( _vFCT.size()>=ns? ns-1:0 );
-      if( !_TC_I_ADJ( options, _t, _vec_adj+_pos_adj, _pos_fct, _ifct )
-       || !_TC_I_QUAD( options, _t, _vec_adj+_pos_adj+_offset_quad ) )
+      if( !_TC_I_ADJ( options, -_t, _vec_adj+_pos_adj, _pos_fct, _ifct )
+       || !_TC_I_QUAD( options, -_t, _vec_adj+_pos_adj+_offset_quad ) )
         { _END_ADJ(); return FATAL; }
       for( unsigned iy=0; Ilk[ns] && iy<_nx; iy++ )
         Ilk[ns][_ifct*_nx+iy] = _Iy[iy];
     }
 
     // Display & record adjoint terminal results
-    if( options.DISPLAY >= 1 )
+    if( options.DISPLAY >= 1 ){
       _print_interm( tk[ns], _nx*_nf, Ilk[ns], "l", os );
+      _print_interm( _np, _Iyq, "q", os );
+    }
     if( options.RESRECORD )
       _results_adj.push_back( Results( tk[ns], _nf*_nx, Ilk[ns] ) );
 
     // Integrate adjoint ODEs through each stage using GSL
     _h_adj.assign( _nf, options.H0 );
     pODEBNDS = this;
-
     for( _istg=ns; _istg>0; _istg-- ){
+
       // Interpolate state mesh in current stage
       if( _istg<ns && !_mesh_sta.interp( _istg, options.INTERPMETH ) )
         { _END_ADJ(); return FAILURE; }
 
+      // Update list of operations in RHSADJ and QUADADJ
+      _pos_rhs  = ( _vRHS.size() <=1? 0: _istg-1 );
+      _pos_quad = ( _vQUAD.size()<=1? 0: _istg-1 );
+      if( !_SET_I_ADJ( options, _pos_rhs, _pos_quad, _pos_fct, false ) )
+        { _END_ADJ(); return FATAL; }
+
       // Integrate backward through current stage for each function
-      if( Ilk && !Ilk[_istg-1] ) Ilk[_istg-1] = new T[_nx*_nf];
       for( _ifct=_pos_adj=0; _ifct < _nf; _ifct++, _pos_adj+=_sys_adj.dimension ){
         _t = -tk[_istg];
 #ifdef MC__ODEBNDS_GSL_DINEQI_DEBUG
@@ -444,12 +445,6 @@ ODEBNDS_GSL<T,PMT,PVT>::bounds_ASA
                     << _vec_adj[_pos_adj+iy] << std::endl;
         { int dum; std::cin >> dum; }
 #endif
-        // Update list of operations in RHSADJ and QUADADJ
-        _pos_rhs  = ( _vRHS.size() <=1? 0: _istg-1 );
-        _pos_quad = ( _vQUAD.size()<=1? 0: _istg-1 );
-        //if( (_istg==ns || _pos_rhs || _pos_quad) && !_SET_I_ADJ() )
-        if( !_SET_I_ADJ( options, _pos_rhs, _pos_quad, _pos_fct, _ifct ) )
-          { _END_ADJ(); return FATAL; }
 
         // Propagate bounds backward to previous stage time
         while( _t < -tk[_istg-1] ){
@@ -487,6 +482,7 @@ ODEBNDS_GSL<T,PMT,PVT>::bounds_ASA
           break;
         }
         _vec2I( _vec_adj+_pos_adj+_offset_quad, _np, _Iyq);
+        if( Ilk && !Ilk[_istg-1] ) Ilk[_istg-1] = new T[_nx*_nf];
         for( unsigned iy=0; Ilk[_istg-1] && iy<_nx; iy++ )
           Ilk[_istg-1][_ifct*_nx+iy] = _Iy[iy];
 
@@ -494,8 +490,8 @@ ODEBNDS_GSL<T,PMT,PVT>::bounds_ASA
         if( _istg>1  ){
           _pos_fct = ( _vFCT.size()>=ns? _istg-1:0 );
           if( _pos_fct
-           && !_CC_I_ADJ( options, _t, _vec_adj+_pos_adj, _pos_fct, _ifct )
-           && !_CC_I_QUAD( options, _t, _vec_adj+_pos_adj+_offset_quad ) )
+           && !_CC_I_ADJ( options, -_t, _vec_adj+_pos_adj, _pos_fct, _ifct )
+           && !_CC_I_QUAD( options, -_t, _vec_adj+_pos_adj+_offset_quad ) )
             { _END_ADJ(); return FATAL; }
             // Reset ODE solver - needed in case of discontinuity (used to be in _CC_I_ADJ)
             gsl_odeiv2_driver_reset( _driver_adj[_ifct] );
@@ -503,17 +499,19 @@ ODEBNDS_GSL<T,PMT,PVT>::bounds_ASA
 
         // Add initial state contribution to derivative bounds
         else if( Idf ){
-          if( !_IC_I_ADJ() ){ _END_ADJ(); return FATAL; }
+          if( !_IC_I_ADJ( -_t ) ){ _END_ADJ(); return FATAL; }
           for( unsigned iq=0; iq<_np; iq++ )
             Idf[_ifct*_np+iq] = _Iyq[iq];
         }
       }
 
       // Display & record adjoint intermediate results
-      if( options.DISPLAY >= 1 )
+      if( options.DISPLAY >= 1 ){
         _print_interm( tk[_istg-1], _nf*_nx, Ilk[_istg-1], "l", os );
+        _print_interm( _np, _Iyq, "q", os );
+      }
       if( options.RESRECORD )
-        _results_adj.push_back( Results( tk[_istg-1], _nf*_nx, Ilk[_istg-1] ) );
+         _results_adj.push_back( Results( tk[_istg-1], _nf*_nx, Ilk[_istg-1] ) );
     }
 
     if( options.DISPLAY >= 1 )
@@ -525,9 +523,46 @@ ODEBNDS_GSL<T,PMT,PVT>::bounds_ASA
     return FAILURE;
   }
   _END_ADJ();
-  if( options.DISPLAY >= 1 ) {_print_stats( stats_adj, os );}
+  if( options.DISPLAY >= 1 ) _print_stats( stats_adj, os );
 
   return NORMAL;
+}
+
+template <typename T, typename PMT, typename PVT> inline bool
+ODEBNDS_GSL<T,PMT,PVT>::_INI_PM_ADJ
+( const unsigned np, const PVT* PMp )
+{
+  // Initialize bound propagation
+  if( !ODEBNDS_BASE<T,PMT,PVT>::_INI_PM_ADJ( options, np, PMp ) )
+    return false;
+
+  // Define Adjoint system in GSL format
+  _sys_adj.function = MC_GSLADJRHSPM__;
+  _sys_adj.params = 0;
+  switch( options.WRAPMIT){
+  case Options::NONE:
+    _sys_adj.dimension = (_PMenv->nmon()+1)*_nz;
+    break;
+  case Options::DINEQ:
+    _sys_adj.dimension = _PMenv->nmon()*_nz + 2*_nx + np;
+    break;
+  case Options::ELLIPS:
+  default:
+    _sys_adj.dimension = _PMenv->nmon()*_nz + _nx*(_nx+1)/2 + np;
+    break;
+  }
+
+  // Set GSL drivers for adjoint ODE integration
+  _INI_GSL(_sys_adj, _driver_adj);
+  delete[] _vec_adj;
+  _vec_adj = new double[_sys_adj.dimension*_nf];
+  _offset_quad = _sys_adj.dimension - _PMenv->nmon()*np-np;
+
+  // Reset result record and statistics
+  _results_adj.clear();
+  _init_stats( stats_adj );
+
+  return true;
 }
 
 template <typename T, typename PMT, typename PVT> inline int
@@ -537,52 +572,16 @@ ODEBNDS_GSL<T,PMT,PVT>::MC_GSLADJRHSPM__
   ODEBNDS_GSL<T,PMT,PVT> *pODEBNDS = ODEBNDS_GSL<T,PMT,PVT>::pODEBNDS;
   if( !pODEBNDS->_mesh_sta.eval( pODEBNDS->_istg, -t, pODEBNDS->_vec_sta ) )
     { return GSL_EBADFUNC; } // set interpolated state
-  bool flag = pODEBNDS->_RHS_PM_ADJ( pODEBNDS->options, t, y, ydot, 
-                                         pODEBNDS->_vec_sta );
+  bool flag = pODEBNDS->_RHS_PM_ADJ( pODEBNDS->options, -t, y, ydot,
+                                     pODEBNDS->_vec_sta, pODEBNDS->_ifct );
   if( flag ){
     double* qdot = ydot + pODEBNDS->_offset_quad;
-    flag = pODEBNDS->_RHS_PM_QUAD( pODEBNDS->options, t, y, qdot );
+    flag = pODEBNDS->_RHS_PM_QUAD( pODEBNDS->options, -t, y, qdot,
+                                   pODEBNDS->_vec_sta, pODEBNDS->_ifct );
   }
   pODEBNDS->stats_adj.numRHS++; // increment RHS counter
   ODEBNDS_GSL<T,PMT,PVT>::pODEBNDS = pODEBNDS;
   return ( flag? GSL_SUCCESS: GSL_EBADFUNC );
-}
-
-template <typename T, typename PMT, typename PVT> inline bool
-ODEBNDS_GSL<T,PMT,PVT>::_INI_PM_ADJ
-( const PVT* PMp )
-{
-  // Initialize bound propagation
-  if( !ODEBNDS_BASE<T,PMT,PVT>::_INI_PM_ADJ( options, PMp ) )
-    return false;
-
-  // Define Adjoint system in GSL format
-  _sys_adj.function = MC_GSLADJRHSPM__;
-  _sys_adj.params = 0;
-  _nz = _nx + _np;
-  switch( options.WRAPMIT){
-  case Options::NONE:
-    _sys_adj.dimension = _PMenv->nmon()*(_nz) + _nx + _np;
-    break;
-  case Options::DINEQ:
-    _sys_adj.dimension = _PMenv->nmon()*(_nz) + 2*_nx + _np;
-    break;
-  case Options::ELLIPS:
-  default:
-    _sys_adj.dimension = _PMenv->nmon()*(_nz) + _nx*(_nx+1)/2 + _np;
-    break;
-  }
-
-  // Set GSL drivers for adjoint ODE integration
-  _INI_GSL(_sys_adj, _driver_adj);
-  delete[] _vec_adj; _vec_adj = new double[_sys_adj.dimension*_nf];
-  _offset_quad = _sys_adj.dimension - _PMenv->nmon()*_np-_np;
-
-  // Reset result record and statistics
-  _results_adj.clear();
-  _init_stats( stats_adj );
-
-  return true;
 }
 
 //! @fn template <typename T, typename PMT, typename PVT> inline typename ODEBNDS_GSL<T,PMT,PVT>::STATUS ODEBNDS_GSL<T,PMT,PVT>::bounds_ASA(
@@ -614,7 +613,6 @@ ODEBNDS_GSL<T,PMT,PVT>::bounds_ASA
   STATUS flag = NORMAL;
   ODEBND_GSL<T,PMT,PVT>::options = options;
   flag = ODEBND_GSL<T,PMT,PVT>::_bounds( ns, tk, PMp, PMxk, PMq, PMf, true, os);
-
   if( flag != NORMAL ) return flag;
 
   // Nothing to do if no functions are defined
@@ -625,10 +623,10 @@ ODEBNDS_GSL<T,PMT,PVT>::bounds_ASA
 
   try{
     // Initialize adjoint bound integration using GSL
-    _INI_PM_ADJ( PMp );
+    if( !_INI_PM_ADJ( _np, PMp ) ) return FATAL;
+    _t = -tk[ns];
 
     // Interpolate state mesh in final stage
-    _t = -tk[ns];
     if( !_mesh_sta.interp( ns, options.INTERPMETH ) )
       { _END_ADJ(); return FAILURE; }
 
@@ -639,14 +637,12 @@ ODEBNDS_GSL<T,PMT,PVT>::bounds_ASA
     case Options::NONE:
     case Options::DINEQ:
       _vec2PMI( _vec_sta, _PMenv, _nx, _PMz );
-      _vec2PMI( _vec_sta+_offset_quad, _PMenv, _nq, _PMq, true );
-      //??_vec2PMI( _vec_sta, _PMenv, _nx, _PMz, _nq, _PMq );
+      //_vec2PMI( _vec_sta+_offset_quad, _PMenv, _nq, _PMq, true );
       break;
     case Options::ELLIPS:
     default:
       _vec2PME( _vec_sta, _PMenv, _nx, _PMz, _Q, _Er, _Ir );
-      _vec2PMI( _vec_sta+_offset_quad, _PMenv, _nq, _PMq, true );
-      //??_vec2PME( _vec_sta, _PMenv, _nx, _PMz, _Q, _Er, _Ir, _nq, _PMq );
+      //_vec2PMI( _vec_sta+_offset_quad, _PMenv, _nq, _PMq, true );
       break;
     }
 
@@ -654,19 +650,17 @@ ODEBNDS_GSL<T,PMT,PVT>::bounds_ASA
     if( PMlk && !PMlk[ns] ) PMlk[ns] = new PVT[_nx*_nf];
     for( _ifct=_pos_adj=0; _ifct < _nf; _ifct++, _pos_adj+=_sys_adj.dimension ){
       _pos_fct = ( _vFCT.size()>=ns? ns-1:0 );
-      if( !_TC_PM_ADJ( options, _t, _vec_adj+_pos_adj, _pos_fct, _ifct)
-          || !_TC_PM_QUAD( options, _vec_adj+_pos_adj+_offset_quad ) )
+      if( !_TC_PM_ADJ( options, -_t, _vec_adj+_pos_adj, _pos_fct, _ifct )
+       || !_TC_PM_QUAD( options, -_t, _vec_adj+_pos_adj+_offset_quad ) )
         { _END_ADJ(); return FATAL; }
       for( unsigned iy=0; PMlk[ns] && iy<_nx; iy++ )
         PMlk[ns][_ifct*_nx+iy] = _PMy[iy];
     }
 
-//==> ADJOINT QAUDRATURES LOOK WRONG!!!
-
     // Display & record adjoint terminal results
     if( options.DISPLAY >= 1 ){
-      _print_interm( tk[ns], _nf*_nx, PMlk[ns], "l", os );
-      //_print_interm( _nq, _PMq, "q", os );
+      _print_interm( tk[ns], _nx*_nf, PMlk[ns], "l", os );
+      _print_interm( _np, _PMyq, "q", os );
     }
     if( options.RESRECORD )
       _results_adj.push_back( Results( tk[ns], _nf*_nx, PMlk[ns] ) );
@@ -674,14 +668,19 @@ ODEBNDS_GSL<T,PMT,PVT>::bounds_ASA
     // Integrate adjoint ODEs through each stage using GSL
     _h_adj.assign( _nf, options.H0 );
     pODEBNDS = this;
-
     for( _istg=ns; _istg>0; _istg-- ){
+
       // Interpolate state mesh in current stage
-      if(_istg<ns && !_mesh_sta.interp(_istg, options.INTERPMETH) ){_END_ADJ(); return FAILURE;}
+      if(_istg<ns && !_mesh_sta.interp(_istg, options.INTERPMETH) )
+        {_END_ADJ(); return FAILURE;}
+
+      // Update list of operations in RHSADJ and QUADADJ
+      _pos_rhs  = ( _vRHS.size() <=1? 0: _istg-1 );
+      _pos_quad = ( _vQUAD.size()<=1? 0: _istg-1 );
+      if( !_SET_PM_ADJ( options, _pos_rhs, _pos_quad, _pos_fct, false ) )
+        { _END_ADJ(); return FATAL; }
 
       // Integrate backward through current stage for each function
-      if( PMlk && !PMlk[_istg-1] ) PMlk[_istg-1] = new PVT[_nx*_nf];
-
       for( _ifct=_pos_adj=0; _ifct < _nf; _ifct++, _pos_adj+=_sys_adj.dimension ){
         _t = -tk[_istg];
 #ifdef MC__ODEBNDS_GSL_DINEQI_DEBUG
@@ -691,11 +690,6 @@ ODEBNDS_GSL<T,PMT,PVT>::bounds_ASA
           std::cout << "_vec_adj[" << _pos_adj+iy << "] = "<<_vec_adj[_pos_adj+iy]<<std::endl;
         { int dum; std::cin >> dum; }
 #endif
-        // Update list of operations in RHSADJ and QUADADJ
-        _pos_rhs  = ( _vRHS.size() <=1? 0: _istg-1 );
-        _pos_quad = ( _vQUAD.size()<=1? 0: _istg-1 );
-        if( !_SET_PM_ADJ( options, _pos_rhs, _pos_quad, _pos_fct, _ifct ) )
-          { _END_ADJ(); return FATAL; }
 
         // Propagate bounds backward to previous stage time
         while( _t < -tk[_istg-1] ){
@@ -724,24 +718,24 @@ ODEBNDS_GSL<T,PMT,PVT>::bounds_ASA
         case Options::DINEQ:
           _vec2PMI( _vec_sta, _PMenv, _nx, _PMz );
           _vec2PMI( _vec_adj+_pos_adj, _PMenv, _nx, _PMy );
-          _vec2PMI( _vec_adj+_pos_adj+_offset_quad, _PMenv, _np, _PMyq, true );
-          //??_vec2PMI( _vec_adj+_pos_adj, _PMenv, _nx, _PMy, _np, _PMyq );
           break;
         case Options::ELLIPS:
         default:
           _vec2PME( _vec_sta, _PMenv, _nx, _PMz, _Q, _Er, _Ir );
           _vec2PME( _vec_adj+_pos_adj, _PMenv, _nx, _PMy, _Qy, _Edy, _Idy );
-          _vec2PMI( _vec_adj+_pos_adj+_offset_quad, _PMenv, _np, _PMyq, true );
-          //??_vec2PME( _vec_adj+_pos_adj, _PMenv, _nx, _PMy, _Qy, _Edy, _Idy, _np, _PMyq );
           break;
         }
-        for(unsigned iy=0; PMlk[_istg-1] && iy<_nx; iy++)
+        _vec2PMI( _vec_adj+_pos_adj+_offset_quad, _PMenv, _np, _PMyq, true );
+        if( PMlk && !PMlk[_istg-1] ) PMlk[_istg-1] = new PVT[_nx*_nf];
+        for( unsigned iy=0; PMlk[_istg-1] && iy<_nx; iy++)
           PMlk[_istg-1][_ifct*_nx+iy] =_PMy[iy];
 
         // Add function contribution to adjoint bounds (discontinuities)
         if( _istg>1  ){
           _pos_fct = ( _vFCT.size()>=ns? _istg-1:0 );
-          if( _pos_fct && !_CC_PM_ADJ( options, _t, _vec_adj+_pos_adj, _pos_fct, _ifct ) )
+          if( _pos_fct
+           && !_CC_PM_ADJ( options, -_t, _vec_adj+_pos_adj, _pos_fct, _ifct )
+           && !_CC_PM_QUAD( options, -_t, _vec_adj+_pos_adj+_offset_quad ) )
             { _END_ADJ(); return FATAL; }
           // Reset ODE solver - needed in case of discontinuity (used to be in _CC_PM_ADJ)
           gsl_odeiv2_driver_reset( _driver_adj[_ifct] );
@@ -749,15 +743,17 @@ ODEBNDS_GSL<T,PMT,PVT>::bounds_ASA
 
         // Add initial state contribution to derivative bounds
         else if( PMdf ){
-          if( !_IC_PM_ADJ() ){ _END_ADJ(); return FATAL; }
+          if( !_IC_PM_ADJ( -_t ) ){ _END_ADJ(); return FATAL; }
           for( unsigned iq=0; iq<_np; iq++ )
             PMdf[_ifct*_np+iq] = _PMyq[iq];
         }
       }
 
       // Display & record adjoint intermediate results
-      if( options.DISPLAY >= 1 )
+      if( options.DISPLAY >= 1 ){
         _print_interm( tk[_istg-1], _nf*_nx, PMlk[_istg-1], "l", os );
+        _print_interm( _np, _PMyq, "q", os );
+      }
       if( options.RESRECORD )
         _results_adj.push_back( Results( tk[_istg-1], _nf*_nx, PMlk[_istg-1] ) );
     }
@@ -775,27 +771,6 @@ ODEBNDS_GSL<T,PMT,PVT>::bounds_ASA
   if( options.DISPLAY >= 1 ) {_print_stats( stats_adj, os );}
 
   return NORMAL;
-}
-
-template <typename T, typename PMT, typename PVT> inline void
-ODEBNDS_GSL<T,PMT,PVT>::record
-( std::ofstream&bndsta, std::ofstream&bndadj, const unsigned iprec ) const
-{
-  ODEBND_GSL<T,PMT,PVT>::record( bndsta, iprec );
-  if( !bndadj ) return;
-
-  // Specify format
-  bndadj << std::right << std::scientific << std::setprecision(iprec);
-
-  // Record computed adjoint interval bounds at stage times
-  typename std::vector< Results >::const_iterator it = _results_adj.begin();
-  for( ; it != _results_adj.end(); ++it ){
-    bndadj << std::setw(iprec+9) << (*it).t;
-    for( unsigned ix=0; ix<(*it).nx; ix++ )
-      bndadj << std::setw(iprec+9) << mc::Op<T>::l( (*it).X[ix] )
-             << std::setw(iprec+9) << mc::Op<T>::u( (*it).X[ix] );
-    bndadj << std::endl;
-  }
 }
 
 } // end namescape mc

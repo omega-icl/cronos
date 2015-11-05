@@ -116,7 +116,7 @@ class ODEBND_BASE:
   //! @brief pointer of variable bounds for DAG evaluation
   T *_IVAR;
 
-  //! @brief pointer to adjoint time **DO NOT FREE**
+  //! @brief pointer to state time **DO NOT FREE**
   T *_It;
 
   //! @brief pointer to state interval bounds **DO NOT FREE**

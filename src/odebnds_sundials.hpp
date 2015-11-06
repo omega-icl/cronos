@@ -89,6 +89,7 @@ class ODEBNDS_SUNDIALS:
   using ODEBNDS_BASE<T,PMT,PVT>::_TC_PM_ADJ;
   using ODEBNDS_BASE<T,PMT,PVT>::_TC_PM_QUAD;
   using ODEBNDS_BASE<T,PMT,PVT>::_CC_PM_ADJ;
+  using ODEBNDS_BASE<T,PMT,PVT>::_CC_PM_QUAD;
   using ODEBNDS_BASE<T,PMT,PVT>::_SET_PM_ADJ;
   using ODEBNDS_BASE<T,PMT,PVT>::_RHS_PM_ADJ;
   using ODEBNDS_BASE<T,PMT,PVT>::_RHS_PM_QUAD;
@@ -214,7 +215,7 @@ class ODEBNDS_SUNDIALS:
 
   //! @brief Function to initialize adjoint polynomial models
   bool _INI_PM_ADJ
-    ( const PVT *PMp );
+    ( const unsigned np, const PVT *PMp );
 
   //! @brief Static wrapper to function to calculate the adjoint DINEQ-PM RHS values
   static int MC_CVADJRHSPM__
@@ -267,8 +268,8 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::_INI_CVODE
     delete[] _indexB;
     delete[] _iusrB;
     _nfct = _nf;
-    _Ny  = N_VCloneVectorArrayEmpty_Serial( _nfct, _Nx );
-    _Nyq = N_VCloneVectorArrayEmpty_Serial( _nfct, _Nx );
+    _Ny  = N_VCloneVectorArray_Serial( _nfct, _Nx );
+    _Nyq = N_VCloneVectorArray_Serial( _nfct, _Nx );
     _indexB = new int[_nfct];
     _iusrB = new unsigned[_nfct];
   }
@@ -494,11 +495,11 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
     switch( options.WRAPMIT){
     case Options::NONE:
     case Options::DINEQ:
-      _vec2I( _vec_sta[ns], _nx, _Iz );
+      _vec2I( _vec_sta[ns].data(), _nx, _Iz );
       break;
     case Options::ELLIPS:
     default:
-      _vec2E( _vec_sta[ns], _nx, _np, _Q, _Er, _Ir, _pref, _Ip, _B, _zref, _Iz );
+      _vec2E( _vec_sta[ns].data(), _nx, _np, _Q, _Er, _Ir, _pref, _Ip, _B, _zref, _Iz );
       break;
     }
 
@@ -564,12 +565,12 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
         switch( options.WRAPMIT){
         case Options::NONE:
         case Options::DINEQ:
-          _vec2I( _vec_sta[_istg-1], _nx, _Iz );
+          _vec2I( _vec_sta[_istg-1].data(), _nx, _Iz );
           _vec2I( NV_DATA_S(_Ny[_ifct]), _nx, _Iy);
           break;
         case Options::ELLIPS:
         default:
-          _vec2E( _vec_sta[_istg-1], _nx, _np, _Q, _Er, _Ir, _pref, _Ip, _B, _zref, _Iz );
+          _vec2E( _vec_sta[_istg-1].data(), _nx, _np, _Q, _Er, _Ir, _pref, _Ip, _B, _zref, _Iz );
           _vec2E( NV_DATA_S(_Ny[_ifct]), _nx, _nx, _np, _Qy, _Edy, _Idy, 0, _Ir, _By,
                   _pref, _Ip, _By+_nx*_nx, _yref, _Iy );
           break;
@@ -580,7 +581,7 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
           Ilk[_istg-1][_ifct*_nx+iy] = _Iy[iy];
 
         // Add function contribution to adjoint bounds (discontinuities)
-        if( _istg>1  ){
+        if( _istg > 1  ){
           _pos_fct = ( _vFCT.size()>=ns? _istg-1:0 );
           if( _pos_fct
            && !_CC_I_ADJ( options, _t, NV_DATA_S(_Ny[_ifct]), _pos_fct, _ifct )
@@ -606,7 +607,6 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
       }
       if( options.RESRECORD )
         _results_adj.push_back( Results( tk[_istg-1], _nf*_nx, Ilk[_istg-1] ) );
-
     }
     if( options.DISPLAY >= 1 )
       _print_interm( _nf*_np, Idf, "df", os );
@@ -734,11 +734,11 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
     switch( options.WRAPMIT){
     case Options::NONE:
     case Options::DINEQ:
-      _vec2PMI( _vec_sta[ns], _PMenv, _nx, _PMz );
+      _vec2PMI( _vec_sta[ns].data(), _PMenv, _nx, _PMz );
       break;
     case Options::ELLIPS:
     default:
-      _vec2PME( _vec_sta[ns], _PMenv, _nx, _PMz, _Q, _Er, _Ir );
+      _vec2PME( _vec_sta[ns].data(), _PMenv, _nx, _PMz, _Q, _Er, _Ir );
       break;
     }
 
@@ -778,9 +778,6 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
         { _END_ADJ(); return FATAL; }
 
       // Propagate bounds backward to previous stage time
-      //_cv_flag = CVodeSetStopTimeB( _cv_mem, tk[_istg-1] );
-      //if( _check_flag(&_cv_flag, "CVodeSetStopTimeB", 1) )
-      //  { _END_ADJ(); return FATAL; }
       _cv_flag = CVodeB( _cv_mem, tk[_istg-1], CV_NORMAL );
       if( _check_cv_flag(&_cv_flag, "CVodeB", 1) )
         { _END_ADJ(); return FATAL; }
@@ -789,8 +786,6 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
       // Bounds on states/adjoints/quadratures at stage time
       //stats_adj.numSteps = 0; 
       for( _ifct=0; _ifct < _nf; _ifct++ ){
-        //for( unsigned i=0; i<_vec_sta[_istg-1].size(); i++ )
-        //  NV_DATA_S(_Nx)[i] = _vec_sta[_istg-1][i];
         _cv_flag = CVodeGetB( _cv_mem, _indexB[_ifct], &_t, _Ny[_ifct]);
         if( _check_cv_flag( &_cv_flag, "CVodeGetB", 1) )
           { _END_ADJ(); return FATAL; }
@@ -804,12 +799,12 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
         switch( options.WRAPMIT){
         case Options::NONE:
         case Options::DINEQ:
-          _vec2PMI( _vec_sta[_istg-1], _PMenv, _nx, _PMz );
+          _vec2PMI( _vec_sta[_istg-1].data(), _PMenv, _nx, _PMz );
           _vec2PMI( NV_DATA_S(_Ny[_ifct]), _PMenv, _nx, _PMy );
           break;
         case Options::ELLIPS:
         default:
-          _vec2PME( _vec_sta[_istg-1], _PMenv, _nx, _PMz, _Q, _Er, _Ir );
+          _vec2PME( _vec_sta[_istg-1].data(), _PMenv, _nx, _PMz, _Q, _Er, _Ir );
           _vec2PME( NV_DATA_S(_Ny[_ifct]), _PMenv, _nx, _PMy, _Qy, _Edy, _Idy );
           break;
         }
@@ -820,11 +815,15 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
 
         // Add function contribution to adjoint bounds (discontinuities)
         if( _istg>1  ){
+          //std::cout << "_Ny[" << _ifct << "]: (before)";
+          //N_VPrint_Serial(_Ny[_ifct]);
           _pos_fct = ( _vFCT.size()>=ns? _istg-1:0 );
-          if( _pos_fct
+          if( _pos_fct 
            && !_CC_PM_ADJ( options, _t, NV_DATA_S(_Ny[_ifct]), _pos_fct, _ifct )
            && !_CC_PM_QUAD( options, _t, NV_DATA_S(_Nyq[_ifct]) ) )
             { _END_ADJ(); return FATAL; }
+          //std::cout << "_Ny[" << _ifct << "]: (after)";
+          //N_VPrint_Serial(_Ny[_ifct]);
 
           // Reset ODE solver - needed in case of discontinuity
           if( !_CC_CVODES( _ifct, _indexB[_ifct] ) )
@@ -845,6 +844,7 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
       }
       if( options.RESRECORD )
         _results_adj.push_back( Results( tk[_istg-1], _nf*_nx, PMlk[_istg-1] ) );
+      //{ std::cout << "--paused--"; int dum; std::cin >> dum; }
     }
 
     if( options.DISPLAY >= 1 )

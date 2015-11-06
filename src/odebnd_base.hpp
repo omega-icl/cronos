@@ -1528,6 +1528,7 @@ ODEBND_BASE<T,PMT,PVT>::_IC_PM_STA
       _PME2vec( _PMenv, _nx, _PMx, 0, vec );
     break;
   }
+  
   return true;
 }
 
@@ -1701,8 +1702,6 @@ ODEBND_BASE<T,PMT,PVT>::_RHS_PM_STA
     _print_interm( t, _nx, _PMx, "PMx Intermediate", std::cerr );
 #endif
     *_PMt = t; // set current time
-    _QUAD_PM( _pDAG, _opQUAD, _PMRHS, _nq, _pQUAD, _nVAR-_nq, _pVAR, _PMVAR,
-              _PMqdot );
     _RHS_PM_NONE( _pDAG, _opRHS, _PMRHS, _nx, _pRHS, _nVAR-_nq, _pVAR, _PMVAR,
                   _PMxdot );
     // Whether or not to ignore the remainder
@@ -1723,8 +1722,6 @@ ODEBND_BASE<T,PMT,PVT>::_RHS_PM_STA
     _print_interm( t, _nx, _PMx, "PMx Intermediate", std::cerr );
 #endif
     *_PMt = t; // set current time
-    _QUAD_PM( _pDAG, _opQUAD, _PMRHS, _nq, _pQUAD, _nVAR-_nq, _pVAR, _PMVAR,
-              _PMqdot );
     _RHS_PM_DI( _pDAG, _opRHSi, _PMRHS, _nx, _pRHS, _nVAR-_nq, _pVAR, _PMVAR,
                 _PMxdot, _RxLdot, _RxUdot );
     // Whether or not to ignore the remainder
@@ -1745,17 +1742,15 @@ ODEBND_BASE<T,PMT,PVT>::_RHS_PM_STA
 #ifdef MC__ODEBND_BASE_DINEQPM_DEBUG
     _print_interm( t, _nx, _PMx, _Er, "PMx Intermediate", std::cerr );
 #endif
-    _QUAD_PM( _pDAG, _opQUAD, _PMRHS, _nq, _pQUAD, _nVAR-_nq, _pVAR, _PMVAR,
-              _PMqdot );
 
     // In this variant a bound on the Jacobian matrix is computed and the
     // linear part is taken as the mid-point of this matrix
     if( !options.ORDMIT ){
+      *_It = t; // set current time
       for( unsigned ix=0; ix<_nx; ix++ ){
         _IVAR[ix] = _PMx[ix].bound(); // set current state bounds
         _PMVAR[ix].center().set( T(0.) ); // cancel remainder term
       }
-      *_It = t; // set current time
       _RHS_PM_ELL0( _pDAG, _opRHS, _PMRHS, _opJAC, _IJAC, _nx, _pRHS,
                     _pJAC, _nVAR-_nq, _pVAR, _PMVAR, _IVAR, _PMxdot, _Idfdx,
                     _Ir, _A, _Irdot );
@@ -1763,7 +1758,9 @@ ODEBND_BASE<T,PMT,PVT>::_RHS_PM_STA
 
     // In this variant a polynomial model of the Jacobian matrix is computed and the
     // linear part is taken as the mid-point of this matrix
-    else if( _PMenv->nord() >= _MVXPenv->nord() ){
+    else if( _PMenv->nord() > _MVXPenv->nord() ){
+    //else if( _PMenv->nord() >= _MVXPenv->nord() ){
+      *_MVXPt = t; // set current time
 #ifdef MC__ODEBND_BASE_MVXP_USE
       for( unsigned jx=0; jx<_nx; jx++ ){
         _MVXPd[jx].set( _MVXPenv, _npar+jx, _Ir[jx] );
@@ -1779,7 +1776,6 @@ ODEBND_BASE<T,PMT,PVT>::_RHS_PM_STA
 #ifdef MC__ODEBND_BASE_DINEQPM_DEBUG
       _print_interm( t, _nx, _MVXPx, "MVXPx Intermediate", std::cerr );
 #endif
-      *_MVXPt = t; // set current time
       _RHS_PM_ELL1( _pDAG, _opRHS, _PMRHS, _opJAC, _PMJAC, _nx, _pRHS,
                     _pJAC, _nVAR-_nq, _pVAR, _PMVAR, _MVXPVAR, _PMxdot,
                     _MVXPdfdx, _Ir, _A, _Irdot );
@@ -1788,6 +1784,7 @@ ODEBND_BASE<T,PMT,PVT>::_RHS_PM_STA
     // In this variant a polynomial model in the joint state-parameter and
     // of the same order as the parameter polynomial model is computed
     else{
+      *_MVXPt = t; // set current time   
       for( unsigned jx=0; jx<_nx; jx++ ){
         _MVXPd[jx].set( _MVXPenv, _npar+jx, _Ir[jx] );
         _MVXPx[jx].set( _MVXPenv ).set( _PMx[jx].center().set( T(0.) ), true );
@@ -1796,7 +1793,6 @@ ODEBND_BASE<T,PMT,PVT>::_RHS_PM_STA
 #ifdef MC__ODEBND_BASE_DINEQPM_DEBUG
       _print_interm( t, _nx, _MVXPx, "MVXPx Intermediate", std::cerr );
 #endif
-      *_MVXPt = t; // set current time   
       _RHS_PM_ELL2( _pDAG, _opRHS, _PMRHS, _nx, _pRHS, _nVAR-_nq, _pVAR,
                     _MVXPVAR, _PMenv, _PMxdot, _MVXPf, _npar, _Ir, _A, _Irdot );
     }

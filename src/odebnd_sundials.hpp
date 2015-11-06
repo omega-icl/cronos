@@ -749,6 +749,9 @@ ODEBND_SUNDIALS<T,PMT,PVT>::_INI_PM_STA
     _Nq  = cv_Nq_size? N_VNew_Serial( cv_Nq_size ): 0;
   }
 
+  // Initialize state parameterization at time stages
+  _vec_sta.clear();
+
   // Reset result record and statistics
   results_sta.clear();
   _init_stats( stats_sta );
@@ -780,6 +783,13 @@ ODEBND_SUNDIALS<T,PMT,PVT>::_bounds
     }
     if( PMxk && !PMxk[0] ) PMxk[0] = new PVT[_nx];
     for( unsigned ix=0; PMxk[0] && ix<_nx; ix++ ) PMxk[0][ix] = _PMx[ix];
+
+    // Store full state at initial time
+    if( store ){
+      realtype*vsta = NV_DATA_S(_Nx);
+      unsigned lsta = NV_LENGTH_S(_Nx);
+      _vec_sta.push_back( std::vector<realtype>( vsta, vsta+lsta ) );
+    }
 
     // Record initial results
     if( options.RESRECORD )
@@ -821,6 +831,13 @@ ODEBND_SUNDIALS<T,PMT,PVT>::_bounds
          || _diam( _nx, _Ir  ) > options.DMAX )
           throw Exceptions( Exceptions::INTERN );
         stats_sta.numSteps++;
+      }
+
+      // Store full state at stage time
+      if( store ){
+        realtype*vsta = NV_DATA_S(_Nx);
+        unsigned lsta = NV_LENGTH_S(_Nx);
+        _vec_sta.push_back( std::vector<realtype>( vsta, vsta+lsta ) );
       }
 
       // Bounds on intermediate states

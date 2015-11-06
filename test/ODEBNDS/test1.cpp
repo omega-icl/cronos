@@ -1,14 +1,29 @@
-#include <fstream>
+const unsigned int NPM   = 2;	// <- Order of poynomial expansion
+const unsigned int NSAMP = 50;	// <- Number of sampling points for inner approx.
+#define SAVE_RESULTS		// <- Whether to save bounds to file
+#define USE_CMODEL		// <- whether to use Chebyshev models or Taylor models
+#define USE_SUNDIALS		// <- whether to use SUNDIALS or GSL integrator
+
 #include "odeslvs_gsl.hpp"
-#include "odebnds_gsl.hpp"
+#ifndef USE_SUNDIALS
+  #include "odebnds_gsl.hpp"
+#else
+  #include "odebnds_sundials.hpp"
+#endif
 
 #include "interval.hpp"
 typedef mc::Interval I;
-typedef mc::Ellipsoid E; 
+typedef mc::Ellipsoid E;
 
-#include "tmodel.hpp"
-typedef mc::TModel<I> TM;
-typedef mc::TVar<I> TV; 
+#ifdef USE_CMODEL
+  #include "cmodel.hpp"
+  typedef mc::CModel<I> PM;
+  typedef mc::CVar<I> PV;
+#else
+  #include "tmodel.hpp"
+  typedef mc::TModel<I> PM;
+  typedef mc::TVar<I> PV;
+#endif
 
 int main()
 {
@@ -50,23 +65,32 @@ int main()
 
   mc::FFVar FCT[NF*NS];  // State functions
   for( unsigned k=0; k<NF*NS; k++ ) FCT[k] = 0.;
-  FCT[(NS/2)*NF+0] = X[0];
+  //FCT[(NS/2)*NF+0] = X[0];
   FCT[(NS-1)*NF+0] = X[0] * X[1];
   FCT[(NS-1)*NF+1] = P[0] * pow( X[0], 2 );
   for( unsigned k=0; k<NS; k++ ) FCT[k*NF+1] += Q[0];
 
-  I Ip[NP] = { I(2.9,3.1) };
+  I Ip[NP] = { I(2.95,3.05) };
   I *Ixk[NS+1], *Iyk[NS+1];
   for( unsigned k=0; k<=NS; k++ ){
     Ixk[k] = new I[NX];
     Iyk[k] = new I[NF*NX];
   }
-
   I Iq[NQ], If[NF], Idf[NF*NP];
 
+  PM PMEnv( NP, NPM );
+  PV PMp[NP] = { PV( &PMEnv, 0, Ip[0] ) };
+  PV *PMxk[NS+1], *PMyk[NS+1];
+  for( unsigned k=0; k<=NS; k++ ){
+    PMxk[k] = new PV[NX];
+    PMyk[k] = new PV[NF*NX];
+  }
+  PV PMq[NQ], PMf[NF], PMdf[NF*NP];
 
+  /////////////////////////////////////////////////////////////////////////////
   //// SAMPLING
   mc::ODESLVS_GSL<I> LV0;
+
   LV0.set_dag( &IVP );
   LV0.set_state( NX, X );
   LV0.set_parameter( NP, P );
@@ -76,27 +100,53 @@ int main()
   //LV0.set_function( NF, FCT );
   LV0.set_function( NF, NS, FCT );
 
-  LV0.options.DISPLAY = 1;
-  LV0.options.ATOL = LV0.options.RTOL = 1e-10;
-  LV0.options.INTMETH = mc::ODESLV_GSL<I>::Options::MSBDF;
+  LV0.options.DISPLAY   = 1;
+#if defined( SAVE_RESULTS )
   LV0.options.RESRECORD = true;
+#endif
+  LV0.options.ATOL      = LV0.options.RTOL = 1e-10;
+  LV0.options.INTMETH   = mc::ODESLV_GSL<I>::Options::MSBDF;
 
   // Approximate adjoint bounds
-  const unsigned int NSAMP = 20;  // Parameter samples
-  for(int g = 0; g < 49; g++){std::cout << "-";}
-  std::cout << std::endl;
-  std::cout << "|\t\t Approximate Bounds \t\t|" << std::endl; 
-  for(int g = 0; g < 49; g++){std::cout << "-";}
-  std::cout << std::endl;
+  std::cout << "\nNON_VALIDATED INTEGRATION - APPROXIMATE ENCLOSURE OF REACHABLE SET:\n\n";
   //LV0.bounds( NS, tk, Ip, Ixk, Iq, If, NSAMP );
-  LV0.bounds_ASA( NS, tk, Ip, Ixk, 0, If, Iyk, Idf, NSAMP );
+  //LV0.bounds_ASA( NS, tk, Ip, Ixk, 0, If, Iyk, Idf, NSAMP );
+#if defined( SAVE_RESULTS )
   std::ofstream apprecSTA("test1_APPROX_STA.dat", std::ios_base::out );
   std::ofstream apprecADJ("test1_APPROX_ADJ.dat", std::ios_base::out );
   LV0.record( apprecSTA, apprecADJ ); 
+#endif
 
-
+  /////////////////////////////////////////////////////////////////////////////
   //// DIFFERENTIAL INEQUALITIES
-  mc::ODEBNDS_GSL<I> LV;
+#ifndef USE_SUNDIALS // GSL integrator
+  mc::ODEBNDS_GSL<I,PM,PV> LV;
+
+  LV.options.DISPLAY = 1;
+#if defined( SAVE_RESULTS )
+  LV.options.RESRECORD = true;
+#endif
+  LV.options.ATOL      = LV.options.RTOL = 1e-8;
+  LV.options.ORDMIT    = 1; //PMp->nord();
+  LV.options.WRAPMIT   = mc::ODEBND_GSL<I,PM,PV>::Options::ELLIPS;//DINEQ
+  LV.options.HMAX      = 1e-2;
+  //LV.options.H0      = 1e-6;
+
+#else // SUNDIALS integrator
+  mc::ODEBNDS_SUNDIALS<I,PM,PV> LV;
+
+  LV.options.DISPLAY   = 1;
+#if defined( SAVE_RESULTS )
+  LV.options.RESRECORD = true;
+#endif
+  LV.options.ATOL      = LV.options.RTOL  = 1e-8;
+  LV.options.ATOLB     = LV.options.RTOLB = 1e-8;
+  LV.options.INTMETH   = mc::ODEBNDS_SUNDIALS<I,PM,PV>::Options::MSADAMS;
+  LV.options.JACAPPROX = mc::ODEBNDS_SUNDIALS<I,PM,PV>::Options::CV_DENSE;//CV_DIAG;
+  LV.options.ORDMIT    = 1; //PMp->nord();
+  LV.options.WRAPMIT   = mc::ODEBNDS_SUNDIALS<I,PM,PV>::Options::DINEQ;//ELLIPS;//NONE;
+#endif
+
   LV.set_dag( &IVP );
   LV.set_state( NX, X );
   LV.set_parameter( NP, P );
@@ -106,30 +156,28 @@ int main()
   //LV.set_function( NF, FCT );
   LV.set_function( NF, NS, FCT );
 
-  LV.options.RESRECORD = true;
-  LV.options.DISPLAY = 1;
-  LV.options.ATOL = LV.options.RTOL = 1e-7;
-  //LV.options.WRAPMIT = mc::ODEBNDS_GSL<I,TM,TV>::Options::DINEQ;
-  LV.options.WRAPMIT = mc::ODEBND_GSL<I,TM,TV>::Options::ELLIPS;
-  LV.options.HMAX = 1e-2;
-  //LV.options.H0   = 1e-6;
+  std::cout << "\nCONTINUOUS SET-VALUED INTEGRATION - INTERVAL ENCLOSURE OF REACHABLE SET:\n\n";
+  //LV.bounds_ASA( NS, tk, Ip, Ixk, Iq, If, Iyk, Idf );
+#if defined( SAVE_RESULTS )
+  std::ofstream direcISTA( "test1_DINEQI_STA.dat", std::ios_base::out );
+  std::ofstream direcIADJ( "test1_DINEQI_ADJ.dat", std::ios_base::out );
+  LV.record( direcISTA, direcIADJ );
+#endif
 
-  // Adjoint bounds from sensitivity class
-  for(int g = 0; g < 41; g++){std::cout << "-";}
-  std::cout << std::endl;
-  std::cout << "|\t State and Adjoint Bounds \t|" << std::endl;     
-  for(int g = 0; g < 41; g++){std::cout << "-";}
-  std::cout << std::endl;
-  LV.bounds_ASA( NS, tk, Ip, Ixk, Iq, If, Iyk, Idf );
-  std::ofstream direcSTA( "test1_DINEQI_STA.dat", std::ios_base::out );
-  std::ofstream direcADJ( "test1_DINEQI_ADJ.dat", std::ios_base::out );
-  LV.record( direcSTA, direcADJ );
-
+  std::cout << "\nCONTINUOUS SET-VALUED INTEGRATION - POLYNOMIAL MODEL ENCLOSURE OF REACHABLE SET:\n\n";
+  LV.bounds_ASA( NS, tk, PMp, PMxk, PMq, PMf, PMyk, PMdf );
+#if defined( SAVE_RESULTS )
+  std::ofstream direcPMSTA( "test1_DINEQPM_STA.dat", std::ios_base::out );
+  std::ofstream direcPMADJ( "test1_DINEQPM_ADJ.dat", std::ios_base::out );
+  LV.record( direcPMSTA, direcPMADJ );
+#endif
 
   // Clean up
   for( unsigned k=0; k<=NS; k++ ){
     delete[] Ixk[k];
     delete[] Iyk[k];
+    delete[] PMxk[k];
+    delete[] PMyk[k];
   }
 
   return 0;

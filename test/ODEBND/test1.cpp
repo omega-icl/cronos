@@ -1,4 +1,4 @@
-const unsigned int NPM   = 7;	// <- Order of poynomial expansion
+const unsigned int NPM   = 10;	// <- Order of poynomial expansion
 const unsigned int NSAMP = 50;	// <- Number of sampling points for inner approx.
 #define SAVE_RESULTS		// <- Whether to save bounds to file
 #undef  TEST_CONVERGENCE	// <- Whether to test Hausdorff convergence of bounds
@@ -54,7 +54,7 @@ int main()
   IC[1] = 1.1;
   for( unsigned k=1; k<NS; k++ )
     for( unsigned i=0; i<NX; i++ ) IC[k*NX+i] = X[i];
-  //IC[(NS/2)*NX+0] += 0.5; <- uncomment to simulate a discontinuity
+  IC[(NS/2)*NX+0] += 0.5; // <- uncomment to simulate a discontinuity
 
   I Ip[NP] = { I(2.9,3.1) };
   I *Ixk[NS+1];
@@ -192,7 +192,7 @@ int main()
 #endif
   //LV2.hausdorff( NS, tk, Ip, Hxk, LV0, NSAMP );
 
-  std::cout << "\nCONTINUOUS SET-VALUED INTEGRATION - POLYNOMIAL MODEL ENCLOSURE OF REACHABLE:\n\n";
+  std::cout << "\nCONTINUOUS SET-VALUED INTEGRATION - POLYNOMIAL MODEL ENCLOSURE OF REACHABLE SET:\n\n";
   LV2.options.PMNOREM = false;
   LV2.options.DMAX    = 5.;
   LV2.bounds( NS, tk, PMp, PMxk );

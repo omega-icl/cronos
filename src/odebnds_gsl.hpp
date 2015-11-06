@@ -196,7 +196,7 @@ public: // EVERYTHING to be called/used from outside (mostly functions and a few
   //! @brief Record state and sensitivity bounds in files <a>obndsta</a> and <a>obndsa</a>, with accuracy of <a>iprec</a> digits
   void record
     ( std::ofstream&obndsta, std::ofstream&obndsa, const unsigned iprec=5 ) const
-    { this->ODEBND_SUNDIALS<T,PMT,PVT>::record( obndsta, iprec );
+    { this->ODEBND_GSL<T,PMT,PVT>::record( obndsta, iprec );
       this->ODEBND_BASE<T,PMT,PVT>::_record( obndsa, _results_adj, iprec ); }
 
 private:

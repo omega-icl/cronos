@@ -1,4 +1,4 @@
-const unsigned int NPM   = 10;	// <- Order of poynomial expansion
+const unsigned int NPM   = 6;	// <- Order of poynomial expansion
 const unsigned int NSAMP = 50;	// <- Number of sampling points for inner approx.
 #define SAVE_RESULTS		// <- Whether to save bounds to file
 #undef  TEST_CONVERGENCE	// <- Whether to test Hausdorff convergence of bounds
@@ -50,7 +50,7 @@ int main()
   RHS[1] = P[0] * X[1] * ( X[0] - 1. );
 
   mc::FFVar IC[NX*NS];  // Initial value and transition functions
-  IC[0] = 1.2;
+  IC[0] = 1.2+(P[0]-3.);
   IC[1] = 1.1;
   for( unsigned k=1; k<NS; k++ )
     for( unsigned i=0; i<NX; i++ ) IC[k*NX+i] = X[i];

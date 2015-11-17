@@ -59,15 +59,15 @@ int main()
   //mc::FFVar QUAD[NQ];  // Quadrature function
   //QUAD[0] = X[1];
 
-  //mc::FFVar FCT[NF];  // State functions
-  //FCT[0] = X[0] * X[1];
-  //FCT[1] = P[0] * pow( X[0], 2 );
-  mc::FFVar FCT[NF*NS];  // State functions
-  for( unsigned k=0; k<NF*NS; k++ ) FCT[k] = 0.;
-  FCT[(NS/2)*NF+0] = X[0];
-  FCT[(NS-1)*NF+0] = X[0] * X[1];
-  FCT[(NS-1)*NF+1] = P[0] * pow( X[0], 2 );
-  //for( unsigned k=0; k<NS; k++ ) FCT[k*NF+1] += Q[0];
+  mc::FFVar FCT[NF];  // State functions
+  FCT[0] = X[0] * X[1];
+  FCT[1] = P[0] * pow( X[0], 2 );
+  //mc::FFVar FCT[NF*NS];  // State functions
+  //for( unsigned k=0; k<NF*NS; k++ ) FCT[k] = 0.;
+  //FCT[(NS/2)*NF+0] = X[0];
+  //FCT[(NS-1)*NF+0] = X[0] * X[1];
+  //FCT[(NS-1)*NF+1] = P[0] * pow( X[0], 2 );
+  ////for( unsigned k=0; k<NS; k++ ) FCT[k*NF+1] += Q[0];
 
   I Ip[NP] = { I(2.9,3.1) };
   I *Ixk[NS+1], *Iyk[NS+1];
@@ -97,8 +97,8 @@ int main()
   LV0.set_initial( NX, IC );
   //LV0.set_initial( NS, NX, IC );
   //LV0.set_quadrature( NQ, QUAD, Q );
-  //LV0.set_function( NF, FCT );
-  LV0.set_function( NS, NF, FCT );
+  LV0.set_function( NF, FCT );
+  //LV0.set_function( NS, NF, FCT );
 
   LV0.options.DISPLAY = 1;
   LV0.options.ATOL = LV0.options.RTOL = 1e-10;
@@ -112,7 +112,7 @@ int main()
   std::cout << "|\t\t Approximate Bounds \t\t|" << std::endl; 
   for(int g = 0; g < 49; g++){std::cout << "-";}
   std::cout << std::endl;
-  LV0.bounds_ASA( NS, tk, Ip, Ixk, 0, If, Iyk, Idf, NSAMP );
+  //LV0.bounds_ASA( NS, tk, Ip, Ixk, 0, If, Iyk, Idf, NSAMP );
   std::ofstream apprecSTA("test4_APPROX_STA.dat", std::ios_base::out );
   std::ofstream apprecADJ("test4_APPROX_ADJ.dat", std::ios_base::out );
   LV0.record( apprecSTA, apprecADJ ); 
@@ -126,8 +126,8 @@ int main()
   LV.set_initial( NX, IC );
   //LV.set_initial( NS, NX, IC );
   //LV.set_quadrature( NQ, QUAD, Q );
-  LV.set_function( NS, NF, FCT );
-  //LV.set_function( NF, FCT );
+  //LV.set_function( NS, NF, FCT );
+  LV.set_function( NF, FCT );
 
   LV.options.RESRECORD = true;
   LV.options.DISPLAY = 1;

@@ -28,7 +28,7 @@ INC_ALL  = $(INC_MC) $(INC_PROFIL) $(INC_FILIB) $(INC_GSL) $(INC_SUNDIALS) $(INC
 
 #####
 
-all: test0 test1 test2 test3
+all: test0 test1 test2 test3 test4
 
 test% : test%.o
 	g++ -o $@ $< $(LIB_ALL)

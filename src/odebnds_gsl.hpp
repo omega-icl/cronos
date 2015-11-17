@@ -87,6 +87,7 @@ class ODEBNDS_GSL:
   using ODEBNDS_BASE<T,PMT,PVT>::_TC_PM_ADJ;
   using ODEBNDS_BASE<T,PMT,PVT>::_TC_PM_QUAD;
   using ODEBNDS_BASE<T,PMT,PVT>::_CC_PM_ADJ;
+  using ODEBNDS_BASE<T,PMT,PVT>::_CC_PM_QUAD;
   using ODEBNDS_BASE<T,PMT,PVT>::_SET_PM_ADJ;
   using ODEBNDS_BASE<T,PMT,PVT>::_RHS_PM_ADJ;
   using ODEBNDS_BASE<T,PMT,PVT>::_RHS_PM_QUAD;
@@ -136,7 +137,7 @@ protected:
 public: // EVERYTHING to be called/used from outside (mostly functions and a few variables)
   //typedef BASE_GSL::STATUS STATUS;
   typedef BASE_GSL::Stats Stats;
-  typedef typename ODEBND_GSL<T,PMT,PVT>::Results Results;
+  typedef typename ODEBND_BASE<T,PMT,PVT>::Results Results;
   typedef typename ODEBND_GSL<T,PMT,PVT>::Exceptions Exceptions;
 
   //! @brief Default constructor
@@ -198,6 +199,11 @@ public: // EVERYTHING to be called/used from outside (mostly functions and a few
     ( std::ofstream&obndsta, std::ofstream&obndsa, const unsigned iprec=5 ) const
     { this->ODEBND_GSL<T,PMT,PVT>::record( obndsta, iprec );
       this->ODEBND_BASE<T,PMT,PVT>::_record( obndsa, _results_adj, iprec ); }
+
+  //! @brief Record state and sensitivity bounds in files <a>obndsta</a> and <a>obndsa</a>, with accuracy of <a>iprec</a> digits
+  void record
+    ( std::ofstream&obndsta, const unsigned iprec=5 ) const
+    { this->ODEBND_GSL<T,PMT,PVT>::record( obndsta, iprec ); }
 
 private:
 
@@ -635,14 +641,14 @@ ODEBNDS_GSL<T,PMT,PVT>::bounds_ASA
       { _END_ADJ(); return FAILURE; }
     switch( options.WRAPMIT){
     case Options::NONE:
+      _vec2PMI( _vec_sta, _PMenv, _nx, _PMz, true );
+      break;
     case Options::DINEQ:
       _vec2PMI( _vec_sta, _PMenv, _nx, _PMz );
-      //_vec2PMI( _vec_sta+_offset_quad, _PMenv, _nq, _PMq, true );
       break;
     case Options::ELLIPS:
     default:
       _vec2PME( _vec_sta, _PMenv, _nx, _PMz, _Q, _Er, _Ir );
-      //_vec2PMI( _vec_sta+_offset_quad, _PMenv, _nq, _PMq, true );
       break;
     }
 
@@ -715,6 +721,9 @@ ODEBNDS_GSL<T,PMT,PVT>::bounds_ASA
           { _END_ADJ(); return FATAL; }
         switch( options.WRAPMIT){
         case Options::NONE:
+          _vec2PMI( _vec_sta, _PMenv, _nx, _PMz, true );
+          _vec2PMI( _vec_adj+_pos_adj, _PMenv, _nx, _PMy, true );
+          break;
         case Options::DINEQ:
           _vec2PMI( _vec_sta, _PMenv, _nx, _PMz );
           _vec2PMI( _vec_adj+_pos_adj, _PMenv, _nx, _PMy );

@@ -1,5 +1,5 @@
 # Third-Party Libraries -->> CHANGE ACCORDINGLY <<--
-PATH_MC = /home/bchachua/Programs/Devel/MC++/MC++_2.0
+PATH_MC = $(HOME)/Programs/Devel/MC++/MC++_2.0
 LIB_MC = -llapack -lblas
 INC_MC = -I$(PATH_MC)/include -I$(PATH_MC)/src/3rdparty/fadbad++ -I$(PATH_MC)/src/3rdparty/cpplapack/include
 
@@ -13,7 +13,7 @@ LIB_SUNDIALS = -L$(PATH_SUNDIALS)/lib -lsundials_cvodes -lsundials_nvecserial \
 INC_SUNDIALS = -I$(PATH_SUNDIALS)/include -I$(PATH_SUNDIALS)/include/sundials \
                -I$(PATH_SUNDIALS)/include/cvodes -I$(PATH_SUNDIALS)/include/nvector
 
-PATH_PROFIL = /home/bchachua/Programs/ThirdParty/Profil-2.0.8
+PATH_PROFIL = $(HOME)/Programs/ThirdParty/Profil-2.0.8
 LIB_PROFIL = -L$(PATH_PROFIL)/lib -lProfilPackages -lProfil -lBias -llr
 INC_PROFIL = -I$(PATH_PROFIL)/include
 
@@ -28,7 +28,7 @@ INC_ALL  = $(INC_MC) $(INC_PROFIL) $(INC_FILIB) $(INC_GSL) $(INC_SUNDIALS) $(INC
 
 #####
 
-all: test1 test2 test3 test4
+all: test1 test2 test3 test4 test5 test5b test6
 
 test% : test%.o
 	g++ -o $@ $< $(LIB_ALL)
@@ -39,5 +39,5 @@ test%.o: test%.cpp
 #####
 
 clean :
-	rm -f test? *.o *.out *.dat *.eps *~
+	rm -f test? test?b *.o *.out *.dat *.eps *~
 

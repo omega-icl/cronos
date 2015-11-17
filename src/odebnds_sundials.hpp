@@ -135,7 +135,7 @@ class ODEBNDS_SUNDIALS:
 
  public:
   typedef BASE_SUNDIALS::Stats Stats;
-  typedef typename ODEBND_SUNDIALS<T,PMT,PVT>::Results Results;
+  typedef typename ODEBND_BASE<T,PMT,PVT>::Results Results;
   typedef typename ODEBND_SUNDIALS<T,PMT,PVT>::Exceptions Exceptions;
 
   //! @brief Default constructor
@@ -167,6 +167,20 @@ class ODEBNDS_SUNDIALS:
   //! @brief Vector storing interval adjoint bounds (see Options::RESRECORD)
   std::vector< Results > _results_adj;
 
+  //! @brief Propagate state/quadrature interval bounds forward in time through every time stages
+  STATUS bounds
+    ( const unsigned ns, const double*tk, const T*Ip, T**Ixk,
+      T*Iq, T*If, std::ostream&os=std::cout )
+      { ODEBND_SUNDIALS<T,PMT,PVT>::options = options;
+        return ODEBND_SUNDIALS<T,PMT,PVT>::_bounds( ns, tk, Ip, Ixk, Iq, If, false, os); }
+
+  //! @brief Propagate state/quadrature polynomial models forward in time through every time stages
+  STATUS bounds
+    ( const unsigned ns, const double*tk, const PVT*PMp, PVT**PMxk,
+      PVT*PMq, PVT*PMf, std::ostream&os=std::cout )
+      { ODEBND_SUNDIALS<T,PMT,PVT>::options = options;
+        return ODEBND_SUNDIALS<T,PMT,PVT>::_bounds( ns, tk, PMp, PMxk, PMq, PMf, false, os); }
+
   //! @brief Propagate state and adjoint interval bounds forward and backward in time through every time stages
   STATUS bounds_ASA
     ( const unsigned ns, const double*tk, const T*Ip, T**Ixk, T*Iq, T*If, T**Ilk, T*Idf,
@@ -182,6 +196,11 @@ class ODEBNDS_SUNDIALS:
     ( std::ofstream&obndsta, std::ofstream&obndsa, const unsigned iprec=5 ) const
     { this->ODEBND_SUNDIALS<T,PMT,PVT>::record( obndsta, iprec );
       this->ODEBND_BASE<T,PMT,PVT>::_record( obndsa, _results_adj, iprec ); }
+
+  //! @brief Record state and sensitivity bounds in files <a>obndsta</a> and <a>obndsa</a>, with accuracy of <a>iprec</a> digits
+  void record
+    ( std::ofstream&obndsta, const unsigned iprec=5 ) const
+    { this->ODEBND_SUNDIALS<T,PMT,PVT>::record( obndsta, iprec ); }
 
  private:
   //! @brief Function to initialize CVode memory block (virtual)
@@ -432,7 +451,7 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::MC_CVADJRHSI__
   ODEBNDS_SUNDIALS<T,PMT,PVT> *pODEBNDS = ODEBNDS_SUNDIALS<T,PMT,PVT>::pODEBNDS;
   pODEBNDS->_ifct = *static_cast<unsigned*>( user_data );
   bool flag = pODEBNDS->_RHS_I_ADJ( pODEBNDS->options, t, NV_DATA_S( y ),
-    NV_DATA_S( ydot ), NV_DATA_S( x ), pODEBNDS->_ifct );
+    NV_DATA_S( ydot ), NV_DATA_S( x ), pODEBNDS->_ifct, true );
   ODEBNDS_SUNDIALS<T,PMT,PVT>::pODEBNDS = pODEBNDS;
   pODEBNDS->stats_adj.numRHS++;
   return( (flag && _diam( pODEBNDS->_nx, pODEBNDS->_Iy ) < pODEBNDS->options.DMAX)? 0: -1 );
@@ -670,7 +689,7 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::MC_CVADJRHSPM__
   ODEBNDS_SUNDIALS<T,PMT,PVT> *pODEBNDS = ODEBNDS_SUNDIALS<T,PMT,PVT>::pODEBNDS;
   pODEBNDS->_ifct = *static_cast<unsigned*>( user_data );
   bool flag = pODEBNDS->_RHS_PM_ADJ( pODEBNDS->options, t, NV_DATA_S( y ),
-    NV_DATA_S( ydot ), NV_DATA_S( x ), pODEBNDS->_ifct );
+    NV_DATA_S( ydot ), NV_DATA_S( x ), pODEBNDS->_ifct, true );
   ODEBNDS_SUNDIALS<T,PMT,PVT>::pODEBNDS = pODEBNDS;
   pODEBNDS->stats_adj.numRHS++;
   return( (flag && _diam( pODEBNDS->_nx, pODEBNDS->_PMy ) < pODEBNDS->options.DMAX)? 0: -1 );
@@ -733,6 +752,8 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
     // Bounds on terminal states/quadratures
     switch( options.WRAPMIT){
     case Options::NONE:
+      _vec2PMI( _vec_sta[ns].data(), _PMenv, _nx, _PMz, true );
+      break;
     case Options::DINEQ:
       _vec2PMI( _vec_sta[ns].data(), _PMenv, _nx, _PMz );
       break;
@@ -752,7 +773,6 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
       for( unsigned iy=0; PMlk[ns] && iy<_nx; iy++ )
         PMlk[ns][_ifct*_nx+iy] = _PMy[iy];
     }
-
     // Display & record adjoint terminal results
     if( options.DISPLAY >= 1 ){
       _print_interm( tk[ns], _nx*_nf, PMlk[ns], "l", os );
@@ -760,6 +780,7 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
     }
     if( options.RESRECORD )
       _results_adj.push_back( Results( tk[ns], _nf*_nx, PMlk[ns] ) );
+    //{ int dum; std::cin >> dum; }
 
     // Initialization of adjoint integration
     for( _ifct=0; _ifct < _nf; _ifct++ )
@@ -798,6 +819,9 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
         stats_adj.numSteps += nstpB;
         switch( options.WRAPMIT){
         case Options::NONE:
+          _vec2PMI( _vec_sta[_istg-1].data(), _PMenv, _nx, _PMz, true );
+          _vec2PMI( NV_DATA_S(_Ny[_ifct]), _PMenv, _nx, _PMy, true );
+          break;
         case Options::DINEQ:
           _vec2PMI( _vec_sta[_istg-1].data(), _PMenv, _nx, _PMz );
           _vec2PMI( NV_DATA_S(_Ny[_ifct]), _PMenv, _nx, _PMy );

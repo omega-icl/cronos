@@ -700,7 +700,7 @@ ODESLVS_GSL<T>::bounds_ASA
   }
   double *q = Iq&&_nq? new double[_nq]: 0;
   double *f = If&&_nf? new double[_nf]: 0;
-  double *df = new double[_nf*_nx];
+  double *df = new double[_nf*_np];
   flag = states_ASA( ns, tk, p, xk, q, f, lk, df, os );
   if( flag != NORMAL || nsamp <= 1 ){
     delete[] p;

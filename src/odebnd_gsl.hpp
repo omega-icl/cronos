@@ -8,6 +8,7 @@
 #undef  MC__ODEBND_GSL_DINEQI_DEBUG
 #undef  MC__ODEBND_GSL_DINEQPM_DEBUG
 
+#include "base_de.hpp"
 #include "odebnd_base.hpp"
 #include "base_gsl.hpp"
 #include "mesh_gsl.hpp"
@@ -35,74 +36,61 @@ class ODEBND_GSL:
   public virtual BASE_GSL,
   public virtual ODEBND_BASE<T,PMT,PVT>
 {
- typedef Ellipsoid E;
- typedef BASE_DE::STATUS STATUS;
- using ODEBND_BASE<T,PMT,PVT>::NORMAL;
- using ODEBND_BASE<T,PMT,PVT>::FAILURE;
- using ODEBND_BASE<T,PMT,PVT>::FATAL;
+ protected:
+  typedef Ellipsoid E;
 
- //using ODEBND_BASE<T,PMT,PVT>::_nx;
- //using ODEBND_BASE<T,PMT,PVT>::_np;
- //using ODEBND_BASE<T,PMT,PVT>::_nq;
- //using ODEBND_BASE<T,PMT,PVT>::_nf;
- //using ODEBND_BASE<T,PMT,PVT>::_vRHS;
- //using ODEBND_BASE<T,PMT,PVT>::_vQUAD;
- //using ODEBND_BASE<T,PMT,PVT>::_vIC;
- //using ODEBND_BASE<T,PMT,PVT>::_vFCT;
+  using ODEBND_BASE<T,PMT,PVT>::_Q;
+  using ODEBND_BASE<T,PMT,PVT>::_Er;
+  using ODEBND_BASE<T,PMT,PVT>::_Ir;
+  using ODEBND_BASE<T,PMT,PVT>::_pref;
+  using ODEBND_BASE<T,PMT,PVT>::_Ip;
+  using ODEBND_BASE<T,PMT,PVT>::_B;
+  using ODEBND_BASE<T,PMT,PVT>::_xref;
+  using ODEBND_BASE<T,PMT,PVT>::_Ix;
+  using ODEBND_BASE<T,PMT,PVT>::_Iq;
+  using ODEBND_BASE<T,PMT,PVT>::_vec2I;
+  using ODEBND_BASE<T,PMT,PVT>::_vec2E;
+  using ODEBND_BASE<T,PMT,PVT>::_IC_I_STA;
+  using ODEBND_BASE<T,PMT,PVT>::_IC_I_QUAD;
+  using ODEBND_BASE<T,PMT,PVT>::_CC_I_STA;
+  using ODEBND_BASE<T,PMT,PVT>::_SET_I_STA;
+  using ODEBND_BASE<T,PMT,PVT>::_RHS_I_STA;
+  using ODEBND_BASE<T,PMT,PVT>::_RHS_I_QUAD;
+  using ODEBND_BASE<T,PMT,PVT>::_JAC_I_STA;
+  using ODEBND_BASE<T,PMT,PVT>::_FCT_I_STA;
 
- using ODEBND_BASE<T,PMT,PVT>::_Q;
- using ODEBND_BASE<T,PMT,PVT>::_Er;
- using ODEBND_BASE<T,PMT,PVT>::_Ir;
- using ODEBND_BASE<T,PMT,PVT>::_pref;
- using ODEBND_BASE<T,PMT,PVT>::_Ip;
- using ODEBND_BASE<T,PMT,PVT>::_B;
- using ODEBND_BASE<T,PMT,PVT>::_xref;
- using ODEBND_BASE<T,PMT,PVT>::_Ix;
- using ODEBND_BASE<T,PMT,PVT>::_Iq;
- using ODEBND_BASE<T,PMT,PVT>::_vec2I;
- using ODEBND_BASE<T,PMT,PVT>::_vec2E;
- using ODEBND_BASE<T,PMT,PVT>::_IC_I_STA;
- using ODEBND_BASE<T,PMT,PVT>::_IC_I_QUAD;
- using ODEBND_BASE<T,PMT,PVT>::_CC_I_STA;
- using ODEBND_BASE<T,PMT,PVT>::_SET_I_STA;
- using ODEBND_BASE<T,PMT,PVT>::_RHS_I_STA;
- using ODEBND_BASE<T,PMT,PVT>::_RHS_I_QUAD;
- using ODEBND_BASE<T,PMT,PVT>::_JAC_I_STA;
- using ODEBND_BASE<T,PMT,PVT>::_FCT_I_STA;
+  using ODEBND_BASE<T,PMT,PVT>::_PMenv;
+  using ODEBND_BASE<T,PMT,PVT>::_PMx;
+  using ODEBND_BASE<T,PMT,PVT>::_PMp;
+  using ODEBND_BASE<T,PMT,PVT>::_PMq;
+  using ODEBND_BASE<T,PMT,PVT>::_vec2PMI;
+  using ODEBND_BASE<T,PMT,PVT>::_vec2PME;
+  using ODEBND_BASE<T,PMT,PVT>::_IC_PM_STA;
+  using ODEBND_BASE<T,PMT,PVT>::_IC_PM_QUAD;
+  using ODEBND_BASE<T,PMT,PVT>::_CC_PM_STA;
+  using ODEBND_BASE<T,PMT,PVT>::_SET_PM_STA;
+  using ODEBND_BASE<T,PMT,PVT>::_RHS_PM_STA;
+  using ODEBND_BASE<T,PMT,PVT>::_RHS_PM_QUAD;
+  using ODEBND_BASE<T,PMT,PVT>::_JAC_PM_STA;
+  using ODEBND_BASE<T,PMT,PVT>::_FCT_PM_STA;
 
- using ODEBND_BASE<T,PMT,PVT>::_PMenv;
- using ODEBND_BASE<T,PMT,PVT>::_PMx;
- using ODEBND_BASE<T,PMT,PVT>::_PMp;
- using ODEBND_BASE<T,PMT,PVT>::_PMq;
- using ODEBND_BASE<T,PMT,PVT>::_vec2PMI;
- using ODEBND_BASE<T,PMT,PVT>::_vec2PME;
- using ODEBND_BASE<T,PMT,PVT>::_IC_PM_STA;
- using ODEBND_BASE<T,PMT,PVT>::_IC_PM_QUAD;
- using ODEBND_BASE<T,PMT,PVT>::_CC_PM_STA;
- using ODEBND_BASE<T,PMT,PVT>::_SET_PM_STA;
- using ODEBND_BASE<T,PMT,PVT>::_RHS_PM_STA;
- using ODEBND_BASE<T,PMT,PVT>::_RHS_PM_QUAD;
- using ODEBND_BASE<T,PMT,PVT>::_JAC_PM_STA;
- using ODEBND_BASE<T,PMT,PVT>::_FCT_PM_STA;
+  using ODEBND_BASE<T,PMT,PVT>::_diam;
+  using ODEBND_BASE<T,PMT,PVT>::_hausdorff;
+  using ODEBND_BASE<T,PMT,PVT>::_remainders;
+  using ODEBND_BASE<T,PMT,PVT>::_print_interm;
 
- using ODEBND_BASE<T,PMT,PVT>::_diam;
- using ODEBND_BASE<T,PMT,PVT>::_dH;
- using ODEBND_BASE<T,PMT,PVT>::_hausdorff;
- using ODEBND_BASE<T,PMT,PVT>::_remainders;
- using ODEBND_BASE<T,PMT,PVT>::_print_interm;
-
- template <typename U, typename PMU, typename PVU>
- friend int MC_GSLRHSI__
-   ( double t, const double* x, double* xdot, void* user_data );
- template <typename U, typename PMU, typename PVU>
- friend int MC_GSLJACI__
-   ( double t, const double* x, double* jac, double* xdot, void* user_data );
- template <typename U, typename PMU, typename PVU>
- friend int MC_GSLRHSPM__
-   ( double t, const double* x, double* xdot, void* user_data );
- template <typename U, typename PMU, typename PVU>
- friend int MC_GSLJACPM__
-   ( double t, const double* x, double* jac, double* xdot, void* user_data );
+  template <typename U, typename PMU, typename PVU>
+  friend int MC_GSLRHSI__
+    ( double t, const double* x, double* xdot, void* user_data );
+  template <typename U, typename PMU, typename PVU>
+  friend int MC_GSLJACI__
+    ( double t, const double* x, double* jac, double* xdot, void* user_data );
+  template <typename U, typename PMU, typename PVU>
+  friend int MC_GSLRHSPM__
+    ( double t, const double* x, double* xdot, void* user_data );
+  template <typename U, typename PMU, typename PVU>
+  friend int MC_GSLJACPM__
+    ( double t, const double* x, double* jac, double* xdot, void* user_data );
 
  private:
   //! @brief GSL data type for bounding ODE system
@@ -146,6 +134,8 @@ class ODEBND_GSL:
   static ODEBND_GSL<T,PMT,PVT> *_pODEBND;
 
 public:
+  typedef typename ODEBND_BASE<T,PMT,PVT>::Results Results;
+
   /** @defgroup ODEBND_GSL Continuous-time set-valued integration of parametric ODEs
    *  @{
    */
@@ -161,8 +151,8 @@ public:
     //! @brief Constructor
     Options():
       BASE_GSL::Options(), WRAPMIT(ELLIPS), ORDMIT(2), PMOPT(typename PMT::Options()),
-      QTOL(machprec()), PMNOREM(false), USEINV(true), MESHPREALLOC(0), DMAX(1e20),
-      DISPLAY(1), RESRECORD(false)
+      QTOL(machprec()), QSCALE(true), PMNOREM(false), USEINV(true), MESHPREALLOC(0),
+      DMAX(1e20), DISPLAY(1), RESRECORD(false)
       {}
     //! @brief Assignment operator
     Options& operator=
@@ -172,6 +162,7 @@ public:
         ORDMIT    = options.ORDMIT;
         PMOPT     = options.PMOPT;
         QTOL      = options.QTOL;
+        QSCALE    = options.QSCALE;
         PMNOREM   = options.PMNOREM;
         USEINV    = options.USEINV;
         MESHPREALLOC = options.MESHPREALLOC;
@@ -194,6 +185,8 @@ public:
     typename PMT::Options PMOPT;
     //! @brief Tolerance when dividing by trace of shape matrix in ellipsoidal bounds (Default: machprec())
     double QTOL;
+    //! @brief Whether or not to scale the ellispoidal remainder (Default: true)
+    double QSCALE;
     //! @brief Whether or not to cancel the remainder term in polynomial models (non-validated integration; Default: false)
     bool PMNOREM;
     //! @brief Whether or not to use the specified invariants for bounds contraction (Default: true)
@@ -229,36 +222,6 @@ public:
     }
   private:
     TYPE _ierr;
-  };
-
-  //! @brief Integration results at a given time instant
-  struct Results
-  {
-    //! @brief Constructors
-    Results
-      ( const double tk, const unsigned int nxk, const T*Ixk ):
-      t( tk ), nx( nxk )
-      { X = new T[nx];
-        for( unsigned int ix=0; ix<nx; ix++ ) X[ix] = Ixk[ix]; }
-    Results
-      ( const double tk, const unsigned int nxk, const PVT*PMxk ):
-      t( tk ), nx( nxk )
-      { X = new T[nx];
-        for( unsigned int ix=0; ix<nx; ix++ ) X[ix] = PMxk[ix].B(); }
-    Results
-      ( const Results&res ):
-      t( res.t ), nx( res.nx )
-      { X = new T[nx];
-        for( unsigned int ix=0; ix<nx; ix++ ) X[ix] = res.X[ix]; }
-    //! @brief Destructor
-    ~Results()
-      { delete[] X; }
-    //! @brief Time instant
-    double t;
-    //! @brief Solution dimension
-    unsigned int nx;
-    //! @brief Solution bounds
-    T* X;
   };
 
   //! @brief Vector storing interval bound results (upon request only)
@@ -765,6 +728,8 @@ ODEBND_GSL<T,PMT,PVT>::_bounds
       // Bounds on intermediate states/quadratures
       switch( options.WRAPMIT){
       case Options::NONE:
+        _vec2PMI( _vec_sta,  _PMenv, _nx, _PMx, true );
+        break;
       case Options::DINEQ:
         _vec2PMI( _vec_sta,  _PMenv, _nx, _PMx, false );
         break;

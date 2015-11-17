@@ -122,6 +122,8 @@ protected:
   static ODEBND_SUNDIALS<T,PMT,PVT> *_pODEBND;
 
 public:
+  typedef typename ODEBND_BASE<T,PMT,PVT>::Results Results;
+
   /** @defgroup ODEBND_SUNDIALS Continuous-time set-valued integration of parametric ODEs
    *  @{
    */
@@ -139,7 +141,7 @@ public:
     //! @brief Constructor
     Options():
       BASE_SUNDIALS::Options(), WRAPMIT(ELLIPS), ORDMIT(2), PMOPT(typename PMT::Options()),
-      QTOL(machprec()), PMNOREM(false), USEINV(true), DMAX(1e20), DISPLAY(1), 
+      QTOL(machprec()), QSCALE(true), PMNOREM(false), USEINV(true), DMAX(1e20), DISPLAY(1), 
       RESRECORD(false)
       {}
     //! @brief Assignment operator
@@ -150,6 +152,7 @@ public:
         ORDMIT    = options.ORDMIT;
         PMOPT     = options.PMOPT;
         QTOL      = options.QTOL;
+        QSCALE    = options.QSCALE;
         PMNOREM   = options.PMNOREM;
         USEINV    = options.USEINV;
         DMAX      = options.DMAX;
@@ -171,6 +174,8 @@ public:
     typename PMT::Options PMOPT;
     //! @brief Tolerance when dividing by trace of shape matrix in ellipsoidal bounds (Default: machprec())
     double QTOL;
+    //! @brief Whether or not to scale the ellispoidal remainder (Default: true)
+    double QSCALE;
     //! @brief Whether or not to cancel the remainder term in polynomial models (non-validated integration; Default: false)
     bool PMNOREM;
     //! @brief Whether or not to use the specified invariants for bounds contraction (default: true)
@@ -204,36 +209,6 @@ public:
     }
   private:
     TYPE _ierr;
-  };
-
-  //! @brief Integration results at a given time instant
-  struct Results
-  {
-    //! @brief Constructors
-    Results
-      ( const double tk, const unsigned int nxk, const T*Ixk ):
-      t( tk ), nx( nxk )
-      { X = new T[nx];
-        for( unsigned int ix=0; ix<nx; ix++ ) X[ix] = Ixk[ix]; }
-    Results
-      ( const double tk, const unsigned int nxk, const PVT*PMxk ):
-      t( tk ), nx( nxk )
-      { X = new T[nx];
-        for( unsigned int ix=0; ix<nx; ix++ ) X[ix] = PMxk[ix].B(); }
-    Results
-      ( const Results&res ):
-      t( res.t ), nx( res.nx )
-      { X = new T[nx];
-        for( unsigned int ix=0; ix<nx; ix++ ) X[ix] = res.X[ix]; }
-    //! @brief Destructor
-    ~Results()
-      { delete[] X; }
-    //! @brief Time instant
-    double t;
-    //! @brief Solution dimension
-    unsigned int nx;
-    //! @brief Solution bounds
-    T* X;
   };
 
   //! @brief Vector storing interval bound results (upon request only)
@@ -843,6 +818,8 @@ ODEBND_SUNDIALS<T,PMT,PVT>::_bounds
       // Bounds on intermediate states
       switch( options.WRAPMIT){
       case Options::NONE:
+        _vec2PMI( NV_DATA_S( _Nx ), _PMenv, _nx, _PMx, true );
+        break;
       case Options::DINEQ:
         _vec2PMI( NV_DATA_S( _Nx ), _PMenv, _nx, _PMx, false );
         break;

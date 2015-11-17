@@ -14,9 +14,11 @@
 #include <cmath>
 #include <fstream>
 #include <vector>
+#include <list>
 #include <sys/time.h>
 
 #include "ellipsoid.hpp"
+#include "base_de.hpp"
 
 // *** TO DO
 // - Detect block structure and use it in ellipsoidal approach
@@ -45,6 +47,36 @@ class ODEBND_BASE:
 
   //! @brief Virtual destructor
   virtual ~ODEBND_BASE();
+
+  //! @brief Integration results at a given time instant
+  struct Results
+  {
+    //! @brief Constructors
+    Results
+      ( const double tk, const unsigned int nxk, const T*Ixk ):
+      t( tk ), nx( nxk )
+      { X = new T[nx];
+        for( unsigned int ix=0; ix<nx; ix++ ) X[ix] = Ixk[ix]; }
+    Results
+      ( const double tk, const unsigned int nxk, const PVT*PMxk ):
+      t( tk ), nx( nxk )
+      { X = new T[nx];
+        for( unsigned int ix=0; ix<nx; ix++ ) X[ix] = PMxk[ix].B(); }
+    Results
+      ( const Results&res ):
+      t( res.t ), nx( res.nx )
+      { X = new T[nx];
+        for( unsigned int ix=0; ix<nx; ix++ ) X[ix] = res.X[ix]; }
+    //! @brief Destructor
+    ~Results()
+      { delete[] X; }
+    //! @brief Time instant
+    double t;
+    //! @brief Solution dimension
+    unsigned int nx;
+    //! @brief Solution bounds
+    T* X;
+  };
 
  protected:
   //! @brief list of operations in RHS evaluation
@@ -323,7 +355,8 @@ class ODEBND_BASE:
   static void _RHS_I_DI
     ( FFGraph*DAG, std::list<const FFOp*>*opRHSi, T*IRHS,
       const unsigned nx, const FFVar*pRHS, const unsigned nVAR,
-      const FFVar*pVAR, T*IVAR, T*Ixdot, double*xLdot, double*xUdot );
+      const FFVar*pVAR, T*IVAR, T*Ixdot, double*xLdot, double*xUdot,
+      const bool neg=false );
 
   //! @brief Static function to calculate the RHS of auxiliary ODEs in interval arithmetic w/ ellipsoidal contractor
   static void _RHS_I_ELL
@@ -331,7 +364,7 @@ class ODEBND_BASE:
       const unsigned nx, const FFVar*pRHS, const unsigned nVAR,
       const FFVar*pVAR, PVT*MVXPVAR, PVT*MVXPf, const double*Q, double*A,
       const unsigned np, double*xrefdot, double*Bdot, T*Iddot, double*Qdot,
-      const double QTOL, const double EPS );
+      const double QTOL, const double EPS, const T*W=0 );
 
   //! @brief Function to calculate the RHS of auxiliary ODEs in interval arithmetic
   template <typename REALTYPE, typename OPT> bool _RHS_I_QUAD
@@ -434,7 +467,8 @@ class ODEBND_BASE:
   static void _RHS_PM_DI
     ( FFGraph*DAG, std::list<const FFOp*>*opRHSi, PVT*PMRHS,
       const unsigned nx, const FFVar*pRHS, const unsigned nVAR,
-      const FFVar*pVAR, PVT*PMVAR, PVT*PMxdot, double*rLdot, double*rUdot );
+      const FFVar*pVAR, PVT*PMVAR, PVT*PMxdot, double*rLdot, double*rUdot,
+      const bool neg=false );
 
   //! @brief Static function to calculate the RHS of auxiliary ODEs in polynomial model arithmetic w/ ellipsoidal contractor - approximation using mean-value theorem and interval analysis
   static void _RHS_PM_ELL0
@@ -462,7 +496,7 @@ class ODEBND_BASE:
   //! @brief Static function to calculate the RHS of auxiliary ODEs in polynomial model arithmetic - ellipsoidal contractor
   static void _RHS_PM_ELL
     ( const unsigned nx, const double*Qr, const double*Ar, const T*Irdot,
-      double*Qrdot, const double QTOL, const double EPS );
+      double*Qrdot, const double QTOL, const double EPS, const PVT*W=0 );
 
   //! @brief Function to calculate the RHS of auxiliary ODEs in polynomial mode arithmetic
   template <typename REALTYPE, typename OPT> bool _RHS_PM_QUAD
@@ -1002,12 +1036,18 @@ ODEBND_BASE<T,PMT,PVT>::_RHS_I_STA
 #ifdef MC__ODEBND_BASE_DINEQI_DEBUG
     for( unsigned ix=0; ix<_nx; ix++ )
       std::cout << "MVXPx[ " << ix << "] = " << _MVXPx[ix] << std::endl;
-    { int dum; std::cin >> dum; }
+    //{ int dum; std::cin >> dum; }
 #endif
     *_MVXPt = t; // set current time
-    _RHS_I_ELL( _pDAG, _opRHS, _PMRHS, _nx, _pRHS, _nVAR-_nq, _pVAR, _MVXPVAR,
-       _MVXPf, _Q, _A, _npar, _xrefdot, _Bdot, _Irdot, _Qdot, options.QTOL,
-       machprec() );
+    // Construct the ellipsoidal remainder derivatives
+    if( options.QSCALE )
+      _RHS_I_ELL( _pDAG, _opRHS, _PMRHS, _nx, _pRHS, _nVAR-_nq, _pVAR, _MVXPVAR,
+         _MVXPf, _Q, _A, _npar, _xrefdot, _Bdot, _Irdot, _Qdot, options.QTOL,
+         machprec(), _Ix );
+    else
+      _RHS_I_ELL( _pDAG, _opRHS, _PMRHS, _nx, _pRHS, _nVAR-_nq, _pVAR, _MVXPVAR,
+         _MVXPf, _Q, _A, _npar, _xrefdot, _Bdot, _Irdot, _Qdot, options.QTOL,
+         machprec() );
     _E2vec( _nx, _npar, _xrefdot, _Qdot, _Bdot, xdot );
 #ifdef MC__ODEBND_BASE_DINEQI_DEBUG
     //E::options.PSDCHK = true;
@@ -1033,16 +1073,19 @@ inline void
 ODEBND_BASE<T,PMT,PVT>::_RHS_I_DI
 ( FFGraph*DAG, std::list<const FFOp*>*opRHSi, T*IRHS,
   const unsigned nx, const FFVar*pRHS, const unsigned nVAR,
-  const FFVar*pVAR, T*IVAR, T*Ixdot, double*xLdot, double*xUdot )
+  const FFVar*pVAR, T*IVAR, T*Ixdot, double*xLdot, double*xUdot,
+  const bool neg )
 {
   for( unsigned ix=0; ix<nx; ix++ ){
     T Ixi = IVAR[ix];
     IVAR[ix] = Op<T>::l( Ixi );
     DAG->eval( opRHSi[ix], IRHS, 1, pRHS+ix, Ixdot+ix, nVAR, pVAR, IVAR );
-    xLdot[ix] = Op<T>::l( Ixdot[ix] );
+    if( !neg ) xLdot[ix] = Op<T>::l( Ixdot[ix] );
+    else       xLdot[ix] = Op<T>::u( Ixdot[ix] );
     IVAR[ix] = Op<T>::u( Ixi );
     DAG->eval( opRHSi[ix], IRHS, 1, pRHS+ix, Ixdot+ix, nVAR, pVAR, IVAR );
-    xUdot[ix] = Op<T>::u( Ixdot[ix] );
+    if( !neg ) xUdot[ix] = Op<T>::u( Ixdot[ix] );
+    else       xUdot[ix] = Op<T>::l( Ixdot[ix] );
     IVAR[ix] = Ixi;
   }
 }
@@ -1054,18 +1097,21 @@ ODEBND_BASE<T,PMT,PVT>::_RHS_I_ELL
   const unsigned nx, const FFVar*pRHS, const unsigned nVAR,
   const FFVar*pVAR, PVT*MVXPVAR, PVT*MVXPf, const double*Q, double*A,
   const unsigned np, double*xrefdot, double*Bdot, T*Iddot, double*Qdot,
-  const double QTOL, const double EPS )
+  const double QTOL, const double EPS, const T*W )
 {
   // Compute polynomial expansion of ODE's RHS
   DAG->eval( opRHS, PMRHS, nx, pRHS, MVXPf, nVAR, pVAR, MVXPVAR );
 
   // Extract time derivatives of constant, linear and remainder parts
   double trQ = 0.;
-  for( unsigned ix=0; ix<nx; ix++ )
-    trQ += ( Q[_ndxLT(ix,ix,nx)]>0? Q[_ndxLT(ix,ix,nx)]: EPS );
+  for( unsigned ix=0; ix<nx; ix++ ){
+    double sqr_wi = W? sqr(Op<T>::abs(W[ix]))+EPS: 1.;
+    trQ += ( Q[_ndxLT(ix,ix,nx)]>EPS? Q[_ndxLT(ix,ix,nx)]/sqr_wi: EPS );
+  }
   double sumkappa = 0.;
   for( unsigned ix=0; ix<nx; ix++ ){
 #ifdef MC__ODEBND_BASE_DINEQI_DEBUG
+    std::cout << "pRHS[" << ix << "] = " << pRHS[ix] << std::endl;
     std::cout << "MVXPf[" << ix << "] = " << MVXPf[ix] << std::endl;
 #endif
     for( unsigned jx=0; jx<nx; jx++ )
@@ -1098,8 +1144,14 @@ ODEBND_BASE<T,PMT,PVT>::_RHS_I_ELL
               << Op<T>::diam( Iddot[ix] ) / 2.
                / ( std::sqrt( trQ ) + QTOL ) << std::endl;
 #endif
-    sumkappa += ( Op<T>::diam( Iddot[ix] ) / 2. )
+    double wi = W? Op<T>::abs(W[ix]): 1.;
+    sumkappa += ( Op<T>::diam( Iddot[ix] ) / 2. ) / wi
               / ( std::sqrt( trQ ) + QTOL );
+#ifdef MC__ODEBND_BASE_DINEQPM_DEBUG
+    std::cout << "kappa[" << ix << "] = "
+              << ( Op<T>::diam( Iddot[ix] ) / 2. ) / wi
+               / ( std::sqrt( trQ ) + QTOL ) << std::endl;
+#endif
   }
 
   for( unsigned jx=0; jx<nx; jx++ ){
@@ -1109,7 +1161,8 @@ ODEBND_BASE<T,PMT,PVT>::_RHS_I_ELL
         Qdot[_ndxLT(ix,jx,nx)] += Q[_ndxLT(ix,kx,nx)] * A[jx+kx*nx]
                                 + A[ix+kx*nx] * Q[_ndxLT(kx,jx,nx)];
     }
-    Qdot[_ndxLT(jx,jx,nx)] += ( Op<T>::diam( Iddot[jx] ) / 2. )
+    double wj = W? Op<T>::abs(W[jx]): 1.;
+    Qdot[_ndxLT(jx,jx,nx)] += ( Op<T>::diam( Iddot[jx] ) / 2. ) * wj
                             * ( std::sqrt( trQ ) + QTOL );
   }
 #ifdef MC__ODEBND_BASE_DINEQI_DEBUG
@@ -1121,7 +1174,7 @@ ODEBND_BASE<T,PMT,PVT>::_RHS_I_ELL
   }
   E Exdot( nx, Qdot, xrefdot );
   std::cout << "Exdot =" << Exdot << std::endl;
-  { int dum; std::cin >> dum; }
+  //{ int dum; std::cin >> dum; }
 #endif
 }
 
@@ -1267,7 +1320,7 @@ ODEBND_BASE<T,PMT,PVT>::_INI_I_STA
     delete[] _MVXPVAR; _MVXPVAR = new PVT[_nVAR-_nq];
     _MVXPx = _MVXPVAR;
     _MVXPp = _MVXPx + _nx;
-    _MVXPt = _MVXPp +1;
+    _MVXPt = _MVXPp + _npar;
     delete   _MVPenv;  _MVPenv  = new PMT( _npar, 1 );
     _MVPenv->options = options.PMOPT;
     delete[] _MVPp;    _MVPp    = new PVT[_npar];
@@ -1406,6 +1459,7 @@ ODEBND_BASE<T,PMT,PVT>::_PMI2vec
 {
   unsigned ivec=0;
   for( unsigned ix=0; ix<nx; ix++ ){
+    //if( centered ) PMx[ix].center();
     std::pair<unsigned, const double*> PMcoef = PMx[ix].coefmon();
     unsigned imon = 0;
     for( ; imon<PMcoef.first; imon++ )
@@ -1509,6 +1563,14 @@ ODEBND_BASE<T,PMT,PVT>::_IC_PM_STA
   switch( options.WRAPMIT){
 
   case OPT::NONE:
+    _pDAG->eval( _opIC, _nx, _pIC, _PMx, _npar, _pVAR+_nx, _PMp );
+    // Whether or not to ignore the remainder
+    if( !options.PMNOREM )
+      _PMI2vec( _PMenv, _nx, _PMx, vec, true );
+    else
+      _PMI2vec( _PMenv, _nx, _PMx, 0, vec );
+    break;
+
   case OPT::DINEQ:
     _pDAG->eval( _opIC, _nx, _pIC, _PMx, _npar, _pVAR+_nx, _PMp );
     // Whether or not to ignore the remainder
@@ -1570,8 +1632,19 @@ ODEBND_BASE<T,PMT,PVT>::_CC_PM_STA
 
   switch( options.WRAPMIT){
   case OPT::NONE:
+    _vec2PMI( vec, _PMenv, _nx, _PMx, true ); // current state/quadrature polynomial model
+    *_PMt = t; // current time
+    _PMIC = new PVT[_opIC.size()];
+    _pDAG->eval( _opIC, _PMIC, _nx, _pIC, _PMxdot, _nVAR-_nq, _pVAR, _PMVAR );
+    // Whether or not to ignore the remainder
+    if( !options.PMNOREM )
+      _PMI2vec( _PMenv, _nx, _PMxdot, vec, true );
+    else
+      _PMI2vec( _PMenv, _nx, _PMxdot, 0, vec );
+    break;
+   
   case OPT::DINEQ:
-    _vec2PMI( vec, _PMenv, _nx, _PMx ); // current state/quadrature polynomial model
+    _vec2PMI( vec, _PMenv, _nx, _PMx, false ); // current state/quadrature polynomial model
     *_PMt = t; // current time
     _PMIC = new PVT[_opIC.size()];
     _pDAG->eval( _opIC, _PMIC, _nx, _pIC, _PMxdot, _nVAR-_nq, _pVAR, _PMVAR );
@@ -1695,9 +1768,9 @@ ODEBND_BASE<T,PMT,PVT>::_RHS_PM_STA
 {
   if( !_pRHS ) return false;
 
-  switch( options.WRAPMIT){
+  switch( options.WRAPMIT ){
   case OPT::NONE:
-    _vec2PMI( x, _PMenv, _nx, _PMx );   // set current state polynomial model
+    _vec2PMI( x, _PMenv, _nx, _PMx, true );   // set current state polynomial model
 #ifdef MC__ODEBND_BASE_DINEQPM_DEBUG
     _print_interm( t, _nx, _PMx, "PMx Intermediate", std::cerr );
 #endif
@@ -1706,7 +1779,7 @@ ODEBND_BASE<T,PMT,PVT>::_RHS_PM_STA
                   _PMxdot );
     // Whether or not to ignore the remainder
     if( !options.PMNOREM )
-      _PMI2vec( _PMenv, _nx, _PMxdot, xdot, false );
+      _PMI2vec( _PMenv, _nx, _PMxdot, xdot, true );
     else
       _PMI2vec( _PMenv, _nx, _PMxdot, 0, xdot );
 #ifdef MC__ODEBND_BASE_DINEQPM_DEBUG
@@ -1716,7 +1789,7 @@ ODEBND_BASE<T,PMT,PVT>::_RHS_PM_STA
     return true;  
 
   case OPT::DINEQ:
-    _vec2PMI( x, _PMenv, _nx, _PMx );   // set current state polynomial model
+    _vec2PMI( x, _PMenv, _nx, _PMx, false );   // set current state polynomial model
     for( unsigned ix=0; ix<_nx; ix++ ) _PMx[ix].center();
 #ifdef MC__ODEBND_BASE_DINEQPM_DEBUG
     _print_interm( t, _nx, _PMx, "PMx Intermediate", std::cerr );
@@ -1797,7 +1870,12 @@ ODEBND_BASE<T,PMT,PVT>::_RHS_PM_STA
                     _MVXPVAR, _PMenv, _PMxdot, _MVXPf, _npar, _Ir, _A, _Irdot );
     }
 
-    _RHS_PM_ELL( _nx, _Q, _A, _Irdot, _Qdot, options.QTOL, machprec() );
+    // Construct the ellipsoidal remainder derivatives
+    if( options.QSCALE )
+      _RHS_PM_ELL( _nx, _Q, _A, _Irdot, _Qdot, options.QTOL, machprec(), _PMx );
+    else
+      _RHS_PM_ELL( _nx, _Q, _A, _Irdot, _Qdot, options.QTOL, machprec() );
+
     // Whether or not to ignore the remainder
     if( !options.PMNOREM )
       _PME2vec( _PMenv, _nx, _PMxdot, _Qdot, xdot );
@@ -1827,16 +1905,22 @@ inline void
 ODEBND_BASE<T,PMT,PVT>::_RHS_PM_DI
 ( FFGraph*DAG, std::list<const FFOp*>*opRHSi, PVT*PMRHS,
   const unsigned nx, const FFVar*pRHS, const unsigned nVAR,
-  const FFVar*pVAR, PVT*PMVAR, PVT*PMxdot, double*rLdot, double*rUdot )
+  const FFVar*pVAR, PVT*PMVAR, PVT*PMxdot, double*rLdot, double*rUdot,
+  const bool neg )
 {
   for( unsigned ix=0; ix<nx; ix++ ){
     T Rxi = PMVAR[ix].remainder();
     PMVAR[ix].set( Op<T>::l( Rxi ) );
+    //DAG->output( opRHSi[ix] );
+    //for( unsigned i=0; i<nVAR; i++ )
+    //  std::cout << i << ": " << pVAR[i] << "  " << PMVAR[i] << std::endl;
     DAG->eval( opRHSi[ix], PMRHS, 1, pRHS+ix, PMxdot+ix, nVAR, pVAR, PMVAR );
-    rLdot[ix] = Op<T>::l( PMxdot[ix].remainder() );
+    if( !neg ) rLdot[ix] = Op<T>::l( PMxdot[ix].remainder() );
+    else       rLdot[ix] = Op<T>::u( PMxdot[ix].remainder() );
     PMVAR[ix].set( Op<T>::u( Rxi ) );
     DAG->eval( opRHSi[ix], PMRHS, 1, pRHS+ix, PMxdot+ix, nVAR, pVAR, PMVAR );
-    rUdot[ix] = Op<T>::u( PMxdot[ix].remainder() );
+    if( !neg ) rUdot[ix] = Op<T>::u( PMxdot[ix].remainder() );
+    else       rUdot[ix] = Op<T>::l( PMxdot[ix].remainder() );
     PMVAR[ix].set( Rxi );
   }
 }
@@ -1845,19 +1929,22 @@ template <typename T, typename PMT, typename PVT>
 inline void
 ODEBND_BASE<T,PMT,PVT>::_RHS_PM_ELL
 ( const unsigned nx, const double*Qr, const double*Ar, const T*Irdot,
-  double*Qrdot, const double QTOL, const double EPS )
+  double*Qrdot, const double QTOL, const double EPS, const PVT*W )
 {
   // Set dynamics of shape matrix
   double trQ = 0., sumkappa = 0.;
-  for( unsigned ix=0; ix<nx; ix++ )
-    trQ += ( Qr[_ndxLT(ix,ix,nx)]>0? Qr[_ndxLT(ix,ix,nx)]: EPS );
+  for( unsigned ix=0; ix<nx; ix++ ){
+    double sqr_wi = W? sqr(Op<PVT>::abs(W[ix]))+EPS: 1.;
+    trQ += ( Qr[_ndxLT(ix,ix,nx)]>EPS? Qr[_ndxLT(ix,ix,nx)]/sqr_wi: EPS );
+  }
   const double srqt_trQ = (trQ>0? std::sqrt( trQ ): 0.) + QTOL;
   for( unsigned ix=0; ix<nx; ix++ ){
+    double wi = W? Op<PVT>::abs(W[ix]): 1.;
 #ifdef MC__ODEBND_BASE_DINEQPM_DEBUG
-      std::cout << "kappa[" << ix << "] = "
-                << Op<T>::diam( Irdot[ix] ) / ( 2. * srqt_trQ ) << std::endl;
+    std::cout << "kappa[" << ix << "] = "
+              << Op<T>::diam( Irdot[ix] ) / ( 2. * wi * srqt_trQ ) << std::endl;
 #endif
-      sumkappa += Op<T>::diam( Irdot[ix] ) / ( 2. * srqt_trQ );
+    sumkappa += Op<T>::diam( Irdot[ix] ) / ( 2. * wi * srqt_trQ );
   }
 
   for( unsigned jx=0; jx<nx; jx++ ){
@@ -1867,7 +1954,8 @@ ODEBND_BASE<T,PMT,PVT>::_RHS_PM_ELL
         Qrdot[_ndxLT(ix,jx,nx)] += Qr[_ndxLT(ix,kx,nx)] * Ar[jx+kx*nx]
                                  + Ar[ix+kx*nx] * Qr[_ndxLT(kx,jx,nx)];
     }
-    Qrdot[_ndxLT(jx,jx,nx)] += Op<T>::diam( Irdot[jx] ) / 2. * srqt_trQ;
+    double wj = W? Op<PVT>::abs(W[jx]): 1.;
+    Qrdot[_ndxLT(jx,jx,nx)] += Op<T>::diam( Irdot[jx] ) / 2. * wj * srqt_trQ;
   }
 
 #ifdef MC__ODEBND_BASE_DINEQPM_DEBUG
@@ -1993,9 +2081,16 @@ ODEBND_BASE<T,PMT,PVT>::_RHS_PM_QUAD
 
   switch( options.WRAPMIT){
   case OPT::NONE:
+    if( !reinit ) break;
+    _vec2PMI( x, _PMenv, _nx, _PMx, true );   // set current state polynomial model
+#ifdef MC__ODEBND_BASE_DINEQPM_DEBUG
+    _print_interm( t, _nx, _PMx, "PMx Intermediate", std::cerr );
+#endif
+    break;
+   
   case OPT::DINEQ:
     if( !reinit ) break;
-    _vec2PMI( x, _PMenv, _nx, _PMx );   // set current state polynomial model
+    _vec2PMI( x, _PMenv, _nx, _PMx, false );   // set current state polynomial model
 #ifdef MC__ODEBND_BASE_DINEQPM_DEBUG
     _print_interm( t, _nx, _PMx, "PMx Intermediate", std::cerr );
 #endif

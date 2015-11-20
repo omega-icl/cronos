@@ -139,32 +139,10 @@ int main()
 
   /////////////////////////////////////////////////////////////////////////
   // Bound ODE trajectories - differential inequalities
-#ifndef USE_SUNDIALS // GSL integrator
-#ifdef USE_CMODEL
+#ifndef USE_SUNDIALS             // GSL integrator
   mc::ODEBND_GSL<I,PM,PV> LV2;
-#else
-  mc::ODEBND_GSL<I> LV2;
-#endif
-  LV2.set_dag( &IVP );
-  LV2.set_state( NX, X );
-  LV2.set_parameter( NP, P );
-  LV2.set_differential( NX, RHS );
-  LV2.set_initial( NS, NX, IC );
-  //LV2.set_initial( NX, IC );
-
-  LV2.options.DISPLAY   = 1;
-#if defined( SAVE_RESULTS )
-  LV2.options.RESRECORD = true;
-#endif
-  LV2.options.ORDMIT    = 1; //PMp->nord();
-  LV2.options.ATOL      = LV2.options.RTOL = 1e-9;
-  LV2.options.WRAPMIT   = mc::ODEBND_GSL<I,PM,PV>::Options::ELLIPS;//DINEQ;//NONE;
-
-#else // SUNDIALS integrator
-#ifdef USE_CMODEL
+#else                            // SUNDIALS integrator
   mc::ODEBND_SUNDIALS<I,PM,PV> LV2;
-#else
-  mc::ODEBND_SUNDIALS<I> LV2;
 #endif
   LV2.set_dag( &IVP );
   LV2.set_state( NX, X );
@@ -173,16 +151,19 @@ int main()
   LV2.set_initial( NS, NX, IC );
   //LV2.set_initial( NX, IC );
 
-  LV2.options.DISPLAY   = 1;
-#if defined( SAVE_RESULTS )
-  LV2.options.RESRECORD = true;
-#endif
-  LV2.options.ORDMIT    = 1; //PMp->nord();
-  LV2.options.ATOL      = LV2.options.RTOL = 1e-8;
+#ifndef USE_SUNDIALS
+  LV2.options.WRAPMIT   = mc::ODEBND_GSL<I,PM,PV>::Options::ELLIPS;//DINEQ;//NONE;
+#else
   LV2.options.INTMETH   = mc::ODEBND_SUNDIALS<I,PM,PV>::Options::MSADAMS;
-  LV2.options.JACAPPROX = mc::ODEBND_SUNDIALS<I,PM,PV>::Options::CV_DENSE;//CV_DIAG;
+  LV2.options.JACAPPROX = mc::ODEBND_SUNDIALS<I,PM,PV>::Options::CV_DIAG;//CV_DENSE;//
   LV2.options.WRAPMIT   = mc::ODEBND_SUNDIALS<I,PM,PV>::Options::ELLIPS;//DINEQ;//NONE;
 #endif
+  LV2.options.DISPLAY   = 1;
+#if defined( SAVE_RESULTS )
+  LV2.options.RESRECORD = true;
+#endif
+  LV2.options.ORDMIT    = 1; //NPM;
+  LV2.options.ATOL      = LV2.options.RTOL = 1e-8;
 
   std::cout << "\nCONTINUOUS SET-VALUED INTEGRATION - INTERVAL ENCLOSURE OF REACHABLE SET:\n\n";
   LV2.bounds( NS, tk, Ip, Ixk );

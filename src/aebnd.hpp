@@ -1065,9 +1065,11 @@ AEBND<T,PMT,PVT>::_ge
     }
 
     // Perform backward elimination
+//std::cout << "G[" << _ndx(ndepblk-1,ndepblk-1,ndepblk) << "] = " << G[_ndx(ndepblk-1,ndepblk-1,ndepblk)] << std::endl;
     if( Op<U>::l( G[_ndx(ndepblk-1,ndepblk-1,ndepblk)] ) <= 0. 
      && Op<U>::u( G[_ndx(ndepblk-1,ndepblk-1,ndepblk)] ) >= 0. )
       return SINGULAR;
+//std::cout << "NON-SINGULAR!" << std::endl;
     varblk[ndepblk-1] = b[ndepblk-1] / G[_ndx(ndepblk-1,ndepblk-1,ndepblk)];
     for( unsigned i=ndepblk; i>0; i-- ){
       U sum = b[i-1];
@@ -1439,7 +1441,7 @@ AEBND<T,PMT,PVT>::_ge
 //! @fn template <typename T, typename PMT, typename PVT> inline typename AEBND<T,PMT,PVT>::STATUS AEBND<T,PMT,PVT>::bounds(
 //! FFVar*X, std::ostream&os=std::cout )
 //!
-//! This function computes an interval enclosure of the solution set of
+//! This function computes a symbolic expression of the solution set of
 //! the parametric AEs:
 //!   - <a>X</a> [output] symbolic solution
 //!   - <a>os</a> [input] output stream (default: std::cout)

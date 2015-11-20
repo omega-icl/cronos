@@ -34,55 +34,55 @@ class ODEBND_SUNDIALS:
   public virtual BASE_SUNDIALS,
   public virtual ODEBND_BASE<T,PMT,PVT>
 {
- typedef Ellipsoid E;
- typedef BASE_DE::STATUS STATUS;
- typedef int (*CVRhsFn)( realtype t, N_Vector y, N_Vector ydot, void *user_data );
+  typedef Ellipsoid E;
+  typedef BASE_DE::STATUS STATUS;
+  typedef int (*CVRhsFn)( realtype t, N_Vector y, N_Vector ydot, void *user_data );
 
-protected:
- using ODEBND_BASE<T,PMT,PVT>::NORMAL;
- using ODEBND_BASE<T,PMT,PVT>::FAILURE;
- using ODEBND_BASE<T,PMT,PVT>::FATAL;
+ protected:
+  using ODEBND_BASE<T,PMT,PVT>::NORMAL;
+  using ODEBND_BASE<T,PMT,PVT>::FAILURE;
+  using ODEBND_BASE<T,PMT,PVT>::FATAL;
 
- using ODEBND_BASE<T,PMT,PVT>::_Q;
- using ODEBND_BASE<T,PMT,PVT>::_Er;
- using ODEBND_BASE<T,PMT,PVT>::_Ir;
- using ODEBND_BASE<T,PMT,PVT>::_pref;
- using ODEBND_BASE<T,PMT,PVT>::_Ip;
- using ODEBND_BASE<T,PMT,PVT>::_B;
- using ODEBND_BASE<T,PMT,PVT>::_xref;
- using ODEBND_BASE<T,PMT,PVT>::_Ix;
- using ODEBND_BASE<T,PMT,PVT>::_Iq;
- using ODEBND_BASE<T,PMT,PVT>::_vec2I;
- using ODEBND_BASE<T,PMT,PVT>::_vec2E;
- using ODEBND_BASE<T,PMT,PVT>::_IC_I_STA;
- using ODEBND_BASE<T,PMT,PVT>::_IC_I_QUAD;
- using ODEBND_BASE<T,PMT,PVT>::_CC_I_STA;
- using ODEBND_BASE<T,PMT,PVT>::_SET_I_STA;
- using ODEBND_BASE<T,PMT,PVT>::_RHS_I_STA;
- using ODEBND_BASE<T,PMT,PVT>::_RHS_I_QUAD;
- using ODEBND_BASE<T,PMT,PVT>::_JAC_I_STA;
- using ODEBND_BASE<T,PMT,PVT>::_FCT_I_STA;
+  using ODEBND_BASE<T,PMT,PVT>::_Q;
+  using ODEBND_BASE<T,PMT,PVT>::_Er;
+  using ODEBND_BASE<T,PMT,PVT>::_Ir;
+  using ODEBND_BASE<T,PMT,PVT>::_pref;
+  using ODEBND_BASE<T,PMT,PVT>::_Ip;
+  using ODEBND_BASE<T,PMT,PVT>::_B;
+  using ODEBND_BASE<T,PMT,PVT>::_xref;
+  using ODEBND_BASE<T,PMT,PVT>::_Ix;
+  using ODEBND_BASE<T,PMT,PVT>::_Iq;
+  using ODEBND_BASE<T,PMT,PVT>::_vec2I;
+  using ODEBND_BASE<T,PMT,PVT>::_vec2E;
+  using ODEBND_BASE<T,PMT,PVT>::_IC_I_STA;
+  using ODEBND_BASE<T,PMT,PVT>::_IC_I_QUAD;
+  using ODEBND_BASE<T,PMT,PVT>::_CC_I_STA;
+  using ODEBND_BASE<T,PMT,PVT>::_SET_I_STA;
+  using ODEBND_BASE<T,PMT,PVT>::_RHS_I_STA;
+  using ODEBND_BASE<T,PMT,PVT>::_RHS_I_QUAD;
+  using ODEBND_BASE<T,PMT,PVT>::_JAC_I_STA;
+  using ODEBND_BASE<T,PMT,PVT>::_FCT_I_STA;
 
- using ODEBND_BASE<T,PMT,PVT>::_PMenv;
- using ODEBND_BASE<T,PMT,PVT>::_PMx;
- using ODEBND_BASE<T,PMT,PVT>::_PMp;
- using ODEBND_BASE<T,PMT,PVT>::_PMq;
- using ODEBND_BASE<T,PMT,PVT>::_vec2PMI;
- using ODEBND_BASE<T,PMT,PVT>::_vec2PME;
- using ODEBND_BASE<T,PMT,PVT>::_IC_PM_STA;
- using ODEBND_BASE<T,PMT,PVT>::_IC_PM_QUAD;
- using ODEBND_BASE<T,PMT,PVT>::_CC_PM_STA;
- using ODEBND_BASE<T,PMT,PVT>::_SET_PM_STA;
- using ODEBND_BASE<T,PMT,PVT>::_RHS_PM_STA;
- using ODEBND_BASE<T,PMT,PVT>::_RHS_PM_QUAD;
- using ODEBND_BASE<T,PMT,PVT>::_JAC_PM_STA;
- using ODEBND_BASE<T,PMT,PVT>::_FCT_PM_STA;
+  using ODEBND_BASE<T,PMT,PVT>::_PMenv;
+  using ODEBND_BASE<T,PMT,PVT>::_PMx;
+  using ODEBND_BASE<T,PMT,PVT>::_PMp;
+  using ODEBND_BASE<T,PMT,PVT>::_PMq;
+  using ODEBND_BASE<T,PMT,PVT>::_vec2PMI;
+  using ODEBND_BASE<T,PMT,PVT>::_vec2PME;
+  using ODEBND_BASE<T,PMT,PVT>::_IC_PM_STA;
+  using ODEBND_BASE<T,PMT,PVT>::_IC_PM_QUAD;
+  using ODEBND_BASE<T,PMT,PVT>::_CC_PM_STA;
+  using ODEBND_BASE<T,PMT,PVT>::_SET_PM_STA;
+  using ODEBND_BASE<T,PMT,PVT>::_RHS_PM_STA;
+  using ODEBND_BASE<T,PMT,PVT>::_RHS_PM_QUAD;
+  using ODEBND_BASE<T,PMT,PVT>::_JAC_PM_STA;
+  using ODEBND_BASE<T,PMT,PVT>::_FCT_PM_STA;
 
- using ODEBND_BASE<T,PMT,PVT>::_diam;
- using ODEBND_BASE<T,PMT,PVT>::_dH;
- using ODEBND_BASE<T,PMT,PVT>::_hausdorff;
- using ODEBND_BASE<T,PMT,PVT>::_remainders;
- using ODEBND_BASE<T,PMT,PVT>::_print_interm;
+  using ODEBND_BASE<T,PMT,PVT>::_diam;
+  using ODEBND_BASE<T,PMT,PVT>::_dH;
+  using ODEBND_BASE<T,PMT,PVT>::_hausdorff;
+  using ODEBND_BASE<T,PMT,PVT>::_remainders;
+  using ODEBND_BASE<T,PMT,PVT>::_print_interm;
 
  protected:
   //! @brief Pointer to the CVODE memory block
@@ -261,6 +261,10 @@ protected:
   bool _INI_I_STA
     ( const unsigned np, const T*Ip, const unsigned ns );
 
+  //! @brief Function to initialize state interval bounding
+  bool _INI_I_STA
+    ( const unsigned np, const unsigned ns );
+
   //! @brief Static wrapper to function computing the DINEQs RHS in interval arithmetic
   static int MC_CVRHSI__
     ( realtype t, N_Vector Nx, N_Vector Nxdot, void *user_data );
@@ -277,6 +281,10 @@ protected:
   //! @brief Function to initialize GSL for state polynomial models
   bool _INI_PM_STA
     ( const unsigned np, const PVT*PMp, const unsigned ns );
+
+  //! @brief Function to initialize GSL for state polynomial models
+  bool _INI_PM_STA
+    ( const unsigned np, const unsigned ns );
 
   //! @brief Static wrapper to function computing the DINEQs RHS in polynomial model arithmetic
   static int MC_CVRHSPM__
@@ -433,9 +441,16 @@ ODEBND_SUNDIALS<T,PMT,PVT>::_INI_I_STA
 ( const unsigned np, const T*Ip, const unsigned ns )
 {
   // Initialize bound propagation
-  if( !ODEBND_BASE<T,PMT,PVT>::_INI_I_STA( options, np, Ip, ns ) )
+  if( !ODEBND_BASE<T,PMT,PVT>::_INI_I_STA( options, np, Ip, ns )
+   || !ODEBND_SUNDIALS<T,PMT,PVT>::_INI_I_STA( np, ns ) )
     return false;
+  return true;
+}
 
+template <typename T, typename PMT, typename PVT> inline bool
+ODEBND_SUNDIALS<T,PMT,PVT>::_INI_I_STA
+( const unsigned np, const unsigned ns )
+{
   // Set SUNDIALS state/quadrature arrays
   unsigned cv_Nx_size = 0, cv_Nq_size = 2*_nq;
   switch( options.WRAPMIT){
@@ -505,7 +520,7 @@ ODEBND_SUNDIALS<T,PMT,PVT>::_bounds
 
     // Bounds on initial states/quadratures
     _t = tk[0];
-    if( !_IC_I_STA( options, NV_DATA_S( _Nx ) )
+    if( !_IC_I_STA( options, _t, NV_DATA_S( _Nx ) )
      || (_Nq && !_IC_I_QUAD( options, NV_DATA_S( _Nq )) ) )
       { _END_STA(); return FATAL; }
     if( options.DISPLAY >= 1 ){
@@ -698,9 +713,16 @@ ODEBND_SUNDIALS<T,PMT,PVT>::_INI_PM_STA
 ( const unsigned np, const PVT* PMp, const unsigned ns )
 {
   // Initialize bound propagation
-  if( !ODEBND_BASE<T,PMT,PVT>::_INI_PM_STA( options, np, PMp, ns ) )
+  if( !ODEBND_BASE<T,PMT,PVT>::_INI_PM_STA( options, np, PMp, ns )
+   || !ODEBND_SUNDIALS<T,PMT,PVT>::_INI_PM_STA( np, ns ) )
     return false;
+  return true;
+}
 
+template <typename T, typename PMT, typename PVT> inline bool
+ODEBND_SUNDIALS<T,PMT,PVT>::_INI_PM_STA
+( const unsigned np, const unsigned ns )
+{
   // Set SUNDIALS state/quadrature arrays
   unsigned cv_Nx_size = _PMenv->nmon()*_nx, cv_Nq_size = (_PMenv->nmon()+1)*_nq;
   switch( options.WRAPMIT){
@@ -749,7 +771,7 @@ ODEBND_SUNDIALS<T,PMT,PVT>::_bounds
 
     // Bounds on initial states/quadratures
     _t = tk[0];
-    if( !_IC_PM_STA( options, NV_DATA_S( _Nx ) )
+    if( !_IC_PM_STA( options, _t, NV_DATA_S( _Nx ) )
      || (_Nq && !_IC_PM_QUAD( options, NV_DATA_S( _Nq )) ) )
       { _END_STA(); return FATAL; }
     if( options.DISPLAY >= 1 ){

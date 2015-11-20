@@ -7,7 +7,6 @@
 
 #include "odebnds_base.hpp"
 #include "odebnd_gsl.hpp"
-#include "odeslvs_gsl.hpp"
 
 #define MC__ODEBNDS_GSL_USE_BAD
 
@@ -200,7 +199,7 @@ public: // EVERYTHING to be called/used from outside (mostly functions and a few
     { this->ODEBND_GSL<T,PMT,PVT>::record( obndsta, iprec );
       this->ODEBND_BASE<T,PMT,PVT>::_record( obndsa, _results_adj, iprec ); }
 
-  //! @brief Record state and sensitivity bounds in files <a>obndsta</a> and <a>obndsa</a>, with accuracy of <a>iprec</a> digits
+  //! @brief Record state bounds in file <a>obndsta</a>, with accuracy of <a>iprec</a> digits
   void record
     ( std::ofstream&obndsta, const unsigned iprec=5 ) const
     { this->ODEBND_GSL<T,PMT,PVT>::record( obndsta, iprec ); }

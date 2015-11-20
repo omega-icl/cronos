@@ -18,7 +18,7 @@
 
 namespace mc
 {
-//! @brief C++ class computing enclosures of the reachable set of parametric ODEs using continuous-time set-valued integration.
+//! @brief C++ class computing enclosures of the reachable set of parametric ODEs using continuous-time set-valued integration and the numerical integrator in GSL.
 ////////////////////////////////////////////////////////////////////////
 //! mc::ODEBND_GSL is a C++ class that computes enclosures of the
 //! reachable set of parametric ordinary differential equations
@@ -37,7 +37,7 @@ class ODEBND_GSL:
   public virtual ODEBND_BASE<T,PMT,PVT>
 {
  protected:
-  typedef Ellipsoid E;
+  //typedef Ellipsoid E;
 
   using ODEBND_BASE<T,PMT,PVT>::_Q;
   using ODEBND_BASE<T,PMT,PVT>::_Er;
@@ -92,14 +92,13 @@ class ODEBND_GSL:
   friend int MC_GSLJACPM__
     ( double t, const double* x, double* jac, double* xdot, void* user_data );
 
- private:
+ protected:
   //! @brief GSL data type for bounding ODE system
   gsl_odeiv2_system _sys_sta;
 
   //! @brief GSL driver for bounding ODE system
   gsl_odeiv2_driver *_driver_sta;
 
- protected:
   //! @brief full GSL state
   double *_vec_sta;
 
@@ -257,7 +256,6 @@ public:
   /** @} */
 
 protected:
-
   //! @brief Function to initialize GSL driver
   void _INI_GSL
     ( gsl_odeiv2_system &sys, gsl_odeiv2_driver *&driver );
@@ -269,6 +267,10 @@ protected:
   bool _INI_I_STA
     ( const unsigned np, const T*Ip, const unsigned ns );
 
+  //! @brief Function to initialize state interval bounding
+  bool _INI_I_STA
+    ( const unsigned np, const unsigned ns );
+
   //! @brief Static wrapper to function to calculate the DINEQs RHS values
   static int MC_GSLRHSI__
     ( double t, const double* x, double* xdot, void* user_data );
@@ -278,13 +280,17 @@ protected:
     ( double t, const double* x, double* jac, double* xdot, void* user_data );
 
   //! @brief Propagate state/quadrature interval bounds forward in time through every time stages
-  STATUS _bounds
+  virtual STATUS _bounds
     ( const unsigned ns, const double*tk, const T*Ip, T**Ixk,
       T*Iq, T*If, const bool store, std::ostream&os );
 
   //! @brief Function to initialize GSL for state polynomial models
   bool _INI_PM_STA
     ( const unsigned np, const PVT*PMp, const unsigned ns );
+
+  //! @brief Function to initialize GSL for state polynomial models
+  bool _INI_PM_STA
+    ( const unsigned np, const unsigned ns );
 
   //! @brief Static wrapper to function to calculate the DINEQ-PMs RHS values
   static int MC_GSLRHSPM__
@@ -295,7 +301,7 @@ protected:
     ( double t, const double*x, double*jac, double*xdot, void*user_data );
 
   //! @brief Propagate state/quadrature polynomial models forward in time through every time stages
-  STATUS _bounds
+  virtual STATUS _bounds
     ( const unsigned ns, const double*tk, const PVT*PMp, PVT**PMxk,
       PVT*PMq, PVT*PMf, const bool store, std::ostream&os );
 
@@ -388,12 +394,19 @@ ODEBND_GSL<T,PMT,PVT>::_INI_I_STA
 ( const unsigned np, const T*Ip, const unsigned ns )
 {
   // Initialize bound propagation
-  if( !ODEBND_BASE<T,PMT,PVT>::_INI_I_STA( options, np, Ip, ns ) )
-    return false;
-
-  // Set GSL driver
   _sys_sta.function = MC_GSLRHSI__;
   _sys_sta.jacobian = MC_GSLJACI__;
+  if( !ODEBND_BASE<T,PMT,PVT>::_INI_I_STA( options, np, Ip, ns )
+   || !ODEBND_GSL<T,PMT,PVT>::_INI_I_STA( np, ns ) )
+    return false;
+  return true;
+}
+
+template <typename T, typename PMT, typename PVT> inline bool
+ODEBND_GSL<T,PMT,PVT>::_INI_I_STA
+( const unsigned np, const unsigned ns )
+{
+  // Set GSL driver
   _sys_sta.params = 0;
   _sys_sta.dimension = 2*_nq;
   switch( options.WRAPMIT){
@@ -438,7 +451,7 @@ ODEBND_GSL<T,PMT,PVT>::_bounds
 
     // Bounds on initial states/quadratures
     _t = tk[0];
-    if( !_IC_I_STA( options, _vec_sta )
+    if( !_IC_I_STA( options, _t, _vec_sta )
      || !_IC_I_QUAD( options, _vec_quad ) )
       { _END_STA(); return FATAL; }
     if( options.DISPLAY >= 1 ){
@@ -617,12 +630,19 @@ ODEBND_GSL<T,PMT,PVT>::_INI_PM_STA
 {
 
   // Initialize bound propagation
-  if( !ODEBND_BASE<T,PMT,PVT>::_INI_PM_STA( options, np, PMp, ns ) )
-    return false;
-
-  // Define ODE system in GSL format
   _sys_sta.function = MC_GSLRHSPM__;
   _sys_sta.jacobian = MC_GSLJACPM__;
+  if( !ODEBND_BASE<T,PMT,PVT>::_INI_PM_STA( options, np, PMp, ns )
+   || !ODEBND_GSL<T,PMT,PVT>::_INI_PM_STA( np, ns ) )
+    return false;
+  return true;
+}
+
+template <typename T, typename PMT, typename PVT> inline bool
+ODEBND_GSL<T,PMT,PVT>::_INI_PM_STA
+( const unsigned np, const unsigned ns )
+{
+  // Define ODE system in GSL format
   _sys_sta.params = 0;
   _sys_sta.dimension = _PMenv->nmon()*(_nx+_nq)+_nq;
   switch( options.WRAPMIT){
@@ -669,7 +689,7 @@ ODEBND_GSL<T,PMT,PVT>::_bounds
 
     // Bounds on initial states/quadratures
     _t = tk[0];
-    if( !_IC_PM_STA( options, _vec_sta )
+    if( !_IC_PM_STA( options, _t, _vec_sta )
      || !_IC_PM_QUAD( options, _vec_quad ) )
       { _END_STA(); return FATAL; }
     if( options.DISPLAY >= 1 ){

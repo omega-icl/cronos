@@ -20,20 +20,6 @@ using namespace CPPL;
 
 int main()
 {
-/*dgematrix A(4,4);
-  A(0,0) = 1.5; A(0,1) = 1.;  A(0,2) = 0.;  A(0,3) = 0.; 
-  A(1,0) = 1.;  A(1,1) = 0.5; A(1,2) = 1.;  A(1,3) = 0.; 
-  A(2,0) = 0.;  A(2,1) = 1.;  A(2,2) = 0.5; A(2,3) = 1.; 
-  A(3,0) = 0.;  A(3,1) = 0.;  A(3,2) = 1.;  A(3,3) = 1.5; 
-
-  dgematrix A(3,3);
-  A(0,0) = 1.;     A(0,1) = 1./2.; A(0,2) = 1./3.;
-  A(1,0) = 1./2.;  A(1,1) = 1./3.; A(1,2) = 1./4.;
-  A(2,0) = 1./3.;  A(2,1) = 1./4.; A(2,2) = 1./5.; 
-
-  dgematrix Q, R;
-  return dgeqrf( A, Q, R ); */
-
   mc::FFGraph NLE;  // DAG describing the problem
 
   const unsigned NP = 1;  // Parameter dimension

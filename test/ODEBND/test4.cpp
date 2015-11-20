@@ -143,11 +143,11 @@ int main()
 #if defined( SAVE_RESULTS )
   LV2.options.RESRECORD = true;
 #endif
-  LV2.options.ORDMIT    = 1; //TMp->nord();
-  //LV2.options.HMIN      = 1e-10;
+  LV2.options.ORDMIT    = 1; //NPM; //
+  LV2.options.HMIN      = 1e-10;
   //LV2.options.ATOL      = LV2.options.RTOL = 1e-10;
   //LV2.options.INTMETH   = mc::ODEBND_SUNDIALS<I,TM,TV>::Options::MSBDF;
-  //LV2.options.JACAPPROX = mc::ODEBND_SUNDIALS<I,TM,TV>::Options::CV_DIAG;
+  LV2.options.JACAPPROX = mc::ODEBND_SUNDIALS<I,TM,TV>::Options::CV_DIAG;
   LV2.options.WRAPMIT   = mc::ODEBND_SUNDIALS<I,TM,TV>::Options::ELLIPS;//DINEQ;//NONE;
 #endif
 

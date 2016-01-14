@@ -88,7 +88,6 @@ int main()
     std::cout << "  k(" << i << ") = " << NLP.get_local_solution().p[i];
   std::cout << std::endl;
 
-
   // Global optimization using SBB
   NLP.options.DISPLAY = 2;
   //NLP.options.MIPFILE = "test6.lp";

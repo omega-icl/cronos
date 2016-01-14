@@ -1,4 +1,4 @@
-const unsigned int NPM   = 15;	// <- Order of Taylor/Chebyshev model
+const unsigned int NPM   = 2;	// <- Order of Taylor/Chebyshev model
 //#define USE_CMODEL		// <- Use Chebyshev models?
 
 #include "aebnd.hpp"
@@ -41,6 +41,8 @@ int main()
     Ix[NX];
 
   PM PMEnv( NP, NPM );
+  PMEnv.options.CENTER_REMAINDER = true;
+  PMEnv.options.REF_MIDPOINT = true;
   PV PMp[NP], PMx[NX], PMx0[NX];
   for( unsigned i=0; i<NP; i++ ) PMp[i].set( &PMEnv, i, Ip[i] );
   for( unsigned i=0; i<NX; i++ ) PMx0[i] = Ix0[i];
@@ -53,17 +55,22 @@ int main()
   EX1.set_var( NP, P );
   EX1.set_dep( NX, X, F );
 
-  EX1.options.DISPLAY = 2;
-  EX1.options.BLKDEC  = false;//true;
-  EX1.options.MAXIT   = 20;
-  EX1.options.RTOL    =
-  EX1.options.ATOL    = 0e0;
-  EX1.options.BOUNDER = mc::AEBND<I,PM,PV>::Options::GE;//KRAW;//GS;
-  EX1.options.PRECOND = mc::AEBND<I,PM,PV>::Options::INVMD;//QRM;//NONE;
+  EX1.options.DISPLAY  = 2;
+  EX1.options.BLKDEC   = true;//false;
+  EX1.options.INTERBND = true; //false;
+  EX1.options.MAXIT    = 20;
+  EX1.options.RTOL     =
+  EX1.options.ATOL     = 0e0;
+  EX1.options.BOUNDER  = mc::AEBND<I,PM,PV>::Options::GS;//GE;//KRAW;//GS;
+  EX1.options.PRECOND  = mc::AEBND<I,PM,PV>::Options::INVMD;//QRM;//NONE;
 
   EX1.setup();
   std::cout << "\nSuccessful? " << (EX1.solve( Ip, Ix, Ix0 )==mc::AEBND<I,PM,PV>::NORMAL?"Y\n":"N\n");
   std::cout << "\nSuccessful? " << (EX1.solve( PMp, PMx, Ix )==mc::AEBND<I,PM,PV>::NORMAL?"Y\n":"N\n");
+  std::cout << "\nPMx2: " << (3+PMp[0])*PMx[1];
+
+
+  return 0;
 
   std::cout << "\nSuccessful? " << (EX1.solve( SOL )==mc::AEBND<I,PM,PV>::NORMAL?"Y\n":"N\n");
   std::ofstream o_sol( "test1_DAG.dot", std::ios_base::out );

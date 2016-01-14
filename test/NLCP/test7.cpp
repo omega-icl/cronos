@@ -3,7 +3,7 @@
 #undef  USE_FILIB	// specify to use FILIB++ for interval arithmetic
 #undef  DEBUG		// whether to output debug information
 #define USE_DEPS	// whether to use dependents
-//#define MC__USE_CPLEX
+#define MC__USE_CPLEX
 ////////////////////////////////////////////////////////////////////////////////
 
 #include <fstream>
@@ -34,8 +34,22 @@ const unsigned NF = ns*(nc*2+1), NP = NF+1;
 std::set<unsigned> branching_strategy
 ( const typename mc::NLCP_GUROBI<I>::NODE*pNode )
 {
+  // Variable selection rule based on Baharev et al [AIChE Journal 2011, Vol. 57, No. 6]
+  // The widest interval corresponding to the bulk composition is bisected exclusively
+  // as long as its width is above 'thres'
   std::set<unsigned> sset;
-  for( unsigned i=1; i<=nc*ns; i++ ) sset.insert( i );
+  double thres = 1e-2, maxw = 0.;
+  for( unsigned i=1; i<=nc*ns; i++ ){
+    //std::cout << pNode->P(i) << std::endl;
+    if( pNode->depend().find(i) == pNode->depend().end()
+     && mc::Op<CVI>::diam(pNode->P(i)) > maxw )
+      maxw = mc::Op<CVI>::diam(pNode->P(i));
+  }
+  std::cout << std::setprecision(3) << std::scientific << "  " << maxw;
+  if( maxw > thres ) //pNode->index() < 1000 )
+    for( unsigned i=1; i<=nc*ns; i++ ) sset.insert( i );
+  else
+    for( unsigned i=0; i<=ns*(nc*2+1); i++ ) sset.insert( i );
   return sset;
 }
 
@@ -372,7 +386,7 @@ int main()
   CP.options.CVATOL      = 1e-5; // 1e-5
   CP.options.CVRTOL      = 1e-5; // 1e-5
   CP.options.BRANCHVAR   = mc::SetInv<CVI>::Options::RGREL;//RGABS;
-  CP.options.BRANCHSEL   = branching_strategy;
+  //CP.options.BRANCHSEL   = branching_strategy;
   CP.options.STGBCHDEPTH = 0;
   CP.options.STGBCHDRMAX = 2;
   CP.options.STGBCHRTOL  = 1e-2;
@@ -383,12 +397,12 @@ int main()
   //CP.options.CTRBACKOFF  = 1e-4; //1e-6
   CP.options.LPALGO      = -1;
   CP.options.LPPRESOLVE  = -1;
-  CP.options.RELMETH     = mc::NLCP_GUROBI<I>::Options::DRL;//CHEB;
+  CP.options.RELMETH     = mc::NLCP_GUROBI<I>::Options::HYBRID;//DRL;//CHEB;
   CP.options.CMODDMAX    = 1e5; //2
   CP.options.CMODSPAR    = true;
-  CP.options.CMODPROP    = 2; //2
-  CP.options.CMODCUTS    = 1; //2
-  CP.options.CMREDORD    = 4; //3
+  CP.options.CMODPROP    = 3; //2
+  CP.options.CMODCUTS    = 3; //2
+  CP.options.CMREDORD    = 5; //3
   CP.options.CMREDTHRES  = 1e-5;//1e-3
   CP.options.MAXCPU      = 3e4 ;
   CP.options.CMODEL.MIXED_IA = true ;

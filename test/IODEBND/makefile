@@ -1,5 +1,5 @@
 # Third-Party Libraries -->> CHANGE ACCORDINGLY <<--
-PATH_MC = /home/bchachua/Programs/Devel/MC++/MC++_2.0
+PATH_MC = $(HOME)/Programs/Devel/MC++/MC++_2.0
 LIB_MC = -llapack -lblas
 INC_MC = -I$(PATH_MC)/include -I$(PATH_MC)/src/3rdparty/fadbad++ -I$(PATH_MC)/src/3rdparty/cpplapack/include
 
@@ -54,5 +54,5 @@ gensvg :
 #####
 
 clean :
-	rm -f test? *.o *.out *.dat *.eps *~
+	rm -f test? test?b *.o *.out *.dat *.eps *~
 

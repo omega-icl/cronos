@@ -2,7 +2,7 @@
 #undef USE_PROFIL	// specify to use PROFIL for interval arithmetic
 #undef USE_FILIB	// specify to use FILIB++ for interval arithmetic
 #undef DEBUG            // whether to output debug information
-#define USE_NCOCUTS     // whether or not to save results to file
+//#define USE_NCOCUTS     // whether or not to save results to file
 ////////////////////////////////////////////////////////////////////////////////
 
 #include <fstream>
@@ -78,9 +78,9 @@ int main()
   for( unsigned i=0; i<NT; i++ ){
     NLP.add_ctr( mc::BASE_NLP::GE, k[NK+i] - mc::sqr( Pmod( k, q_50, Im_50[i] ) - Pm_50[i]*(1.+ePm) ) );
     NLP.add_ctr( mc::BASE_NLP::GE, k[NK+i] - mc::sqr( Pmod( k, q_50, Im_50[i] ) - Pm_50[i]*(1.-ePm) ) );
-    NLP.add_ctr( mc::BASE_NLP::GE, k[NK+i] - mc::sqr( Pmod( k, q_1200, Im_1200[i] ) - Pm_1200[i]*(1.+ePm) ) );
-    NLP.add_ctr( mc::BASE_NLP::GE, k[NK+i] - mc::sqr( Pmod( k, q_1200, Im_1200[i] ) - Pm_1200[i]*(1.-ePm) ) );
-    OBJ += k[NK+i];
+    NLP.add_ctr( mc::BASE_NLP::GE, k[NK+NT+i] - mc::sqr( Pmod( k, q_1200, Im_1200[i] ) - Pm_1200[i]*(1.+ePm) ) );
+    NLP.add_ctr( mc::BASE_NLP::GE, k[NK+NT+i] - mc::sqr( Pmod( k, q_1200, Im_1200[i] ) - Pm_1200[i]*(1.-ePm) ) );
+    OBJ += k[NK+i] + k[NK+NT+i];
   }
   NLP.set_obj( mc::NLGO_GUROBI<I>::MIN, OBJ );
 
@@ -147,7 +147,7 @@ int main()
   //CP.options.MIPFILE     = "test5.lp";
   CP.options.POLIMG.SANDWICH_MAXCUT = 5;
   CP.options.DISPLAY     = 2;
-  CP.options.MAXITER     = 20000;
+  CP.options.MAXITER     = 25000;
   CP.options.CVATOL      = 1e-6;
   CP.options.CVRTOL      = 1e-6;
   CP.options.BRANCHVAR   = mc::SetInv<CVI>::Options::RGREL;
@@ -155,14 +155,15 @@ int main()
   CP.options.DOMREDMAX   = 10;
   CP.options.DOMREDTHRES = 2e-2;
   CP.options.CTRBACKOFF  = 1e-6;
-  CP.options.RELMETH     = mc::NLCP_GUROBI<I>::Options::CHEB;
+  CP.options.RELMETH     = mc::NLCP_GUROBI<I>::Options::CHEB;//DRL;//HYBRID;//
+  CP.options.CMODSPAR    = true;
   CP.options.CMODPROP    = 2;
-  CP.options.CMODCUTS    = 1;
+  CP.options.CMODCUTS    = 2;
   std::cout << CP;
 
   Ik[0] = I(0.,0.02); Ik[1] = I(0.,1.); Ik[2] = I(0.,1.);
 #ifdef USE_NCOCUTS
-  for( unsigned i=0; i<2*NT; i++ ) Ik[NK+i] = I(-5.e-2,5.e-2);
+  for( unsigned i=0; i<2*NT; i++ ) Ik[NK+i] = ePm * I(-1,1);
 #endif
 
 #ifndef USE_NCOCUTS
@@ -175,7 +176,11 @@ int main()
   CP.solve( Ik );
 
 #if defined(SAVE_RESULTS )
+#ifndef USE_NCOCUTS
+  std::ofstream K_un( "test5b.out", std::ios_base::out );
+#else
   std::ofstream K_un( "test5b_NCO.out", std::ios_base::out );
+#endif
   CP.output_nodes( K_un );
   K_un.close();
 #endif

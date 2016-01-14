@@ -30,15 +30,15 @@ int main()
 
   NLP.set_dag( &DAG );  // DAG
   NLP.set_var( NP, p ); // decision variables
-  NLP.set_obj( mc::NLPSLV_IPOPT::MIN, -9*p[4]-15*p[8]+6*p[0]+16*p[1]+10*p[5] );
-  NLP.add_ctr( mc::NLPSLV_IPOPT::EQ, p[0]+p[1]-p[2]-p[3] );
-  NLP.add_ctr( mc::NLPSLV_IPOPT::EQ, p[2]+p[6]-p[4] );
-  NLP.add_ctr( mc::NLPSLV_IPOPT::EQ, p[3]+p[7]-p[8] );
-  NLP.add_ctr( mc::NLPSLV_IPOPT::EQ, p[6]+p[7]-p[5] );
-  NLP.add_ctr( mc::NLPSLV_IPOPT::LE, p[9]*p[2]+2*p[6]-2.5*p[4] );
-  NLP.add_ctr( mc::NLPSLV_IPOPT::LE, p[9]*p[3]+2*p[7]-1.5*p[8] );
-  NLP.add_ctr( mc::NLPSLV_IPOPT::LE, 3*p[0]+p[1]-p[9]*p[2]-p[9]*p[3] );
-  //NLP.add_ctr( mc::NLPSLV_IPOPT::LE, 3*p[0]+p[1]-p[9]*(p[2]+p[3]) );
+  NLP.set_obj( mc::BASE_NLP::MIN, -9*p[4]-15*p[8]+6*p[0]+16*p[1]+10*p[5] );
+  NLP.add_ctr( mc::BASE_NLP::EQ, p[0]+p[1]-p[2]-p[3] );
+  NLP.add_ctr( mc::BASE_NLP::EQ, p[2]+p[6]-p[4] );
+  NLP.add_ctr( mc::BASE_NLP::EQ, p[3]+p[7]-p[8] );
+  NLP.add_ctr( mc::BASE_NLP::EQ, p[6]+p[7]-p[5] );
+  NLP.add_ctr( mc::BASE_NLP::LE, p[9]*p[2]+2*p[6]-2.5*p[4] );
+  NLP.add_ctr( mc::BASE_NLP::LE, p[9]*p[3]+2*p[7]-1.5*p[8] );
+  NLP.add_ctr( mc::BASE_NLP::LE, 3*p[0]+p[1]-p[9]*p[2]-p[9]*p[3] );
+  //NLP.add_ctr( mc::BASE_NLP::LE, 3*p[0]+p[1]-p[9]*(p[2]+p[3]) );
 
   typedef mc::Interval I;
   I Ip[NP] = { I(0,300), I(0,300), I(0,100), I(0,200), I(0,100), I(0,300),

@@ -62,7 +62,7 @@ int main()
   CP.options.DOMREDMAX   = 10;
   CP.options.DOMREDTHRES = 2e-2;
   CP.options.DOMREDBKOFF = 1e-8;
-  CP.options.RELMETH     = mc::NLCP_GUROBI<I>::Options::CHEB;
+  CP.options.RELMETH     = mc::NLCP_GUROBI<I>::Options::DRL;
   CP.options.CMODPROP    = 1;
   std::cout << CP;
 

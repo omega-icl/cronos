@@ -44,7 +44,7 @@ int main()
 
   mc::NLGO_GUROBI<I> NLP;
   NLP.options.POLIMG.SANDWICH_MAXCUT = 7;
-  NLP.options.POLIMG.SANDWICH_ATOL   = NLP.options.POLIMG.SANDWICH_RTOL  = 1e-5;
+  NLP.options.POLIMG.SANDWICH_ATOL   = NLP.options.POLIMG.SANDWICH_RTOL  = 1e-3;
   //NLP.options.CVATOL = NLP.options.CVRTOL = 1e-5;
   //NLP.options.MIPABSGAP = NLP.options.MIPRELGAP = 1e-9;
   //NLP.options.MAXITER = 0;
@@ -100,16 +100,22 @@ int main()
     std::cout << "  dLSQdk(" << i << ") = " << dLSQdk0[i];
   }
   std::cout << std::endl;
+  { int dum; std::cin >> dum; }
 
   // Global optimization using SBB
   NLP.options.DISPLAY = 2;
   //NLP.options.MIPFILE = "test5.lp";
   NLP.options.NLPSLV.DISPLAY = 0;
   NLP.options.CSALGO  = mc::NLGO_GUROBI<I>::Options::SBB;
-  NLP.options.RELMETH = mc::NLGO_GUROBI<I>::Options::HYBRID;//CHEB;
-  NLP.options.CMODPROP = 2;
+  NLP.options.RELMETH = mc::NLGO_GUROBI<I>::Options::HYBRID;//CHEB;//
+  NLP.options.CMODPROP = 3;
+  NLP.options.CMODSPAR = true;
 
   NLP.solve( Ik, 0, k0 );
+  std::cout << std::fixed << std::setprecision(1);
+  std::cout << "POLIMG: " << NLP.stats.tPOLIMG << " sec\n";
+  std::cout << "LPSET:  " << NLP.stats.tLPSET << " sec\n";
+  std::cout << "LPSOL:  " << NLP.stats.tLPSOL << " sec, " << NLP.stats.nLPSOL << " problems\n";
 
   return 0;
 }

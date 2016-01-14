@@ -136,19 +136,19 @@ int main()
   CP.options.DOMREDTHRES = 2e-2;
   CP.options.DOMREDBKOFF = 1e-8;
   CP.options.CTRBACKOFF  = 1e-4;
-  CP.options.RELMETH     = mc::NLCP_GUROBI<I>::Options::DRL;//CHEB;
+  CP.options.RELMETH     = mc::NLCP_GUROBI<I>::Options::HYBRID;//CHEB;
   CP.options.CMODSPAR    = false;//true;
-  CP.options.CMODPROP    = 1;
-  CP.options.CMODCUTS    = 1;
+  CP.options.CMODPROP    = 3;
+  CP.options.CMODCUTS    = 2;
   CP.options.CMREDORD    = 3;
   CP.options.CMREDTHRES  = 1e-5;
-  CP.options.CMREDALL    = false;
+  CP.options.CMREDALL    = true;
   CP.options.CMODEL.MIXED_IA = true ;
   std::cout << CP;
 
   //const I Ip[NP] = { I(0.9,1.), I(0.,0.6), I(0.4,1.1), I(0.,5.), I(0.,25.), I(40.,50.), I(30.,55.) };
   //const I Ip[NP] = { I(.85,.9), I(0.,0.6), I(0.4,0.8), I(0.,5.), I(0.,40.), I(40.,50.), I(30.,55.) };
-  const I Ip[NP] = { I(1e-3,1.5), I(0.,0.6), I(0.,0.8), I(0.,5.), I(0.,80.), I(40.,50.), I(30.,55.) };
+  const I Ip[NP] = { I(1e-2,1.5), I(0.,0.6), I(0.,0.8), I(0.,5.), I(0.,80.), I(40.,50.), I(0.,60.) };
   //const I Ip[NP] = { I(1.00000e-03,6.33054e-01), I(0.00000e+00,1.50000e-01), I(4.00000e-01,8.00000e-01),
   //                   I(1.25000e+00,2.50000e+00), I(0.00000e+00,2.00000e+01), I(5.00000e+01,5.00001e+01),
   //                   I(4.25000e+01,4.87500e+01) };
@@ -156,10 +156,10 @@ int main()
   //                   I(1.25000e+00,2.50000e+00), I(0.00000e+00,2.00000e+01), I(4.99999e+01,5.00001e+01),
   //                   I(3.62500e+01,4.875000e+01) };
 
-  std::set<unsigned> CMexcl;
-  CMexcl.insert( 5 );
-  CP.setup(CMexcl);
-  //CP.setup();
+  //std::set<unsigned> CMexcl;
+  //CMexcl.insert( 5 );
+  //CP.setup(CMexcl);
+  CP.setup();
   CP.solve( Ip );
 
 #if defined(SAVE_RESULTS )
@@ -180,11 +180,31 @@ int main()
   mc::FFVar SSEQ = Leverrier_det( NF , dFdX , c_array );
   CP.add_ctr( mc::BASE_OPT::EQ, SSEQ );
 
+  const I Ip[NP] = { I(1e-2,1.5), I(0.,0.6), I(0.,0.8), I(0.,5.), I(0.,80.), I(40.,50.), I(0.,60.) };
+
+  //CP.options.MIPFILE   = "test6.lp";
+  CP.options.DISPLAY     = 2;
+  CP.options.MAXITER     = 10000;
   CP.options.CVATOL      = 1e-6;
   CP.options.CVRTOL      = 1e-6;
-  CP.options.CMODPROP    = 2;
+  CP.options.BRANCHVAR   = mc::SetInv<CVI>::Options::RGREL;
+  CP.options.NODEMEAS    = mc::SetInv<CVI>::Options::LENGTH;
+  CP.options.STGBCHDEPTH = 0;
+  CP.options.STGBCHDRMAX = 0;
+  CP.options.STGBCHRTOL  = 1e-2;
+  CP.options.DOMREDMAX   = 10;
+  CP.options.DOMREDTHRES = 2e-2;
+  CP.options.DOMREDBKOFF = 1e-8;
+  CP.options.CTRBACKOFF  = 1e-4;
+  CP.options.RELMETH     = mc::NLCP_GUROBI<I>::Options::HYBRID;//DRL;
+  CP.options.CMODSPAR    = true;
+  CP.options.CMODPROP    = 3;
   CP.options.CMODCUTS    = 2;
   CP.options.CMREDORD    = 0;
+  CP.options.CMREDTHRES  = 1e-5;
+  CP.options.CMREDALL    = true;
+  CP.options.CMODEL.MIXED_IA = true ;
+  std::cout << CP;
 
   CP.setup();
   CP.solve( Ip );

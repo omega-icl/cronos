@@ -41,7 +41,7 @@ int main()
   NLP.options.POLIMG.SANDWICH_ATOL   = NLP.options.POLIMG.SANDWICH_RTOL  = 1e-5;
   NLP.options.POLIMG.BREAKPOINT_TYPE = mc::PolImg<I>::Options::BIN;//SOS2;//NONE;
   NLP.options.POLIMG.DCDECOMP_SCALE  = false;//true;
-  //NLP.options.MIPFILE = "test4.lp";
+  NLP.options.MIPFILE = "test4.lp";
   NLP.options.MIPDISPLAY = 0;
   NLP.options.DISPLAY = 2;
   NLP.options.NLPSLV.DISPLAY = 0;
@@ -74,20 +74,22 @@ int main()
 
   NLP.options.RELMETH = mc::NLGO_GUROBI<I>::Options::CHEB;
   NLP.options.CMODPROP = 3;
+  NLP.options.CMODSPAR = true;
   NLP.solve( Ip );
   NLP.solve( Ip, Tp );
 
   NLP.options.RELMETH = mc::NLGO_GUROBI<I>::Options::HYBRID;
+  //NLP.options.MIPFILE = "test4.lp";
   NLP.options.CMODPROP = 3;
   NLP.solve( Ip );
   NLP.solve( Ip, Tp );
 
   // Global optimization using PWL
-  NLP.options.CSALGO = mc::NLGO_GUROBI<I>::Options::PWL;
-  NLP.options.RELMETH = mc::NLGO_GUROBI<I>::Options::CHEB;
-  NLP.options.POLIMG.BREAKPOINT_TYPE = mc::PolImg<I>::Options::BIN;//SOS2;//NONE;
-  //NLP.solve( Ip );
-  NLP.solve( Ip, Tp );
+  //NLP.options.CSALGO = mc::NLGO_GUROBI<I>::Options::PWL;
+  //NLP.options.RELMETH = mc::NLGO_GUROBI<I>::Options::CHEB;
+  //NLP.options.POLIMG.BREAKPOINT_TYPE = mc::PolImg<I>::Options::BIN;//SOS2;//NONE;
+  ////NLP.solve( Ip );
+  //NLP.solve( Ip, Tp );
 
   return 0;
 }

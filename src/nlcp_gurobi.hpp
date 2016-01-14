@@ -103,17 +103,13 @@ class NLCP_GUROBI:
   template <typename U> friend std::ostream& operator<<
     ( std::ostream&os, const NLCP_GUROBI<U>& );
 
- //using NLGO_GUROBI<T>::set_dag;
- //using NLGO_GUROBI<T>::set_var;
- //using NLGO_GUROBI<T>::add_ctr;
-
- using NLGO_GUROBI<T>::_nvar;
- using NLGO_GUROBI<T>::_tvar;
- using NLGO_GUROBI<T>::_nctr;
- using NLGO_GUROBI<T>::_CMctr;
- using NLGO_GUROBI<T>::_CMexcl;
- using SetInv<CVar<T>>::_open_nodes;
- using SetInv<CVar<T>>::_exclude_vars;
+  using NLGO_GUROBI<T>::_nvar;
+  using NLGO_GUROBI<T>::_tvar;
+  using NLGO_GUROBI<T>::_nctr;
+  using NLGO_GUROBI<T>::_CMctr;
+  using NLGO_GUROBI<T>::_CMexcl;
+  using SetInv<CVar<T>>::_open_nodes;
+  using SetInv<CVar<T>>::_exclude_vars;
 
  public:
 

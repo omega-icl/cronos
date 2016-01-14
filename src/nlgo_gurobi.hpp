@@ -181,7 +181,7 @@ Other options can be modified to tailor the search, including output level, maxi
 //- [TO DO] Implement similar solver in CPLEX (maybe with a base class NLGO_base)
 //- [TO DO] Enable KKT cuts and reduction constraints
 //- [OK]    Implement SBB method
-//- [OK]    Enable use of polynomial models in relaxations [OK]
+//- [OK]    Enable use of polynomial models in relaxations
 //- [OK]    Enable multiple rounds of PWR refinement
 //- [OK]    Support MINLP
 //- [OK]    Exclude linear variables from bound contraction
@@ -240,6 +240,7 @@ class NLGO_GUROBI:
   typedef std::map< const PolVar<T>*, GRBVar, lt_PolVar<T> > t_LPVar;
   typedef std::map< const PolCut<T>*, GRBConstr, lt_PolCut<T> > t_LPCut;
 #endif
+  typedef std::set< FFVar*, lt_FFVar > t_FFVar;
   using SBB<T>::_exclude_vars;
 
 
@@ -261,6 +262,9 @@ protected:
   std::vector< std::list<const FFOp*> > _op_g;
   //! @brief list of operations for Lagragian gradient evaluation
   std::list<const FFOp*> _op_dL;
+
+  //! @brief set of linear functions (objective or constraints) in problem
+  t_FFVar _fct_lin;
 
   //! @brief Polyhedral image environment
   PolImg<T> _POLenv;
@@ -284,11 +288,13 @@ protected:
 
 private:
   //! @brief Chebyshev full basis in DAG
-  std::pair<unsigned,FFVar*> _basis;
+  std::vector< FFVar > _basis;
   //! @brief Chebyshev full basis order
   unsigned _basisord;
+  //! @brief Chebyshev full basis size
+  unsigned _basisdim;
   //! @brief Internal DAG variable for [-1,1] scaled variables
-  std::vector<FFVar> _scalvar;
+  std::vector< FFVar > _scalvar;
   //! @brief Internal DAG variable for objective function
   FFVar _objvar;
   //! @brief Internal DAG variable for Lagrangian function
@@ -370,7 +376,7 @@ public:
    */
   //! @brief Constructor
   NLGO_GUROBI()
-    : _nvar(0), _nctr(0), _CMenv(0), _basis(0,0), _basisord(0), _lagr_grad(0)
+    : _nvar(0), _nctr(0), _CMenv(0), _basisord(0), _basisdim(0), _lagr_grad(0)
     {
 #ifdef MC__USE_CPLEX
       _ILOenv = new IloEnv;
@@ -398,7 +404,6 @@ public:
       delete _GRBmodel;
       delete _GRBenv;
 #endif
-      delete[] _basis.second;
       delete _CMenv;
       // No need to delete _NLPSLV
     }
@@ -408,7 +413,7 @@ public:
   {
     //! @brief Constructor
     Options():
-      CSALGO(SBB), RELMETH(DRL), PREPROC(true), DOMREDMAX(10), DOMREDTHRES(0.2),
+      CSALGO(SBB), RELMETH(DRL), PREPROC(true), DOMREDMAX(10), DOMREDTHRES(0.05),
       DOMREDBKOFF(1e-8), CVATOL(1e-3), CVRTOL(1e-3), LPPRESOLVE(-1),
       LPFEASTOL(1e-9), LPOPTIMTOL(1e-9), MIPRELGAP(1e-7), MIPABSGAP(1e-7),
       PRESOS2BIGM(-1.), CMODSPAR(false), CMODPROP(2), CMODCUTS(0), CMODDMAX(1e20),
@@ -470,7 +475,7 @@ public:
     //! @brief Display
     void display
       ( std::ostream&out ) const;
-     //! @brief Preprocessing (local optimization, domain reduction)
+    //! @brief Preprocessing (local optimization, domain reduction)
     bool PREPROC;
     //! @brief Maximum number of domain reduction rounds
     unsigned DOMREDMAX;
@@ -563,8 +568,8 @@ public:
 
   //! @brief Setup DAG for cost and constraint evaluation
   void setup
-    ();
-    //( std::set<unsigned> CMexcl=std::set<unsigned>() );
+    //();
+    ( std::set<unsigned> CMexcl=std::set<unsigned>() );
 
   //! @brief Solve (continuous) optimization model to local optimality using IPOPT in variable range <a>P</a> and from initial point <a>p0</a> -- return value is IPOPT status
   Ipopt::ApplicationReturnStatus local
@@ -698,6 +703,9 @@ protected:
     }
 
 private:
+  //! @brief Set model linear cuts
+  void _set_lincuts
+    ( const bool feastest );
   //! @brief Set model polyhedral outer-approximation cuts
   void _set_poacuts
     ( const bool feastest );
@@ -775,8 +783,8 @@ private:
 
 template <typename T> inline void
 NLGO_GUROBI<T>::setup
-()
-//( std::set<unsigned> CMexcl )
+//()
+( std::set<unsigned> CMexcl )
 {
   // full set of decision variables (independent & dependent)
   _var = BASE_NLP::_var;
@@ -794,8 +802,8 @@ NLGO_GUROBI<T>::setup
 
   // setup [-1,1] scaled variables for Chebyshev model environment
   // do not downsize to avoid adding more variables into DAG
-  //_CMexcl = CMexcl;
-  _CMexcl.clear();
+  _CMexcl = CMexcl;
+  //_CMexcl.clear();
   _CMdim = 0;
   for( unsigned i=0; i<_nvar; i++ )
     if( _CMexcl.find(i) == _CMexcl.end() ) ++_CMdim;
@@ -820,7 +828,28 @@ NLGO_GUROBI<T>::setup
   _op_POLfg.resize(nfgop);
   //_op_g = _dag->subgraph( std::get<1>(_ctr).size(), std::get<1>(_ctr).data() );
 
-  // assess problem linearity
+  // identify linear objective/constraint functions in NLP
+  _fct_lin.clear();
+  if( std::get<0>(_obj).size() ){
+    FFDep fdep = std::get<1>(_obj)[0].dep();
+    auto it = fdep.dep().cbegin();
+    bool islin = true;
+    for( ; islin && it != fdep.dep().cend(); ++it )
+      if( !it->second ) islin = false;
+    if( islin ) _fct_lin.insert( &std::get<1>(_obj)[0] );
+  }
+  for( unsigned j=0; j<_nctr; j++ ){
+    FFDep gdep = std::get<1>(_ctr)[j].dep();
+    auto it = gdep.dep().cbegin();
+    bool islin = true;
+    for( ; islin && it != gdep.dep().cend(); ++it )
+      if( !it->second ) islin = false;
+    if( islin ) _fct_lin.insert( &std::get<1>(_ctr)[j] );
+  }
+  std::cout << "LINEAR OBJECTIVE/CONSTRAINT FUNCTIONS:    " << _fct_lin.size() << std::endl
+            << "NONLINEAR OBJECTIVE/CONSTRAINT FUNCTIONS: " << _nctr-_fct_lin.size()+1 << std::endl;
+
+  // identify linear variables in NLP and exclude from branching
   FFDep fgdep = std::get<0>(_obj).size()? std::get<1>(_obj)[0].dep(): 0.;
   for( unsigned j=0; j<_nctr; j++ )
     fgdep += std::get<1>(_ctr)[j].dep();
@@ -828,14 +857,19 @@ NLGO_GUROBI<T>::setup
   std::cout << "NLP <- " << fgdep << std::endl;
   //int dum; std::cin >> dum;
 #endif
-
-  // Variables to exclude from branching
   _exclude_vars.clear();
+  unsigned nvar_lin = 0;
   for( unsigned i=0; i<_nvar; i++ ){
     auto it = fgdep.dep().find(i);
-    if( it == fgdep.dep().end() || it->second )
+    if( it == fgdep.dep().end() || it->second ){
       _exclude_vars.insert(i);
+      nvar_lin++;
+    }
   }
+  std::cout << "LINEARLY PARTICIPATING VARIABLES:         " << nvar_lin << std::endl
+            << "NONLINEARLY PARTICIPATING VARIABLES:      " << _nvar-nvar_lin << std::endl
+            << std::endl;
+
 /*
   // setup Lagrangian gradient evaluation
   _cleanup();
@@ -1448,6 +1482,7 @@ NLGO_GUROBI<T>::_refine_polrelax
 
   // Update polyhedral cuts
   _POLenv.reset_cuts();
+  _set_lincuts( feastest );
   if( options.RELMETH==Options::DRL || options.RELMETH==Options::HYBRID )
     _set_poacuts( feastest );
   if( options.RELMETH==Options::CHEB || options.RELMETH==Options::HYBRID )
@@ -1477,6 +1512,8 @@ NLGO_GUROBI<T>::_set_polrelax
     );
   _POLobjaux.set( &_POLenv, _objvar, T(-SBB<T>::options.INF,SBB<T>::options.INF), true );
 
+  _set_lincuts( feastest );
+
   if( options.RELMETH==Options::DRL || options.RELMETH==Options::HYBRID )
     // Add polyhedral cuts
     _set_poacuts( feastest );
@@ -1486,10 +1523,6 @@ NLGO_GUROBI<T>::_set_polrelax
     if( _CMenv && (_CMenv->nvar() != _CMdim || _CMenv->nord() != options.CMODPROP) ){
       _CMvar.clear();
       delete _CMenv; _CMenv = 0;   
-    }
-    _basisord = (!options.CMODCUTS || options.CMODCUTS>options.CMODPROP)? options.CMODPROP: options.CMODCUTS;
-    if( _basis.second && (!_CMenv || _basis.first != _CMenv->posord()[_basisord+1]) ){
-      delete[] _basis.second; _basis.first = 0; _basis.second = 0;
     }
 
     if( !_CMenv ){
@@ -1512,16 +1545,19 @@ NLGO_GUROBI<T>::_set_polrelax
         else
           _CMvar[ip] = P[ip];
     }
-    // Set polyhedral main scaled variables
+
+    // Set polyhedral main scaled variables and size Chebyshev basis
     _POLscalvar.clear();
     itv = _scalvar.begin();
     for( unsigned ip=0; itv!=_scalvar.end(); ++itv, ip++ )
       _POLscalvar.push_back(
         PolVar<T>( &_POLenv, *itv, Op<T>::zeroone()*2.-1., true )
       );
-    // Set scaled and polyhedral Chebyshev basis variables
-    if( !_basis.second ) _basis = _CMenv->get_bndmon( _basisord, _scalvar.data(), true );
-    _POLbasis.resize( _basis.first );
+    _basisord = (!options.CMODCUTS || options.CMODCUTS>options.CMODPROP)?
+                options.CMODPROP: options.CMODCUTS;
+    _basisdim = _CMenv->posord()[_basisord+1];
+    _basis.resize( _basisdim );
+    _POLbasis.resize( _basisdim );
 
     // Add polyhedral cuts
     _set_chebcuts( feastest );
@@ -1547,6 +1583,8 @@ NLGO_GUROBI<T>::_update_polrelax
   for( auto itv = _POLvar.begin(); itv!=_POLvar.end(); ++itv, ip++ )
     itv->update( P[ip], tvar?(tvar[ip]?false:true):true );
 
+  _set_lincuts( feastest );
+
   if( options.RELMETH==Options::DRL || options.RELMETH==Options::HYBRID )
     // Add polyhedral cuts
     _set_poacuts( feastest );
@@ -1571,13 +1609,16 @@ NLGO_GUROBI<T>::_update_polrelax
 }
 
 template <typename T> inline void
-NLGO_GUROBI<T>::_set_poacuts
+NLGO_GUROBI<T>::_set_lincuts
 ( const bool feastest )
 {
   // Add polyhedral cuts for objective - by-pass if feasibility test or no objective function defined
-  if( !feastest && std::get<1>(_obj).size() ){
+  auto ito = std::get<0>(_obj).begin();
+  for( unsigned j=0; ito!=std::get<0>(_obj).end() && j<1; ++ito, j++ ){
+    if( feastest || _fct_lin.find(std::get<1>(_obj).data()) == _fct_lin.end() ) continue;
     try{
       _dag->eval( _op_f, _op_POLfg.data(), 1, std::get<1>(_obj).data(), &_POLobj, _nvar, _var.data(), _POLvar.data() );
+      _POLenv.generate_cuts( 1, &_POLobj, false );
       switch( std::get<0>(_obj)[0] ){
         case MIN: _POLenv.add_cut( PolCut<T>::GE, 0., _POLobjaux, 1., _POLobj, -1. ); break;
         case MAX: _POLenv.add_cut( PolCut<T>::LE, 0., _POLobjaux, 1., _POLobj, -1. ); break;
@@ -1592,8 +1633,62 @@ NLGO_GUROBI<T>::_set_poacuts
   _POLctr.resize( _nctr );
   auto itc = std::get<0>(_ctr).begin();
   for( unsigned j=0; itc!=std::get<0>(_ctr).end(); ++itc, j++ ){
+    if( _fct_lin.find(std::get<1>(_ctr).data()+j) == _fct_lin.end() ) continue;
     try{
       _dag->eval( _op_g[j], _op_POLfg.data(), 1, std::get<1>(_ctr).data()+j, _POLctr.data()+j, _nvar, _var.data(), _POLvar.data() );
+      _POLenv.generate_cuts( 1, _POLctr.data()+j, false );
+      switch( (*itc) ){
+        case EQ: if( !feastest ){ _POLenv.add_cut( PolCut<T>::EQ, 0., _POLctr[j], 1. ); break; }
+                 else             _POLenv.add_cut( PolCut<T>::GE, 0., _POLctr[j], 1., _POLobjaux,  1. ); // no break
+        case LE: if( !feastest ){ _POLenv.add_cut( PolCut<T>::LE, 0., _POLctr[j], 1. ); break; }
+                 else           { _POLenv.add_cut( PolCut<T>::LE, 0., _POLctr[j], 1., _POLobjaux, -1. ); break; }
+        case GE: if( !feastest ){ _POLenv.add_cut( PolCut<T>::GE, 0., _POLctr[j], 1. ); break; }
+                 else           { _POLenv.add_cut( PolCut<T>::GE, 0., _POLctr[j], 1., _POLobjaux,  1. ); break; }
+      }
+    }
+    catch(...){
+      // No cut added for constraint #j in case evaluation failed
+      continue;
+    }
+  }
+#ifdef MC__NLGO_GUROBI_DEBUG
+  std::cout << _POLenv;
+#endif
+}
+
+template <typename T> inline void
+NLGO_GUROBI<T>::_set_poacuts
+( const bool feastest )
+{
+  // Add polyhedral cuts for objective - by-pass if feasibility test or no objective function defined
+  //if( !feastest && std::get<1>(_obj).size() ){
+  auto ito = std::get<0>(_obj).begin();
+  for( unsigned j=0; ito!=std::get<0>(_obj).end() && j<1; ++ito, j++ ){
+    if( feastest || _fct_lin.find(std::get<1>(_obj).data()) != _fct_lin.end() ) continue;
+    try{
+      //std::cout << "objective" << std::endl;
+      _dag->eval( _op_f, _op_POLfg.data(), 1, std::get<1>(_obj).data(), &_POLobj, _nvar, _var.data(), _POLvar.data() );
+      _POLenv.generate_cuts( 1, &_POLobj, false );
+      switch( std::get<0>(_obj)[0] ){
+        case MIN: _POLenv.add_cut( PolCut<T>::GE, 0., _POLobjaux, 1., _POLobj, -1. ); break;
+        case MAX: _POLenv.add_cut( PolCut<T>::LE, 0., _POLobjaux, 1., _POLobj, -1. ); break;
+      }
+    }
+    catch(...){
+      // No cut added for objective in case evaluation failed
+    }
+  }
+
+  // Add polyhedral cuts for constraints - add slack to inequality constraints if feasibility test
+  _POLctr.resize( _nctr );
+  auto itc = std::get<0>(_ctr).begin();
+  for( unsigned j=0; itc!=std::get<0>(_ctr).end(); ++itc, j++ ){
+    if( _fct_lin.find(std::get<1>(_ctr).data()+j) != _fct_lin.end() ) continue;
+    try{
+      //std::cout << "constraint #" << j << std::endl;
+      //_dag->output( _op_g[j] );
+      _dag->eval( _op_g[j], _op_POLfg.data(), 1, std::get<1>(_ctr).data()+j, _POLctr.data()+j, _nvar, _var.data(), _POLvar.data() );
+      _POLenv.generate_cuts( 1, _POLctr.data()+j, false );
       switch( (*itc) ){
         case EQ: if( !feastest ){ _POLenv.add_cut( PolCut<T>::EQ, 0., _POLctr[j], 1. ); break; }
                  else             _POLenv.add_cut( PolCut<T>::GE, 0., _POLctr[j], 1., _POLobjaux,  1. ); // no break
@@ -1625,24 +1720,62 @@ NLGO_GUROBI<T>::_set_chebcuts
       std::cout << "Variable #" << i << ": " << _CMvar[i];
 #endif
   }
-  _dag->eval( _basis.first-1, _basis.second+1, _POLbasis.data()+1, _scalvar.size(), _scalvar.data(), _POLscalvar.data() );
+  bool basis_dense = false;
 
   // Add Chebyshev-derived cuts for objective - by-pass if feasibility test or no objective function defined
-  if( !feastest && std::get<1>(_obj).size() ){
+  //if( !feastest && std::get<1>(_obj).size() ){
+  auto ito = std::get<0>(_obj).begin();
+  for( unsigned j=0; ito!=std::get<0>(_obj).end() && j<1; ++ito, j++ ){
+    if( feastest || _fct_lin.find(std::get<1>(_obj).data()) != _fct_lin.end() ) continue;
     try{
-      _dag->eval( _op_f, _op_CMfg.data(), 1, std::get<1>(_obj).data(), &_CMobj, _nvar, _var.data(), _CMvar.data() );
+       // Polynomial model evaluation
+      _dag->eval( _op_f, _op_CMfg.data(), 1, std::get<1>(_obj).data(), &_CMobj,
+                  _nvar, _var.data(), _CMvar.data() );
 #ifdef MC__NLGO_GUROBI_DEBUG
        std::cout << _CMobj;
        if(_p_inc.data()) std::cout << _CMobj.P(_p_inc.data())+_CMobj.R() << std::endl;
 #endif
+
+      // Polynomial model remainder
       T Robj = _CMobj.remainder();
       for( unsigned i=_basisord+1; i<=_CMenv->nord(); i++ )
         Robj += _CMobj.bndord(i);
-      switch( std::get<0>(_obj)[0] ){
-        case MIN: _POLenv.add_cut( PolCut<T>::LE, -Op<T>::l(Robj)-_CMobj.coefmon().second[0],
-          _POLbasis.size()-1, _POLbasis.data()+1, _CMobj.coefmon().second+1, _POLobjaux, -1. ); break;
-        case MAX: _POLenv.add_cut( PolCut<T>::GE, -Op<T>::u(Robj)-_CMobj.coefmon().second[0],
-          _POLbasis.size()-1, _POLbasis.data()+1, _CMobj.coefmon().second+1, _POLobjaux, -1. ); break;
+
+      // Dense polynomial relaxation
+      if( _CMobj.ndxmon().empty() ){
+        if( !basis_dense ){
+          _CMenv->get_bndmon( _basisord, _basis.data(), _scalvar.data(), true );
+          _dag->eval( _basis.size()-1, _basis.data()+1, _POLbasis.data()+1, _scalvar.size(),
+                      _scalvar.data(), _POLscalvar.data() );
+          _POLenv.generate_cuts( _basis.size()-1, _POLbasis.data()+1, false );
+          basis_dense = true;
+        }
+        switch( std::get<0>(_obj)[0] ){
+          case MIN: _POLenv.add_cut( PolCut<T>::LE, -Op<T>::l(Robj)-_CMobj.coefmon().second[0],
+            _POLbasis.size()-1, _POLbasis.data()+1, _CMobj.coefmon().second+1, _POLobjaux, -1. ); break;
+          case MAX: _POLenv.add_cut( PolCut<T>::GE, -Op<T>::u(Robj)-_CMobj.coefmon().second[0],
+            _POLbasis.size()-1, _POLbasis.data()+1, _CMobj.coefmon().second+1, _POLobjaux, -1. ); break;
+        }
+      }
+
+      // Sparse polynomial relaxation
+      else{
+        auto first_CMobj = _CMobj.ndxmon().cbegin();
+        const double a0 = *first_CMobj? 0.: (++first_CMobj, _CMobj.coefmon().second[0]);
+        auto last_CMobj = _CMobj.ndxmon().lower_bound(_basisdim);
+        const std::set<unsigned> ndx_CMobj( first_CMobj, last_CMobj );
+        if( !basis_dense ){
+          _CMenv->get_bndmon( _basisord, _basis.data(), ndx_CMobj, _scalvar.data(), true );
+          _dag->eval( ndx_CMobj, _basis.data(), _POLbasis.data(), _scalvar.size(),
+                      _scalvar.data(), _POLscalvar.data() );
+          _POLenv.generate_cuts( ndx_CMobj, _POLbasis.data(), false );
+        }
+        switch( std::get<0>(_obj)[0] ){
+          case MIN: _POLenv.add_cut( PolCut<T>::LE, -Op<T>::l(Robj)-a0, ndx_CMobj,
+            _POLbasis.data(), _CMobj.coefmon().second, _POLobjaux, -1. ); break;
+          case MAX: _POLenv.add_cut( PolCut<T>::GE, -Op<T>::u(Robj)-a0, ndx_CMobj,
+            _POLbasis.data(), _CMobj.coefmon().second, _POLobjaux, -1. ); break;
+        }
       }
     }
     catch(...){
@@ -1658,36 +1791,80 @@ NLGO_GUROBI<T>::_set_chebcuts
   _CMctr.resize( _nctr );
   auto itc = std::get<0>(_ctr).begin();
   for( unsigned j=0; itc!=std::get<0>(_ctr).end(); ++itc, j++ ){
+    if( _fct_lin.find(std::get<1>(_ctr).data()+j) != _fct_lin.end() ) continue;
     try{
-      _dag->eval( _op_g[j], _op_CMfg.data(), 1, std::get<1>(_ctr).data()+j, _CMctr.data()+j, _nvar, _var.data(), _CMvar.data() );
+      // Polynomial model evaluation
+      _dag->eval( _op_g[j], _op_CMfg.data(), 1, std::get<1>(_ctr).data()+j, _CMctr.data()+j,
+                  _nvar, _var.data(), _CMvar.data() );
 #ifdef MC__NLGO_GUROBI_DEBUG
       std::cout << "Constraint #" << j << ": " << _CMctr[j];
       if(_p_inc.data()) std::cout << "optim: " << _CMctr[j].P(_p_inc.data())+_CMctr[j].R() << std::endl;
 #endif
-      // Test for too large Chebyshev bounds or NaN (
+      // Test for too large Chebyshev bounds or NaN
       if( !(Op<CVar<T>>::diam(_CMctr[j]) <= options.CMODDMAX) ) throw(0);
+
+      // Polynomial model remainder
       T Rctr = _CMctr[j].remainder();
       for( unsigned i=_basisord+1; i<=_CMenv->nord(); i++ )
         Rctr += _CMctr[j].bndord(i);
-      switch( (*itc) ){
-        case EQ: if( !feastest ) _POLenv.add_cut( PolCut<T>::GE,
-          -Op<T>::u(Rctr)-_CMctr[j].coefmon().second[0],
-          _POLbasis.size()-1, _POLbasis.data()+1, _CMctr[j].coefmon().second+1 ); // no break
-                 else            _POLenv.add_cut( PolCut<T>::GE,
-          -Op<T>::u(Rctr)-_CMctr[j].coefmon().second[0],
-          _POLbasis.size()-1, _POLbasis.data()+1, _CMctr[j].coefmon().second+1, _POLobjaux,  1. ); // no break
-        case LE: if( !feastest ){ _POLenv.add_cut( PolCut<T>::LE,
-          -Op<T>::l(Rctr)-_CMctr[j].coefmon().second[0],
-          _POLbasis.size()-1, _POLbasis.data()+1, _CMctr[j].coefmon().second+1 ); break; }
-                 else           { _POLenv.add_cut( PolCut<T>::LE,
-          -Op<T>::l(Rctr)-_CMctr[j].coefmon().second[0],
-          _POLbasis.size()-1, _POLbasis.data()+1, _CMctr[j].coefmon().second+1, _POLobjaux, -1. ); break; }
-        case GE: if( !feastest ){ _POLenv.add_cut( PolCut<T>::GE,
-          -Op<T>::u(Rctr)-_CMctr[j].coefmon().second[0],
-          _POLbasis.size()-1, _POLbasis.data()+1, _CMctr[j].coefmon().second+1 ); break; }
-                 else           { _POLenv.add_cut( PolCut<T>::GE,
-          -Op<T>::u(Rctr)-_CMctr[j].coefmon().second[0],
-          _POLbasis.size()-1, _POLbasis.data()+1, _CMctr[j].coefmon().second+1, _POLobjaux,  1. ); break; }
+
+      // Dense polynomial relaxation
+      if( _CMctr[j].ndxmon().empty() ){
+        if( !basis_dense ){
+          _CMenv->get_bndmon( _basisord, _basis.data(), _scalvar.data(), true );
+          _dag->eval( _basis.size()-1, _basis.data()+1, _POLbasis.data()+1, _scalvar.size(),
+                      _scalvar.data(), _POLscalvar.data() );
+          _POLenv.generate_cuts( _basis.size()-1, _POLbasis.data()+1, false );
+          basis_dense = true;
+        }
+        switch( (*itc) ){
+          case EQ: if( !feastest ) _POLenv.add_cut( PolCut<T>::GE,
+            -Op<T>::u(Rctr)-_CMctr[j].coefmon().second[0],
+            _POLbasis.size()-1, _POLbasis.data()+1, _CMctr[j].coefmon().second+1 ); // no break
+                   else            _POLenv.add_cut( PolCut<T>::GE,
+            -Op<T>::u(Rctr)-_CMctr[j].coefmon().second[0],
+            _POLbasis.size()-1, _POLbasis.data()+1, _CMctr[j].coefmon().second+1, _POLobjaux,  1. ); // no break
+          case LE: if( !feastest ){ _POLenv.add_cut( PolCut<T>::LE,
+            -Op<T>::l(Rctr)-_CMctr[j].coefmon().second[0],
+            _POLbasis.size()-1, _POLbasis.data()+1, _CMctr[j].coefmon().second+1 ); break; }
+                   else           { _POLenv.add_cut( PolCut<T>::LE,
+            -Op<T>::l(Rctr)-_CMctr[j].coefmon().second[0],
+            _POLbasis.size()-1, _POLbasis.data()+1, _CMctr[j].coefmon().second+1, _POLobjaux, -1. ); break; }
+          case GE: if( !feastest ){ _POLenv.add_cut( PolCut<T>::GE,
+            -Op<T>::u(Rctr)-_CMctr[j].coefmon().second[0],
+            _POLbasis.size()-1, _POLbasis.data()+1, _CMctr[j].coefmon().second+1 ); break; }
+                   else           { _POLenv.add_cut( PolCut<T>::GE,
+            -Op<T>::u(Rctr)-_CMctr[j].coefmon().second[0],
+            _POLbasis.size()-1, _POLbasis.data()+1, _CMctr[j].coefmon().second+1, _POLobjaux,  1. ); break; }
+        }
+      }
+
+      // Sparse polynomial relaxation
+      else{
+        auto first_CMctr = _CMctr[j].ndxmon().cbegin();
+        const double a0 = *first_CMctr? 0.: (++first_CMctr, _CMctr[j].coefmon().second[0]);
+        auto last_CMctr = _CMctr[j].ndxmon().lower_bound(_basisdim);
+        const std::set<unsigned> ndx_CMctr( first_CMctr, last_CMctr );
+        if( !basis_dense ){
+          _CMenv->get_bndmon( _basisord, _basis.data(), ndx_CMctr, _scalvar.data(), true );
+          _dag->eval( ndx_CMctr, _basis.data(), _POLbasis.data(), _scalvar.size(),
+                      _scalvar.data(), _POLscalvar.data() );
+          _POLenv.generate_cuts( ndx_CMctr, _POLbasis.data(), false );
+        }
+        switch( (*itc) ){
+          case EQ: if( !feastest ) _POLenv.add_cut( PolCut<T>::GE, -Op<T>::u(Rctr)-a0,
+            ndx_CMctr, _POLbasis.data(), _CMctr[j].coefmon().second ); // no break
+                   else            _POLenv.add_cut( PolCut<T>::GE, -Op<T>::u(Rctr)-a0,
+            ndx_CMctr, _POLbasis.data(), _CMctr[j].coefmon().second, _POLobjaux,  1. ); // no break
+          case LE: if( !feastest ){ _POLenv.add_cut( PolCut<T>::LE, -Op<T>::l(Rctr)-a0,
+            ndx_CMctr, _POLbasis.data(), _CMctr[j].coefmon().second ); break; }
+                   else           { _POLenv.add_cut( PolCut<T>::LE, -Op<T>::l(Rctr)-a0,
+            ndx_CMctr, _POLbasis.data(), _CMctr[j].coefmon().second, _POLobjaux, -1. ); break; }
+          case GE: if( !feastest ){ _POLenv.add_cut( PolCut<T>::GE, -Op<T>::u(Rctr)-a0,
+            ndx_CMctr, _POLbasis.data(), _CMctr[j].coefmon().second ); break; }
+                   else           { _POLenv.add_cut( PolCut<T>::GE, -Op<T>::u(Rctr)-a0,
+            ndx_CMctr, _POLbasis.data(), _CMctr[j].coefmon().second, _POLobjaux,  1. ); break; }
+        }
       }
     }
     catch(...){
@@ -1788,6 +1965,7 @@ NLGO_GUROBI<T>::_set_LPcuts
   _reset_LPmodel();
   for( auto itv=_POLenv.Vars().begin(); itv!=_POLenv.Vars().end(); ++itv )
     _set_LPvar( itv->second );
+    //if( itv->second->cuts() ) _set_LPvar( itv->second );
   for( auto itv=_POLenv.Aux().begin(); itv!=_POLenv.Aux().end(); ++itv )
     _set_LPvar( *itv );
 #ifndef MC__USE_CPLEX

@@ -28,10 +28,10 @@ template <class T>
 T Pmod
 ( const T*k, double q, double Ir )
 {
-  //const double tau = 5.5e-3, K = 3.57e-2;
-  //return k[0]*Ir/(1.+tau*k[1]*pow(q,k[2])*Ir+K*tau*sqr(k[1]*pow(q,k[2])*Ir));
-  const double tau = 5.5e-3;
-  return k[0]*Ir/(1.+tau*k[1]*pow(q,k[2])*Ir+k[3]*tau*sqr(k[1]*pow(q,k[2])*Ir));
+  const double tau = 5.5e-3, K = 3.57e-2;
+  return k[0]*Ir/(1.+tau*k[1]*pow(q,k[2])*Ir+K*tau*sqr(k[1]*pow(q,k[2])*Ir));
+  //const double tau = 5.5e-3;
+  //return k[0]*Ir/(1.+tau*k[1]*pow(q,k[2])*Ir+k[3]*tau*sqr(k[1]*pow(q,k[2])*Ir));
 }
 
 const unsigned NT = 14;
@@ -44,15 +44,15 @@ const double Im_1200[NT] = {   20.,   40.,   60.,   80.,  100.,  150.,  200.,  3
 const double Pm_1200[NT] = { 0.31725, 0.62856, 0.93329, 1.23086, 1.52077, 2.20916, 2.84152,
                              3.92743, 4.77558, 5.84660, 6.30032, 6.37668, 6.24496, 6.00915 }; // [gchl/gC·h]
 const double q_50 = 8.2e-2, q_1200 = 1.8e-2; // [gchl/gC]
-const double dPm_rel = 0.01;
+const double dPm_rel = 5e-2; // relative error
 
 ////////////////////////////////////////////////////////////////////////////////
 
 int main() 
 {
   mc::FFGraph DAG;
-  //const unsigned NP = 3, NY = 2;
-  const unsigned NP = 4, NY = 2;
+  const unsigned NP = 3, NY = 2;
+  //const unsigned NP = 4, NY = 2;
   mc::FFVar P[NP], Y[NY];
   for( unsigned i=0; i<NP; i++ ) P[i].set( &DAG );
 
@@ -84,8 +84,8 @@ int main()
   CP.options.CMODCUTS    = 1;
   std::cout << CP;
 
-  //const I Ip[NP] = { I(0.015,0.017), I(0.4,0.6), I(0.4,0.6) };
-  const I Ip[NP] = { I(0.015,0.017), I(0.4,0.6), I(0.4,0.6), I(1e-2,6e-2),  };
+  const I Ip[NP] = { I(0.015,0.017), I(0.4,0.6), I(0.4,0.6) };
+  //const I Ip[NP] = { I(0.015,0.017), I(0.4,0.6), I(0.4,0.6), I(1e-2,6e-2),  };
 
   CP.solve( Ip );
 

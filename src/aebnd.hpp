@@ -151,8 +151,8 @@ public:
   {
     //! @brief Constructor
     Options( int iDISP=1 ):
-      BOUNDER(AUTO), PRECOND(INVMD), BLKDEC(false), MAXIT(10), RTOL(1e-7),
-      ATOL(machprec()), DISPLAY(iDISP)
+      BOUNDER(AUTO), PRECOND(INVMD), BLKDEC(false), INTERBND(true),
+      MAXIT(10), RTOL(1e-7), ATOL(machprec()), DISPLAY(iDISP)
       {}
     //! @brief Enumeration of bounding methods (for polynomial models only)
     enum BOUNDING_METHOD{
@@ -176,6 +176,8 @@ public:
     PRECOND_METHOD PRECOND;
     //! @brief Whether to apply block decomposition (default: true)
     bool BLKDEC;
+    //! @brief Whether to intersect bounds from one iteration to the next (default: true)
+    bool INTERBND;
     //! @brief Maximum number of iterations (default: 10, no limit: 0)
     unsigned int MAXIT;
     //! @brief Relative stopping tolerance (default: 1e-7)
@@ -969,7 +971,9 @@ AEBND<T,PMT,PVT>::_gs
             else temp += ( 1. - G[_ndx(i,i,ndepblk)] ) * ( varblk[j] - refblk[j] );
           }
           Xk = refblk[i] + b[i] + temp;
-          if( !Op<U>::inter( varblk[i], Xk, varblk[i] ) ) return EMPTY;
+          if( options.INTERBND ) varblk[i] = Xk;
+          else if( !Op<U>::inter( varblk[i], Xk, varblk[i] ) ) return EMPTY;
+          //if( !Op<U>::inter( varblk[i], Xk, varblk[i] ) ) return EMPTY;
         }
       }
 
@@ -990,7 +994,9 @@ AEBND<T,PMT,PVT>::_gs
             }
             Xk = refblk[i] + b[i] + temp;
           }
-          if( !Op<U>::inter( varblk[i], Xk, varblk[i] ) ) return EMPTY;
+          if( options.INTERBND ) varblk[i] = Xk;
+          else if( !Op<U>::inter( varblk[i], Xk, varblk[i] ) ) return EMPTY;
+          //if( !Op<U>::inter( varblk[i], Xk, varblk[i] ) ) return EMPTY;
           //else if( options.DISPLAY >= 2 )
           //  os << " Skipped Iteration #" << iter+1
           //     << " for Variable X" << _bVARrev[posblk+i] << std::endl;

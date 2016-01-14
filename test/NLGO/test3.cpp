@@ -120,6 +120,13 @@ int main()
 
   NLP.setup();
   //int status = NLP.relax( Ip );
+
+  NLP.options.CSALGO  = mc::NLGO_GUROBI<I>::Options::SBB;
+  NLP.options.RELMETH = mc::NLGO_GUROBI<I>::Options::HYBRID;
+  NLP.options.CMODSPAR = true;
+  NLP.options.CMODPROP = 2;
+  //NLP.options.MIPFILE = "test3.lp";
+
   int status = NLP.solve( Ip );
 
   //if( status == Ipopt::Solve_Succeeded ){

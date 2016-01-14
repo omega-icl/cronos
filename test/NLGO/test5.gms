@@ -118,8 +118,8 @@ EQUATIONS
 
 F..  z =E= SUM(NT, power(x('1')*Im50(NT)/(1.+tau*x('2')*exp(x('3')*log(q50))*Im50(NT)+K*tau*power(x('2')*exp(x('3')*log(q50))*Im50(NT),2))-Pm50(NT),2)) + SUM(NT, power(x('1')*Im1200(NT)/(1.+tau*x('2')*exp(x('3')*log(q1200))*Im1200(NT)+K*tau*power(x('2')*exp(x('3')*log(q1200))*Im1200(NT),2))-Pm1200(NT),2));
 
-OPTION NLP = BARON;
-*OPTION NLP = ANTIGONE;
+*OPTION NLP = BARON;
+OPTION NLP = ANTIGONE;
 OPTION OPTCR = 1e-3;
 OPTION OPTCA = 1e-3;
 

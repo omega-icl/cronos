@@ -3,9 +3,10 @@
 #undef  USE_FILIB	// specify to use FILIB++ for interval arithmetic
 #undef  DEBUG		// whether to output debug information
 #define USE_DEPS	// whether to use dependents
-//#define MC__USE_CPLEX
+#define MC__USE_CPLEX
 ////////////////////////////////////////////////////////////////////////////////
 
+#include <iostream>
 #include <fstream>
 #include "nlcp_gurobi.hpp"//.backup"
 
@@ -29,13 +30,53 @@ typedef mc::CVar<I> CVI;
 const unsigned nc = 3, ns = 5, pf = 3;
 
 ////////////////////////////////////////////////////////////////////////////////
+
 std::set<unsigned> branching_strategy
 ( const typename mc::NLCP_GUROBI<I>::NODE*pNode )
 {
+  // Variable selection rule based on Baharev et al [AIChE Journal 2011, Vol. 57, No. 6]
+  // The widest interval corresponding to the bulk composition is bisected exclusively
+  // as long as its width is above 'thres'
   std::set<unsigned> sset;
-  for( unsigned i=1; i<=nc*ns; i++ ) sset.insert( i );
+  double thres = 2e-2, maxw = 0.;
+  for( unsigned i=1; i<=nc*ns; i++ ){
+    //std::cout << pNode->P(i) << std::endl;
+    if( pNode->depend().find(i) == pNode->depend().end()
+     && mc::Op<CVI>::diam(pNode->P(i)) > maxw )
+      maxw = mc::Op<CVI>::diam(pNode->P(i));
+  }
+  std::cout << std::setprecision(3) << std::scientific << "  " << maxw;
+  if( maxw > thres ) //pNode->index() < 1000 )
+    for( unsigned i=1; i<=nc*ns; i++ ) sset.insert( i );
+  else
+    for( unsigned i=0; i<=ns*(nc*2+1); i++ ) sset.insert( i );
   return sset;
 }
+/*
+////////////////////////////////////////////////////////////////////////////////
+std::set<unsigned> branching_strategy
+( const typename mc::NLCP_GUROBI<I>::NODE*pNode )
+{
+  // Variable selection rule based on Baharev et al [AIChE Journal 2011, Vol. 57, No. 6]
+  // The widest interval corresponding to the bulk composition is bisected exclusively
+  // as long as its width is above 'thres'
+  std::set<unsigned> sset;
+  double thres = 2e-2, maxw = 0.;
+  for( unsigned i=nc*ns+1; i<=2*nc*ns; i++ ){
+    //std::cout << pNode->P(i) << std::endl;
+    if( pNode->depend().find(i) == pNode->depend().end()
+     && mc::Op<CVI>::diam(pNode->P(i)) > maxw )
+      maxw = mc::Op<CVI>::diam(pNode->P(i));
+  }
+  std::cout << std::setprecision(3) << std::scientific << "  " << maxw;
+  if( maxw > thres ) //pNode->index() < 1000 )
+    for( unsigned i=nc*ns+1; i<=2*nc*ns; i++ ) sset.insert( i );
+  else
+    for( unsigned i=0; i<=ns*(nc*2+1); i++ ) sset.insert( i );
+  return sset;
+}
+*/
+////////////////////////////////////////////////////////////////////////////////
 
 int main() 
 {
@@ -249,7 +290,44 @@ int main()
   Ip[	33	] = I(	336.3		,	383.4		);
   Ip[	34	] = I(	336.3		,	383.4		);
   Ip[	35	] = I(	336.3		,	383.4		); // End of T
-
+/*
+  Ip[	0	] = I(	   4.6701947e-01,   4.6717792e-01	);
+  Ip[	1	] = I(	   8.5551997e-01,   8.5676991e-01	);
+  Ip[	2	] = I(	   8.0591492e-01,   8.1131385e-01	);
+  Ip[	3	] = I(	   6.4700690e-01,   6.5136625e-01	);
+  Ip[	4	] = I(	   1.5107848e-01,   1.5849069e-01	);
+  Ip[	5	] = I(	   6.6921106e-03,   1.1079602e-02	);
+  Ip[	6	] = I(	   2.7985792e-02,   3.4615882e-02	);
+  Ip[	7	] = I(	   5.4691554e-02,   6.2034091e-02	);
+  Ip[	8	] = I(	   1.0487149e-01,   1.1087940e-01	);
+  Ip[	9	] = I(	   2.3939398e-01,   2.4483152e-01	);
+  Ip[	10	] = I(	   2.2719817e-01,   2.3493617e-01	);
+  Ip[	11	] = I(	   1.0958544e-01,   1.1560984e-01	);
+  Ip[	12	] = I(	   1.3513333e-01,   1.3942801e-01	);
+  Ip[	13	] = I(	   2.3511186e-01,   2.4182897e-01	);
+  Ip[	14	] = I(	   6.0361257e-01,   6.0841635e-01	);
+  Ip[	15	] = I(	   7.5825218e-01,   7.6229098e-01	);
+  Ip[	16	] = I(	   1.0232978e+00,   1.0295358e+00	);
+  Ip[	17	] = I(	   1.0585126e+00,   1.0704878e+00	);
+  Ip[	18	] = I(	   1.2693443e+00,   1.2834685e+00	);
+  Ip[	19	] = I(	   4.6522215e+00,   4.6895259e+00	);
+  Ip[	20	] = I(	   2.3043283e+01,   2.3119556e+01	);
+  Ip[	21	] = I(	   5.5970688e-01,   5.6530602e-01	);
+  Ip[	22	] = I(	   5.0115584e-01,   5.0720480e-01	);
+  Ip[	23	] = I(	   3.7942828e-01,   3.8642725e-01	);
+  Ip[	24	] = I(	   3.2903279e-01,   3.3477730e-01	);
+  Ip[	25	] = I(	   1.0214119e+00,   1.0269908e+00	);
+  Ip[	26	] = I(	   9.3170161e-01,   9.3973987e-01	);
+  Ip[	27	] = I(	   7.9972948e-01,   8.0664404e-01	);
+  Ip[	28	] = I(	   5.2361885e-01,   5.3194986e-01	);
+  Ip[	29	] = I(	   3.1010805e-01,   3.2268334e-01	);
+  Ip[	30	] = I(	   7.9282603e-01,   7.9742497e-01	);
+  Ip[	31	] = I(	   3.3672449e+02,   3.3673853e+02	);
+  Ip[	32	] = I(	   3.3697156e+02,   3.3698397e+02	);
+  Ip[	33	] = I(	   3.3778297e+02,   3.3779421e+02	);
+  Ip[	34	] = I(	   3.4493677e+02,   3.4499489e+02	);
+  Ip[	35	] = I(	   3.7531356e+02,   3.7538123e+02	);
+*/
 /*
   // Relaxation
   mc::NLGO_GUROBI<I> RELAX;
@@ -289,31 +367,31 @@ int main()
   CP.set_var( NP-NF, P );
   CP.set_dep( NF, P+NP-NF, F );
 #endif
-  CP.options.MIPFILE     = "";//"test8.lp";//
+  CP.options.MIPFILE     = "test8.lp";//
   CP.options.DISPLAY     = 2;
   CP.options.MAXITER     = 0;
   CP.options.CVATOL      = 1e-5; // 1e-5
   CP.options.CVRTOL      = 1e-5; // 1e-5
-  CP.options.BRANCHVAR   = mc::SetInv<CVI>::Options::RGREL;//RGABS;
+  CP.options.BRANCHVAR   = mc::SetInv<CVI>::Options::RGREL;//RGABS;//
   CP.options.BRANCHSEL   = branching_strategy;
-  CP.options.STGBCHDEPTH = 0;
+  CP.options.STGBCHDEPTH = 5;
   CP.options.STGBCHDRMAX = 1;
   CP.options.STGBCHRTOL  = 1e-2;
   CP.options.NODEMEAS    = mc::SetInv<CVI>::Options::LENGTH;
-  CP.options.DOMREDMAX   = 10;
+  CP.options.DOMREDMAX   = 20;
   CP.options.DOMREDTHRES = 1e-2; //2e-2
   CP.options.DOMREDBKOFF = 1e-4; //2e-2
   //CP.options.CTRBACKOFF  = 1e-4; //1e-6
   CP.options.LPALGO      = -1;
   CP.options.LPPRESOLVE  = -1;
-  CP.options.RELMETH     = mc::NLCP_GUROBI<I>::Options::HYBRID;//CHEB;//DRL;//
-  CP.options.CMODDMAX    = 1e5; //2
+  CP.options.RELMETH     = mc::NLCP_GUROBI<I>::Options::CHEB;//DRL//HYBRID;;
+  CP.options.CMODDMAX    = 1e6; //2
   CP.options.CMODSPAR    = true;
-  CP.options.CMODPROP    = 1; //2
-  CP.options.CMODCUTS    = 1; //2
-  CP.options.CMREDORD    = 4; //3
+  CP.options.CMODPROP    = 3; //2
+  CP.options.CMODCUTS    = 3; //2
+  CP.options.CMREDORD    = 5; //3
   CP.options.CMREDTHRES  = 1e-5;//1e-3
-  CP.options.MAXCPU      = 3e4 ;
+  CP.options.MAXCPU      = 1e5 ;
   CP.options.CMODEL.MIXED_IA = true ;
   std::cout << CP;
 

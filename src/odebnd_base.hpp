@@ -325,7 +325,7 @@ class ODEBND_BASE:
   //! @brief Function to initialize state interval bounds w/ ellipsoidal bounds 
   static void _IC_I_ELL
     ( const unsigned nx, PVT*MVPx, double*xref, double*Q,
-      const unsigned np, double*B, T*Ix );
+      const unsigned np, double*B, T*Ix, T*Ir, E&Er );
 
   //! @brief Function to reinitialize state interval bounds
   template <typename REALTYPE, typename OPT> bool _CC_I_STA
@@ -792,7 +792,7 @@ ODEBND_BASE<T,PMT,PVT>::_IC_I_STA
   default:
     *_MVPt = t; // current time
     _pDAG->eval( _opIC, _nx, _pIC, _MVPx, _npar+1, _pVAR+_nx, _MVPp );
-    _IC_I_ELL( _nx, _MVPx, _xref, _Q, _npar, _B, _Ix );
+    _IC_I_ELL( _nx, _MVPx, _xref, _Q, _npar, _B, _Ix, _Ir, _Er );
     _E2vec( _nx, _npar, _xref, _Q, _B, vec );
     break;
   }
@@ -804,30 +804,32 @@ template <typename T, typename PMT, typename PVT>
 inline void
 ODEBND_BASE<T,PMT,PVT>::_IC_I_ELL
 ( const unsigned nx, PVT*MVPx, double*xref, double*Q,
-  const unsigned np, double*B, T*Ix )
+  const unsigned np, double*B, T*Ix, T*Ir, E&Er )
 {
   double norm1R = 0.;
   for( unsigned ix=0; ix<nx; ix++ )
     norm1R += Op<T>::diam( MVPx[ix].remainder() ) / 2.;
-  for( unsigned ix=0, iQ=0; ix<nx; ix++ ){
-    xref[ix] = MVPx[ix].constant();
-    for( unsigned jp=0; jp<np; jp++ ) B[jp*nx+ix] = MVPx[ix].linear( jp );
+  for( unsigned ix=0; ix<nx; ix++ ){
+    for( unsigned jp=0; jp<np; jp++ )
+      B[jp*nx+ix] = MVPx[ix].linear( jp );
     Ix[ix] = MVPx[ix].bound();
-    Q[iQ++] = norm1R * Op<T>::diam( MVPx[ix].remainder() ) / 2.;
-    for( unsigned jx=ix+1; jx<nx; jx++ ) Q[iQ++] = 0.;
+    Ir[ix] = MVPx[ix].constant() + MVPx[ix].remainder();
+  }
+  Er.set( nx, Ir );
+  for( unsigned ix=0, iQ=0; ix<nx; ix++ ){
+    xref[ix] = Er.c(ix);
+    for( unsigned jx=ix; jx<nx; jx++ )
+      Q[iQ++] = Er.Q(ix,jx);
   }
 #ifdef MC__ODEBND_BASE_DINEQI_DEBUG
   std::cout << "@t0" << std::endl;
-  for( unsigned ix=0; ix<nx; ix++ )
-    std::cout << "xref[" << ix << "] = " << xref[ix] << std::endl;
   for( unsigned ix=0; ix<nx; ix++ ){
     std::cout << "B[" << ix << ",#] = ";
     for( unsigned jp=0; jp<np; jp++ )
       std::cout << B[jp*nx+ix] << "  ";
     std::cout << std::endl;
   }
-  E Ex0( nx, Q, xref );
-  std::cout << "Ex0 =" << Ex0 << std::endl;
+  std::cout << "Er =" << Er << std::endl;
   { int dum; std::cin >> dum; }
 #endif
 }

@@ -642,8 +642,8 @@ ODEBNDS_BASE<T,PMT,PVT>::_TC_I_ADJ
     for( unsigned jx=0; jx<_nx; jx++ )
       _MVZd[jx].set( _MVZenv, jx, _Ir[jx] );
     _ep2x( _nx, _npar, _MVZd, _pref, _MVZp, _B, _zref, _MVZz );
-    _pDAG->eval( _opADJTC, _nx, _pADJTC, _MVZy, _nz+1, _pVAR+_nx, _MVZVAR+_nx );
-    _IC_I_ELL( _nx, _MVZy, _yref, _Qy, _nz, _By, _Iy );
+    _pDAG->eval( _opADJTC, _nx, _pADJTC, _MVZy, _nz+1, _pVAR+_nx, _MVZVAR );
+    _IC_I_ELL( _nx, _MVZy, _yref, _Qy, _nz, _By, _Iy, _Idy, _Edy );
     _E2vec( _nx, _nz, _yref, _Qy, _By, y );
     break;
   }

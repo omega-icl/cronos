@@ -5,7 +5,7 @@
 #ifndef MC__ODEBNDS_GSL_HPP
 #define MC__ODEBNDS_GSL_HPP
 
-#include "odebnds_base.hpp"
+#include "odebnds_base_NP.hpp"
 #include "odebnd_gsl.hpp"
 
 #define MC__ODEBNDS_GSL_USE_BAD
@@ -50,6 +50,7 @@ class ODEBNDS_GSL:
   using ODEBND_BASE<T,PMT,PVT>::_Ir;
   using ODEBND_BASE<T,PMT,PVT>::_pref;
   using ODEBND_BASE<T,PMT,PVT>::_Ip;
+  using ODEBND_BASE<T,PMT,PVT>::_xref;
   using ODEBND_BASE<T,PMT,PVT>::_B;
   using ODEBND_BASE<T,PMT,PVT>::_diam;
   using ODEBND_BASE<T,PMT,PVT>::_vec2I;
@@ -60,9 +61,7 @@ class ODEBNDS_GSL:
   using ODEBND_BASE<T,PMT,PVT>::_vec2PME;
   using ODEBND_BASE<T,PMT,PVT>::_print_interm;
 
-  using ODEBNDS_BASE<T,PMT,PVT>::_nz;
-  using ODEBNDS_BASE<T,PMT,PVT>::_Iz;
-  using ODEBNDS_BASE<T,PMT,PVT>::_zref;
+  using ODEBNDS_BASE<T,PMT,PVT>::_Ix;
   using ODEBNDS_BASE<T,PMT,PVT>::_Iy;
   using ODEBNDS_BASE<T,PMT,PVT>::_Idy;
   using ODEBNDS_BASE<T,PMT,PVT>::_Iyq;
@@ -305,15 +304,16 @@ ODEBNDS_GSL<T,PMT,PVT>::_INI_I_ADJ
   // Define adjoint ODE system in GSL format
   _sys_adj.function = MC_GSLADJRHSI__;
   _sys_adj.params = 0;
+  _sys_adj.dimension = 2*np;
   switch( options.WRAPMIT){
-    case Options::NONE:
-    case Options::DINEQ:
-      _sys_adj.dimension = 2*_nx + 2*np;
-      break;
-    case Options::ELLIPS:
-    default:
-      _sys_adj.dimension = _nx*(1+_nz)+_nx*(_nx+1)/2 + 2*np;
-      break;
+  case Options::NONE:
+  case Options::DINEQ:
+    _sys_adj.dimension += 2*_nx;
+    break;
+  case Options::ELLIPS:
+  default:
+    _sys_adj.dimension += _nx*(1+np)+_nx*(_nx+1)/2;
+    break;
   }
 
   // Set GSL drivers for adjoint ODE integration
@@ -397,11 +397,11 @@ ODEBNDS_GSL<T,PMT,PVT>::bounds_ASA
     switch( options.WRAPMIT){
     case Options::NONE:
     case Options::DINEQ:
-      _vec2I( _vec_sta, _nx, _Iz );
+      _vec2I( _vec_sta, _nx, _Ix );
       break;
     case Options::ELLIPS:
     default:
-      _vec2E( _vec_sta, _nx, _np, _Q, _Er, _Ir, _pref, _Ip, _B, _zref, _Iz );
+      _vec2E( _vec_sta, _nx, _np, _Q, _Er, _Ir, _pref, _Ip, _B, _xref, _Ix );
       break;
     }
 
@@ -460,7 +460,7 @@ ODEBNDS_GSL<T,PMT,PVT>::bounds_ASA
            || (options.NMAX && stats_adj.numSteps > options.NMAX)
            || _diam(_nx, _Iy) > options.DMAX )
             throw Exceptions( Exceptions::INTERN );
-          stats_adj.numSteps++;
+          stats_adj.numSteps++;    
           if( options.HMAX > 0 && _h_adj[_ifct] > options.HMAX ) _h_adj[_ifct] = options.HMAX;
         }
 #ifdef MC__ODEBNDS_GSL_DINEQI_DEBUG
@@ -476,14 +476,13 @@ ODEBNDS_GSL<T,PMT,PVT>::bounds_ASA
         switch( options.WRAPMIT){
         case Options::NONE:
         case Options::DINEQ:
-          _vec2I( _vec_sta, _nx, _Iz );
+          _vec2I( _vec_sta, _nx, _Ix );
           _vec2I( _vec_adj+_pos_adj, _nx, _Iy);
           break;
         case Options::ELLIPS:
         default:
-          _vec2E( _vec_sta, _nx, _np, _Q, _Er, _Ir, _pref, _Ip, _B, _zref, _Iz );
-          _vec2E( _vec_adj+_pos_adj, _nx, _nx, _np, _Qy, _Edy, _Idy, 0, _Ir, _By,
-                  _pref, _Ip, _By+_nx*_nx, _yref, _Iy );
+          _vec2E( _vec_sta, _nx, _np, _Q, _Er, _Ir, _pref, _Ip, _B, _xref, _Ix );
+          _vec2E( _vec_adj+_pos_adj, _nx, _np, _Qy, _Edy, _Idy, _pref, _Ip, _By, _yref, _Iy); 
           break;
         }
         _vec2I( _vec_adj+_pos_adj+_offset_quad, _np, _Iyq);
@@ -546,14 +545,14 @@ ODEBNDS_GSL<T,PMT,PVT>::_INI_PM_ADJ
   _sys_adj.params = 0;
   switch( options.WRAPMIT){
   case Options::NONE:
-    _sys_adj.dimension = (_PMenv->nmon()+1)*_nz;
+    _sys_adj.dimension = (_PMenv->nmon()+1)*(_nx+np);
     break;
   case Options::DINEQ:
-    _sys_adj.dimension = _PMenv->nmon()*_nz + 2*_nx + np;
+    _sys_adj.dimension = _PMenv->nmon()*(_nx+np) + 2*_nx + np;
     break;
   case Options::ELLIPS:
   default:
-    _sys_adj.dimension = _PMenv->nmon()*_nz + _nx*(_nx+1)/2 + np;
+    _sys_adj.dimension = _PMenv->nmon()*(_nx+np) + _nx*(_nx+1)/2 + np;
     break;
   }
 

@@ -333,7 +333,7 @@ class ODEBND_BASE:
 
   //! @brief Function to reinitialize state interval bounds w/ ellipsoidal bounds 
   static void _CC_I_ELL
-    ( const unsigned nx, PVT*MVXPf, const E&Ed, double*Af,
+    ( const unsigned nx, PVT*MVXPf, T*If, const E&Ed, double*Af,
       const unsigned np, double*reff, double*Bf, T*Idf, double*Qf,
       const double QTOL, const double EPS );
 
@@ -810,10 +810,10 @@ ODEBND_BASE<T,PMT,PVT>::_IC_I_ELL
   for( unsigned ix=0; ix<nx; ix++ )
     norm1R += Op<T>::diam( MVPx[ix].remainder() ) / 2.;
   for( unsigned ix=0; ix<nx; ix++ ){
-    for( unsigned jp=0; jp<np; jp++ )
-      B[jp*nx+ix] = MVPx[ix].linear( jp );
     Ix[ix] = MVPx[ix].bound();
-    Ir[ix] = MVPx[ix].constant() + MVPx[ix].remainder();
+    for( unsigned jp=0; jp<np; jp++ )
+      B[jp*nx+ix] = MVPx[ix].linear( jp, true );
+    Ir[ix] = MVPx[ix].bound();
   }
   Er.set( nx, Ir );
   for( unsigned ix=0, iQ=0; ix<nx; ix++ ){
@@ -864,7 +864,7 @@ ODEBND_BASE<T,PMT,PVT>::_CC_I_STA
     *_MVXPt = t; // current time
     _PMIC = new PVT[_opIC.size()];
     _pDAG->eval( _opIC, _PMIC, _nx, _pIC, _MVXPf, _nVAR-_nq, _pVAR, _MVXPVAR );
-    _CC_I_ELL( _nx, _MVXPf, _Er, _A, _npar, _xrefdot, _Bdot, _Irdot, _Qdot,
+    _CC_I_ELL( _nx, _MVXPf, _Ix, _Er, _A, _npar, _xrefdot, _Bdot, _Irdot, _Qdot,
                options.QTOL, machprec() );
     _E2vec( _nx, _npar, _xrefdot, _Qdot, _Bdot, vec );
     break;
@@ -877,12 +877,13 @@ ODEBND_BASE<T,PMT,PVT>::_CC_I_STA
 template <typename T, typename PMT, typename PVT>
 inline void
 ODEBND_BASE<T,PMT,PVT>::_CC_I_ELL
-( const unsigned nx, PVT*MVXPf, const E&Ed, double*Af,
+( const unsigned nx, PVT*MVXPf, T*If, const E&Ed, double*Af,
   const unsigned np, double*reff, double*Bf, T*Idf, double*Qf,
   const double QTOL, const double EPS )
 {
   // Extract time derivatives of constant, linear and remainder parts
   for( unsigned ix=0; ix<nx; ix++ ){
+    If[ix] = MVXPf[ix].bound();
 #ifdef MC__ODEBND_BASE_DINEQI_DEBUG
     std::cout << "MVXPf[" << ix << "] = " << MVXPf[ix] << std::endl;
 #endif

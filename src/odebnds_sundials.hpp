@@ -52,6 +52,7 @@ class ODEBNDS_SUNDIALS:
   using ODEBND_BASE<T,PMT,PVT>::_Ir;
   using ODEBND_BASE<T,PMT,PVT>::_pref;
   using ODEBND_BASE<T,PMT,PVT>::_Ip;
+  using ODEBND_BASE<T,PMT,PVT>::_xref;
   using ODEBND_BASE<T,PMT,PVT>::_B;
   using ODEBND_BASE<T,PMT,PVT>::_diam;
   using ODEBND_BASE<T,PMT,PVT>::_vec2I;
@@ -63,9 +64,7 @@ class ODEBNDS_SUNDIALS:
   using ODEBND_BASE<T,PMT,PVT>::_vec2PME;
   using ODEBND_BASE<T,PMT,PVT>::_print_interm;
 
-  using ODEBNDS_BASE<T,PMT,PVT>::_nz;
-  using ODEBNDS_BASE<T,PMT,PVT>::_Iz;
-  using ODEBNDS_BASE<T,PMT,PVT>::_zref;
+  using ODEBNDS_BASE<T,PMT,PVT>::_Ix;
   using ODEBNDS_BASE<T,PMT,PVT>::_Iy;
   using ODEBNDS_BASE<T,PMT,PVT>::_Idy;
   using ODEBNDS_BASE<T,PMT,PVT>::_Iyq;
@@ -416,7 +415,7 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::_INI_I_ADJ
     break;
   case Options::ELLIPS:
   default:
-    cv_Ny_size = _nx*(1+_nz)+_nx*(_nx+1)/2;
+    cv_Ny_size = _nx*(1+np)+_nx*(_nx+1)/2;
     break;
   }
   for( unsigned i=0; i<_nf; i++ ){
@@ -464,7 +463,7 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::MC_CVADJQUADI__
   ODEBNDS_SUNDIALS<T,PMT,PVT> *pODEBNDS = ODEBNDS_SUNDIALS<T,PMT,PVT>::pODEBNDS;
   pODEBNDS->_ifct = *static_cast<unsigned*>( user_data );
   bool flag = pODEBNDS->_RHS_I_QUAD( pODEBNDS->options, t, NV_DATA_S( y ),
-    NV_DATA_S( qdot ), NV_DATA_S( x ), pODEBNDS->_ifct );
+    NV_DATA_S( qdot ), NV_DATA_S( x ), pODEBNDS->_ifct, true );
   ODEBNDS_SUNDIALS<T,PMT,PVT>::pODEBNDS = pODEBNDS;
   return( flag? 0: -1 );
 }
@@ -514,11 +513,11 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
     switch( options.WRAPMIT){
     case Options::NONE:
     case Options::DINEQ:
-      _vec2I( _vec_sta[ns].data(), _nx, _Iz );
+      _vec2I( _vec_sta[ns].data(), _nx, _Ix );
       break;
     case Options::ELLIPS:
     default:
-      _vec2E( _vec_sta[ns].data(), _nx, _np, _Q, _Er, _Ir, _pref, _Ip, _B, _zref, _Iz );
+      _vec2E( _vec_sta[ns].data(), _nx, _np, _Q, _Er, _Ir, _pref, _Ip, _B, _xref, _Ix );
       break;
     }
 
@@ -531,12 +530,14 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
         { _END_ADJ(); return FATAL; }
       for( unsigned iy=0; Ilk[ns] && iy<_nx; iy++ )
         Ilk[ns][_ifct*_nx+iy] = _Iy[iy];
+      for( unsigned iq=0; iq<_np; iq++ )
+        Idf[_ifct*_np+iq] = _Iyq[iq];
     }
 
     // Display & record adjoint terminal results
     if( options.DISPLAY >= 1 ){
-      _print_interm( tk[ns], _nx*_nf, Ilk[ns], "l", os );//_nf
-      _print_interm( _np, _Iyq, "q", os );
+      _print_interm( tk[ns], _nf*_nx, Ilk[ns], "l", os );//_nf
+      _print_interm( _nf*_np, Idf, "df", os );
     }
     if( options.RESRECORD )
       _results_adj.push_back( Results( tk[ns], _nx*_nf, Ilk[ns] ) );//_nf
@@ -584,14 +585,16 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
         switch( options.WRAPMIT){
         case Options::NONE:
         case Options::DINEQ:
-          _vec2I( _vec_sta[_istg-1].data(), _nx, _Iz );
+          _vec2I( _vec_sta[_istg-1].data(), _nx, _Ix );
           _vec2I( NV_DATA_S(_Ny[_ifct]), _nx, _Iy);
           break;
         case Options::ELLIPS:
         default:
-          _vec2E( _vec_sta[_istg-1].data(), _nx, _np, _Q, _Er, _Ir, _pref, _Ip, _B, _zref, _Iz );
-          _vec2E( NV_DATA_S(_Ny[_ifct]), _nx, _nx, _np, _Qy, _Edy, _Idy, 0, _Ir, _By,
-                  _pref, _Ip, _By+_nx*_nx, _yref, _Iy );
+          _vec2E( _vec_sta[_istg-1].data(), _nx, _np, _Q, _Er, _Ir, _pref, _Ip, _B, _xref, _Ix );
+          _vec2E( NV_DATA_S(_Ny[_ifct]), _nx, _np, _Qy, _Edy, _Idy, _pref, _Ip, _By, _yref, _Iy );
+//#ifdef MC__ODEBNDS_GSL_DINEQI_DEBUG
+          std::cout << "Edy: " << _Edy;
+//#endif
           break;
         }
         _vec2I( NV_DATA_S( _Nyq[_ifct] ), _np, _Iyq );
@@ -622,13 +625,13 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
       // Display & record adjoint intermediate results
       if( options.DISPLAY >= 1 ){
         _print_interm( tk[_istg-1], _nf*_nx, Ilk[_istg-1], "l", os );
-        _print_interm( _np, _Iyq, "q", os );
+        _print_interm( _nf*_np, Idf, "df", os );
       }
       if( options.RESRECORD )
         _results_adj.push_back( Results( tk[_istg-1], _nf*_nx, Ilk[_istg-1] ) );
     }
-    if( options.DISPLAY >= 1 )
-      _print_interm( _nf*_np, Idf, "df", os );
+    //if( options.DISPLAY >= 1 )
+    //  _print_interm( _nf*_np, Idf, "df", os );
   }
   catch(...){
     _END_ADJ();

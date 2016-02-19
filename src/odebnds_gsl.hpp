@@ -5,7 +5,7 @@
 #ifndef MC__ODEBNDS_GSL_HPP
 #define MC__ODEBNDS_GSL_HPP
 
-#include "odebnds_base_NP.hpp"
+#include "odebnds_base.hpp"
 #include "odebnd_gsl.hpp"
 
 #define MC__ODEBNDS_GSL_USE_BAD
@@ -414,12 +414,14 @@ ODEBNDS_GSL<T,PMT,PVT>::bounds_ASA
         { _END_ADJ(); return FATAL; }
       for( unsigned iy=0; Ilk[ns] && iy<_nx; iy++ )
         Ilk[ns][_ifct*_nx+iy] = _Iy[iy];
+      for( unsigned iq=0; iq<_np; iq++ )
+        Idf[_ifct*_np+iq] = _Iyq[iq];
     }
 
     // Display & record adjoint terminal results
     if( options.DISPLAY >= 1 ){
-      _print_interm( tk[ns], _nx*_nf, Ilk[ns], "l", os );
-      _print_interm( _np, _Iyq, "q", os );
+      _print_interm( tk[ns], _nf*_nx, Ilk[ns], "l", os );
+      _print_interm( _nf*_np, Idf, "df", os );
     }
     if( options.RESRECORD )
       _results_adj.push_back( Results( tk[ns], _nf*_nx, Ilk[ns] ) );
@@ -482,7 +484,10 @@ ODEBNDS_GSL<T,PMT,PVT>::bounds_ASA
         case Options::ELLIPS:
         default:
           _vec2E( _vec_sta, _nx, _np, _Q, _Er, _Ir, _pref, _Ip, _B, _xref, _Ix );
-          _vec2E( _vec_adj+_pos_adj, _nx, _np, _Qy, _Edy, _Idy, _pref, _Ip, _By, _yref, _Iy); 
+          _vec2E( _vec_adj+_pos_adj, _nx, _np, _Qy, _Edy, _Idy, _pref, _Ip, _By, _yref, _Iy);
+//#ifdef MC__ODEBNDS_GSL_DINEQI_DEBUG
+          std::cout << "Edy: " << _Edy;
+//#endif
           break;
         }
         _vec2I( _vec_adj+_pos_adj+_offset_quad, _np, _Iyq);
@@ -512,14 +517,14 @@ ODEBNDS_GSL<T,PMT,PVT>::bounds_ASA
       // Display & record adjoint intermediate results
       if( options.DISPLAY >= 1 ){
         _print_interm( tk[_istg-1], _nf*_nx, Ilk[_istg-1], "l", os );
-        _print_interm( _np, _Iyq, "q", os );
+        _print_interm( _nf*_np, Idf, "df", os );
       }
       if( options.RESRECORD )
          _results_adj.push_back( Results( tk[_istg-1], _nf*_nx, Ilk[_istg-1] ) );
     }
 
-    if( options.DISPLAY >= 1 )
-      _print_interm( _nf*_np, Idf, "df", os );
+    //if( options.DISPLAY >= 1 )
+    //  _print_interm( _nf*_np, Idf, "df", os );
   }
   catch(...){
     _END_ADJ();

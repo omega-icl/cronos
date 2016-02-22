@@ -42,9 +42,11 @@ class ODEBND_GSL:
   using ODEBND_BASE<T,PMT,PVT>::_Q;
   using ODEBND_BASE<T,PMT,PVT>::_Er;
   using ODEBND_BASE<T,PMT,PVT>::_Ir;
+  using ODEBND_BASE<T,PMT,PVT>::_Irq;
   using ODEBND_BASE<T,PMT,PVT>::_pref;
   using ODEBND_BASE<T,PMT,PVT>::_Ip;
   using ODEBND_BASE<T,PMT,PVT>::_B;
+  using ODEBND_BASE<T,PMT,PVT>::_Bq;
   using ODEBND_BASE<T,PMT,PVT>::_xref;
   using ODEBND_BASE<T,PMT,PVT>::_Ix;
   using ODEBND_BASE<T,PMT,PVT>::_Iq;
@@ -408,21 +410,21 @@ ODEBND_GSL<T,PMT,PVT>::_INI_I_STA
 {
   // Set GSL driver
   _sys_sta.params = 0;
-  _sys_sta.dimension = 2*_nq;
   switch( options.WRAPMIT){
   case Options::NONE:
   case Options::DINEQ:
-    _sys_sta.dimension += 2*_nx;
+    _offset_quad = 2*_nx;
+    _sys_sta.dimension = _offset_quad + 2*_nq;
     break;
   case Options::ELLIPS:
   default:
-    _sys_sta.dimension += _nx*(1+np)+_nx*(_nx+1)/2;
+    _offset_quad = _nx*(1+np)+_nx*(_nx+1)/2;
+    _sys_sta.dimension = _offset_quad + _nq*(2+np);
     break;
   }
   _INI_GSL( _sys_sta, _driver_sta );
   delete [] _vec_sta;
   _vec_sta  = new double[ _sys_sta.dimension ];
-  _offset_quad = _sys_sta.dimension - 2*_nq;
   _vec_quad = _vec_sta + _offset_quad;
 
   // Initialize mesh
@@ -511,13 +513,14 @@ ODEBND_GSL<T,PMT,PVT>::_bounds
       case Options::NONE:
       case Options::DINEQ:
         _vec2I( _vec_sta, _nx, _Ix );
+        if( _nq ) _vec2I( _vec_quad, _nq, _Iq );
         break;
       case Options::ELLIPS:
       default:
         _vec2E( _vec_sta, _nx, _np, _Q, _Er, _Ir, _pref, _Ip, _B, _xref, _Ix );
+        if( _nq ) _vec2I( _vec_quad, _nq, _np, _pref, _Ip, _Bq, _Irq, _Iq );
         break;
       }
-      _vec2I( _vec_quad, _nq, _Iq );
       if( options.DISPLAY >= 1 ){
         _print_interm( _t, _nx, _Ix, "x", os );
         _print_interm( _nq, _Iq, "q", os );

@@ -63,13 +63,15 @@ class ODEBNDS_GSL:
 
   using ODEBNDS_BASE<T,PMT,PVT>::_Ix;
   using ODEBNDS_BASE<T,PMT,PVT>::_Iy;
-  using ODEBNDS_BASE<T,PMT,PVT>::_Idy;
   using ODEBNDS_BASE<T,PMT,PVT>::_Iyq;
+  using ODEBNDS_BASE<T,PMT,PVT>::_Idy;
+  using ODEBNDS_BASE<T,PMT,PVT>::_Idyq;
   using ODEBNDS_BASE<T,PMT,PVT>::_Qy;
   using ODEBNDS_BASE<T,PMT,PVT>::_By;
+  using ODEBNDS_BASE<T,PMT,PVT>::_Byq;
   using ODEBNDS_BASE<T,PMT,PVT>::_Edy;
   using ODEBNDS_BASE<T,PMT,PVT>::_yref;
-  using ODEBNDS_BASE<T,PMT,PVT>::_PMz;
+  using ODEBNDS_BASE<T,PMT,PVT>::_PMx;
   using ODEBNDS_BASE<T,PMT,PVT>::_PMy;
   using ODEBNDS_BASE<T,PMT,PVT>::_PMyq;
   using ODEBNDS_BASE<T,PMT,PVT>::_vec2E;
@@ -304,15 +306,16 @@ ODEBNDS_GSL<T,PMT,PVT>::_INI_I_ADJ
   // Define adjoint ODE system in GSL format
   _sys_adj.function = MC_GSLADJRHSI__;
   _sys_adj.params = 0;
-  _sys_adj.dimension = 2*np;
   switch( options.WRAPMIT){
   case Options::NONE:
   case Options::DINEQ:
-    _sys_adj.dimension += 2*_nx;
+    _offset_quad = 2*_nx;
+    _sys_adj.dimension = _offset_quad + 2*np;
     break;
   case Options::ELLIPS:
   default:
-    _sys_adj.dimension += _nx*(1+np)+_nx*(_nx+1)/2;
+    _offset_quad = _nx*(1+np)+_nx*(_nx+1)/2;
+    _sys_adj.dimension = _offset_quad + _np*(2+np);
     break;
   }
 
@@ -320,7 +323,6 @@ ODEBNDS_GSL<T,PMT,PVT>::_INI_I_ADJ
   _INI_GSL( _sys_adj, _driver_adj );
   delete [] _vec_adj;
   _vec_adj  = new double[ _sys_adj.dimension*_nf ];
-  _offset_quad = _sys_adj.dimension - 2*np;
 
   // Reset result record and statistics
   _results_adj.clear();
@@ -421,7 +423,7 @@ ODEBNDS_GSL<T,PMT,PVT>::bounds_ASA
     // Display & record adjoint terminal results
     if( options.DISPLAY >= 1 ){
       _print_interm( tk[ns], _nf*_nx, Ilk[ns], "l", os );
-      _print_interm( _nf*_np, Idf, "df", os );
+      //_print_interm( _nf*_np, Idf, "df", os );
     }
     if( options.RESRECORD )
       _results_adj.push_back( Results( tk[ns], _nf*_nx, Ilk[ns] ) );
@@ -480,23 +482,24 @@ ODEBNDS_GSL<T,PMT,PVT>::bounds_ASA
         case Options::DINEQ:
           _vec2I( _vec_sta, _nx, _Ix );
           _vec2I( _vec_adj+_pos_adj, _nx, _Iy);
+          _vec2I( _vec_adj+_pos_adj+_offset_quad, _np, _Iyq);
           break;
         case Options::ELLIPS:
         default:
           _vec2E( _vec_sta, _nx, _np, _Q, _Er, _Ir, _pref, _Ip, _B, _xref, _Ix );
           _vec2E( _vec_adj+_pos_adj, _nx, _np, _Qy, _Edy, _Idy, _pref, _Ip, _By, _yref, _Iy);
-//#ifdef MC__ODEBNDS_GSL_DINEQI_DEBUG
+#ifdef MC__ODEBNDS_GSL_DINEQI_DEBUG
           std::cout << "Edy: " << _Edy;
-//#endif
+#endif
+          _vec2I( _vec_adj+_pos_adj+_offset_quad, _np, _np, _pref, _Ip, _Byq, _Idyq, _Iyq );
           break;
         }
-        _vec2I( _vec_adj+_pos_adj+_offset_quad, _np, _Iyq);
         if( Ilk && !Ilk[_istg-1] ) Ilk[_istg-1] = new T[_nx*_nf];
         for( unsigned iy=0; Ilk[_istg-1] && iy<_nx; iy++ )
           Ilk[_istg-1][_ifct*_nx+iy] = _Iy[iy];
 
         // Add function contribution to adjoint bounds (discontinuities)
-        if( _istg>1  ){
+        if( _istg > 1  ){
           _pos_fct = ( _vFCT.size()>=ns? _istg-1:0 );
           if( _pos_fct
            && !_CC_I_ADJ( options, -_t, _vec_adj+_pos_adj, _pos_fct, _ifct )
@@ -507,24 +510,22 @@ ODEBNDS_GSL<T,PMT,PVT>::bounds_ASA
         }
 
         // Add initial state contribution to derivative bounds
-        else if( Idf ){
-          if( !_IC_I_ADJ( -_t ) ){ _END_ADJ(); return FATAL; }
-          for( unsigned iq=0; iq<_np; iq++ )
-            Idf[_ifct*_np+iq] = _Iyq[iq];
-        }
+        else if( !_IC_I_ADJ( -_t ) ){ _END_ADJ(); return FATAL; }
+        for( unsigned iq=0; iq<_np; iq++ )
+          Idf[_ifct*_np+iq] = _Iyq[iq];
       }
 
       // Display & record adjoint intermediate results
       if( options.DISPLAY >= 1 ){
         _print_interm( tk[_istg-1], _nf*_nx, Ilk[_istg-1], "l", os );
-        _print_interm( _nf*_np, Idf, "df", os );
+        //_print_interm( _nf*_np, Idf, "df", os );
       }
       if( options.RESRECORD )
          _results_adj.push_back( Results( tk[_istg-1], _nf*_nx, Ilk[_istg-1] ) );
     }
 
-    //if( options.DISPLAY >= 1 )
-    //  _print_interm( _nf*_np, Idf, "df", os );
+    if( options.DISPLAY >= 1 )
+      _print_interm( _nf*_np, Idf, "df", os );
   }
   catch(...){
     _END_ADJ();
@@ -550,22 +551,22 @@ ODEBNDS_GSL<T,PMT,PVT>::_INI_PM_ADJ
   _sys_adj.params = 0;
   switch( options.WRAPMIT){
   case Options::NONE:
-    _sys_adj.dimension = (_PMenv->nmon()+1)*(_nx+np);
+    _offset_quad = (_PMenv->nmon()+1)*_nx;
     break;
   case Options::DINEQ:
-    _sys_adj.dimension = _PMenv->nmon()*(_nx+np) + 2*_nx + np;
+    _offset_quad = (_PMenv->nmon()+2)*_nx;
     break;
   case Options::ELLIPS:
   default:
-    _sys_adj.dimension = _PMenv->nmon()*(_nx+np) + _nx*(_nx+1)/2 + np;
+    _offset_quad = _PMenv->nmon()*_nx+_nx*(_nx+1)/2;
     break;
   }
+  _sys_adj.dimension = _offset_quad + (_PMenv->nmon()+1)*np;
 
   // Set GSL drivers for adjoint ODE integration
   _INI_GSL(_sys_adj, _driver_adj);
   delete[] _vec_adj;
   _vec_adj = new double[_sys_adj.dimension*_nf];
-  _offset_quad = _sys_adj.dimension - _PMenv->nmon()*np-np;
 
   // Reset result record and statistics
   _results_adj.clear();
@@ -642,34 +643,24 @@ ODEBNDS_GSL<T,PMT,PVT>::bounds_ASA
     // Bounds on terminal states/quadratures
     if( !_mesh_sta.eval( ns, tk[ns], _vec_sta ) )
       { _END_ADJ(); return FAILURE; }
-    switch( options.WRAPMIT){
-    case Options::NONE:
-      _vec2PMI( _vec_sta, _PMenv, _nx, _PMz, true );
-      break;
-    case Options::DINEQ:
-      _vec2PMI( _vec_sta, _PMenv, _nx, _PMz );
-      break;
-    case Options::ELLIPS:
-    default:
-      _vec2PME( _vec_sta, _PMenv, _nx, _PMz, _Q, _Er, _Ir );
-      break;
-    }
 
     // Bounds on terminal adjoints/quadratures
     if( PMlk && !PMlk[ns] ) PMlk[ns] = new PVT[_nx*_nf];
     for( _ifct=_pos_adj=0; _ifct < _nf; _ifct++, _pos_adj+=_sys_adj.dimension ){
       _pos_fct = ( _vFCT.size()>=ns? ns-1:0 );
-      if( !_TC_PM_ADJ( options, -_t, _vec_adj+_pos_adj, _pos_fct, _ifct )
+      if( !_TC_PM_ADJ( options, -_t, _vec_sta, _vec_adj+_pos_adj, _pos_fct, _ifct )
        || !_TC_PM_QUAD( options, -_t, _vec_adj+_pos_adj+_offset_quad ) )
         { _END_ADJ(); return FATAL; }
       for( unsigned iy=0; PMlk[ns] && iy<_nx; iy++ )
         PMlk[ns][_ifct*_nx+iy] = _PMy[iy];
+      for( unsigned iq=0; iq<_np; iq++ )
+        PMdf[_ifct*_np+iq] = _PMyq[iq];
     }
 
     // Display & record adjoint terminal results
     if( options.DISPLAY >= 1 ){
       _print_interm( tk[ns], _nx*_nf, PMlk[ns], "l", os );
-      _print_interm( _np, _PMyq, "q", os );
+      //_print_interm( _np, PMdf, "df", os );
     }
     if( options.RESRECORD )
       _results_adj.push_back( Results( tk[ns], _nf*_nx, PMlk[ns] ) );
@@ -724,16 +715,16 @@ ODEBNDS_GSL<T,PMT,PVT>::bounds_ASA
           { _END_ADJ(); return FATAL; }
         switch( options.WRAPMIT){
         case Options::NONE:
-          _vec2PMI( _vec_sta, _PMenv, _nx, _PMz, true );
+          _vec2PMI( _vec_sta, _PMenv, _nx, _PMx, true );
           _vec2PMI( _vec_adj+_pos_adj, _PMenv, _nx, _PMy, true );
           break;
         case Options::DINEQ:
-          _vec2PMI( _vec_sta, _PMenv, _nx, _PMz );
+          _vec2PMI( _vec_sta, _PMenv, _nx, _PMx );
           _vec2PMI( _vec_adj+_pos_adj, _PMenv, _nx, _PMy );
           break;
         case Options::ELLIPS:
         default:
-          _vec2PME( _vec_sta, _PMenv, _nx, _PMz, _Q, _Er, _Ir );
+          _vec2PME( _vec_sta, _PMenv, _nx, _PMx, _Q, _Er, _Ir );
           _vec2PME( _vec_adj+_pos_adj, _PMenv, _nx, _PMy, _Qy, _Edy, _Idy );
           break;
         }
@@ -754,17 +745,15 @@ ODEBNDS_GSL<T,PMT,PVT>::bounds_ASA
         }
 
         // Add initial state contribution to derivative bounds
-        else if( PMdf ){
-          if( !_IC_PM_ADJ( -_t ) ){ _END_ADJ(); return FATAL; }
-          for( unsigned iq=0; iq<_np; iq++ )
-            PMdf[_ifct*_np+iq] = _PMyq[iq];
-        }
+        else if( !_IC_PM_ADJ( -_t ) ){ _END_ADJ(); return FATAL; }
+        for( unsigned iq=0; iq<_np; iq++ )
+          PMdf[_ifct*_np+iq] = _PMyq[iq];
       }
 
       // Display & record adjoint intermediate results
       if( options.DISPLAY >= 1 ){
         _print_interm( tk[_istg-1], _nf*_nx, PMlk[_istg-1], "l", os );
-        _print_interm( _np, _PMyq, "q", os );
+        //_print_interm( _np, PMdf, "df", os );
       }
       if( options.RESRECORD )
         _results_adj.push_back( Results( tk[_istg-1], _nf*_nx, PMlk[_istg-1] ) );

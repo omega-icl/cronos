@@ -46,9 +46,11 @@ class ODEBND_SUNDIALS:
   using ODEBND_BASE<T,PMT,PVT>::_Q;
   using ODEBND_BASE<T,PMT,PVT>::_Er;
   using ODEBND_BASE<T,PMT,PVT>::_Ir;
+  using ODEBND_BASE<T,PMT,PVT>::_Irq;
   using ODEBND_BASE<T,PMT,PVT>::_pref;
   using ODEBND_BASE<T,PMT,PVT>::_Ip;
   using ODEBND_BASE<T,PMT,PVT>::_B;
+  using ODEBND_BASE<T,PMT,PVT>::_Bq;
   using ODEBND_BASE<T,PMT,PVT>::_xref;
   using ODEBND_BASE<T,PMT,PVT>::_Ix;
   using ODEBND_BASE<T,PMT,PVT>::_Iq;
@@ -452,15 +454,17 @@ ODEBND_SUNDIALS<T,PMT,PVT>::_INI_I_STA
 ( const unsigned np, const unsigned ns )
 {
   // Set SUNDIALS state/quadrature arrays
-  unsigned cv_Nx_size = 0, cv_Nq_size = 2*_nq;
+  unsigned cv_Nx_size, cv_Nq_size;
   switch( options.WRAPMIT){
   case Options::NONE:
   case Options::DINEQ:
-    cv_Nx_size += 2*_nx;
+    cv_Nx_size = 2*_nx;
+    cv_Nq_size = 2*_nq;
     break;
   case Options::ELLIPS:
   default:
-    cv_Nx_size += _nx*(1+np)+_nx*(_nx+1)/2;
+    cv_Nx_size = _nx*(1+np)+_nx*(_nx+1)/2;
+    cv_Nq_size = _nq*(2+np);
     break;
   }
   if( !_Nx || cv_Nx_size != NV_LENGTH_S( _Nx ) ){
@@ -577,6 +581,11 @@ ODEBND_SUNDIALS<T,PMT,PVT>::_bounds
           throw Exceptions( Exceptions::INTERN );
         stats_sta.numSteps++;
       }
+      if( _nq ){
+        _cv_flag = CVodeGetQuad( _cv_mem, &_t, _Nq );
+        if( _check_cv_flag(&_cv_flag, "CVodeGetQuad", 1) )
+          { _END_STA(); return FATAL; }
+      }
 
       // Store full state at stage time
       if( store ){
@@ -585,25 +594,21 @@ ODEBND_SUNDIALS<T,PMT,PVT>::_bounds
         _vec_sta.push_back( std::vector<realtype>( vsta, vsta+lsta ) );
       }
 
-      // Bounds on intermediate states
+      // Bounds on intermediate states and quadratures
       switch( options.WRAPMIT){
       case Options::NONE:
       case Options::DINEQ:
         _vec2I( NV_DATA_S( _Nx ), _nx, _Ix );
+        if( _nq) _vec2I( NV_DATA_S( _Nq ), _nq, _Iq );
         break;
       case Options::ELLIPS:
       default:
         _vec2E( NV_DATA_S( _Nx ), _nx, _np, _Q, _Er, _Ir, _pref, _Ip, _B, _xref, _Ix );
+        if( _nq) _vec2I( NV_DATA_S( _Nq ), _nq, _np, _pref, _Ip, _Bq, _Irq, _Iq );
         break;
       }
 
       // Bounds on intermediate quadratures
-      if( _nq ){
-        _cv_flag = CVodeGetQuad( _cv_mem, &_t, _Nq );
-        if( _check_cv_flag(&_cv_flag, "CVodeGetQuad", 1) )
-          { _END_STA(); return FATAL; }
-        _vec2I( NV_DATA_S( _Nq ), _nq, _Iq );
-      }
 
       // Keep track/display/record stage results
       if( options.DISPLAY >= 1 ){

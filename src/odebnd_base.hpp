@@ -211,14 +211,20 @@ class ODEBND_BASE:
   //! @brief state reference
   double *_xref;
 
-  //! @brief linear transformation A matrix
+  //! @brief linear transformation A matrix for state equations
   double *_A;
 
-  //! @brief linear transformation B matrix
+  //! @brief linear transformation B matrix for state equations
   double *_B;
+
+  //! @brief linear transformation B matrix for quadrature equations
+  double *_Bq;
 
   //! @brief linear transformed state interval bounds
   T *_Ir;
+
+  //! @brief linear transformed state quadrature bounds
+  T *_Irq;
 
   //! @brief RHS Jacobian interval bounds
   T *_Idfdx;
@@ -232,11 +238,17 @@ class ODEBND_BASE:
   //! @brief state reference time derivatives
   double *_xrefdot;
 
-  //! @brief linear transformation B matrix time derivatives
+  //! @brief linear transformation B matrix time derivatives for state equations
   double *_Bdot;
 
-  //! @brief rotated state interval bounds time derivatives
+  //! @brief linear transformation B matrix time derivatives for quadrature equations
+  double *_Bqdot;
+
+  //! @brief rotated state interval bounds time derivatives for state equations
   T *_Irdot;
+
+  //! @brief rotated state interval bounds time derivatives for quadrature equations
+  T *_Irqdot;
 
   //! @brief shape matrix time derivatives in ellipsoidal bounds
   double *_Qdot;
@@ -252,6 +264,9 @@ class ODEBND_BASE:
 
   //! @brief RHS Jacobian polynomial model
   PVT *_MVXPdfdx;
+
+  //! @brief RHS polynomial model for quadrature equations
+  PVT *_MVXPqdot;
 
   //! @brief polynomial models for variables in mean-value theorem
   PVT *_MVXPVAR;
@@ -289,6 +304,16 @@ class ODEBND_BASE:
   template <typename REALTYPE> static void _I2vec
     ( const unsigned nx, const T*Ix, REALTYPE*vec, const bool centered=false );
 
+  //! @brief Static function converting interval bounds to GSL array
+  template <typename REALTYPE> static void _I2vec
+    ( const unsigned nx, const unsigned np, const double*B, const double*dL,
+      const double*dU, REALTYPE*vec );
+
+  //! @brief Static function converting interval bounds to GSL array
+  template <typename REALTYPE> static void _I2vec
+    ( const unsigned nx, const unsigned np, const double*B, const T*Id,
+      REALTYPE*vec, const bool centered=false );
+
   //! @brief Static function converting ellipsoidal bounds to GSL array
   template <typename REALTYPE> static void _E2vec
     ( const unsigned nx, const unsigned np, const double*xref, const double*Qx,
@@ -297,6 +322,11 @@ class ODEBND_BASE:
   //! @brief Function converting GSL array to interval bounds
   template <typename REALTYPE> static void _vec2I
     ( const REALTYPE*vec, const unsigned nx, T*Ix, const bool centered=false );
+
+  //! @brief Function converting GSL array to interval bounds
+  template <typename REALTYPE> static void _vec2I
+    ( const REALTYPE*vec, const unsigned nx, const unsigned np, const double*pref,
+      const T*Ip, double*B, T*Id, T*Ix, const bool centered=false );
 
   //! @brief Static function converting GSL array to ellipsoidal bounds
   template <typename REALTYPE> static void _vec2E
@@ -355,16 +385,20 @@ class ODEBND_BASE:
       const unsigned np, double*xrefdot, double*Bdot, T*Iddot, double*Qdot,
       const double QTOL, const double EPS, const T*W=0 );
 
+  //! @brief Static function to calculate the RHS of auxiliary ODEs w/ ellipsoidal contractor
+  template <typename U>
+  static void _RHS_ELL
+    ( const unsigned nx, const double*Qr, const double*Ar, const T*Irdot,
+      double*Qrdot, const double QTOL, const double EPS, const U*W=0 );
+
   //! @brief Function to calculate the RHS of auxiliary ODEs in interval arithmetic
   template <typename REALTYPE, typename OPT> bool _RHS_I_QUAD
-    ( const OPT&options, double t, const REALTYPE*x, REALTYPE*qdot,
-      const bool bndinit=true );
+    ( const OPT&options, double t, const REALTYPE*x, REALTYPE*qdot );
 
-  //! @brief Static function to calculate the quadratures in interval arithmetic
-  static void _QUAD_I
-    ( FFGraph*DAG, std::list<const FFOp*>&opQUAD, T*IQUAD,
-      const unsigned nq, const FFVar*pQUAD, const unsigned nVAR,
-      const FFVar*pVAR, T*IVAR, T*Iqdot );
+  //! @brief Static function to calculate the RHS of quadratures in interval arithmetic w/ ellipsoidal contractor
+  static void _QUAD_I_ELL
+    ( const unsigned nq, const unsigned offset, PVT*MVYXPg, double*Bqdot,
+      T*Idqdot, T*Iqdot );
 
   //! @brief Function to calculate the Jacobian of auxiliary ODEs in interval arithmetic
   template <typename REALTYPE, typename OPT> bool _JAC_I_STA
@@ -461,11 +495,6 @@ class ODEBND_BASE:
   static void _RHS_PM_ELL2
     ( const unsigned nx, PMT*PMenv, PVT*PMf, PVT*MVXPf, const unsigned np,
       const T*Ir, double*Ar, T*Irdot );
-
-  //! @brief Static function to calculate the RHS of auxiliary ODEs in polynomial model arithmetic - ellipsoidal contractor
-  static void _RHS_PM_ELL
-    ( const unsigned nx, const double*Qr, const double*Ar, const T*Irdot,
-      double*Qrdot, const double QTOL, const double EPS, const PVT*W=0 );
 
   //! @brief Function to calculate the RHS of auxiliary ODEs in polynomial mode arithmetic
   template <typename REALTYPE, typename OPT> bool _RHS_PM_QUAD
@@ -567,12 +596,12 @@ ODEBND_BASE<T,PMT,PVT>::ODEBND_BASE
 
   // Initialize parameterization arrays
   _pref = _xref = _xrefdot = 0;
-  _A = _B = _Bdot = _Q = _Qdot = 0;
-  _Ir = _Idfdx = _Irdot = 0;
+  _A = _B = _Bq = _Bdot = _Bqdot = _Q = _Qdot = 0;
+  _Ir = _Irq = _Idfdx = _Irdot = _Irqdot = 0;
 
   // Initialize polynomial model environments
   _MVXPenv = _MVPenv = 0;
-  _MVXPd = _MVXPf = _MVXPdfdx = _MVXPVAR = _MVXPx = _MVXPp = _MVPx = _MVPp = _MVPt = 0;
+  _MVXPd = _MVXPf = _MVXPdfdx = _MVXPqdot = _MVXPVAR = _MVXPx = _MVXPp = _MVPx = _MVPp = _MVPt = 0;
 
   // Initialize ellipsoidal calculus
   E::options.PSDCHK = false;
@@ -615,16 +644,21 @@ ODEBND_BASE<T,PMT,PVT>::~ODEBND_BASE
   delete[] _xref;
   delete[] _A;
   delete[] _B;
+  delete[] _Bq;
   delete[] _Ir;
+  delete[] _Irq;
   delete[] _Idfdx;
   delete[] _Q;
   delete[] _xrefdot;
   delete[] _Bdot;
+  delete[] _Bqdot;
   delete[] _Irdot;
+  delete[] _Irqdot;
   delete[] _Qdot;
   delete[] _MVXPd;
   delete[] _MVXPf;
   delete[] _MVXPdfdx;
+  delete[] _MVXPqdot;
   delete[] _MVXPVAR;  // **DO NOT DELETE _MVXPx, _MVXPp**
   delete   _MVXPenv;
   delete[] _MVPp;
@@ -653,13 +687,38 @@ ODEBND_BASE<T,PMT,PVT>::_vec2I
 }
 
 template <typename T, typename PMT, typename PVT>
+template <typename REALTYPE>
+inline void
+ODEBND_BASE<T,PMT,PVT>::_vec2I
+( const REALTYPE*vec, const unsigned nx, const unsigned np, const double*pref,
+  const T*Ip, double*B, T*Id, T*Ix, const bool centered )
+{
+  unsigned ivec = 0;
+  for( unsigned iB=0; iB<nx*np; iB++ )
+    B[iB] = vec[ivec++];
+  for( unsigned ix=0; ix<nx; ix++ ){
+    if( !centered ){
+      Id[ix] = T( vec[ivec], vec[ivec+1] );
+      ivec += 2;
+    }
+    else{
+      Id[ix] = T( -vec[ivec], vec[ivec] );
+      ivec++;
+    }
+  }
+  _ep2x( nx, np, Id, pref, Ip, B, 0, Ix );
+
+  return;
+}
+
+template <typename T, typename PMT, typename PVT>
 template <typename U> inline void
 ODEBND_BASE<T,PMT,PVT>::_ep2x
 ( const unsigned nx, const unsigned np, const U*d, const double*pref,
   const U*p, const double*B, const double*xref, U*x )
 {
   for( unsigned ix=0; ix<nx; ix++ ){   
-    x[ix] = xref[ix] + d[ix];
+    x[ix] = xref? xref[ix] + d[ix]: d[ix];
     for( unsigned jp=0; jp<np; jp++ )
       x[ix] += ( p[jp] - pref[jp] ) * B[jp*nx+ix];
   }
@@ -745,6 +804,45 @@ ODEBND_BASE<T,PMT,PVT>::_I2vec
 template <typename T, typename PMT, typename PVT>
 template <typename REALTYPE>
 inline void
+ODEBND_BASE<T,PMT,PVT>::_I2vec
+( const unsigned nx, const unsigned np, const double*B, const double*dL,
+  const double*dU, REALTYPE*vec )
+{
+  unsigned ivec = 0;
+  for( unsigned iB=0; iB<nx*np; iB++ )
+    vec[ivec++] = B[iB];
+  for( unsigned ix=0; ix<nx; ix++ ){
+    vec[ivec++] = dL[ix];
+    vec[ivec++] = dU[ix];
+  }
+  return;
+}
+
+template <typename T, typename PMT, typename PVT>
+template <typename REALTYPE>
+inline void
+ODEBND_BASE<T,PMT,PVT>::_I2vec
+( const unsigned nx, const unsigned np, const double*B, const T*Id,
+  REALTYPE*vec, const bool centered )
+{
+  unsigned ivec = 0;
+  for( unsigned iB=0; iB<nx*np; iB++ )
+    vec[ivec++] = B[iB];
+  if( !centered ){
+    for( unsigned ix=0; ix<nx; ix++ ){
+      vec[ivec++] = Op<T>::l( Id[ix] );
+      vec[ivec++] = Op<T>::u( Id[ix] );
+    }
+  }
+  else
+    for( unsigned ix=0; ix<nx; ix++ )
+      vec[ivec++] = 0.5*Op<T>::diam( Id[ix] );
+  return;
+}
+
+template <typename T, typename PMT, typename PVT>
+template <typename REALTYPE>
+inline void
 ODEBND_BASE<T,PMT,PVT>::_E2vec
 ( const unsigned nx, const unsigned np, const double*xref, const double*Q,
   const double*B, REALTYPE*vec )
@@ -757,17 +855,6 @@ ODEBND_BASE<T,PMT,PVT>::_E2vec
   for( unsigned iB=0; iB<nx*np; iB++ )
     vec[ivec++] = B[iB];
   return;
-}
-
-template <typename T, typename PMT, typename PVT>
-template <typename REALTYPE, typename OPT> inline bool
-ODEBND_BASE<T,PMT,PVT>::_IC_I_QUAD
-( const OPT&options, REALTYPE*vec )
-{
-  if( !_vQUAD.size() || !_nq ) return true;
-  for( unsigned iq=0; iq<_nq; iq++ ) _Iq[iq] = 0.;
-  _I2vec( _nq, _Iq, vec );
-  return true;
 }
 
 template <typename T, typename PMT, typename PVT>
@@ -806,9 +893,6 @@ ODEBND_BASE<T,PMT,PVT>::_IC_I_ELL
 ( const unsigned nx, PVT*MVPx, double*xref, double*Q,
   const unsigned np, double*B, T*Ix, T*Ir, E&Er )
 {
-  double norm1R = 0.;
-  for( unsigned ix=0; ix<nx; ix++ )
-    norm1R += Op<T>::diam( MVPx[ix].remainder() ) / 2.;
   for( unsigned ix=0; ix<nx; ix++ ){
     Ix[ix] = MVPx[ix].bound();
     for( unsigned jp=0; jp<np; jp++ )
@@ -832,6 +916,35 @@ ODEBND_BASE<T,PMT,PVT>::_IC_I_ELL
   std::cout << "Er =" << Er << std::endl;
   { int dum; std::cin >> dum; }
 #endif
+}
+
+template <typename T, typename PMT, typename PVT>
+template <typename REALTYPE, typename OPT> inline bool
+ODEBND_BASE<T,PMT,PVT>::_IC_I_QUAD
+( const OPT&options, REALTYPE*vec )
+{
+  if( !_vQUAD.size() || !_nq ) return true;
+
+  switch( options.WRAPMIT){
+
+  case OPT::NONE:
+  case OPT::DINEQ:
+    for( unsigned iq=0; iq<_nq; iq++ ) _Iq[iq] = 0.;
+    _I2vec( _nq, _Iq, vec );
+    break;
+
+  case OPT::ELLIPS:
+  default:
+    for( unsigned iq=0; iq<_nq; iq++ ){
+      _Irq[iq] = _Iq[iq] = 0.;
+      for( unsigned jp=0; jp<_npar; jp++ )
+        _Bq[jp*_nq+iq] = 0.;
+    }
+    _I2vec( _npar, _npar, _Bq, _Irq, vec );
+    break;
+  }
+
+  return true;
 }
 
 template <typename T, typename PMT, typename PVT>
@@ -1034,13 +1147,7 @@ ODEBND_BASE<T,PMT,PVT>::_RHS_I_ELL
   const double QTOL, const double EPS, const T*W )
 {
   // Extract time derivatives of constant, linear and remainder parts
-  const double WTOL = 1e-8;//EPS*1e2;
-  double trQ = 0.;
-  for( unsigned ix=0; ix<nx; ix++ ){
-    double sqr_wi = W? sqr(Op<T>::abs(W[ix])+WTOL): 1.;
-    trQ += ( Q[_ndxLT(ix,ix,nx)]>EPS? Q[_ndxLT(ix,ix,nx)]/sqr_wi: EPS );
-  }
-  double sumkappa = 0.;
+  // Set reference and linear block RHS
   for( unsigned ix=0; ix<nx; ix++ ){
 #ifdef MC__ODEBND_BASE_DINEQI_DEBUG
     std::cout << "MVXPf[" << ix << "] = " << MVXPf[ix] << std::endl;
@@ -1072,36 +1179,52 @@ ODEBND_BASE<T,PMT,PVT>::_RHS_I_ELL
     std::cout << "Iddot[" << ix << "] = " << Iddot[ix]
               << " : " << Op<T>::mid(Iddot[ix]) << std::endl;
 #endif
-    double wi = W? Op<T>::abs(W[ix])+WTOL: 1.;
-    sumkappa += ( Op<T>::diam( Iddot[ix] ) / 2. ) / wi
-              / ( std::sqrt( trQ ) + QTOL );
+  }
+
+  return _RHS_ELL( nx, Q, A, Iddot, Qdot, QTOL, EPS, W );
+}
+
+template <typename T, typename PMT, typename PVT>
+template <typename U>
+inline void
+ODEBND_BASE<T,PMT,PVT>::_RHS_ELL
+( const unsigned nx, const double*Qx, const double*Ax, const T*Idxdot,
+  double*Qxdot, const double QTOL, const double EPS, const U*W )
+{
+  // Set dynamics of shape matrix
+  const double WTOL = 1e-8;//EPS*1e2;
+  double trQ = 0.;
+  for( unsigned ix=0; ix<nx; ix++ ){
+    double sqr_wi = W? sqr(Op<U>::abs(W[ix])+WTOL): 1.;
+    trQ += ( Qx[_ndxLT(ix,ix,nx)]>EPS? Qx[_ndxLT(ix,ix,nx)]/sqr_wi: EPS );
+  }
+  double sumkappa = 0.;
+  const double srqt_trQ = (trQ>0? std::sqrt( trQ ): 0.) + QTOL;
+  for( unsigned ix=0; ix<nx; ix++ ){
+    double wi = W? Op<U>::abs(W[ix])+WTOL: 1.;
 #ifdef MC__ODEBND_BASE_DINEQPM_DEBUG
     std::cout << "kappa[" << ix << "] = "
-              << ( Op<T>::diam( Iddot[ix] ) / 2. ) / wi
-               / ( std::sqrt( trQ ) + QTOL ) << std::endl;
+              << Op<T>::diam( Idxdot[ix] ) / ( 2. * wi * srqt_trQ ) << std::endl;
 #endif
+    sumkappa += Op<T>::diam( Idxdot[ix] ) / ( 2. * wi * srqt_trQ );
   }
 
   for( unsigned jx=0; jx<nx; jx++ ){
     for( unsigned ix=jx; ix<nx; ix++ ){
-      Qdot[_ndxLT(ix,jx,nx)] = sumkappa * Q[_ndxLT(ix,jx,nx)];
+      Qxdot[_ndxLT(ix,jx,nx)] = sumkappa * Qx[_ndxLT(ix,jx,nx)];
       for( unsigned kx=0; kx<nx; kx++ )
-        Qdot[_ndxLT(ix,jx,nx)] += Q[_ndxLT(ix,kx,nx)] * A[jx+kx*nx]
-                                + A[ix+kx*nx] * Q[_ndxLT(kx,jx,nx)];
+        Qxdot[_ndxLT(ix,jx,nx)] += Qx[_ndxLT(ix,kx,nx)] * Ax[jx+kx*nx]
+                                 + Ax[ix+kx*nx] * Qx[_ndxLT(kx,jx,nx)];
     }
-    double wj = W? Op<T>::abs(W[jx])+WTOL: 1.;
-    Qdot[_ndxLT(jx,jx,nx)] += ( Op<T>::diam( Iddot[jx] ) / 2. ) * wj
-                            * ( std::sqrt( trQ ) + QTOL );
+    double wj = W? Op<U>::abs(W[jx])+WTOL: 1.;
+    Qxdot[_ndxLT(jx,jx,nx)] += Op<T>::diam( Idxdot[jx] ) / 2. * wj * srqt_trQ;
   }
-#ifdef MC__ODEBND_BASE_DINEQI_DEBUG
-  for( unsigned ix=0; ix<nx; ix++ ){
-    std::cout << "Qdot[" << ix << ",#] = ";
-    for( unsigned jx=0; jx<=ix; jx++ )
-      std::cout << Qdot[_ndxLT(ix,jx,nx)] << "  ";
-    std::cout << std::endl;
-  }
-  E Exdot( nx, Qdot, xrefdot );
-  std::cout << "Exdot =" << Exdot << std::endl;
+
+#ifdef MC__ODEBND_BASE_DINEQPM_DEBUG
+  for( unsigned ix=0; ix<nx; ix++ )
+    std::cout << "Idxdot[" << ix << "] =" << Idxdot[ix] << std::endl;
+  E Exdot( nx, Qxdot );
+  std::cout << "Edxdot =" << Edxdot << std::endl;
   { int dum; std::cin >> dum; }
 #endif
 }
@@ -1109,41 +1232,60 @@ ODEBND_BASE<T,PMT,PVT>::_RHS_I_ELL
 template <typename T, typename PMT, typename PVT>
 template <typename REALTYPE, typename OPT> inline bool
 ODEBND_BASE<T,PMT,PVT>::_RHS_I_QUAD
-( const OPT&options, double t, const REALTYPE*x, REALTYPE*qdot,
-  const bool bndinit )
+( const OPT&options, double t, const REALTYPE*x, REALTYPE*qdot )
 {
   if( !_pQUAD ) return false;
 
   switch( options.WRAPMIT){
   case OPT::NONE:
   case OPT::DINEQ:
-    if( !bndinit ) break;
-    _vec2I( x, _nx, _Ix );   // set current state bounds
+    _pDAG->eval( _opQUAD, _IRHS, _nq, _pQUAD, _Iqdot, _nVAR-_nq, _pVAR, _IVAR );
+    _I2vec( _nq, _Iqdot, qdot );
     break;
 
   case OPT::ELLIPS:
   default:
-    if( !bndinit ) break;
-    _vec2E( x, _nx, _npar, _Q, _Er, _Ir, _pref, _Ip, _B, _xref, _Ix ); // set current state enclosure
+    _pDAG->eval( _opQUAD, _PMRHS, _nq, _pQUAD, _MVXPqdot, _nVAR-_nq, _pVAR, _MVXPVAR );
+    _QUAD_I_ELL( _npar, _nx, _MVXPqdot, _Bqdot, _Irqdot, _Iqdot );
+    _I2vec( _nq, _npar, _Bqdot, _Irqdot, qdot );
     break;
   }
 
-  *_It = t; // set current time
-  _QUAD_I( _pDAG, _opQUAD, _IRHS, _nq, _pQUAD, _nVAR-_nq, _pVAR, _IVAR, _Iqdot );
-  _I2vec( _nq, _Iqdot, qdot );
-    
    return true;
 }
 
 template <typename T, typename PMT, typename PVT>
 inline void
-ODEBND_BASE<T,PMT,PVT>::_QUAD_I
-( FFGraph*DAG, std::list<const FFOp*>&opQUAD, T*IQUAD,
-  const unsigned nq, const FFVar*pQUAD, const unsigned nVAR,
-  const FFVar*pVAR, T*IVAR, T*Iqdot )
+ODEBND_BASE<T,PMT,PVT>::_QUAD_I_ELL
+( const unsigned nq, const unsigned offset, PVT*MVYXPg, double*Bqdot,
+  T*Idqdot, T*Iqdot )
 {
-  if( !nq ) return;
-  DAG->eval( opQUAD, IQUAD, nq, pQUAD, Iqdot, nVAR, pVAR, IVAR );
+  // Extract time derivatives of constant, linear and remainder parts
+  // Set reference and linear block RHS
+  for( unsigned iq=0; iq<nq; iq++ ){
+#ifdef MC__ODEBNDS_BASE_DINEQI_DEBUG
+    std::cout << "MVYXPg[" << iq << "] = " << MVYXPg[iq] << std::endl;
+#endif
+    Iqdot[iq] = MVYXPg[iq].B();
+#ifdef MC__ODEBNDS_BASE_DINEQI_DEBUG
+    std::cout << "Iqdot[" << iq << "] = " << Iqdot[iq]
+              << " : " << Op<T>::mid(Iqdot[iq]) << std::endl;
+#endif
+    for( unsigned jq=0; jq<nq; jq++ )
+      Bqdot[iq+jq*nq] = MVYXPg[iq].linear(offset+jq,true);
+#ifdef MC__ODEBNDS_BASE_DINEQI_DEBUG
+    std::cout << "Bqdot[" << iq << ",#] = ";
+    for( unsigned jq=0; jq<nq; jq++ )
+      std::cout << Bqdot[iq+jq*nq] << "  ";
+    std::cout << std::endl;
+    std::cout << "MVYXPg[" << iq << "] = " << MVYXPg[iq] << std::endl;
+#endif
+    Idqdot[iq] = MVYXPg[iq].B();
+#ifdef MC__ODEBNDS_BASE_DINEQI_DEBUG
+    std::cout << "Idqdot[" << iq << "] = " << Idqdot[iq]
+              << " : " << Op<T>::mid(Idqdot[iq]) << std::endl;
+#endif
+  }
 }
 
 template <typename T, typename PMT, typename PVT>
@@ -1209,7 +1351,7 @@ ODEBND_BASE<T,PMT,PVT>::_INI_I_STA
   }
 
   // Set parameterization variables
-  delete[] _Iqdot; _Iqdot = new T[_nq];
+  delete[] _Iqdot; _Iqdot = _nq? new T[_nq]: 0;
 
   switch( options.WRAPMIT){
   case OPT::DINEQ:
@@ -1225,17 +1367,22 @@ ODEBND_BASE<T,PMT,PVT>::_INI_I_STA
     delete[] _xref;    _xref    = new double[_nx];
     delete[] _A;       _A       = new double[_nx*_nx];
     delete[] _B;       _B       = new double[_nx*_npar];
+    delete[] _Bq;      _Bq      = _nq? new double[_nq*_npar]: 0;
     delete[] _Q;       _Q       = new double[_nx*(_nx+1)/2];
     delete[] _Ir;      _Ir      = new T[_nx];
+    delete[] _Irq;     _Irq     = _nq? new T[_nq]: 0;
     delete[] _xrefdot; _xrefdot = new double[_nx];
     delete[] _Bdot;    _Bdot    = new double[_nx*_npar];
+    delete[] _Bqdot;   _Bqdot   = _nq? new double[_nq*_npar]: 0;
     delete[] _Qdot;    _Qdot    = new double[_nx*(_nx+1)/2];
     delete[] _Irdot;   _Irdot   = new T[_nx];
+    delete[] _Irqdot;  _Irqdot  = _nq? new T[_nq]: 0;
 
     delete   _MVXPenv; _MVXPenv = new PMT( _nx+_npar, options.ORDMIT );
     _MVXPenv->options = options.PMOPT;
     delete[] _MVXPd;   _MVXPd   = new PVT[_nx];
     delete[] _MVXPf;   _MVXPf   = new PVT[_nx];
+    delete[] _MVXPqdot;_MVXPqdot= _nq? new PVT[_nq]: 0;
     delete[] _MVXPVAR; _MVXPVAR = new PVT[_nVAR-_nq];
     _MVXPx = _MVXPVAR;
     _MVXPp = _MVXPx + _nx;
@@ -1298,8 +1445,9 @@ ODEBND_BASE<T,PMT,PVT>::_SET_I_STA
     break;   
   case OPT::ELLIPS:
   default:
-    _IRHS = _opQUAD.size()? new T[ _opQUAD.size() ] : 0;
-    _PMRHS = _opRHS.size()? new PVT[ _opRHS.size() ] : 0;
+    //_IRHS = _opQUAD.size()? new T[ _opQUAD.size() ] : 0;
+    //_PMRHS = _opRHS.size()? new PVT[ _opRHS.size() ] : 0;
+    _PMRHS = new PVT[ opmax ];
     break;
   }
 
@@ -1816,9 +1964,9 @@ ODEBND_BASE<T,PMT,PVT>::_RHS_PM_STA
 
     // Construct the ellipsoidal remainder derivatives
     if( options.QSCALE )
-      _RHS_PM_ELL( _nx, _Q, _A, _Irdot, _Qdot, options.QTOL, machprec(), _PMx );
+      _RHS_ELL( _nx, _Q, _A, _Irdot, _Qdot, options.QTOL, machprec(), _PMx );
     else
-      _RHS_PM_ELL( _nx, _Q, _A, _Irdot, _Qdot, options.QTOL, machprec() );
+      _RHS_ELL( _nx, _Q, _A, _Irdot, _Qdot, options.QTOL, machprec(), (PVT*)0 );
 
     // Whether or not to ignore the remainder
     if( !options.PMNOREM )
@@ -1832,50 +1980,6 @@ ODEBND_BASE<T,PMT,PVT>::_RHS_PM_STA
     return true;
    }
   }
-}
-
-template <typename T, typename PMT, typename PVT>
-inline void
-ODEBND_BASE<T,PMT,PVT>::_RHS_PM_ELL
-( const unsigned nx, const double*Qr, const double*Ar, const T*Irdot,
-  double*Qrdot, const double QTOL, const double EPS, const PVT*W )
-{
-  const double WTOL = 1e-8;//EPS*1e2;
-
-  // Set dynamics of shape matrix
-  double trQ = 0., sumkappa = 0.;
-  for( unsigned ix=0; ix<nx; ix++ ){
-    double sqr_wi = W? sqr(Op<PVT>::abs(W[ix])+WTOL): 1.;
-    trQ += ( Qr[_ndxLT(ix,ix,nx)]>EPS? Qr[_ndxLT(ix,ix,nx)]/sqr_wi: EPS );
-  }
-  const double srqt_trQ = (trQ>0? std::sqrt( trQ ): 0.) + QTOL;
-  for( unsigned ix=0; ix<nx; ix++ ){
-    double wi = W? Op<PVT>::abs(W[ix])+WTOL: 1.; //W? Op<PVT>::abs(W[ix]): 1.;
-#ifdef MC__ODEBND_BASE_DINEQPM_DEBUG
-    std::cout << "kappa[" << ix << "] = "
-              << Op<T>::diam( Irdot[ix] ) / ( 2. * wi * srqt_trQ ) << std::endl;
-#endif
-    sumkappa += Op<T>::diam( Irdot[ix] ) / ( 2. * wi * srqt_trQ );
-  }
-
-  for( unsigned jx=0; jx<nx; jx++ ){
-    for( unsigned ix=jx; ix<nx; ix++ ){
-      Qrdot[_ndxLT(ix,jx,nx)] = sumkappa * Qr[_ndxLT(ix,jx,nx)];
-      for( unsigned kx=0; kx<nx; kx++ )
-        Qrdot[_ndxLT(ix,jx,nx)] += Qr[_ndxLT(ix,kx,nx)] * Ar[jx+kx*nx]
-                                 + Ar[ix+kx*nx] * Qr[_ndxLT(kx,jx,nx)];
-    }
-    double wj = W? Op<PVT>::abs(W[jx])+WTOL: 1.;
-    Qrdot[_ndxLT(jx,jx,nx)] += Op<T>::diam( Irdot[jx] ) / 2. * wj * srqt_trQ;
-  }
-
-#ifdef MC__ODEBND_BASE_DINEQPM_DEBUG
-  for( unsigned ix=0; ix<nx; ix++ )
-    std::cout << "Irdot[" << ix << "] =" << Irdot[ix] << std::endl;
-  E Erdot( nx, Qrdot );
-  std::cout << "Erdot =" << Erdot << std::endl;
-  { int dum; std::cin >> dum; }
-#endif
 }
 
 template <typename T, typename PMT, typename PVT>

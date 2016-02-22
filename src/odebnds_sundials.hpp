@@ -66,13 +66,15 @@ class ODEBNDS_SUNDIALS:
 
   using ODEBNDS_BASE<T,PMT,PVT>::_Ix;
   using ODEBNDS_BASE<T,PMT,PVT>::_Iy;
-  using ODEBNDS_BASE<T,PMT,PVT>::_Idy;
   using ODEBNDS_BASE<T,PMT,PVT>::_Iyq;
+  using ODEBNDS_BASE<T,PMT,PVT>::_Idy;
+  using ODEBNDS_BASE<T,PMT,PVT>::_Idyq;
   using ODEBNDS_BASE<T,PMT,PVT>::_Qy;
   using ODEBNDS_BASE<T,PMT,PVT>::_By;
+  using ODEBNDS_BASE<T,PMT,PVT>::_Byq;
   using ODEBNDS_BASE<T,PMT,PVT>::_Edy;
   using ODEBNDS_BASE<T,PMT,PVT>::_yref;
-  using ODEBNDS_BASE<T,PMT,PVT>::_PMz;
+  using ODEBNDS_BASE<T,PMT,PVT>::_PMx;
   using ODEBNDS_BASE<T,PMT,PVT>::_PMy;
   using ODEBNDS_BASE<T,PMT,PVT>::_PMyq;
   using ODEBNDS_BASE<T,PMT,PVT>::_vec2E;
@@ -407,15 +409,17 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::_INI_I_ADJ
     return false;
 
   // Set SUNDIALS adjoint/quadrature arrays
-  unsigned cv_Ny_size = 0, cv_Nyq_size = 2*np;
+  unsigned cv_Ny_size, cv_Nyq_size;
   switch( options.WRAPMIT){
   case Options::NONE:
   case Options::DINEQ:
-    cv_Ny_size += 2*_nx;
+    cv_Ny_size  = 2*_nx;
+    cv_Nyq_size = 2*np;
     break;
   case Options::ELLIPS:
   default:
-    cv_Ny_size = _nx*(1+np)+_nx*(_nx+1)/2;
+    cv_Ny_size  = _nx*(1+np)+_nx*(_nx+1)/2;
+    cv_Nyq_size = _np*(2+np);
     break;
   }
   for( unsigned i=0; i<_nf; i++ ){
@@ -537,7 +541,7 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
     // Display & record adjoint terminal results
     if( options.DISPLAY >= 1 ){
       _print_interm( tk[ns], _nf*_nx, Ilk[ns], "l", os );//_nf
-      _print_interm( _nf*_np, Idf, "df", os );
+      //_print_interm( _nf*_np, Idf, "df", os );
     }
     if( options.RESRECORD )
       _results_adj.push_back( Results( tk[ns], _nx*_nf, Ilk[ns] ) );//_nf
@@ -587,17 +591,18 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
         case Options::DINEQ:
           _vec2I( _vec_sta[_istg-1].data(), _nx, _Ix );
           _vec2I( NV_DATA_S(_Ny[_ifct]), _nx, _Iy);
+          _vec2I( NV_DATA_S( _Nyq[_ifct] ), _np, _Iyq );
           break;
         case Options::ELLIPS:
         default:
           _vec2E( _vec_sta[_istg-1].data(), _nx, _np, _Q, _Er, _Ir, _pref, _Ip, _B, _xref, _Ix );
           _vec2E( NV_DATA_S(_Ny[_ifct]), _nx, _np, _Qy, _Edy, _Idy, _pref, _Ip, _By, _yref, _Iy );
-//#ifdef MC__ODEBNDS_GSL_DINEQI_DEBUG
+#ifdef MC__ODEBNDS_GSL_DINEQI_DEBUG
           std::cout << "Edy: " << _Edy;
-//#endif
+#endif
+          _vec2I( NV_DATA_S( _Nyq[_ifct] ), _np, _np, _pref, _Ip, _Byq, _Idyq, _Iyq );
           break;
         }
-        _vec2I( NV_DATA_S( _Nyq[_ifct] ), _np, _Iyq );
         if( Ilk && !Ilk[_istg-1] ) Ilk[_istg-1] = new T[_nx*_nf];
         for( unsigned iy=0; Ilk[_istg-1] && iy<_nx; iy++ )
           Ilk[_istg-1][_ifct*_nx+iy] = _Iy[iy];
@@ -615,23 +620,21 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
             { _END_ADJ(); return FATAL; }
         }
         // Add initial state contribution to derivative bounds
-        else if( Idf ){
-          if( !_IC_I_ADJ( _t ) ){ _END_ADJ(); return FATAL; }
-          for( unsigned iq=0; iq<_np; iq++ )
-            Idf[_ifct*_np+iq] = _Iyq[iq];
-        }
+        else if( !_IC_I_ADJ( _t ) ){ _END_ADJ(); return FATAL; }
+        for( unsigned iq=0; iq<_np; iq++ )
+          Idf[_ifct*_np+iq] = _Iyq[iq];
       }
 
       // Display & record adjoint intermediate results
       if( options.DISPLAY >= 1 ){
         _print_interm( tk[_istg-1], _nf*_nx, Ilk[_istg-1], "l", os );
-        _print_interm( _nf*_np, Idf, "df", os );
+        //_print_interm( _nf*_np, Idf, "df", os );
       }
       if( options.RESRECORD )
         _results_adj.push_back( Results( tk[_istg-1], _nf*_nx, Ilk[_istg-1] ) );
     }
-    //if( options.DISPLAY >= 1 )
-    //  _print_interm( _nf*_np, Idf, "df", os );
+    if( options.DISPLAY >= 1 )
+      _print_interm( _nf*_np, Idf, "df", os );
   }
   catch(...){
     _END_ADJ();
@@ -654,19 +657,21 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::_INI_PM_ADJ
     return false;
 
   // Set SUNDIALS adjoint/quadrature arrays
-  unsigned cv_Ny_size = 0, cv_Nyq_size = (_PMenv->nmon()+1)*_np;
+  unsigned cv_Ny_size;
   switch( options.WRAPMIT){
   case Options::NONE:
-    cv_Ny_size += (_PMenv->nmon()+1)*_nx;
+    cv_Ny_size = (_PMenv->nmon()+1)*_nx;
     break;
   case Options::DINEQ:
-    cv_Ny_size += _PMenv->nmon()*_nx + 2*_nx ;
+    cv_Ny_size = _PMenv->nmon()*_nx + 2*_nx ;
     break;
   case Options::ELLIPS:
   default:
-    cv_Ny_size += _PMenv->nmon()*_nx + _nx*(_nx+1)/2;
+    cv_Ny_size = _PMenv->nmon()*_nx + _nx*(_nx+1)/2;
     break;
   }
+  unsigned cv_Nyq_size = (_PMenv->nmon()+1)*_np;
+
   for( unsigned i=0; i<_nf; i++ ){
     if( !_Ny[i] || cv_Ny_size != NV_LENGTH_S( _Ny[i] ) ){
       if( _Ny[i] ) N_VDestroy_Serial( _Ny[i] );
@@ -752,38 +757,25 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
     if( !_INI_PM_ADJ( _np, PMp )) return FATAL;
     _t = tk[ns];
 
-    // Bounds on terminal states/quadratures
-    switch( options.WRAPMIT){
-    case Options::NONE:
-      _vec2PMI( _vec_sta[ns].data(), _PMenv, _nx, _PMz, true );
-      break;
-    case Options::DINEQ:
-      _vec2PMI( _vec_sta[ns].data(), _PMenv, _nx, _PMz );
-      break;
-    case Options::ELLIPS:
-    default:
-      _vec2PME( _vec_sta[ns].data(), _PMenv, _nx, _PMz, _Q, _Er, _Ir );
-      break;
-    }
-
     // Bounds on terminal adjoints/quadratures
     if( PMlk && !PMlk[ns] ) PMlk[ns] = new PVT[_nx*_nf];
     for( _ifct=0; _ifct < _nf; _ifct++ ){
       _pos_fct = ( _vFCT.size()>=ns? ns-1:0 );
-      if( !_TC_PM_ADJ( options, _t, NV_DATA_S(_Ny[_ifct]), _pos_fct, _ifct)
+      if( !_TC_PM_ADJ( options, _t, _vec_sta[ns].data(), NV_DATA_S(_Ny[_ifct]), _pos_fct, _ifct )
        || ( _Nyq && _Nyq[_ifct] && !_TC_PM_QUAD( options, _t, NV_DATA_S(_Nyq[_ifct]) ) ) )
         { _END_ADJ(); return FATAL; }
       for( unsigned iy=0; PMlk[ns] && iy<_nx; iy++ )
         PMlk[ns][_ifct*_nx+iy] = _PMy[iy];
+      for( unsigned iq=0; iq<_np; iq++ )
+        PMdf[_ifct*_np+iq] = _PMyq[iq];
     }
     // Display & record adjoint terminal results
     if( options.DISPLAY >= 1 ){
       _print_interm( tk[ns], _nx*_nf, PMlk[ns], "l", os );
-      _print_interm( _np, _PMyq, "q", os );
+      //_print_interm( _np, PMdf, "df", os );
     }
     if( options.RESRECORD )
       _results_adj.push_back( Results( tk[ns], _nf*_nx, PMlk[ns] ) );
-    //{ int dum; std::cin >> dum; }
 
     // Initialization of adjoint integration
     for( _ifct=0; _ifct < _nf; _ifct++ )
@@ -822,16 +814,16 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
         stats_adj.numSteps += nstpB;
         switch( options.WRAPMIT){
         case Options::NONE:
-          _vec2PMI( _vec_sta[_istg-1].data(), _PMenv, _nx, _PMz, true );
+          _vec2PMI( _vec_sta[_istg-1].data(), _PMenv, _nx, _PMx, true );
           _vec2PMI( NV_DATA_S(_Ny[_ifct]), _PMenv, _nx, _PMy, true );
           break;
         case Options::DINEQ:
-          _vec2PMI( _vec_sta[_istg-1].data(), _PMenv, _nx, _PMz );
+          _vec2PMI( _vec_sta[_istg-1].data(), _PMenv, _nx, _PMx );
           _vec2PMI( NV_DATA_S(_Ny[_ifct]), _PMenv, _nx, _PMy );
           break;
         case Options::ELLIPS:
         default:
-          _vec2PME( _vec_sta[_istg-1].data(), _PMenv, _nx, _PMz, _Q, _Er, _Ir );
+          _vec2PME( _vec_sta[_istg-1].data(), _PMenv, _nx, _PMx, _Q, _Er, _Ir );
           _vec2PME( NV_DATA_S(_Ny[_ifct]), _PMenv, _nx, _PMy, _Qy, _Edy, _Idy );
           break;
         }
@@ -841,37 +833,30 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
           PMlk[_istg-1][_ifct*_nx+iy] =_PMy[iy];
 
         // Add function contribution to adjoint bounds (discontinuities)
-        if( _istg>1  ){
-          //std::cout << "_Ny[" << _ifct << "]: (before)";
-          //N_VPrint_Serial(_Ny[_ifct]);
+        if( _istg > 1  ){
           _pos_fct = ( _vFCT.size()>=ns? _istg-1:0 );
           if( _pos_fct 
            && !_CC_PM_ADJ( options, _t, NV_DATA_S(_Ny[_ifct]), _pos_fct, _ifct )
            && !_CC_PM_QUAD( options, _t, NV_DATA_S(_Nyq[_ifct]) ) )
             { _END_ADJ(); return FATAL; }
-          //std::cout << "_Ny[" << _ifct << "]: (after)";
-          //N_VPrint_Serial(_Ny[_ifct]);
 
           // Reset ODE solver - needed in case of discontinuity
           if( !_CC_CVODES( _ifct, _indexB[_ifct] ) )
             { _END_ADJ(); return FATAL; }
         }
         // Add initial state contribution to derivative bounds
-        else if( PMdf ){
-          if( !_IC_PM_ADJ( _t ) ){ _END_ADJ(); return FATAL; }
-          for( unsigned iq=0; iq<_np; iq++ )
-            PMdf[_ifct*_np+iq] = _PMyq[iq];
-        }
+        else if( !_IC_PM_ADJ( _t ) ){ _END_ADJ(); return FATAL; }
+        for( unsigned iq=0; iq<_np; iq++ )
+          PMdf[_ifct*_np+iq] = _PMyq[iq];
       }
 
       // Display & record adjoint intermediate results
       if( options.DISPLAY >= 1 ){
         _print_interm( tk[_istg-1], _nf*_nx, PMlk[_istg-1], "l", os );
-        _print_interm( _np, _PMyq, "q", os );
+        //_print_interm( _np, PMdf, "df", os );
       }
       if( options.RESRECORD )
         _results_adj.push_back( Results( tk[_istg-1], _nf*_nx, PMlk[_istg-1] ) );
-      //{ std::cout << "--paused--"; int dum; std::cin >> dum; }
     }
 
     if( options.DISPLAY >= 1 )

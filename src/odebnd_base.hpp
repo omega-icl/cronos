@@ -469,7 +469,7 @@ class ODEBND_BASE:
   //! @brief Function to reinitialize state polynomial model w/ ellipsoidal remainder
   static void _CC_PM_ELL
     ( const unsigned nx, const E&Exr, const double*Afr, const T*Ifr,
-      double*Qfr, const double QTOL, const double EPS );
+      PVT*PMf, double*Qfr, const double QTOL, const double EPS );
 
   //! @brief Function to set RHS and QUAD pointers
   template <typename OPT> bool _SET_PM_STA
@@ -1799,7 +1799,7 @@ ODEBND_BASE<T,PMT,PVT>::_CC_PM_STA
 
     // Whether or not to ignore the remainder
     if( !options.PMNOREM ){
-      _CC_PM_ELL( _nx, _Er, _A, _Irdot, _Qdot, options.QTOL, machprec() );
+      _CC_PM_ELL( _nx, _Er, _A, _Irdot, _PMxdot, _Qdot, options.QTOL, machprec() );
       _PME2vec( _PMenv, _nx, _PMxdot, _Qdot, vec );
     }
     else
@@ -1815,7 +1815,7 @@ template <typename T, typename PMT, typename PVT>
 inline void
 ODEBND_BASE<T,PMT,PVT>::_CC_PM_ELL
 ( const unsigned nx, const E&Exr, const double*Afr, const T*Ifr,
-  double*Qfr, const double QTOL, const double EPS )
+  PVT*PMf, double*Qfr, const double QTOL, const double EPS )
 {
   // Set shape matrix of discontinuity
   E Efr;
@@ -1828,9 +1828,11 @@ ODEBND_BASE<T,PMT,PVT>::_CC_PM_ELL
   }
   else
     Efr = minksum_ea( Exr, Ifr, QTOL, EPS );    
-  for( unsigned jx=0; jx<nx; jx++ )
+  for( unsigned jx=0; jx<nx; jx++ ){
     for( unsigned ix=jx; ix<nx; ix++ )
       Qfr[_ndxLT(ix,jx,nx)] = Efr.Q(ix,jx);
+    PMf[jx].set( T(Efr.l(jx),Efr.u(jx)) );
+  }
 
 #ifdef MC__ODEBND_BASE_DINEQPM_DEBUG
   for( unsigned ix=0; ix<nx; ix++ ){

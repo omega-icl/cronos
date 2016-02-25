@@ -1,4 +1,4 @@
-// Copyright (C) 2015 Benoit Chachuat & Nikola Peric, Imperial College London.
+// Copyright (C) 2015- Benoit Chachuat & Nikola Peric, Imperial College London.
 // All Rights Reserved.
 // This code is published under the Eclipse Public License.
 
@@ -47,51 +47,36 @@ class ODEBNDS_SUNDIALS:
   using ODEBND_BASE<T,PMT,PVT>::FAILURE;
   using ODEBND_BASE<T,PMT,PVT>::FATAL;
 
-  using ODEBND_BASE<T,PMT,PVT>::_Q;
-  using ODEBND_BASE<T,PMT,PVT>::_Er;
-  using ODEBND_BASE<T,PMT,PVT>::_Ir;
-  using ODEBND_BASE<T,PMT,PVT>::_pref;
-  using ODEBND_BASE<T,PMT,PVT>::_Ip;
-  using ODEBND_BASE<T,PMT,PVT>::_xref;
-  using ODEBND_BASE<T,PMT,PVT>::_B;
   using ODEBND_BASE<T,PMT,PVT>::_diam;
-  using ODEBND_BASE<T,PMT,PVT>::_vec2I;
-  using ODEBND_BASE<T,PMT,PVT>::_vec2E;
-  using ODEBND_BASE<T,PMT,PVT>::_PMenv;
-  using ODEBND_BASE<T,PMT,PVT>::_PMq;
-  using ODEBND_BASE<T,PMT,PVT>::_PMp;
-  using ODEBND_BASE<T,PMT,PVT>::_vec2PMI;
-  using ODEBND_BASE<T,PMT,PVT>::_vec2PME;
   using ODEBND_BASE<T,PMT,PVT>::_print_interm;
+  using ODEBND_BASE<T,PMT,PVT>::_PMenv;
 
-  using ODEBNDS_BASE<T,PMT,PVT>::_Ix;
   using ODEBNDS_BASE<T,PMT,PVT>::_Iy;
   using ODEBNDS_BASE<T,PMT,PVT>::_Iyq;
-  using ODEBNDS_BASE<T,PMT,PVT>::_Idy;
-  using ODEBNDS_BASE<T,PMT,PVT>::_Idyq;
-  using ODEBNDS_BASE<T,PMT,PVT>::_Qy;
-  using ODEBNDS_BASE<T,PMT,PVT>::_By;
-  using ODEBNDS_BASE<T,PMT,PVT>::_Byq;
-  using ODEBNDS_BASE<T,PMT,PVT>::_Edy;
-  using ODEBNDS_BASE<T,PMT,PVT>::_yref;
-  using ODEBNDS_BASE<T,PMT,PVT>::_PMx;
   using ODEBNDS_BASE<T,PMT,PVT>::_PMy;
   using ODEBNDS_BASE<T,PMT,PVT>::_PMyq;
-  using ODEBNDS_BASE<T,PMT,PVT>::_vec2E;
+  using ODEBNDS_BASE<T,PMT,PVT>::_IC_I_SET;
   using ODEBNDS_BASE<T,PMT,PVT>::_IC_I_ADJ;
+  using ODEBNDS_BASE<T,PMT,PVT>::_IC_I_QUAD;
+  using ODEBNDS_BASE<T,PMT,PVT>::_TC_I_SET;
   using ODEBNDS_BASE<T,PMT,PVT>::_TC_I_ADJ;
   using ODEBNDS_BASE<T,PMT,PVT>::_TC_I_QUAD;
+  using ODEBNDS_BASE<T,PMT,PVT>::_CC_I_SET;
   using ODEBNDS_BASE<T,PMT,PVT>::_CC_I_ADJ;
   using ODEBNDS_BASE<T,PMT,PVT>::_CC_I_QUAD;
-  using ODEBNDS_BASE<T,PMT,PVT>::_SET_I_ADJ;
+  using ODEBNDS_BASE<T,PMT,PVT>::_RHS_I_SET;
   using ODEBNDS_BASE<T,PMT,PVT>::_RHS_I_ADJ;
   using ODEBNDS_BASE<T,PMT,PVT>::_RHS_I_QUAD;
+  using ODEBNDS_BASE<T,PMT,PVT>::_IC_PM_SET;
   using ODEBNDS_BASE<T,PMT,PVT>::_IC_PM_ADJ;
+  using ODEBNDS_BASE<T,PMT,PVT>::_IC_PM_QUAD;
+  using ODEBNDS_BASE<T,PMT,PVT>::_TC_PM_SET;
   using ODEBNDS_BASE<T,PMT,PVT>::_TC_PM_ADJ;
   using ODEBNDS_BASE<T,PMT,PVT>::_TC_PM_QUAD;
+  using ODEBNDS_BASE<T,PMT,PVT>::_CC_PM_SET;
   using ODEBNDS_BASE<T,PMT,PVT>::_CC_PM_ADJ;
   using ODEBNDS_BASE<T,PMT,PVT>::_CC_PM_QUAD;
-  using ODEBNDS_BASE<T,PMT,PVT>::_SET_PM_ADJ;
+  using ODEBNDS_BASE<T,PMT,PVT>::_RHS_PM_SET;
   using ODEBNDS_BASE<T,PMT,PVT>::_RHS_PM_ADJ;
   using ODEBNDS_BASE<T,PMT,PVT>::_RHS_PM_QUAD;
 
@@ -453,8 +438,8 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::MC_CVADJRHSI__
 {
   ODEBNDS_SUNDIALS<T,PMT,PVT> *pODEBNDS = ODEBNDS_SUNDIALS<T,PMT,PVT>::pODEBNDS;
   pODEBNDS->_ifct = *static_cast<unsigned*>( user_data );
-  bool flag = pODEBNDS->_RHS_I_ADJ( pODEBNDS->options, t, NV_DATA_S( y ),
-    NV_DATA_S( ydot ), NV_DATA_S( x ), pODEBNDS->_ifct, true );
+  bool flag = pODEBNDS->_RHS_I_ADJ( pODEBNDS->options, t, NV_DATA_S( x ), NV_DATA_S( y ),
+    NV_DATA_S( ydot ), pODEBNDS->_ifct, true );
   ODEBNDS_SUNDIALS<T,PMT,PVT>::pODEBNDS = pODEBNDS;
   pODEBNDS->stats_adj.numRHS++;
   return( (flag && _diam( pODEBNDS->_nx, pODEBNDS->_Iy ) < pODEBNDS->options.DMAX)? 0: -1 );
@@ -466,8 +451,8 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::MC_CVADJQUADI__
 {
   ODEBNDS_SUNDIALS<T,PMT,PVT> *pODEBNDS = ODEBNDS_SUNDIALS<T,PMT,PVT>::pODEBNDS;
   pODEBNDS->_ifct = *static_cast<unsigned*>( user_data );
-  bool flag = pODEBNDS->_RHS_I_QUAD( pODEBNDS->options, t, NV_DATA_S( y ),
-    NV_DATA_S( qdot ), NV_DATA_S( x ), pODEBNDS->_ifct, true );
+  bool flag = pODEBNDS->_RHS_I_QUAD( pODEBNDS->options, NV_DATA_S( qdot ),
+    pODEBNDS->_ifct, true );
   ODEBNDS_SUNDIALS<T,PMT,PVT>::pODEBNDS = pODEBNDS;
   return( flag? 0: -1 );
 }
@@ -511,26 +496,13 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
     if( !_INI_I_ADJ( _np, Ip )) return FATAL;
     _t = tk[ns];
 
-    // Bounds on terminal states/quadratures
-    //for( unsigned i=0; i<_vec_sta[ns].size(); i++ )
-    //  NV_DATA_S(_Nx)[i] = _vec_sta[ns][i];
-    switch( options.WRAPMIT){
-    case Options::NONE:
-    case Options::DINEQ:
-      _vec2I( _vec_sta[ns].data(), _nx, _Ix );
-      break;
-    case Options::ELLIPS:
-    default:
-      _vec2E( _vec_sta[ns].data(), _nx, _np, _Q, _Er, _Ir, _pref, _Ip, _B, _xref, _Ix );
-      break;
-    }
-
     // Bounds on terminal adjoints/quadratures
     if( Ilk && !Ilk[ns] ) Ilk[ns] = new T[_nx*_nf];
     for( _ifct=0; _ifct < _nf; _ifct++ ){
       _pos_fct = ( _vFCT.size()>=ns? ns-1:0 );
-      if( !_TC_I_ADJ( options, _t, NV_DATA_S(_Ny[_ifct]), _pos_fct, _ifct)
-       || ( _Nyq && _Nyq[_ifct] && !_TC_I_QUAD( options, _t, NV_DATA_S(_Nyq[_ifct]) ) ) )
+      if( !_TC_I_SET( options, _pos_fct, _ifct)
+       || !_TC_I_ADJ( options, _t, _vec_sta[ns].data(), NV_DATA_S(_Ny[_ifct]) )
+       || ( _Nyq && _Nyq[_ifct] && !_TC_I_QUAD( options, NV_DATA_S(_Nyq[_ifct]) ) ) )
         { _END_ADJ(); return FATAL; }
       for( unsigned iy=0; Ilk[ns] && iy<_nx; iy++ )
         Ilk[ns][_ifct*_nx+iy] = _Iy[iy];
@@ -559,7 +531,7 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
       // Update list of operations in RHSADJ and QUADADJ
       _pos_rhs  = ( _vRHS.size() <=1? 0: _istg-1 );
       _pos_quad = ( _vQUAD.size()<=1? 0: _istg-1 );
-      if( !_SET_I_ADJ( options, _pos_rhs, _pos_quad, _pos_fct ) )
+      if( !_RHS_I_SET( options, _pos_rhs, _pos_quad, _pos_fct ) )
         { _END_ADJ(); return FATAL; }
 
       // Propagate bounds backward to previous stage time
@@ -574,8 +546,6 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
       // Bounds on states/adjoints/quadratures at stage time
       //stats_adj.numSteps = 0; 
       for( _ifct=0; _ifct < _nf; _ifct++ ){
-        //for( unsigned i=0; i<_vec_sta[_istg-1].size(); i++ )
-        //  NV_DATA_S(_Nx)[i] = _vec_sta[_istg-1][i];
         _cv_flag = CVodeGetB( _cv_mem, _indexB[_ifct], &_t, _Ny[_ifct]);
         if( _check_cv_flag( &_cv_flag, "CVodeGetB", 1) )
           { _END_ADJ(); return FATAL; }
@@ -586,33 +556,14 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
         long int nstpB;
         _cv_flag = CVodeGetNumSteps( cv_memB, &nstpB );
         stats_adj.numSteps += nstpB;
-        switch( options.WRAPMIT){
-        case Options::NONE:
-        case Options::DINEQ:
-          _vec2I( _vec_sta[_istg-1].data(), _nx, _Ix );
-          _vec2I( NV_DATA_S(_Ny[_ifct]), _nx, _Iy);
-          _vec2I( NV_DATA_S( _Nyq[_ifct] ), _np, _Iyq );
-          break;
-        case Options::ELLIPS:
-        default:
-          _vec2E( _vec_sta[_istg-1].data(), _nx, _np, _Q, _Er, _Ir, _pref, _Ip, _B, _xref, _Ix );
-          _vec2E( NV_DATA_S(_Ny[_ifct]), _nx, _np, _Qy, _Edy, _Idy, _pref, _Ip, _By, _yref, _Iy );
-#ifdef MC__ODEBNDS_GSL_DINEQI_DEBUG
-          std::cout << "Edy: " << _Edy;
-#endif
-          _vec2I( NV_DATA_S( _Nyq[_ifct] ), _np, _np, _pref, _Ip, _Byq, _Idyq, _Iyq );
-          break;
-        }
-        if( Ilk && !Ilk[_istg-1] ) Ilk[_istg-1] = new T[_nx*_nf];
-        for( unsigned iy=0; Ilk[_istg-1] && iy<_nx; iy++ )
-          Ilk[_istg-1][_ifct*_nx+iy] = _Iy[iy];
 
         // Add function contribution to adjoint bounds (discontinuities)
         if( _istg > 1  ){
           _pos_fct = ( _vFCT.size()>=ns? _istg-1:0 );
           if( _pos_fct
-           && !_CC_I_ADJ( options, _t, NV_DATA_S(_Ny[_ifct]), _pos_fct, _ifct )
-           && !_CC_I_QUAD( options, _t, NV_DATA_S(_Nyq[_ifct]) ) )
+           && ( !_CC_I_SET( options, _pos_fct, _ifct )
+             || !_CC_I_ADJ( options, _t, _vec_sta[_istg-1].data(), NV_DATA_S(_Ny[_ifct]) )
+             || ( _Nyq && _Nyq[_ifct] && !_CC_I_QUAD( options, NV_DATA_S(_Nyq[_ifct]) ) ) ) )
             { _END_ADJ(); return FATAL; }
 
           // Reset ODE solver - needed in case of discontinuity
@@ -620,7 +571,15 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
             { _END_ADJ(); return FATAL; }
         }
         // Add initial state contribution to derivative bounds
-        else if( !_IC_I_ADJ( _t ) ){ _END_ADJ(); return FATAL; }
+        else if( !_IC_I_SET( options )
+              || !_IC_I_ADJ( options, _t, _vec_sta[_istg-1].data(), NV_DATA_S(_Ny[_ifct]) )
+              || ( _Nyq && _Nyq[_ifct] && !_IC_I_QUAD( options, NV_DATA_S(_Nyq[_ifct]) ) ) )
+          { _END_ADJ(); return FATAL; }
+
+        // Keep track of results at stage times
+        if( Ilk && !Ilk[_istg-1] ) Ilk[_istg-1] = new T[_nx*_nf];
+        for( unsigned iy=0; Ilk[_istg-1] && iy<_nx; iy++ )
+          Ilk[_istg-1][_ifct*_nx+iy] = _Iy[iy];
         for( unsigned iq=0; iq<_np; iq++ )
           Idf[_ifct*_np+iq] = _Iyq[iq];
       }
@@ -651,7 +610,6 @@ template <typename T, typename PMT, typename PVT> inline bool
 ODEBNDS_SUNDIALS<T,PMT,PVT>::_INI_PM_ADJ
 ( const unsigned np, const PVT *PMp )
 {
-
   // Initialize bound propagation
   if( !ODEBNDS_BASE<T,PMT,PVT>::_INI_PM_ADJ( options, np, PMp ) )
     return false;
@@ -696,8 +654,8 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::MC_CVADJRHSPM__
 {
   ODEBNDS_SUNDIALS<T,PMT,PVT> *pODEBNDS = ODEBNDS_SUNDIALS<T,PMT,PVT>::pODEBNDS;
   pODEBNDS->_ifct = *static_cast<unsigned*>( user_data );
-  bool flag = pODEBNDS->_RHS_PM_ADJ( pODEBNDS->options, t, NV_DATA_S( y ),
-    NV_DATA_S( ydot ), NV_DATA_S( x ), pODEBNDS->_ifct, true );
+  bool flag = pODEBNDS->_RHS_PM_ADJ( pODEBNDS->options, t, NV_DATA_S( x ), NV_DATA_S( y ),
+    NV_DATA_S( ydot ), pODEBNDS->_ifct, true );
   ODEBNDS_SUNDIALS<T,PMT,PVT>::pODEBNDS = pODEBNDS;
   pODEBNDS->stats_adj.numRHS++;
   return( (flag && _diam( pODEBNDS->_nx, pODEBNDS->_PMy ) < pODEBNDS->options.DMAX)? 0: -1 );
@@ -709,8 +667,8 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::MC_CVADJQUADPM__
 {
   ODEBNDS_SUNDIALS<T,PMT,PVT> *pODEBNDS = ODEBNDS_SUNDIALS<T,PMT,PVT>::pODEBNDS;
   pODEBNDS->_ifct = *static_cast<unsigned*>( user_data );
-  bool flag = pODEBNDS->_RHS_PM_QUAD( pODEBNDS->options, t, NV_DATA_S( y ),
-    NV_DATA_S( qdot ), NV_DATA_S( x ), pODEBNDS->_ifct );
+  bool flag = pODEBNDS->_RHS_PM_QUAD( pODEBNDS->options, NV_DATA_S( qdot ),
+    pODEBNDS->_ifct, true );
   ODEBNDS_SUNDIALS<T,PMT,PVT>::pODEBNDS = pODEBNDS;
   return( flag? 0: -1 );
 }
@@ -761,8 +719,9 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
     if( PMlk && !PMlk[ns] ) PMlk[ns] = new PVT[_nx*_nf];
     for( _ifct=0; _ifct < _nf; _ifct++ ){
       _pos_fct = ( _vFCT.size()>=ns? ns-1:0 );
-      if( !_TC_PM_ADJ( options, _t, _vec_sta[ns].data(), NV_DATA_S(_Ny[_ifct]), _pos_fct, _ifct )
-       || ( _Nyq && _Nyq[_ifct] && !_TC_PM_QUAD( options, _t, NV_DATA_S(_Nyq[_ifct]) ) ) )
+      if( !_TC_PM_SET( options, _pos_fct, _ifct )
+       || !_TC_PM_ADJ( options, _t, _vec_sta[ns].data(), NV_DATA_S(_Ny[_ifct]) )
+       || ( _Nyq && _Nyq[_ifct] && !_TC_PM_QUAD( options, NV_DATA_S(_Nyq[_ifct]) ) ) )
         { _END_ADJ(); return FATAL; }
       for( unsigned iy=0; PMlk[ns] && iy<_nx; iy++ )
         PMlk[ns][_ifct*_nx+iy] = _PMy[iy];
@@ -790,7 +749,7 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
       // Update list of operations in RHSADJ and QUADADJ
       _pos_rhs  = ( _vRHS.size() <=1? 0: _istg-1 );
       _pos_quad = ( _vQUAD.size()<=1? 0: _istg-1 );
-      if( !_SET_PM_ADJ( options, _pos_rhs, _pos_quad, _pos_fct ) )
+      if( !_RHS_PM_SET( options, _pos_rhs, _pos_quad, _pos_fct ) )
         { _END_ADJ(); return FATAL; }
 
       // Propagate bounds backward to previous stage time
@@ -812,32 +771,15 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
         long int nstpB;
         _cv_flag = CVodeGetNumSteps( cv_memB, &nstpB );
         stats_adj.numSteps += nstpB;
-        switch( options.WRAPMIT){
-        case Options::NONE:
-          _vec2PMI( _vec_sta[_istg-1].data(), _PMenv, _nx, _PMx, true );
-          _vec2PMI( NV_DATA_S(_Ny[_ifct]), _PMenv, _nx, _PMy, true );
-          break;
-        case Options::DINEQ:
-          _vec2PMI( _vec_sta[_istg-1].data(), _PMenv, _nx, _PMx );
-          _vec2PMI( NV_DATA_S(_Ny[_ifct]), _PMenv, _nx, _PMy );
-          break;
-        case Options::ELLIPS:
-        default:
-          _vec2PME( _vec_sta[_istg-1].data(), _PMenv, _nx, _PMx, _Q, _Er, _Ir );
-          _vec2PME( NV_DATA_S(_Ny[_ifct]), _PMenv, _nx, _PMy, _Qy, _Edy, _Idy );
-          break;
-        }
-        _vec2PMI( NV_DATA_S( _Nyq[_ifct] ), _PMenv, _np, _PMyq, true );
-        if( PMlk && !PMlk[_istg-1] ) PMlk[_istg-1] = new PVT[_nx*_nf];
-        for( unsigned iy=0; PMlk[_istg-1] && iy<_nx; iy++)
-          PMlk[_istg-1][_ifct*_nx+iy] =_PMy[iy];
+        //{ int dum; std::cin >> dum; }
 
         // Add function contribution to adjoint bounds (discontinuities)
         if( _istg > 1  ){
           _pos_fct = ( _vFCT.size()>=ns? _istg-1:0 );
           if( _pos_fct 
-           && !_CC_PM_ADJ( options, _t, NV_DATA_S(_Ny[_ifct]), _pos_fct, _ifct )
-           && !_CC_PM_QUAD( options, _t, NV_DATA_S(_Nyq[_ifct]) ) )
+           && ( !_CC_PM_SET( options, _pos_fct, _ifct )
+             || !_CC_PM_ADJ( options, _t, _vec_sta[ns].data(), NV_DATA_S(_Ny[_ifct]) )
+             || ( _Nyq && _Nyq[_ifct] && !_CC_PM_QUAD( options, NV_DATA_S(_Nyq[_ifct]) ) ) ) )
             { _END_ADJ(); return FATAL; }
 
           // Reset ODE solver - needed in case of discontinuity
@@ -845,7 +787,15 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
             { _END_ADJ(); return FATAL; }
         }
         // Add initial state contribution to derivative bounds
-        else if( !_IC_PM_ADJ( _t ) ){ _END_ADJ(); return FATAL; }
+        else if( !_IC_PM_SET( options )
+              || !_IC_PM_ADJ( options, _t, _vec_sta[ns].data(), NV_DATA_S(_Ny[_ifct]) )
+              || ( _Nyq && _Nyq[_ifct] && !_IC_PM_QUAD( options, NV_DATA_S(_Nyq[_ifct]) ) ) )
+          { _END_ADJ(); return FATAL; }
+
+        // Keep track of results at stage times
+        if( PMlk && !PMlk[_istg-1] ) PMlk[_istg-1] = new PVT[_nx*_nf];
+        for( unsigned iy=0; PMlk[_istg-1] && iy<_nx; iy++)
+          PMlk[_istg-1][_ifct*_nx+iy] =_PMy[iy];
         for( unsigned iq=0; iq<_np; iq++ )
           PMdf[_ifct*_np+iq] = _PMyq[iq];
       }

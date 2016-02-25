@@ -1,8 +1,8 @@
-const unsigned int NPM   = 2;	// <- Order of poynomial expansion
+const unsigned int NPM   = 4;	// <- Order of poynomial expansion
 const unsigned int NSAMP = 50;	// <- Number of sampling points for inner approx.
 #define SAVE_RESULTS		// <- Whether to save bounds to file
 #define USE_CMODEL		// <- whether to use Chebyshev models or Taylor models
-#define USE_SUNDIALS		// <- whether to use SUNDIALS or GSL integrator
+#undef  USE_SUNDIALS		// <- whether to use SUNDIALS or GSL integrator
 
 #include "odeslvs_gsl.hpp"
 #ifndef USE_SUNDIALS
@@ -29,14 +29,14 @@ int main()
 {
   mc::FFGraph IVP;  // DAG describing the problem
 
-  double t0 = 0., tf = 2.;  // Time span
-  const unsigned int NS = 100;  // Time stages
+  double t0 = 0., tf = 6.;  // Time span
+  const unsigned int NS = 120;  // Time stages
   double tk[NS+1]; tk[0] = t0;
   for( unsigned k=0; k<NS; k++ ) tk[k+1] = tk[k] + (tf-t0)/(double)NS;
 
   const unsigned NP = 1;  // Number of parameters
   const unsigned NX = 2;  // Number of states
-  const unsigned NQ = 1;  // Numboer of state quadratures
+  const unsigned NQ = 1;  // Number of state quadratures
   const unsigned NF = 2;  // Number of state functions
 
   mc::FFVar P[NP];  // Parameters
@@ -54,7 +54,7 @@ int main()
 
   mc::FFVar IC[NX];   // Initial value function
   IC[0] = 1.2;
-  IC[1] = 1.1;
+  IC[1] = 1.1 + 0.01*P[0];
 
   mc::FFVar QUAD[NQ];  // Quadrature function
   QUAD[0] = X[1];
@@ -65,7 +65,7 @@ int main()
 
   mc::FFVar FCT[NF*NS];  // State functions
   for( unsigned k=0; k<NF*NS; k++ ) FCT[k] = 0.;
-  //FCT[(NS/2)*NF+0] = X[0];
+  //if( NS > 1 ) FCT[(NS/2)*NF+0] = X[0] + 0.1*P[0];
   FCT[(NS-1)*NF+0] = X[0] * X[1];
   FCT[(NS-1)*NF+1] = P[0] * pow( X[0], 2 );
   for( unsigned k=0; k<NS; k++ ) FCT[k*NF+1] += Q[0];
@@ -106,11 +106,13 @@ int main()
 #endif
   LV0.options.ATOL      = LV0.options.RTOL = 1e-10;
   LV0.options.INTMETH   = mc::ODESLV_GSL<I>::Options::MSBDF;
+  //LV0.options.HMAX      = 1e-3;
 
   // Approximate adjoint bounds
   std::cout << "\nNON_VALIDATED INTEGRATION - APPROXIMATE ENCLOSURE OF REACHABLE SET:\n\n";
   //LV0.bounds( NS, tk, Ip, Ixk, Iq, If, NSAMP );
-  //LV0.bounds_ASA( NS, tk, Ip, Ixk, 0, If, Iyk, Idf, NSAMP );
+  LV0.bounds_ASA( NS, tk, Ip, Ixk, 0, If, Iyk, Idf, NSAMP );
+  //{ int dum; std::cin >> dum; }
 #if defined( SAVE_RESULTS )
   std::ofstream apprecSTA("test1_APPROX_STA.dat", std::ios_base::out );
   std::ofstream apprecADJ("test1_APPROX_ADJ.dat", std::ios_base::out );
@@ -126,11 +128,12 @@ int main()
 #if defined( SAVE_RESULTS )
   LV.options.RESRECORD = true;
 #endif
-  LV.options.ATOL      = LV.options.RTOL = 1e-8;
+  LV.options.ATOL      = LV.options.RTOL = 1e-13;
   LV.options.ORDMIT    = 1; //PMp->nord();
-  LV.options.WRAPMIT   = mc::ODEBND_GSL<I,PM,PV>::Options::ELLIPS;//DINEQ
-  LV.options.HMAX      = 1e-2;
+  LV.options.WRAPMIT   = mc::ODEBND_GSL<I,PM,PV>::Options::ELLIPS;//NONE;//DINEQ
+  LV.options.HMAX      = 1e-3;
   //LV.options.H0      = 1e-6;
+  LV.options.QSCALE    = false;
 
 #else // SUNDIALS integrator
   mc::ODEBNDS_SUNDIALS<I,PM,PV> LV;
@@ -139,12 +142,15 @@ int main()
 #if defined( SAVE_RESULTS )
   LV.options.RESRECORD = true;
 #endif
-  LV.options.ATOL      = LV.options.RTOL  = 1e-8;
-  LV.options.ATOLB     = LV.options.RTOLB = 1e-8;
+  LV.options.ATOL      = LV.options.ATOLB  = 1e-10;
+  LV.options.RTOL      = LV.options.RTOLB  = 1e-8;
+  LV.options.NMAX      = 10000;
   LV.options.INTMETH   = mc::ODEBNDS_SUNDIALS<I,PM,PV>::Options::MSADAMS;
   LV.options.JACAPPROX = mc::ODEBNDS_SUNDIALS<I,PM,PV>::Options::CV_DENSE;//CV_DIAG;
-  LV.options.ORDMIT    = 1; //PMp->nord();
-  LV.options.WRAPMIT   = mc::ODEBNDS_SUNDIALS<I,PM,PV>::Options::DINEQ;//ELLIPS;//NONE;
+  LV.options.ORDMIT    = 1;//PMp->nord();
+  LV.options.WRAPMIT   = mc::ODEBNDS_SUNDIALS<I,PM,PV>::Options::ELLIPS;//NONE;//DINEQ;
+  LV.options.QERRB     = true;
+  LV.options.QSCALE    = false;
 #endif
 
   LV.set_dag( &IVP );
@@ -157,7 +163,7 @@ int main()
   LV.set_function( NF, NS, FCT );
 
   std::cout << "\nCONTINUOUS SET-VALUED INTEGRATION - INTERVAL ENCLOSURE OF REACHABLE SET:\n\n";
-  //LV.bounds_ASA( NS, tk, Ip, Ixk, Iq, If, Iyk, Idf );
+  LV.bounds_ASA( NS, tk, Ip, Ixk, Iq, If, Iyk, Idf );
 #if defined( SAVE_RESULTS )
   std::ofstream direcISTA( "test1_DINEQI_STA.dat", std::ios_base::out );
   std::ofstream direcIADJ( "test1_DINEQI_ADJ.dat", std::ios_base::out );

@@ -505,7 +505,7 @@ class ODEBND_BASE:
   static void _QUAD_PM
     ( FFGraph*DAG, std::list<const FFOp*>&opQUAD, PVT*PMQUAD,
       const unsigned nq, const FFVar*pQUAD, const unsigned nVAR,
-      const FFVar*pVAR, PVT*PMVAR, PVT*PMqdot );
+      const FFVar*pVAR, PVT*PMVAR, PVT*PMqdot, const bool append=false );
 
   //! @brief Function to calculate the Jacobian of auxiliary ODEs in polynomial mode arithmetic
   template <typename REALTYPE, typename OPT> bool _JAC_PM_STA
@@ -718,7 +718,9 @@ ODEBND_BASE<T,PMT,PVT>::_ep2x
   const U*p, const double*B, const double*xref, U*x )
 {
   for( unsigned ix=0; ix<nx; ix++ ){   
-    x[ix] = xref? xref[ix] + d[ix]: d[ix];
+    x[ix] = 0;
+    if( xref ) x[ix] += xref[ix];
+    if( d )    x[ix] += d[ix];
     for( unsigned jp=0; jp<np; jp++ )
       x[ix] += ( p[jp] - pref[jp] ) * B[jp*nx+ix];
   }
@@ -2127,10 +2129,10 @@ inline void
 ODEBND_BASE<T,PMT,PVT>::_QUAD_PM
 ( FFGraph*DAG, std::list<const FFOp*>&opQUAD, PVT*PMQUAD,
   const unsigned nq, const FFVar*pQUAD, const unsigned nVAR,
-  const FFVar*pVAR, PVT*PMVAR, PVT*PMqdot )
+  const FFVar*pVAR, PVT*PMVAR, PVT*PMqdot, const bool append )
 {
   if( !nq ) return;
-  DAG->eval( opQUAD, PMQUAD, nq, pQUAD, PMqdot, nVAR, pVAR, PMVAR );
+  DAG->eval( opQUAD, PMQUAD, nq, pQUAD, PMqdot, nVAR, pVAR, PMVAR, append );
   for( unsigned iq=0; iq<nq; iq++ ) PMqdot[iq].center();
 }
 

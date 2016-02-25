@@ -38,6 +38,19 @@ test%.o: test%.cpp
 
 #####
 
+graph : gendot gensvg
+
+gendot :
+	dot -Tsvg -O $(shell ls *.dot)
+
+gensvg :
+	@for FILE in $(shell ls *.svg); do \
+	  echo $$FILE; \
+	  (display $$FILE &); \
+	done
+
+#####
+
 clean :
 	rm -f test? test?b *.o *.out *.dat *.eps *~
 

@@ -54,6 +54,7 @@ class ODEBNDS_GSL:
   using ODEBNDS_BASE<T,PMT,PVT>::_Iyq;
   using ODEBNDS_BASE<T,PMT,PVT>::_PMy;
   using ODEBNDS_BASE<T,PMT,PVT>::_PMyq;
+  using ODEBNDS_BASE<T,PMT,PVT>::_GET_I_ADJ;
   using ODEBNDS_BASE<T,PMT,PVT>::_IC_I_SET;
   using ODEBNDS_BASE<T,PMT,PVT>::_IC_I_ADJ;
   using ODEBNDS_BASE<T,PMT,PVT>::_IC_I_QUAD;
@@ -66,6 +67,7 @@ class ODEBNDS_GSL:
   using ODEBNDS_BASE<T,PMT,PVT>::_RHS_I_SET;
   using ODEBNDS_BASE<T,PMT,PVT>::_RHS_I_ADJ;
   using ODEBNDS_BASE<T,PMT,PVT>::_RHS_I_QUAD;
+  using ODEBNDS_BASE<T,PMT,PVT>::_GET_PM_ADJ;
   using ODEBNDS_BASE<T,PMT,PVT>::_IC_PM_SET;
   using ODEBNDS_BASE<T,PMT,PVT>::_IC_PM_ADJ;
   using ODEBNDS_BASE<T,PMT,PVT>::_IC_PM_QUAD;
@@ -459,6 +461,8 @@ ODEBNDS_GSL<T,PMT,PVT>::bounds_ASA
              || !_CC_I_ADJ( options, _t, _vec_sta, _vec_adj+_pos_adj )
              || !_CC_I_QUAD( options, _vec_adj+_pos_adj+_offset_quad ) ) )
             { _END_ADJ(); return FATAL; }
+          else if( !_pos_fct )
+             _GET_I_ADJ( options, _vec_adj+_pos_adj, _vec_adj+_pos_adj+_offset_quad );
 
           // Reset ODE solver - needed in case of discontinuity (used to be in _CC_PM_ADJ)
           gsl_odeiv2_driver_reset( _driver_adj[_ifct] );
@@ -680,6 +684,8 @@ ODEBNDS_GSL<T,PMT,PVT>::bounds_ASA
              || !_CC_PM_ADJ( options, _t, _vec_sta, _vec_adj+_pos_adj )
              || !_CC_PM_QUAD( options, _vec_adj+_pos_adj+_offset_quad ) ) )
             { _END_ADJ(); return FATAL; }
+          else if( !_pos_fct )
+             _GET_PM_ADJ( options, _vec_adj+_pos_adj, _vec_adj+_pos_adj+_offset_quad );
 
           // Reset ODE solver - needed in case of discontinuity (used to be in _CC_PM_ADJ)
           gsl_odeiv2_driver_reset( _driver_adj[_ifct] );

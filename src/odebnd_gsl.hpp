@@ -152,7 +152,7 @@ public:
     //! @brief Constructor
     Options():
       BASE_GSL::Options(), WRAPMIT(ELLIPS), ORDMIT(2), PMOPT(typename PMT::Options()),
-      QTOL(machprec()), QSCALE(true), PMNOREM(false), USEINV(true), MESHPREALLOC(0),
+      QTOL(machprec()), QSCALE(machprec()), PMNOREM(false), USEINV(true), MESHPREALLOC(0),
       DMAX(1e20), DISPLAY(1), RESRECORD(false)
       {}
     //! @brief Assignment operator
@@ -186,7 +186,7 @@ public:
     typename PMT::Options PMOPT;
     //! @brief Tolerance when dividing by trace of shape matrix in ellipsoidal bounds (Default: machprec())
     double QTOL;
-    //! @brief Whether or not to scale the ellispoidal remainder (Default: true)
+    //! @brief Tolerance for applying ellipsoidal remainder scaling (Default: machprec())
     double QSCALE;
     //! @brief Whether or not to cancel the remainder term in polynomial models (non-validated integration; Default: false)
     bool PMNOREM;

@@ -383,13 +383,14 @@ class ODEBND_BASE:
   static void _RHS_I_ELL
     ( const unsigned nx, PVT*MVXPf, const double*Q, double*A,
       const unsigned np, double*xrefdot, double*Bdot, T*Iddot, double*Qdot,
-      const double QTOL, const double EPS, const T*W=0 );
+      const double QTOL, const double EPS, const double QSCALE, const T*W=0 );
 
   //! @brief Static function to calculate the RHS of auxiliary ODEs w/ ellipsoidal contractor
   template <typename U>
   static void _RHS_ELL
     ( const unsigned nx, const double*Qr, const double*Ar, const T*Irdot,
-      double*Qrdot, const double QTOL, const double EPS, const U*W=0 );
+      double*Qrdot, const double QTOL, const double EPS, const double QSCALE,
+      const U*W=0 );
 
   //! @brief Function to calculate the RHS of auxiliary ODEs in interval arithmetic
   template <typename REALTYPE, typename OPT> bool _RHS_I_QUAD
@@ -558,6 +559,10 @@ class ODEBND_BASE:
   static unsigned _ndxLT
     ( const unsigned i, const unsigned j, const unsigned n )
     { return( i<j? _ndxLT(j,i,n): i+j*n-j*(j+1)/2 ); }
+
+  //! @brief Scaling fuction
+  template <typename U> static double _scaling
+    ( const unsigned ix, const U*W, const double WTOL );
 
   //! @brief Function computing set diameter (max-norm component-wise)
   static double _diam
@@ -1115,12 +1120,8 @@ ODEBND_BASE<T,PMT,PVT>::_RHS_I_STA
 
     // Construct the ellipsoidal remainder derivatives
     _pDAG->eval( _opRHS, _PMRHS, _nx, _pRHS, _MVXPf, _nVAR-_nq, _pVAR, _MVXPVAR );
-    if( options.QSCALE )
-      _RHS_I_ELL( _nx, _MVXPf, _Q, _A, _npar, _xrefdot, _Bdot, _Irdot,
-         _Qdot, options.QTOL, machprec(), _Ix );
-    else
-      _RHS_I_ELL( _nx, _MVXPf, _Q, _A, _npar, _xrefdot, _Bdot, _Irdot,
-         _Qdot, options.QTOL, machprec() );
+    _RHS_I_ELL( _nx, _MVXPf, _Q, _A, _npar, _xrefdot, _Bdot, _Irdot,
+       _Qdot, options.QTOL, machprec(), options.QSCALE, _Ir );
     _E2vec( _nx, _npar, _xrefdot, _Qdot, _Bdot, xdot );
 #ifdef MC__ODEBND_BASE_DINEQI_DEBUG
     //E::options.PSDCHK = true;
@@ -1146,7 +1147,7 @@ inline void
 ODEBND_BASE<T,PMT,PVT>::_RHS_I_ELL
 ( const unsigned nx, PVT*MVXPf, const double*Q, double*A,
   const unsigned np, double*xrefdot, double*Bdot, T*Iddot, double*Qdot,
-  const double QTOL, const double EPS, const T*W )
+  const double QTOL, const double EPS, const double WTOL, const T*W )
 {
   // Extract time derivatives of constant, linear and remainder parts
   // Set reference and linear block RHS
@@ -1183,7 +1184,19 @@ ODEBND_BASE<T,PMT,PVT>::_RHS_I_ELL
 #endif
   }
 
-  return _RHS_ELL( nx, Q, A, Iddot, Qdot, QTOL, EPS, W );
+  return _RHS_ELL( nx, Q, A, Iddot, Qdot, QTOL, EPS, WTOL, W );
+}
+
+template <typename T, typename PMT, typename PVT>
+template <typename U>
+inline double
+ODEBND_BASE<T,PMT,PVT>::_scaling
+( const unsigned ix, const U*W, const double WTOL )
+{
+  if( !W || WTOL <= 0. ) return 1.;
+  //const double WTOL = 1e-10;//EPS*1e2;
+  double wi = Op<U>::abs(W[ix]);
+  return wi<WTOL? WTOL: wi;
 }
 
 template <typename T, typename PMT, typename PVT>
@@ -1191,24 +1204,24 @@ template <typename U>
 inline void
 ODEBND_BASE<T,PMT,PVT>::_RHS_ELL
 ( const unsigned nx, const double*Qx, const double*Ax, const T*Idxdot,
-  double*Qxdot, const double QTOL, const double EPS, const U*W )
+  double*Qxdot, const double QTOL, const double EPS, const double WTOL,
+  const U*W )
 {
   // Set dynamics of shape matrix
-  const double WTOL = 1e-8;//EPS*1e2;
-  double trQ = 0.;
+  double trQW = 0.;
   for( unsigned ix=0; ix<nx; ix++ ){
-    double sqr_wi = W? sqr(Op<U>::abs(W[ix])+WTOL): 1.;
-    trQ += ( Qx[_ndxLT(ix,ix,nx)]>EPS? Qx[_ndxLT(ix,ix,nx)]/sqr_wi: EPS );
+    double sqr_wi = sqr(_scaling(ix,W,WTOL));
+    trQW += ( Qx[_ndxLT(ix,ix,nx)]>EPS? Qx[_ndxLT(ix,ix,nx)]/sqr_wi: EPS );
   }
   double sumkappa = 0.;
-  const double srqt_trQ = (trQ>0? std::sqrt( trQ ): 0.) + QTOL;
+  const double srqt_trQW = (trQW>0? std::sqrt( trQW ): 0.) + QTOL;
   for( unsigned ix=0; ix<nx; ix++ ){
-    double wi = W? Op<U>::abs(W[ix])+WTOL: 1.;
+    double wi = _scaling(ix,W,WTOL);
 #ifdef MC__ODEBND_BASE_DINEQPM_DEBUG
     std::cout << "kappa[" << ix << "] = "
-              << Op<T>::diam( Idxdot[ix] ) / ( 2. * wi * srqt_trQ ) << std::endl;
+              << Op<T>::diam( Idxdot[ix] ) / ( 2. * wi * srqt_trQW ) << std::endl;
 #endif
-    sumkappa += Op<T>::diam( Idxdot[ix] ) / ( 2. * wi * srqt_trQ );
+    sumkappa += Op<T>::diam( Idxdot[ix] ) / ( 2. * wi * srqt_trQW );
   }
 
   for( unsigned jx=0; jx<nx; jx++ ){
@@ -1218,8 +1231,8 @@ ODEBND_BASE<T,PMT,PVT>::_RHS_ELL
         Qxdot[_ndxLT(ix,jx,nx)] += Qx[_ndxLT(ix,kx,nx)] * Ax[jx+kx*nx]
                                  + Ax[ix+kx*nx] * Qx[_ndxLT(kx,jx,nx)];
     }
-    double wj = W? Op<U>::abs(W[jx])+WTOL: 1.;
-    Qxdot[_ndxLT(jx,jx,nx)] += Op<T>::diam( Idxdot[jx] ) / 2. * wj * srqt_trQ;
+    double wj = _scaling(jx,W,WTOL);
+    Qxdot[_ndxLT(jx,jx,nx)] += Op<T>::diam( Idxdot[jx] ) / 2. * wj * srqt_trQW;
   }
 
 #ifdef MC__ODEBND_BASE_DINEQPM_DEBUG
@@ -1967,10 +1980,7 @@ ODEBND_BASE<T,PMT,PVT>::_RHS_PM_STA
     }
 
     // Construct the ellipsoidal remainder derivatives
-    if( options.QSCALE )
-      _RHS_ELL( _nx, _Q, _A, _Irdot, _Qdot, options.QTOL, machprec(), _PMx );
-    else
-      _RHS_ELL( _nx, _Q, _A, _Irdot, _Qdot, options.QTOL, machprec(), (PVT*)0 );
+    _RHS_ELL( _nx, _Q, _A, _Irdot, _Qdot, options.QTOL, machprec(), options.QSCALE, _Ir );
 
     // Whether or not to ignore the remainder
     if( !options.PMNOREM )

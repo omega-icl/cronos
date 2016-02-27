@@ -1,6 +1,6 @@
 // ESCAPE26 Case Study 1 - Exothermic Batch Reactor
 
-const unsigned int NPM   = 2;	// <- Order of poynomial expansion
+const unsigned int NPM   = 3;	// <- Order of poynomial expansion
 const unsigned int NSAMP = 20;	// <- Number of sampling points for inner approx.
 #define SAVE_RESULTS		// <- Whether to save bounds to file
 #define USE_CMODEL		// <- whether to use Chebyshev models or Taylor models
@@ -125,7 +125,7 @@ int main()
 #endif
   LV.options.ATOL      = LV.options.RTOL = 1e-8;
   LV.options.ORDMIT    = 1; //PMp->nord();
-  LV.options.WRAPMIT   = mc::ODEBND_GSL<I,PM,PV>::Options::DINEQ; //ELLIPS;//NONE;
+  LV.options.WRAPMIT   = mc::ODEBND_GSL<I,PM,PV>::Options::ELLIPS;//DINEQ; //NONE;
   //LV.options.HMAX      = 1e-2;
   //LV.options.H0        = 1e-6;
 
@@ -136,12 +136,14 @@ int main()
 #if defined( SAVE_RESULTS )
   LV.options.RESRECORD = true;
 #endif
-  LV.options.ATOL      = LV.options.RTOL  = 1e-8;
-  LV.options.ATOLB     = LV.options.RTOLB = 1e-8;
+  LV.options.ATOL      = LV.options.ATOLB = 1e-10;
+  LV.options.RTOL      = LV.options.RTOLB = 1e-8;
   LV.options.INTMETH   = mc::ODEBNDS_SUNDIALS<I,PM,PV>::Options::MSADAMS;
   LV.options.JACAPPROX = mc::ODEBNDS_SUNDIALS<I,PM,PV>::Options::CV_DIAG;//CV_DENSE;
-  LV.options.ORDMIT    = 1; //PMp->nord();
-  LV.options.WRAPMIT   = mc::ODEBNDS_SUNDIALS<I,PM,PV>::Options::DINEQ;//ELLIPS;//NONE;
+  LV.options.ORDMIT    = 1;//PMp->nord();
+  LV.options.WRAPMIT   = mc::ODEBNDS_SUNDIALS<I,PM,PV>::Options::ELLIPS;//DINEQ;//NONE;
+  //LV.options.QSCALE    = true;
+  LV.options.HMIN      = 1e-12;
 #endif
 
   LV.set_dag( &IVP );
@@ -160,6 +162,7 @@ int main()
 #endif
 
   std::cout << "\nCONTINUOUS SET-VALUED INTEGRATION - POLYNOMIAL MODEL ENCLOSURE OF REACHABLE SET:\n\n";
+  //LV.bounds( NS, tk, PMp, PMxk );
   LV.bounds_ASA( NS, tk, PMp, PMxk, 0, PMf, PMyk, PMdf );
 #if defined( SAVE_RESULTS )
   std::ofstream direcPMSTA( "test5_DINEQPM_STA.dat", std::ios_base::out );

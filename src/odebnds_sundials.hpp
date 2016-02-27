@@ -55,6 +55,7 @@ class ODEBNDS_SUNDIALS:
   using ODEBNDS_BASE<T,PMT,PVT>::_Iyq;
   using ODEBNDS_BASE<T,PMT,PVT>::_PMy;
   using ODEBNDS_BASE<T,PMT,PVT>::_PMyq;
+  using ODEBNDS_BASE<T,PMT,PVT>::_GET_I_ADJ;
   using ODEBNDS_BASE<T,PMT,PVT>::_IC_I_SET;
   using ODEBNDS_BASE<T,PMT,PVT>::_IC_I_ADJ;
   using ODEBNDS_BASE<T,PMT,PVT>::_IC_I_QUAD;
@@ -67,6 +68,7 @@ class ODEBNDS_SUNDIALS:
   using ODEBNDS_BASE<T,PMT,PVT>::_RHS_I_SET;
   using ODEBNDS_BASE<T,PMT,PVT>::_RHS_I_ADJ;
   using ODEBNDS_BASE<T,PMT,PVT>::_RHS_I_QUAD;
+  using ODEBNDS_BASE<T,PMT,PVT>::_GET_PM_ADJ;
   using ODEBNDS_BASE<T,PMT,PVT>::_IC_PM_SET;
   using ODEBNDS_BASE<T,PMT,PVT>::_IC_PM_ADJ;
   using ODEBNDS_BASE<T,PMT,PVT>::_IC_PM_QUAD;
@@ -535,9 +537,6 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
         { _END_ADJ(); return FATAL; }
 
       // Propagate bounds backward to previous stage time
-      //_cv_flag = CVodeSetStopTimeB( _cv_mem, tk[_istg-1] );
-      //if( _check_flag(&_cv_flag, "CVodeSetStopTimeB", 1) )
-      //  { _END_ADJ(); return FATAL; }
       _cv_flag = CVodeB( _cv_mem, tk[_istg-1], CV_NORMAL );
       if( _check_cv_flag(&_cv_flag, "CVodeB", 1) )
         { _END_ADJ(); return FATAL; }
@@ -565,6 +564,14 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
              || !_CC_I_ADJ( options, _t, _vec_sta[_istg-1].data(), NV_DATA_S(_Ny[_ifct]) )
              || ( _Nyq && _Nyq[_ifct] && !_CC_I_QUAD( options, NV_DATA_S(_Nyq[_ifct]) ) ) ) )
             { _END_ADJ(); return FATAL; }
+          else if( !_pos_fct )
+             _GET_I_ADJ( options, NV_DATA_S(_Ny[_ifct]), _Nyq && _Nyq[_ifct]? NV_DATA_S(_Nyq[_ifct]): 0 );
+#ifdef MC__ODEBNDS_SUNDIALS_DEBUG
+          for( unsigned iy=0; iy<NV_LENGTH_S(_Ny[_ifct]); iy++ )
+            std::cout << "_Ny" << _ifct << "[iy] = " << NV_Ith_S(_Ny[_ifct],iy) << std::endl;
+          for( unsigned iy=0; iy<NV_LENGTH_S(_Nyq[_ifct]); iy++ )
+            std::cout << "_Nyq" << _ifct << "[iy] = " << NV_Ith_S(_Nyq[_ifct],iy) << std::endl;
+#endif
 
           // Reset ODE solver - needed in case of discontinuity
           if( !_CC_CVODES( _ifct, _indexB[_ifct] ) )
@@ -753,6 +760,9 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
         { _END_ADJ(); return FATAL; }
 
       // Propagate bounds backward to previous stage time
+      //_cv_flag = CVodeSetStopTimeB( _cv_mem, tk[_istg-1] );
+      //if( _check_cv_flag(&_cv_flag, "CVodeSetStopTimeB", 1) )
+      //  { _END_ADJ(); return FATAL; }
       _cv_flag = CVodeB( _cv_mem, tk[_istg-1], CV_NORMAL );
       if( _check_cv_flag(&_cv_flag, "CVodeB", 1) )
         { _END_ADJ(); return FATAL; }
@@ -764,6 +774,12 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
         _cv_flag = CVodeGetB( _cv_mem, _indexB[_ifct], &_t, _Ny[_ifct]);
         if( _check_cv_flag( &_cv_flag, "CVodeGetB", 1) )
           { _END_ADJ(); return FATAL; }
+#ifdef MC__ODEBNDS_SUNDIALS_DEBUG
+        for( unsigned iy=0; iy<NV_LENGTH_S(_Ny[_ifct]); iy++ )
+          std::cout << "_Ny" << _ifct << "[iy] = " << NV_Ith_S(_Ny[_ifct],iy) << std::endl;
+        for( unsigned iy=0; iy<NV_LENGTH_S(_Nyq[_ifct]); iy++ )
+          std::cout << "_Nyq" << _ifct << "[iy] = " << NV_Ith_S(_Nyq[_ifct],iy) << std::endl;
+#endif
         _cv_flag = CVodeGetQuadB( _cv_mem, _indexB[_ifct], &_t, _Nyq[_ifct]);
         if( _check_cv_flag( &_cv_flag, "CVodeGetQuadB", 1) )
           { _END_ADJ(); return FATAL; }
@@ -781,7 +797,14 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
              || !_CC_PM_ADJ( options, _t, _vec_sta[ns].data(), NV_DATA_S(_Ny[_ifct]) )
              || ( _Nyq && _Nyq[_ifct] && !_CC_PM_QUAD( options, NV_DATA_S(_Nyq[_ifct]) ) ) ) )
             { _END_ADJ(); return FATAL; }
-
+          else if( !_pos_fct )
+             _GET_PM_ADJ( options, NV_DATA_S(_Ny[_ifct]), _Nyq && _Nyq[_ifct]? NV_DATA_S(_Nyq[_ifct]): 0 );
+#ifdef MC__ODEBNDS_SUNDIALS_DEBUG
+          for( unsigned iy=0; iy<NV_LENGTH_S(_Ny[_ifct]); iy++ )
+            std::cout << "_Ny" << _ifct << "[iy] = " << NV_Ith_S(_Ny[_ifct],iy) << std::endl;
+          for( unsigned iy=0; iy<NV_LENGTH_S(_Nyq[_ifct]); iy++ )
+            std::cout << "_Nyq" << _ifct << "[iy] = " << NV_Ith_S(_Nyq[_ifct],iy) << std::endl;
+#endif
           // Reset ODE solver - needed in case of discontinuity
           if( !_CC_CVODES( _ifct, _indexB[_ifct] ) )
             { _END_ADJ(); return FATAL; }
@@ -807,6 +830,7 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
       }
       if( options.RESRECORD )
         _results_adj.push_back( Results( tk[_istg-1], _nf*_nx, PMlk[_istg-1] ) );
+      //{ int dum; std::cin >> dum; }
     }
 
     if( options.DISPLAY >= 1 )

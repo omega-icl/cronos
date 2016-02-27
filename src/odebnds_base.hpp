@@ -75,6 +75,7 @@ protected:
   using ODEBND_BASE<T,PMT,PVT>::_PME2vec;
   using ODEBND_BASE<T,PMT,PVT>::_QUAD_PM;
   using ODEBND_BASE<T,PMT,PVT>::_e2x;
+  using ODEBND_BASE<T,PMT,PVT>::_scaling;
   using ODEBND_BASE<T,PMT,PVT>::_print_interm;
 
 public:
@@ -290,6 +291,10 @@ protected:
   template <typename OPT> bool _INI_I_ADJ
     ( const OPT &options, const unsigned np, const T *Ip );
 
+  //! @brief Function to retreive adjoint interval bounds
+  template <typename REALTYPE, typename OPT> void _GET_I_ADJ
+    ( const OPT &options, const REALTYPE*y, const REALTYPE*yq );
+
   //! @brief Function to set adjoint interval bounds at terminal time
   template <typename OPT> bool _TC_I_SET
     ( const OPT &options, unsigned pos_fct, unsigned ifct );
@@ -346,13 +351,14 @@ protected:
   static void _RHS_I_ELL
     ( const unsigned nx, PVT*MVYXPg, const double*Qy, double*Ay, double *Ax,
       const unsigned np, double*yrefdot, double*Bydot, T*Idydot, double*Qydot,
-      const double QTOL, const double EPS, const bool neg, const T*W=0 );
+      const double QTOL, const double EPS, const double WTOL, const bool neg,
+      const T*W=0 );
 
   //! @brief Static function to calculate the RHS of adjoint ODEs w/ ellipsoidal contractor
   template <typename U> static void _RHS_ELL
     ( const unsigned nx, const double*Qy, const double*Ay, const double *Ax,
       const T*Idydot, double*Qydot, const double QTOL, const double EPS,
-      const bool neg, const U*W );
+      const double QSCALE, const bool neg, const U*W );
 
   //! @brief Function to calculate the RHS of auxiliary ODEs in interval arithmetic
   template <typename REALTYPE, typename OPT> bool _RHS_I_QUAD
@@ -361,6 +367,10 @@ protected:
   //! @brief Function to initialize adjoint polynomial models
   template <typename OPT> bool _INI_PM_ADJ
     ( const OPT &options, const unsigned np, const PVT *PMp );
+
+  //! @brief Function to retreive adjoint polynomial models
+  template <typename REALTYPE, typename OPT> void _GET_PM_ADJ
+    ( const OPT &options, const REALTYPE*y, const REALTYPE*yq );
 
   //! @brief Function to initialize adjoint/quadrature polynomial model
   template <typename OPT> bool _TC_PM_SET
@@ -1127,6 +1137,25 @@ ODEBNDS_BASE<T,PMT,PVT>::_CC_I_QUAD
 }
 
 template <typename T, typename PMT, typename PVT>
+template <typename REALTYPE, typename OPT> inline void
+ODEBNDS_BASE<T,PMT,PVT>::_GET_I_ADJ
+( const OPT &options, const REALTYPE*y, const REALTYPE*yq )
+{
+  switch( options.WRAPMIT){
+  case OPT::NONE:
+  case OPT::DINEQ:
+    _vec2I( y, _nx, _Iy );
+    if( yq ) _vec2I( yq, _npar, _Iyq );
+    break;
+
+  case OPT::ELLIPS:
+  default:
+    _vec2E( y, _nx, _np, _Qy, _Edy, _Idy, _pref, _Ip, _By, _yref, _Iy );
+    if( yq ) _vec2I( yq, _npar, _npar, _pref, _Ip, _Byq, _Idyq, _Iyq );
+  }
+}
+
+template <typename T, typename PMT, typename PVT>
 template <typename OPT> inline bool
 ODEBNDS_BASE<T,PMT,PVT>::_RHS_I_SET
 ( const OPT &options, unsigned iADJRHS, unsigned iQUAD, unsigned pos_fct,
@@ -1314,12 +1343,8 @@ ODEBNDS_BASE<T,PMT,PVT>::_RHS_I_ADJ
     // Construct the adjoint ellipsoidal remainder derivatives
     _pDAG->eval( _opADJRHS[ifct], _PMADJRHS, _nx, _pADJRHS+ifct*_nx, _MVYXPg,
                  _nVAR-_npar, _pVAR, _MVYXPVAR );
-    if( options.QSCALE )
-      _RHS_I_ELL( _nx, _MVYXPg, _Qy, _Ay, _Ax, _npar, _yrefdot, _Bydot, _Idydot, _Qydot, 
-                    options.QTOL, machprec(), neg, _Iy );
-    else
-      _RHS_I_ELL( _nx, _MVYXPg, _Qy, _Ay, _Ax, _npar, _yrefdot, _Bydot, _Idydot, _Qydot, 
-                    options.QTOL, machprec(), neg );
+    _RHS_I_ELL( _nx, _MVYXPg, _Qy, _Ay, _Ax, _npar, _yrefdot, _Bydot, _Idydot, _Qydot, 
+      options.QTOL, machprec(), options.QSCALE, neg, _Idy );
     _E2vec( _nx, _npar, _yrefdot, _Qydot, _Bydot, ydot );
     break;
   }
@@ -1331,7 +1356,8 @@ inline void
 ODEBNDS_BASE<T,PMT,PVT>::_RHS_I_ELL
 ( const unsigned nx, PVT*MVYXPg, const double*Qy, double*Ay, double *Ax,
   const unsigned np, double*yrefdot, double*Bydot, T*Idydot, double*Qydot,
-  const double QTOL, const double EPS, const bool neg, const T*W )
+  const double QTOL, const double EPS, const double WTOL, const bool neg,
+  const T*W )
 {
   // Extract time derivatives of constant, linear and remainder parts
   // Set reference and linear block RHS
@@ -1377,7 +1403,7 @@ ODEBNDS_BASE<T,PMT,PVT>::_RHS_I_ELL
 #ifdef MC__ODEBNDS_BASE_DINEQI_DEBUG
     { int dum; std::cin >> dum; }
 #endif
-  return _RHS_ELL( nx, Qy, Ay, Ax, Idydot, Qydot, QTOL, EPS, neg, W );
+  return _RHS_ELL( nx, Qy, Ay, Ax, Idydot, Qydot, QTOL, EPS, WTOL, neg, W );
 }
 
 template <typename T, typename PMT, typename PVT>
@@ -1386,32 +1412,31 @@ inline void
 ODEBNDS_BASE<T,PMT,PVT>::_RHS_ELL
 ( const unsigned nx, const double*Qy, const double*Ay, const double *Ax,
   const T*Idydot, double*Qydot, const double QTOL, const double EPS,
-  const bool neg, const U*W )
+  const double WTOL, const bool neg, const U*W )
 {
   // Construct trajectories kappa and eta
-  const double WTOL = 1e-8;//EPS*1e2;
-  double trQ = 0.;
+  double trQW = 0.;
   for( unsigned ix=0; ix<nx; ix++ ){
-    double sqr_wi = W? sqr(Op<U>::abs(W[ix])+WTOL): 1.;
-    trQ += ( Qy[_ndxLT(ix,ix,nx)]>EPS? Qy[_ndxLT(ix,ix,nx)]/sqr_wi: EPS );
+    double sqr_wi = sqr(_scaling(ix,W,WTOL));
+    trQW += ( Qy[_ndxLT(ix,ix,nx)]>EPS? Qy[_ndxLT(ix,ix,nx)]/sqr_wi: EPS );
   }
   double sumkappa = 0., sumeta = 0., AxTAx[nx];
-  const double srqt_trQ = (trQ>0? std::sqrt( trQ ): 0.) + QTOL;
+  const double srqt_trQW = (trQW>0? std::sqrt( trQW ): 0.) + QTOL;
   for( unsigned ix=0; ix<nx; ix++ ){
-    double wi = W? Op<U>::abs(W[ix])+WTOL: 1.;
+    double wi = _scaling(ix,W,WTOL);
     //sumkappa += .1;
-    sumkappa += Op<T>::diam( Idydot[ix] ) / ( 2. * wi * srqt_trQ );
+    sumkappa += Op<T>::diam( Idydot[ix] ) / ( 2. * wi * srqt_trQW );
     AxTAx[ix] = 0.;
     for( unsigned jx=0; jx<nx; jx++)
       AxTAx[ix] += Ax[jx+ix*nx] * Ax[jx+ix*nx];
     if( AxTAx[ix] < EPS ) AxTAx[ix] = EPS;
-    sumeta += std::sqrt(AxTAx[ix]) / ( wi * srqt_trQ );
+    sumeta += std::sqrt(AxTAx[ix]) / ( wi * srqt_trQW );
 #ifdef MC__ODEBNDS_BASE_DINEQPM_DEBUG
     std::cout << "eta[" << ix << "] = "
-              << std::sqrt(AxTAx[ix]) / ( wi * srqt_trQ )
+              << std::sqrt(AxTAx[ix]) / ( wi * srqt_trQW )
               << std::endl;
     std::cout << "kappa[" << ix << "] = "
-              << Op<T>::diam( Idydot[ix] ) / ( 2. * wi * srqt_trQ )
+              << Op<T>::diam( Idydot[ix] ) / ( 2. * wi * srqt_trQW )
               << std::endl;
 #endif
   }
@@ -1419,18 +1444,16 @@ ODEBNDS_BASE<T,PMT,PVT>::_RHS_ELL
   // Set ellipsoidal remainder RHS
   double pm = neg? -1.: 1.;
   for( unsigned jx=0; jx<nx; jx++ ){
-    for( unsigned ix=jx; ix<nx; ix++ ){
+   double wj = _scaling(jx,W,WTOL);
+   for( unsigned ix=jx; ix<nx; ix++ ){
       Qydot[_ndxLT(ix,jx,nx)] = pm * ( sumkappa + sumeta ) * Qy[_ndxLT(ix,jx,nx)];
       for( unsigned kx=0; kx<nx; kx++ ){
-        double wk = W? Op<U>::abs(W[kx])+WTOL: 1.,
-               wksqtrQ = wk * ( std::sqrt( trQ ) + QTOL );
         Qydot[_ndxLT(ix,jx,nx)] += Qy[_ndxLT(ix,kx,nx)] * Ay[jx+kx*nx]
           + Ay[ix+kx*nx] * Qy[_ndxLT(kx,jx,nx)]
-          + pm * Ax[ix+kx*nx] * Ax[jx+kx*nx] / std::sqrt(AxTAx[kx]) * wksqtrQ;
+          + pm * Ax[ix+kx*nx] * Ax[jx+kx*nx] / std::sqrt(AxTAx[kx]) * wj * srqt_trQW;
       }
     }
-    double wj = W? Op<U>::abs(W[jx])+WTOL: 1.;
-    Qydot[_ndxLT(jx,jx,nx)] += pm * Op<T>::diam( Idydot[jx] ) / 2. * wj * srqt_trQ;
+    Qydot[_ndxLT(jx,jx,nx)] += pm * Op<T>::diam( Idydot[jx] ) / 2. * wj * srqt_trQW;
     //Qydot[_ndxLT(jx,jx,nx)] += pm * sqr( Op<T>::diam( Idydot[jx] ) / 2. ) / 0.1;
   }
 #ifdef MC__ODEBNDS_BASE_DINEQI_DEBUG
@@ -1830,6 +1853,8 @@ ODEBNDS_BASE<T,PMT,PVT>::_CC_PM_ADJ
   switch( options.WRAPMIT){
   case OPT::NONE:
     *_PMt = t; // current time
+    _vec2PMI( x, _PMenv, _nx, _PMx, true );
+    _vec2PMI( y, _PMenv, _nx, _PMy, true );
     _pDAG->eval( _nx, _pADJCC, _PMydot, _nVAR-_npar, _pVAR, _PMVAR );
 
     // Whether or not to ignore the adjoint remainder
@@ -1841,6 +1866,8 @@ ODEBNDS_BASE<T,PMT,PVT>::_CC_PM_ADJ
 
   case OPT::DINEQ:
     *_PMt = t; // current time
+    _vec2PMI( x, _PMenv, _nx, _PMx );
+    _vec2PMI( y, _PMenv, _nx, _PMy );
     _pDAG->eval( _nx, _pADJCC, _PMydot, _nVAR-_npar, _pVAR, _PMVAR );
 
     // Whether or not to ignore the adjoint remainder
@@ -1856,12 +1883,12 @@ ODEBNDS_BASE<T,PMT,PVT>::_CC_PM_ADJ
     _vec2PME( x, _PMenv, _nx, _PMx, _Q, _Er, _Ir );// set current state bounds
 #ifdef MC__ODEBNDS_BASE_DINEQPM_DEBUG
     std::cout << "Function:" << ifct << std::endl;
-    _print_interm( t, _nx, _PMx, _Er, "PMx Intermediate", std::cerr );
+    _print_interm( t, _nx, _PMx, _Er, "PMx Intermediate [CC1]", std::cerr );
 #endif
     _vec2PME( y, _PMenv, _nx, _PMy, _Qy, _Edy, _Idy ); // set current adjoint bounds
-#ifdef MC__ODEBNDS_BASE_DINEQPM_DEBUG
-    _print_interm( t, _nx, _PMy, _Edy, "PMy Intermediate", std::cerr );
-#endif
+//#ifdef MC__ODEBNDS_BASE_DINEQPM_DEBUG
+    _print_interm( t, _nx, _PMy, _Edy, "PMy Intermediate [CC1]", std::cerr );
+//#endif
 
     // In this variant a bound on the Jacobian matrix is computed and the
     // linear part is taken as the mid-point of this matrix
@@ -2004,12 +2031,13 @@ ODEBNDS_BASE<T,PMT,PVT>::_CC_PM_ELL
   }
 #ifdef MC__ODEBNDS_BASE_DINEQI_DEBUG
   for( unsigned ix=0; ix<nx; ix++ ){
+    std::cout << "PMg[" << ix << ",#] = " << PMg[ix];
     std::cout << "Qg[" << ix << ",#] = ";
     for( unsigned jx=0; jx<=ix; jx++ )
       std::cout << Qg[_ndxLT(ix,jx,nx)] << "  ";
     std::cout << std::endl;
   }
-  { int dum; std::cin >> dum; }
+  //{ int dum; std::cin >> dum; }
   // throw(0);
 #endif
 }
@@ -2030,6 +2058,29 @@ ODEBNDS_BASE<T,PMT,PVT>::_CC_PM_QUAD
     _PMI2vec( _PMenv, _npar, _PMyq, 0, yq );
 
   return true;
+}
+
+template <typename T, typename PMT, typename PVT>
+template <typename REALTYPE, typename OPT> inline void
+ODEBNDS_BASE<T,PMT,PVT>::_GET_PM_ADJ
+( const OPT &options, const REALTYPE*y, const REALTYPE*yq )
+{
+  switch( options.WRAPMIT){
+  case OPT::NONE:
+    _vec2PMI( y, _PMenv, _nx, _PMy, true );
+    break;
+
+  case OPT::DINEQ:
+    _vec2PMI( y, _PMenv, _nx, _PMy );
+    break;
+
+  case OPT::ELLIPS:
+  default:
+    _vec2PME( y, _PMenv, _nx, _PMy, _Qy, _Edy, _Idy ); // set current adjoint bounds
+    break;
+  }
+
+  if( yq ) _vec2PMI( yq, _PMenv, _npar, _PMyq, true );
 }
 
 template <typename T, typename PMT, typename PVT>
@@ -2302,8 +2353,8 @@ ODEBNDS_BASE<T,PMT,PVT>::_RHS_PM_ADJ
 #ifdef MC__ODEBNDS_BASE_DINEQPM_DEBUG
         std::cout << "Iy[" << ix << "] = " << _Iy[ix] << std::endl;
 #endif
-        ( _PMx[ix].center() ).set( T(0.) ); // cancel state remainder term
-        ( _PMy[ix].center() ).set( T(0.) ); // cancel adjoint remainder term
+        _PMx[ix].set( T(0.) ); // cancel state remainder term
+        _PMy[ix].set( T(0.) ); // cancel adjoint remainder term
       }
       _pDAG->eval( _opADJRHS[ifct], _PMADJRHS, _nx, _pADJRHS+ifct*_nx, _PMydot,
                    _nVAR-_npar, _pVAR, _PMVAR );
@@ -2321,12 +2372,12 @@ ODEBNDS_BASE<T,PMT,PVT>::_RHS_PM_ADJ
       for( unsigned jx=0; jx<_nx; jx++ ){ // state bounds
         _MVYXPw[jx].set( _MVYXPenv, _npar+jx, T(-1.,1.) );
         _MVYXPr[jx] = _MVYXPw[jx] * 0.5*Op<T>::diam(_Ir[jx]);
-        _MVYXPx[jx].set( _MVYXPenv ).set( _PMx[jx].center().set( T(0.) ), true );
+        _MVYXPx[jx].set( _MVYXPenv ).set( _PMx[jx].set( T(0.) ), true );
       }
       _e2x( _nx, _MVYXPr, _MVYXPx, false );
 //#else
 //      for( unsigned jx=0; jx<_nx; jx++ ){
-//        _MVYXPx[jx].set( _MVYXPenv ).set( _PMx[jx].center(), true );
+//        _MVYXPx[jx].set( _MVYXPenv ).set( _PMx[jx], true );
 //        _PMx[jx].set( T(0.) );
 //      }
 //#endif
@@ -2336,12 +2387,12 @@ ODEBNDS_BASE<T,PMT,PVT>::_RHS_PM_ADJ
 #ifdef MC__ODEBNDS_BASE_MVYXP_USE
       for( unsigned jx=0; jx<_nx; jx++ ){ // adjoint bounds
         _MVYXPd[jx].set( _MVYXPenv, _npar+_nx+jx, _Idy[jx] );
-        _MVYXPy[jx].set( _MVYXPenv ).set( _PMy[jx].center().set( T(0.) ), true );
+        _MVYXPy[jx].set( _MVYXPenv ).set( _PMy[jx].set( T(0.) ), true );
       }
       _e2x( _nx, _MVYXPd, _MVYXPy, false );
 #else
       for( unsigned jx=0; jx<_nx; jx++ ){
-        _MVYXPy[jx].set( _MVYXPenv ).set( _PMy[jx].center(), true );
+        _MVYXPy[jx].set( _MVYXPenv ).set( _PMy[jx], true );
         _PMy[jx].set( T(0.) );
       }
 #endif
@@ -2365,7 +2416,7 @@ ODEBNDS_BASE<T,PMT,PVT>::_RHS_PM_ADJ
       }
       for( unsigned jx=0; jx<_nx; jx++ ){ // state bounds
         _MVYXPr[jx] = _MVYXPw[jx] * 0.5*Op<T>::diam(_Ir[jx]);
-        _MVYXPx[jx].set( _MVYXPenv ).set( _PMx[jx].center().set( T(0.) ), true );
+        _MVYXPx[jx].set( _MVYXPenv ).set( _PMx[jx].set( T(0.) ), true );
       }
       _e2x( _nx, _MVYXPr, _MVYXPx, false );
 #ifdef MC__ODEBNDS_BASE_DINEQPM_DEBUG
@@ -2373,7 +2424,7 @@ ODEBNDS_BASE<T,PMT,PVT>::_RHS_PM_ADJ
         std::cout << "MVYXPx[" << jx << "] = " << _MVYXPx[jx] << std::endl;
 #endif
       for( unsigned jx=0; jx<_nx; jx++ ){ // adjoint bounds
-        _MVYXPy[jx].set( _MVYXPenv ).set( _PMy[jx].center().set( T(0.) ), true );
+        _MVYXPy[jx].set( _MVYXPenv ).set( _PMy[jx].set( T(0.) ), true );
       }
       _e2x( _nx, _MVYXPd, _MVYXPy, false );
 #ifdef MC__ODEBNDS_BASE_DINEQPM_DEBUG
@@ -2385,11 +2436,15 @@ ODEBNDS_BASE<T,PMT,PVT>::_RHS_PM_ADJ
       _RHS_PM_ELL2( _nx, _PMenv, _PMydot, _MVYXPg, _npar, _Ir, _Ax, _Idy, _Ay, _Idydot );
     }
 
+    // Regenerate _PMx and _PMy, whose remainder terms where canceled
+    for( unsigned jx=0; jx<_nx; jx++ ){
+      _PMx[jx].set( _Ir[jx] );
+      _PMy[jx].set( _Idy[jx] );
+    }
+
     // Construct the ellipsoidal remainder derivatives
-    if( options.QSCALE )
-      _RHS_ELL( _nx, _Qy, _Ay, _Ax, _Idydot, _Qydot, options.QTOL, machprec(), neg, _PMy );
-    else
-      _RHS_ELL( _nx, _Qy, _Ay, _Ax, _Idydot, _Qydot, options.QTOL, machprec(), neg, (PVT*)0 );
+    _RHS_ELL( _nx, _Qy, _Ay, _Ax, _Idydot, _Qydot, options.QTOL, machprec(),
+      options.QSCALE, neg, _Idy );
 
     // Whether or not to ignore the adjoint remainder
     if( !options.PMNOREM )
@@ -2398,7 +2453,7 @@ ODEBNDS_BASE<T,PMT,PVT>::_RHS_PM_ADJ
       _PME2vec( _PMenv, _nx, _PMydot, 0, ydot );
 #ifdef MC__ODEBNDS_BASE_DINEQPM_DEBUG
     _print_interm( t, _nx, _PMydot, E(_nx,_Qydot), "PMydot Intermediate", std::cerr );
-    { std::cout << "--paused--"; int dum; std::cin >> dum; }
+    //{ std::cout << "--paused--"; int dum; std::cin >> dum; }
 #endif
     break;
   }
@@ -2549,6 +2604,11 @@ ODEBNDS_BASE<T,PMT,PVT>::_RHS_PM_QUAD
     _PMI2vec( _PMenv, _npar, _PMyqdot, yqdot, true );
   else
     _PMI2vec( _PMenv, _npar, _PMyqdot, 0, yqdot );
+
+#ifdef MC__ODEBNDS_BASE_DINEQPM_DEBUG
+    _print_interm( _npar, _PMyqdot, "PMyqdot Intermediate", std::cerr );
+    //{ std::cout << "--paused--"; int dum; std::cin >> dum; }
+#endif
 
   return true;  
 }

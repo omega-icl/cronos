@@ -2,7 +2,7 @@ const unsigned int NPM   = 4;	// <- Order of poynomial expansion
 const unsigned int NSAMP = 50;	// <- Number of sampling points for inner approx.
 #define SAVE_RESULTS		// <- Whether to save bounds to file
 #define USE_CMODEL		// <- whether to use Chebyshev models or Taylor models
-#undef  USE_SUNDIALS		// <- whether to use SUNDIALS or GSL integrator
+#define USE_SUNDIALS		// <- whether to use SUNDIALS or GSL integrator
 
 #include "odeslvs_gsl.hpp"
 #ifndef USE_SUNDIALS
@@ -107,7 +107,7 @@ int main()
   LV0.options.ATOL      = LV0.options.RTOL = 1e-10;
   LV0.options.INTMETH   = mc::ODESLV_GSL<I>::Options::MSBDF;
   //LV0.options.HMAX      = 1e-3;
-
+/*
   // Approximate adjoint bounds
   std::cout << "\nNON_VALIDATED INTEGRATION - APPROXIMATE ENCLOSURE OF REACHABLE SET:\n\n";
   //LV0.bounds( NS, tk, Ip, Ixk, Iq, If, NSAMP );
@@ -118,7 +118,7 @@ int main()
   std::ofstream apprecADJ("test1_APPROX_ADJ.dat", std::ios_base::out );
   LV0.record( apprecSTA, apprecADJ ); 
 #endif
-
+*/
   /////////////////////////////////////////////////////////////////////////////
   //// DIFFERENTIAL INEQUALITIES
 #ifndef USE_SUNDIALS // GSL integrator
@@ -133,7 +133,7 @@ int main()
   LV.options.WRAPMIT   = mc::ODEBND_GSL<I,PM,PV>::Options::ELLIPS;//NONE;//DINEQ
   LV.options.HMAX      = 1e-3;
   //LV.options.H0      = 1e-6;
-  LV.options.QSCALE    = false;
+  //LV.options.QSCALE  = 1e-10;
 
 #else // SUNDIALS integrator
   mc::ODEBNDS_SUNDIALS<I,PM,PV> LV;
@@ -142,15 +142,15 @@ int main()
 #if defined( SAVE_RESULTS )
   LV.options.RESRECORD = true;
 #endif
-  LV.options.ATOL      = LV.options.ATOLB  = 1e-10;
-  LV.options.RTOL      = LV.options.RTOLB  = 1e-8;
+  LV.options.ATOL      = LV.options.ATOLB  = 1e-8;
+  LV.options.RTOL      = LV.options.RTOLB  = 1e-11;
   LV.options.NMAX      = 10000;
   LV.options.INTMETH   = mc::ODEBNDS_SUNDIALS<I,PM,PV>::Options::MSADAMS;
   LV.options.JACAPPROX = mc::ODEBNDS_SUNDIALS<I,PM,PV>::Options::CV_DENSE;//CV_DIAG;
   LV.options.ORDMIT    = 1;//PMp->nord();
   LV.options.WRAPMIT   = mc::ODEBNDS_SUNDIALS<I,PM,PV>::Options::ELLIPS;//NONE;//DINEQ;
   LV.options.QERRB     = true;
-  LV.options.QSCALE    = false;
+  LV.options.QSCALE    = 0e0;
 #endif
 
   LV.set_dag( &IVP );

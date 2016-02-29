@@ -390,7 +390,7 @@ class ODEBND_BASE:
   static void _RHS_ELL
     ( const unsigned nx, const double*Qr, const double*Ar, const T*Irdot,
       double*Qrdot, const double QTOL, const double EPS, const double QSCALE,
-      const U*W=0 );
+      const U*W );
 
   //! @brief Function to calculate the RHS of auxiliary ODEs in interval arithmetic
   template <typename REALTYPE, typename OPT> bool _RHS_I_QUAD
@@ -563,6 +563,11 @@ class ODEBND_BASE:
   //! @brief Scaling fuction
   template <typename U> static double _scaling
     ( const unsigned ix, const U*W, const double WTOL );
+
+  //! @brief Scaling fuction
+  template <typename U> static double _scaling
+    ( const unsigned ix, const U*W, const double WMAX, const double EPS,
+      const double WTOL );
 
   //! @brief Function computing set diameter (max-norm component-wise)
   static double _diam
@@ -1195,8 +1200,22 @@ ODEBND_BASE<T,PMT,PVT>::_scaling
 {
   if( !W || WTOL <= 0. ) return 1.;
   //const double WTOL = 1e-10;//EPS*1e2;
+  //double wi = Op<U>::abs(W[ix]);
+  //return wi<WTOL? WTOL: wi;
+  return Op<U>::abs(W[ix]) + WTOL;
+}
+
+template <typename T, typename PMT, typename PVT>
+template <typename U>
+inline double
+ODEBND_BASE<T,PMT,PVT>::_scaling
+( const unsigned ix, const U*W, const double WMAX, const double EPS,
+  const double WTOL )
+{
+  if( !W || WTOL <= 0. || WMAX <= EPS ) return 1.;
   double wi = Op<U>::abs(W[ix]);
-  return wi<WTOL? WTOL: wi;
+  return wi/WMAX < WTOL? WTOL: wi/WMAX;
+  //return Op<U>::abs(W[ix]) + WTOL;
 }
 
 template <typename T, typename PMT, typename PVT>
@@ -1207,7 +1226,62 @@ ODEBND_BASE<T,PMT,PVT>::_RHS_ELL
   double*Qxdot, const double QTOL, const double EPS, const double WTOL,
   const U*W )
 {
-  // Set dynamics of shape matrix
+#ifdef MC__ODEBND_BASE_DINEQPM_DEBUG
+  std::cout << "Ex =" << E(nx,Qx) << std::endl;
+#endif
+
+ // Set dynamics of shape matrix
+  double trQW = 0., WMAX = 0.;
+  for( unsigned ix=0; ix<nx; ix++ )
+    if( Op<U>::abs(W[ix]) > WMAX ) WMAX = Op<U>::abs(W[ix]);
+  for( unsigned ix=0; ix<nx; ix++ ){
+    double sqr_wi = sqr(_scaling(ix,W,WMAX,EPS,WTOL));
+    trQW += ( Qx[_ndxLT(ix,ix,nx)]>EPS? Qx[_ndxLT(ix,ix,nx)]/sqr_wi: EPS );
+  }
+  double sumkappa = 0.;
+  const double srqt_trQW = (trQW>0? std::sqrt( trQW ): 0.) + QTOL;
+  for( unsigned ix=0; ix<nx; ix++ ){
+    double wi = _scaling(ix,W,WMAX,EPS,WTOL);
+#ifdef MC__ODEBND_BASE_DINEQPM_DEBUG
+    std::cout << "kappa[" << ix << "] = "
+              << Op<T>::diam( Idxdot[ix] ) / ( 2. * wi * srqt_trQW ) << std::endl;
+#endif
+    sumkappa += Op<T>::diam( Idxdot[ix] ) / ( 2. * wi * srqt_trQW );
+  }
+
+  for( unsigned jx=0; jx<nx; jx++ ){
+    for( unsigned ix=jx; ix<nx; ix++ ){
+      Qxdot[_ndxLT(ix,jx,nx)] = sumkappa * Qx[_ndxLT(ix,jx,nx)];
+      for( unsigned kx=0; kx<nx; kx++ )
+        Qxdot[_ndxLT(ix,jx,nx)] += Qx[_ndxLT(ix,kx,nx)] * Ax[jx+kx*nx]
+                                 + Ax[ix+kx*nx] * Qx[_ndxLT(kx,jx,nx)];
+    }
+    double wj = _scaling(jx,W,WMAX,EPS,WTOL);
+    Qxdot[_ndxLT(jx,jx,nx)] += Op<T>::diam( Idxdot[jx] ) / 2. * wj * srqt_trQW;
+  }
+
+#ifdef MC__ODEBND_BASE_DINEQPM_DEBUG
+  for( unsigned ix=0; ix<nx; ix++ )
+    std::cout << "Idxdot[" << ix << "] =" << Idxdot[ix] << std::endl;
+  E Exdot( nx, Qxdot );
+  std::cout << "Exdot =" << Exdot << std::endl;
+  { int dum; std::cin >> dum; }
+#endif
+}
+/*
+template <typename T, typename PMT, typename PVT>
+template <typename U>
+inline void
+ODEBND_BASE<T,PMT,PVT>::_RHS_ELL
+( const unsigned nx, const double*Qx, const double*Ax, const T*Idxdot,
+  double*Qxdot, const double QTOL, const double EPS, const double WTOL,
+  const U*W )
+{
+#ifdef MC__ODEBND_BASE_DINEQPM_DEBUG
+  std::cout << "Ex =" << E(nx,Qx) << std::endl;
+#endif
+
+ // Set dynamics of shape matrix
   double trQW = 0.;
   for( unsigned ix=0; ix<nx; ix++ ){
     double sqr_wi = sqr(_scaling(ix,W,WTOL));
@@ -1239,11 +1313,11 @@ ODEBND_BASE<T,PMT,PVT>::_RHS_ELL
   for( unsigned ix=0; ix<nx; ix++ )
     std::cout << "Idxdot[" << ix << "] =" << Idxdot[ix] << std::endl;
   E Exdot( nx, Qxdot );
-  std::cout << "Edxdot =" << Edxdot << std::endl;
+  std::cout << "Exdot =" << Exdot << std::endl;
   { int dum; std::cin >> dum; }
 #endif
 }
-
+*/
 template <typename T, typename PMT, typename PVT>
 template <typename REALTYPE, typename OPT> inline bool
 ODEBND_BASE<T,PMT,PVT>::_RHS_I_QUAD

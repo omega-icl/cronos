@@ -1415,6 +1415,71 @@ ODEBNDS_BASE<T,PMT,PVT>::_RHS_ELL
   const double WTOL, const bool neg, const U*W )
 {
   // Construct trajectories kappa and eta
+  double trQW = 0., WMAX = 0.;
+  for( unsigned ix=0; ix<nx; ix++ )
+    if( Op<U>::abs(W[ix]) > WMAX ) WMAX = Op<U>::abs(W[ix]);
+  for( unsigned ix=0; ix<nx; ix++ ){
+    double sqr_wi = sqr(_scaling(ix,W,WMAX,EPS,WTOL));
+    trQW += ( Qy[_ndxLT(ix,ix,nx)]>EPS? Qy[_ndxLT(ix,ix,nx)]/sqr_wi: EPS );
+  }
+  double sumkappa = 0., sumeta = 0., AxTAx[nx];
+  const double srqt_trQW = (trQW>0? std::sqrt( trQW ): 0.) + QTOL;
+  for( unsigned ix=0; ix<nx; ix++ ){
+    double wi = _scaling(ix,W,WMAX,EPS,WTOL);
+    //sumkappa += .1;
+    sumkappa += Op<T>::diam( Idydot[ix] ) / ( 2. * wi * srqt_trQW );
+    AxTAx[ix] = 0.;
+    for( unsigned jx=0; jx<nx; jx++)
+      AxTAx[ix] += Ax[jx+ix*nx] * Ax[jx+ix*nx];
+    if( AxTAx[ix] < EPS ) AxTAx[ix] = EPS;
+    sumeta += std::sqrt(AxTAx[ix]) / ( wi * srqt_trQW );
+#ifdef MC__ODEBNDS_BASE_DINEQPM_DEBUG
+    std::cout << "eta[" << ix << "] = "
+              << std::sqrt(AxTAx[ix]) / ( wi * srqt_trQW )
+              << std::endl;
+    std::cout << "kappa[" << ix << "] = "
+              << Op<T>::diam( Idydot[ix] ) / ( 2. * wi * srqt_trQW )
+              << std::endl;
+#endif
+  }
+
+  // Set ellipsoidal remainder RHS
+  double pm = neg? -1.: 1.;
+  for( unsigned jx=0; jx<nx; jx++ ){
+   double wj = _scaling(jx,W,WMAX,EPS,WTOL);
+   for( unsigned ix=jx; ix<nx; ix++ ){
+      Qydot[_ndxLT(ix,jx,nx)] = pm * ( sumkappa + sumeta ) * Qy[_ndxLT(ix,jx,nx)];
+      for( unsigned kx=0; kx<nx; kx++ ){
+        Qydot[_ndxLT(ix,jx,nx)] += Qy[_ndxLT(ix,kx,nx)] * Ay[jx+kx*nx]
+          + Ay[ix+kx*nx] * Qy[_ndxLT(kx,jx,nx)]
+          + pm * Ax[ix+kx*nx] * Ax[jx+kx*nx] / std::sqrt(AxTAx[kx]) * wj * srqt_trQW;
+      }
+    }
+    Qydot[_ndxLT(jx,jx,nx)] += pm * Op<T>::diam( Idydot[jx] ) / 2. * wj * srqt_trQW;
+    //Qydot[_ndxLT(jx,jx,nx)] += pm * sqr( Op<T>::diam( Idydot[jx] ) / 2. ) / 0.1;
+  }
+#ifdef MC__ODEBNDS_BASE_DINEQI_DEBUG
+  for( unsigned ix=0; ix<nx; ix++ ){
+    std::cout << "Qydot[" << ix << ",#] = ";
+    for( unsigned jx=0; jx<=ix; jx++ )
+      std::cout << Qydot[_ndxLT(ix,jx,nx)] << "  ";
+    std::cout << std::endl;
+  }
+  E Eydot( nx, Qydot, yrefdot );
+  std::cout << "Eydot =" << Eydot << std::endl;
+  { int dum; std::cin >> dum; }
+#endif
+}
+/*
+template <typename T, typename PMT, typename PVT>
+template <typename U>
+inline void
+ODEBNDS_BASE<T,PMT,PVT>::_RHS_ELL
+( const unsigned nx, const double*Qy, const double*Ay, const double *Ax,
+  const T*Idydot, double*Qydot, const double QTOL, const double EPS,
+  const double WTOL, const bool neg, const U*W )
+{
+  // Construct trajectories kappa and eta
   double trQW = 0.;
   for( unsigned ix=0; ix<nx; ix++ ){
     double sqr_wi = sqr(_scaling(ix,W,WTOL));
@@ -1468,7 +1533,7 @@ ODEBNDS_BASE<T,PMT,PVT>::_RHS_ELL
   { int dum; std::cin >> dum; }
 #endif
 }
-
+*/
 template <typename T, typename PMT, typename PVT>
 template <typename REALTYPE, typename OPT> inline bool
 ODEBNDS_BASE<T,PMT,PVT>::_RHS_I_QUAD
@@ -1886,9 +1951,9 @@ ODEBNDS_BASE<T,PMT,PVT>::_CC_PM_ADJ
     _print_interm( t, _nx, _PMx, _Er, "PMx Intermediate [CC1]", std::cerr );
 #endif
     _vec2PME( y, _PMenv, _nx, _PMy, _Qy, _Edy, _Idy ); // set current adjoint bounds
-//#ifdef MC__ODEBNDS_BASE_DINEQPM_DEBUG
+#ifdef MC__ODEBNDS_BASE_DINEQPM_DEBUG
     _print_interm( t, _nx, _PMy, _Edy, "PMy Intermediate [CC1]", std::cerr );
-//#endif
+#endif
 
     // In this variant a bound on the Jacobian matrix is computed and the
     // linear part is taken as the mid-point of this matrix

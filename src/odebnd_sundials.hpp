@@ -143,7 +143,7 @@ public:
     //! @brief Constructor
     Options():
       BASE_SUNDIALS::Options(), WRAPMIT(ELLIPS), ORDMIT(2), PMOPT(typename PMT::Options()),
-      QTOL(machprec()), QSCALE(machprec()), PMNOREM(false), USEINV(true), DMAX(1e20), DISPLAY(1), 
+      QTOL(machprec()), QSCALE(1e-5), PMNOREM(false), USEINV(true), DMAX(1e20), DISPLAY(1), 
       RESRECORD(false)
       {}
     //! @brief Assignment operator

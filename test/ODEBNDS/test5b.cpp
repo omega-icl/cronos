@@ -1,7 +1,7 @@
 // ESCAPE26 Case Study 1 - Exothermic Batch Reactor
 
-const unsigned int NPM   = 2;	// <- Order of poynomial expansion
-const unsigned int NSAMP = 3;	// <- Number of sampling points for inner approx.
+const unsigned int NPM   = 3;	// <- Order of poynomial expansion
+const unsigned int NSAMP = 2;	// <- Number of sampling points for inner approx.
 #define SAVE_RESULTS		// <- Whether to save bounds to file
 #define USE_CMODEL		// <- whether to use Chebyshev models or Taylor models
 #define USE_SUNDIALS		// <- whether to use SUNDIALS or GSL integrator
@@ -31,8 +31,8 @@ int main()
 {
   mc::FFGraph IVP;  // DAG describing the problem
 
-  double t0 = 0., tf = 300.;  // Time span
-  const unsigned int NS = 3;  // Time stages
+  double t0 = 0., tf = 600.;  // Time span
+  const unsigned int NS = 8;  // Time stages
   double tk[NS+1]; tk[0] = t0;
   for( unsigned k=0; k<NS; k++ ) tk[k+1] = tk[k] + (tf-t0)/(double)NS;
 
@@ -71,7 +71,8 @@ int main()
   mc::FFVar FCT[NF];  // State functions
   FCT[0] = X1;
 
-  I Ip[NP] = { I(350.,370.), I(290.,310.), I(290.,310.), I(290.,310.) };
+  I Ip[NP] = { I(350.,370.) };
+  for( unsigned i=0; i<NS; i++ ) Ip[1+i] = I(290.,310.);
   I *Ixk[NS+1], *Iyk[NS+1];
   for( unsigned k=0; k<=NS; k++ ){
     Ixk[k] = new I[NX];
@@ -80,14 +81,15 @@ int main()
   I If[NF], Idf[NF*NP];
 
   PM PMEnv( NP, NPM );
-  PV PMp[NP] = { PV( &PMEnv, 0, Ip[0] ), PV( &PMEnv, 1, Ip[1] ), PV( &PMEnv, 2, Ip[2] ), PV( &PMEnv, 3, Ip[3] ) };
+  PV PMp[NP];
+  for( unsigned i=0; i<NP; i++ ) PMp[i] = PV( &PMEnv, i, Ip[i] );
   PV *PMxk[NS+1], *PMyk[NS+1];
   for( unsigned k=0; k<=NS; k++ ){
     PMxk[k] = new PV[NX];
     PMyk[k] = new PV[NF*NX];
   }
   PV PMf[NF], PMdf[NF*NP];
-/*
+
   /////////////////////////////////////////////////////////////////////////////
   //// SAMPLING
   mc::ODESLVS_GSL<I> LV0;
@@ -115,7 +117,7 @@ int main()
   std::ofstream apprecADJ("test5b_APPROX_ADJ.dat", std::ios_base::out );
   LV0.record( apprecSTA, apprecADJ ); 
 #endif
-*/
+
   /////////////////////////////////////////////////////////////////////////////
   //// DIFFERENTIAL INEQUALITIES
 #ifndef USE_SUNDIALS // GSL integrator
@@ -138,12 +140,14 @@ int main()
 #if defined( SAVE_RESULTS )
   LV.options.RESRECORD = true;
 #endif
-  LV.options.ATOL      = LV.options.RTOL  = 1e-8;
-  LV.options.ATOLB     = LV.options.RTOLB = 1e-8;
+  LV.options.ATOL      = LV.options.ATOLB = 1e-10;
+  LV.options.RTOL      = LV.options.RTOLB = 1e-8;
   LV.options.INTMETH   = mc::ODEBNDS_SUNDIALS<I,PM,PV>::Options::MSADAMS;
   LV.options.JACAPPROX = mc::ODEBNDS_SUNDIALS<I,PM,PV>::Options::CV_DIAG;//CV_DENSE;
   LV.options.ORDMIT    = 1; //PMp->nord();
   LV.options.WRAPMIT   = mc::ODEBNDS_SUNDIALS<I,PM,PV>::Options::DINEQ;//ELLIPS;//NONE;
+  //LV.options.QSCALE    = 1e0;
+  LV.options.HMIN      = 1e-12;
 #endif
 
   LV.set_dag( &IVP );
@@ -152,7 +156,7 @@ int main()
   LV.set_differential( NS, NX, RHS );
   LV.set_initial( NX, IC );
   LV.set_function( NF, FCT );
-/*
+
   std::cout << "\nCONTINUOUS SET-VALUED INTEGRATION - INTERVAL ENCLOSURE OF REACHABLE SET:\n\n";
   LV.bounds_ASA( NS, tk, Ip, Ixk, 0, If, Iyk, Idf );
 #if defined( SAVE_RESULTS )
@@ -160,7 +164,7 @@ int main()
   std::ofstream direcIADJ( "test5b_DINEQI_ADJ.dat", std::ios_base::out );
   LV.record( direcISTA, direcIADJ );
 #endif
-*/
+
   std::cout << "\nCONTINUOUS SET-VALUED INTEGRATION - POLYNOMIAL MODEL ENCLOSURE OF REACHABLE SET:\n\n";
   //LV.bounds( NS, tk, PMp, PMxk, 0, PMf );
   LV.bounds_ASA( NS, tk, PMp, PMxk, 0, PMf, PMyk, PMdf );

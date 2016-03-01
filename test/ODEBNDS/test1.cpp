@@ -1,4 +1,4 @@
-const unsigned int NPM   = 2;	// <- Order of poynomial expansion
+const unsigned int NPM   = 1;	// <- Order of poynomial expansion
 const unsigned int NSAMP = 50;	// <- Number of sampling points for inner approx.
 #define SAVE_RESULTS		// <- Whether to save bounds to file
 #define USE_CMODEL		// <- whether to use Chebyshev models or Taylor models
@@ -29,8 +29,8 @@ int main()
 {
   mc::FFGraph IVP;  // DAG describing the problem
 
-  double t0 = 0., tf = 2.;  // Time span
-  const unsigned int NS = 20;  // Time stages
+  double t0 = 0., tf = 5.;  // Time span
+  const unsigned int NS = 200;  // Time stages
   double tk[NS+1]; tk[0] = t0;
   for( unsigned k=0; k<NS; k++ ) tk[k+1] = tk[k] + (tf-t0)/(double)NS;
 
@@ -107,7 +107,7 @@ int main()
   LV0.options.ATOL      = LV0.options.RTOL = 1e-10;
   LV0.options.INTMETH   = mc::ODESLV_GSL<I>::Options::MSBDF;
   //LV0.options.HMAX      = 1e-3;
-
+/*
   // Approximate adjoint bounds
   std::cout << "\nNON_VALIDATED INTEGRATION - APPROXIMATE ENCLOSURE OF REACHABLE SET:\n\n";
   //LV0.bounds( NS, tk, Ip, Ixk, Iq, If, NSAMP );
@@ -118,7 +118,7 @@ int main()
   std::ofstream apprecADJ("test1_APPROX_ADJ.dat", std::ios_base::out );
   LV0.record( apprecSTA, apprecADJ ); 
 #endif
-
+*/
   /////////////////////////////////////////////////////////////////////////////
   //// DIFFERENTIAL INEQUALITIES
 #ifndef USE_SUNDIALS // GSL integrator
@@ -150,7 +150,7 @@ int main()
   LV.options.ORDMIT    = 1;//PMp->nord();
   LV.options.WRAPMIT   = mc::ODEBNDS_SUNDIALS<I,PM,PV>::Options::ELLIPS;//NONE;//DINEQ;
   LV.options.QERRB     = true;
-  //LV.options.QSCALE    = 1e-10;
+  LV.options.QSCALE    = 1e-5;
 #endif
 
   LV.set_dag( &IVP );
@@ -161,7 +161,7 @@ int main()
   LV.set_quadrature( NQ, QUAD, Q );
   //LV.set_function( NF, FCT );
   LV.set_function( NF, NS, FCT );
-
+/*
   std::cout << "\nCONTINUOUS SET-VALUED INTEGRATION - INTERVAL ENCLOSURE OF REACHABLE SET:\n\n";
   LV.bounds_ASA( NS, tk, Ip, Ixk, Iq, If, Iyk, Idf );
 #if defined( SAVE_RESULTS )
@@ -169,7 +169,7 @@ int main()
   std::ofstream direcIADJ( "test1_DINEQI_ADJ.dat", std::ios_base::out );
   LV.record( direcISTA, direcIADJ );
 #endif
-
+*/
   std::cout << "\nCONTINUOUS SET-VALUED INTEGRATION - POLYNOMIAL MODEL ENCLOSURE OF REACHABLE SET:\n\n";
   LV.bounds_ASA( NS, tk, PMp, PMxk, PMq, PMf, PMyk, PMdf );
 #if defined( SAVE_RESULTS )

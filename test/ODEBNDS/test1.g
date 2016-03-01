@@ -38,7 +38,7 @@ do for [i = 0:NF-1]{
   do for [j = 1:NX]{
     set title sprintf("F%d, l%d",i+1,j)
     set xlabel "t"
-    set xlabel "y"
+    set ylabel "l"
     lb = 2*NX*i + 2*j 
     ub = 2*NX*i + 2*j + 1
     plot SAMPLINGdata u 1:lb:ub w filledcu lt rgb "cyan", \
@@ -52,4 +52,3 @@ unset multiplot
 !ps2eps -B -f -l test1_DINEQ_ADJ.eps
 !mv test1_DINEQ_ADJ.eps.eps test1_DINEQ_ADJ.eps 
 
-#pause 0

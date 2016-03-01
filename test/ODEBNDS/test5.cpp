@@ -31,7 +31,7 @@ int main()
 {
   mc::FFGraph IVP;  // DAG describing the problem
 
-  double t0 = 0., tf = 300.;  // Time span
+  double t0 = 0., tf = 600.;  // Time span
   const unsigned int NS = 100;  // Time stages
   double tk[NS+1]; tk[0] = t0;
   for( unsigned k=0; k<NS; k++ ) tk[k+1] = tk[k] + (tf-t0)/(double)NS;
@@ -142,7 +142,7 @@ int main()
   LV.options.JACAPPROX = mc::ODEBNDS_SUNDIALS<I,PM,PV>::Options::CV_DIAG;//CV_DENSE;
   LV.options.ORDMIT    = 1;//PMp->nord();
   LV.options.WRAPMIT   = mc::ODEBNDS_SUNDIALS<I,PM,PV>::Options::ELLIPS;//DINEQ;//NONE;
-  //LV.options.QSCALE    = true;
+  //LV.options.QSCALE    = 1e0;
   LV.options.HMIN      = 1e-12;
 #endif
 
@@ -162,7 +162,7 @@ int main()
 #endif
 
   std::cout << "\nCONTINUOUS SET-VALUED INTEGRATION - POLYNOMIAL MODEL ENCLOSURE OF REACHABLE SET:\n\n";
-  //LV.bounds( NS, tk, PMp, PMxk );
+  //LV.bounds( NS, tk, PMp, PMxk, 0, PMf );
   LV.bounds_ASA( NS, tk, PMp, PMxk, 0, PMf, PMyk, PMdf );
 #if defined( SAVE_RESULTS )
   std::ofstream direcPMSTA( "test5_DINEQPM_STA.dat", std::ios_base::out );

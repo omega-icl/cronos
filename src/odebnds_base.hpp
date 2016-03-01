@@ -351,7 +351,7 @@ protected:
   static void _RHS_I_ELL
     ( const unsigned nx, PVT*MVYXPg, const double*Qy, double*Ay, double *Ax,
       const unsigned np, double*yrefdot, double*Bydot, T*Idydot, double*Qydot,
-      const double QTOL, const double EPS, const double WTOL, const bool neg,
+      const double QTOL, const double EPS, const double QSCALE, const bool neg,
       const T*W=0 );
 
   //! @brief Static function to calculate the RHS of adjoint ODEs w/ ellipsoidal contractor
@@ -605,7 +605,7 @@ ODEBNDS_BASE<T,PMT,PVT>::_INI_I_ADJ
     delete[] _Byq;     _Byq     = new double[_npar*_npar];
     delete[] _Qy;      _Qy      = new double[_nx*(_nx+1)/2];
     delete[] _Idy;     _Idy     = new T[_nx];
-    delete[] _Idyq;    _Idyq    = new T[_nx];
+    delete[] _Idyq;    _Idyq    = new T[_npar];
     delete[] _yrefdot; _yrefdot = new double[_nx];
     delete[] _Bydot;   _Bydot   = new double[_nx*_npar];
     delete[] _Byqdot;  _Byqdot  = new double[_npar*_npar];
@@ -1356,7 +1356,7 @@ inline void
 ODEBNDS_BASE<T,PMT,PVT>::_RHS_I_ELL
 ( const unsigned nx, PVT*MVYXPg, const double*Qy, double*Ay, double *Ax,
   const unsigned np, double*yrefdot, double*Bydot, T*Idydot, double*Qydot,
-  const double QTOL, const double EPS, const double WTOL, const bool neg,
+  const double QTOL, const double EPS, const double QSCALE, const bool neg,
   const T*W )
 {
   // Extract time derivatives of constant, linear and remainder parts
@@ -1403,7 +1403,7 @@ ODEBNDS_BASE<T,PMT,PVT>::_RHS_I_ELL
 #ifdef MC__ODEBNDS_BASE_DINEQI_DEBUG
     { int dum; std::cin >> dum; }
 #endif
-  return _RHS_ELL( nx, Qy, Ay, Ax, Idydot, Qydot, QTOL, EPS, WTOL, neg, W );
+  return _RHS_ELL( nx, Qy, Ay, Ax, Idydot, Qydot, QTOL, EPS, QSCALE, neg, W );
 }
 
 template <typename T, typename PMT, typename PVT>
@@ -1412,20 +1412,27 @@ inline void
 ODEBNDS_BASE<T,PMT,PVT>::_RHS_ELL
 ( const unsigned nx, const double*Qy, const double*Ay, const double *Ax,
   const T*Idydot, double*Qydot, const double QTOL, const double EPS,
-  const double WTOL, const bool neg, const U*W )
+  const double QSCALE, const bool neg, const U*W )
 {
   // Construct trajectories kappa and eta
   double trQW = 0., WMAX = 0.;
-  for( unsigned ix=0; ix<nx; ix++ )
+  for( unsigned ix=0; ix<nx; ix++ ){
     if( Op<U>::abs(W[ix]) > WMAX ) WMAX = Op<U>::abs(W[ix]);
+#ifdef MC__ODEBNDS_BASE_DINEQPM_DEBUG
+    std::cout << "W[" << ix << "] = " << W[ix] << std::endl;
+#endif
+  }
+#ifdef MC__ODEBNDS_BASE_DINEQPM_DEBUG
+    std::cout << "WMAX = " << WMAX << std::endl;
+#endif
   for( unsigned ix=0; ix<nx; ix++ ){
-    double sqr_wi = sqr(_scaling(ix,W,WMAX,EPS,WTOL));
-    trQW += ( Qy[_ndxLT(ix,ix,nx)]>EPS? Qy[_ndxLT(ix,ix,nx)]/sqr_wi: EPS );
+    double sqr_wi = sqr(_scaling(ix,W,WMAX,EPS,QSCALE));
+    trQW += ( Qy[_ndxLT(ix,ix,nx)]/sqr_wi>EPS? Qy[_ndxLT(ix,ix,nx)]/sqr_wi: EPS );
   }
   double sumkappa = 0., sumeta = 0., AxTAx[nx];
   const double srqt_trQW = (trQW>0? std::sqrt( trQW ): 0.) + QTOL;
   for( unsigned ix=0; ix<nx; ix++ ){
-    double wi = _scaling(ix,W,WMAX,EPS,WTOL);
+    double wi = _scaling(ix,W,WMAX,EPS,QSCALE);
     //sumkappa += .1;
     sumkappa += Op<T>::diam( Idydot[ix] ) / ( 2. * wi * srqt_trQW );
     AxTAx[ix] = 0.;
@@ -1446,7 +1453,7 @@ ODEBNDS_BASE<T,PMT,PVT>::_RHS_ELL
   // Set ellipsoidal remainder RHS
   double pm = neg? -1.: 1.;
   for( unsigned jx=0; jx<nx; jx++ ){
-   double wj = _scaling(jx,W,WMAX,EPS,WTOL);
+   double wj = _scaling(jx,W,WMAX,EPS,QSCALE);
    for( unsigned ix=jx; ix<nx; ix++ ){
       Qydot[_ndxLT(ix,jx,nx)] = pm * ( sumkappa + sumeta ) * Qy[_ndxLT(ix,jx,nx)];
       for( unsigned kx=0; kx<nx; kx++ ){
@@ -1459,81 +1466,12 @@ ODEBNDS_BASE<T,PMT,PVT>::_RHS_ELL
     //Qydot[_ndxLT(jx,jx,nx)] += pm * sqr( Op<T>::diam( Idydot[jx] ) / 2. ) / 0.1;
   }
 #ifdef MC__ODEBNDS_BASE_DINEQI_DEBUG
-  for( unsigned ix=0; ix<nx; ix++ ){
-    std::cout << "Qydot[" << ix << ",#] = ";
-    for( unsigned jx=0; jx<=ix; jx++ )
-      std::cout << Qydot[_ndxLT(ix,jx,nx)] << "  ";
-    std::cout << std::endl;
-  }
-  E Eydot( nx, Qydot, yrefdot );
+  E Eydot( nx, Qydot );
   std::cout << "Eydot =" << Eydot << std::endl;
   { int dum; std::cin >> dum; }
 #endif
 }
-/*
-template <typename T, typename PMT, typename PVT>
-template <typename U>
-inline void
-ODEBNDS_BASE<T,PMT,PVT>::_RHS_ELL
-( const unsigned nx, const double*Qy, const double*Ay, const double *Ax,
-  const T*Idydot, double*Qydot, const double QTOL, const double EPS,
-  const double WTOL, const bool neg, const U*W )
-{
-  // Construct trajectories kappa and eta
-  double trQW = 0.;
-  for( unsigned ix=0; ix<nx; ix++ ){
-    double sqr_wi = sqr(_scaling(ix,W,WTOL));
-    trQW += ( Qy[_ndxLT(ix,ix,nx)]>EPS? Qy[_ndxLT(ix,ix,nx)]/sqr_wi: EPS );
-  }
-  double sumkappa = 0., sumeta = 0., AxTAx[nx];
-  const double srqt_trQW = (trQW>0? std::sqrt( trQW ): 0.) + QTOL;
-  for( unsigned ix=0; ix<nx; ix++ ){
-    double wi = _scaling(ix,W,WTOL);
-    //sumkappa += .1;
-    sumkappa += Op<T>::diam( Idydot[ix] ) / ( 2. * wi * srqt_trQW );
-    AxTAx[ix] = 0.;
-    for( unsigned jx=0; jx<nx; jx++)
-      AxTAx[ix] += Ax[jx+ix*nx] * Ax[jx+ix*nx];
-    if( AxTAx[ix] < EPS ) AxTAx[ix] = EPS;
-    sumeta += std::sqrt(AxTAx[ix]) / ( wi * srqt_trQW );
-#ifdef MC__ODEBNDS_BASE_DINEQPM_DEBUG
-    std::cout << "eta[" << ix << "] = "
-              << std::sqrt(AxTAx[ix]) / ( wi * srqt_trQW )
-              << std::endl;
-    std::cout << "kappa[" << ix << "] = "
-              << Op<T>::diam( Idydot[ix] ) / ( 2. * wi * srqt_trQW )
-              << std::endl;
-#endif
-  }
 
-  // Set ellipsoidal remainder RHS
-  double pm = neg? -1.: 1.;
-  for( unsigned jx=0; jx<nx; jx++ ){
-   double wj = _scaling(jx,W,WTOL);
-   for( unsigned ix=jx; ix<nx; ix++ ){
-      Qydot[_ndxLT(ix,jx,nx)] = pm * ( sumkappa + sumeta ) * Qy[_ndxLT(ix,jx,nx)];
-      for( unsigned kx=0; kx<nx; kx++ ){
-        Qydot[_ndxLT(ix,jx,nx)] += Qy[_ndxLT(ix,kx,nx)] * Ay[jx+kx*nx]
-          + Ay[ix+kx*nx] * Qy[_ndxLT(kx,jx,nx)]
-          + pm * Ax[ix+kx*nx] * Ax[jx+kx*nx] / std::sqrt(AxTAx[kx]) * wj * srqt_trQW;
-      }
-    }
-    Qydot[_ndxLT(jx,jx,nx)] += pm * Op<T>::diam( Idydot[jx] ) / 2. * wj * srqt_trQW;
-    //Qydot[_ndxLT(jx,jx,nx)] += pm * sqr( Op<T>::diam( Idydot[jx] ) / 2. ) / 0.1;
-  }
-#ifdef MC__ODEBNDS_BASE_DINEQI_DEBUG
-  for( unsigned ix=0; ix<nx; ix++ ){
-    std::cout << "Qydot[" << ix << ",#] = ";
-    for( unsigned jx=0; jx<=ix; jx++ )
-      std::cout << Qydot[_ndxLT(ix,jx,nx)] << "  ";
-    std::cout << std::endl;
-  }
-  E Eydot( nx, Qydot, yrefdot );
-  std::cout << "Eydot =" << Eydot << std::endl;
-  { int dum; std::cin >> dum; }
-#endif
-}
-*/
 template <typename T, typename PMT, typename PVT>
 template <typename REALTYPE, typename OPT> inline bool
 ODEBNDS_BASE<T,PMT,PVT>::_RHS_I_QUAD

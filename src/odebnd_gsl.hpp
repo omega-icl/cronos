@@ -152,7 +152,7 @@ public:
     //! @brief Constructor
     Options():
       BASE_GSL::Options(), WRAPMIT(ELLIPS), ORDMIT(2), PMOPT(typename PMT::Options()),
-      QTOL(machprec()), QSCALE(machprec()), PMNOREM(false), USEINV(true), MESHPREALLOC(0),
+      QTOL(machprec()), QSCALE(1e-5), PMNOREM(false), USEINV(true), MESHPREALLOC(0),
       DMAX(1e20), DISPLAY(1), RESRECORD(false)
       {}
     //! @brief Assignment operator

@@ -1,4 +1,4 @@
-// Copyright (C) 2012-2014 Benoit Chachuat, Imperial College London.
+// Copyright (C) 2012-2016 Benoit Chachuat, Imperial College London.
 // All Rights Reserved.
 // This code is published under the Eclipse Public License.
 
@@ -270,10 +270,57 @@ protected:
       for( unsigned iy=0; iy<_ny; iy++ )
         if( _pY[iy].dag() != _pDAG ) _pY[iy].set( _pDAG ); }
 
+  //! @brief Function to display intermediate results
+  template<typename U> static void _print_interm
+    ( const unsigned nx, const U*x, const std::string&var, std::ostream&os=std::cout );
+
+  //! @brief Function to display intermediate results
+  template<typename U> static void _print_interm
+    ( const double t, const unsigned nx, const U*x, const std::string&var,
+      std::ostream&os=std::cout );
+
+  //! @brief Function to display intermediate results
+  template<typename U, typename V> static void _print_interm
+    ( const double t, const unsigned nx, const U*x, const V&r,
+      const std::string&var, std::ostream&os=std::cout );
+
   //! @brief Private methods to block default compiler methods
   BASE_DE(const BASE_DE&);
   BASE_DE& operator=(const BASE_DE&);
 };
+
+template <typename U> inline void
+BASE_DE::_print_interm
+( const double t, const unsigned nx, const U*x, const std::string&var,
+  std::ostream&os )
+{
+  os << " @t = " << std::scientific << std::setprecision(4)
+                 << std::left << t << " :" << std::endl;
+  _print_interm( nx, x, var, os );
+  return;
+}
+
+template <typename U, typename V> inline void
+BASE_DE::_print_interm
+( const double t, const unsigned nx, const U*x, const V&r,
+  const std::string&var, std::ostream&os )
+{
+  os << " @t = " << std::scientific << std::setprecision(4)
+                 << std::left << t << " :" << std::endl;
+  _print_interm( nx, x, var, os );
+  os << " " << "R" << var.c_str() << " =" << r << std::endl;
+  return;
+}
+
+template <typename U> inline void
+BASE_DE::_print_interm
+( const unsigned nx, const U*x, const std::string&var, std::ostream&os )
+{
+  if( !x ) return;
+  for( unsigned ix=0; ix<nx; ix++ )
+    os << " " << var.c_str() << "[" << ix << "] = " << x[ix] << std::endl;
+  return;
+}
 
 } // end namescape mc
 

@@ -516,6 +516,12 @@ class ODEBND_BASE:
   bool _FCT_PM_STA
     ( const unsigned iFCT, const double t, PVT*PMf );
 
+  //! @brief Recursive function computing bounds on solutions of IVP in ODEs using sampling
+  template <typename ODESLV> inline bool _sampling
+    ( const unsigned ns, const double*tk, const T*Ip, T**Ixk, T*Iq, T*If,
+      ODESLV&traj, const unsigned nsamp, unsigned* vsamp, const unsigned ipar,
+      double*p, double**xk, double*q, double*f, std::ostream&os );
+
   //! @brief Computes Hausdorff distance between interval enclosure and actual reachable set of parametric ODEs, using parameter sampling
   template <typename ODEBND, typename ODESLV> inline bool _hausdorff
     ( const unsigned ns, const double*tk, const T*Ip, double**Hxk,
@@ -540,20 +546,6 @@ class ODEBND_BASE:
       const PVT*const*PMxk, T**Rxk, ODESLV&traj, const unsigned nsamp,
       unsigned* vsamp, const unsigned ip, double*p, double**xk,
       std::ostream&os );
-
-  //! @brief Function to display intermediate results
-  template<typename U> static void _print_interm
-    ( const unsigned nx, const U*x, const std::string&var, std::ostream&os=std::cout );
-
-  //! @brief Function to display intermediate results
-  template<typename U> static void _print_interm
-    ( const double t, const unsigned nx, const U*x, const std::string&var,
-      std::ostream&os=std::cout );
-
-  //! @brief Function to display intermediate results
-  template<typename U, typename V> static void _print_interm
-    ( const double t, const unsigned nx, const U*x, const V&r, const std::string&var,
-      std::ostream&os=std::cout );
 
   //! @brief Position in symmetric matrix stored in lower triangular form
   static unsigned _ndxLT
@@ -2366,6 +2358,52 @@ ODEBND_BASE<T,PMT,PVT>::_hausdorff
 }
 
 template <typename T, typename PMT, typename PVT>
+template <typename ODESLV> inline bool
+ODEBND_BASE<T,PMT,PVT>::_sampling
+( const unsigned ns, const double*tk, const T*Ip, T**Ixk, T*Iq, T*If,
+  ODESLV&traj, const unsigned nsamp, unsigned* vsamp, const unsigned ipar,
+  double*p, double**xk, double*q, double*f, std::ostream&os )
+{
+  // Update bounds for all sampling points
+  for( unsigned isamp=0; isamp<nsamp; isamp++ ){
+    vsamp[ipar] = isamp;
+
+    // Continue recursive call
+    if( ipar+1 < _np ){
+      typename ODESLV::STATUS flag = _sampling( ns, tk, Ip, Ixk, Iq, If,
+        traj, nsamp, vsamp, ipar+1, p, xk, q, f, os );
+      if( flag != ODESLV::NORMAL ) return false;
+      continue;
+    }
+
+    // Update bounds for current point
+#ifdef MC__ODEBND_BASE_SAMPLE_DEBUG
+    std::cout << "Sample: ";
+#endif
+    for( unsigned ip=0; ip<_np; ip++ ){
+      p[ip] = Op<T>::l( Ip[ip] ) + vsamp[ip]/(nsamp-1.) * Op<T>::diam( Ip[ip] );
+#ifdef MC__ODEBND_BASE_SAMPLE_DEBUG
+      std::cout << p[ip] << "  ";
+#endif
+    }
+#ifdef MC__ODEBND_BASE_SAMPLE_DEBUG
+    std::cout << std::endl;
+#endif
+    typename ODESLV::STATUS flag = traj.states( ns, tk, p, xk, q, f, os );
+    if( flag != ODESLV::NORMAL ) return flag;
+    for( unsigned is=0; Ixk && is<=ns; is++ )
+      for( unsigned ix=0; ix<_nx; ix++ )
+        Ixk[is][ix] = Op<T>::hull( xk[is][ix], Ixk[is][ix] );
+    for( unsigned iq=0; Iq && iq<_nq; iq++ )
+      Iq[iq] = Op<T>::hull( q[iq], Iq[iq] );
+    for( unsigned ifn=0; If && ifn<_nf; ifn++ )
+      If[ifn] = Op<T>::hull( f[ifn], If[ifn] );
+  }
+
+  return true;
+}  
+
+template <typename T, typename PMT, typename PVT>
 template <typename ODEBND, typename ODESLV> inline bool
 ODEBND_BASE<T,PMT,PVT>::_hausdorff
 ( const unsigned ns, const double*tk, const PVT*PMp, double**Hxk,
@@ -2519,42 +2557,6 @@ ODEBND_BASE<T,PMT,PVT>::_dH
 {
   return std::max( std::fabs(Op<U>::l(X)-Op<U>::l(Y)),
                    std::fabs(Op<U>::u(X)-Op<U>::u(Y)) );
-}
-
-template <typename T, typename PMT, typename PVT>
-template <typename U> inline void
-ODEBND_BASE<T,PMT,PVT>::_print_interm
-( const double t, const unsigned nx, const U*x, const std::string&var,
-  std::ostream&os )
-{
-  os << " @t = " << std::scientific << std::setprecision(4)
-                 << std::left << t << " :" << std::endl;
-  _print_interm( nx, x, var, os );
-  return;
-}
-
-template <typename T, typename PMT, typename PVT>
-template <typename U, typename V> inline void
-ODEBND_BASE<T,PMT,PVT>::_print_interm
-( const double t, const unsigned nx, const U*x, const V&r,
-  const std::string&var, std::ostream&os )
-{
-  os << " @t = " << std::scientific << std::setprecision(4)
-                 << std::left << t << " :" << std::endl;
-  _print_interm( nx, x, var, os );
-  os << " " << "R" << var.c_str() << " =" << r << std::endl;
-  return;
-}
-
-template <typename T, typename PMT, typename PVT>
-template <typename U> inline void
-ODEBND_BASE<T,PMT,PVT>::_print_interm
-( const unsigned nx, const U*x, const std::string&var, std::ostream&os )
-{
-  if( !x ) return;
-  for( unsigned ix=0; ix<nx; ix++ )
-    os << " " << var.c_str() << "[" << ix << "] = " << x[ix] << std::endl;
-  return;
 }
 
 template <typename T, typename PMT, typename PVT>

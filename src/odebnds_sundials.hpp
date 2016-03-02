@@ -794,7 +794,7 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
           _pos_fct = ( _vFCT.size()>=ns? _istg-1:0 );
           if( _pos_fct 
            && ( !_CC_PM_SET( options, _pos_fct, _ifct )
-             || !_CC_PM_ADJ( options, _t, _vec_sta[ns].data(), NV_DATA_S(_Ny[_ifct]) )
+             || !_CC_PM_ADJ( options, _t, _vec_sta[_istg-1].data(), NV_DATA_S(_Ny[_ifct]) )
              || ( _Nyq && _Nyq[_ifct] && !_CC_PM_QUAD( options, NV_DATA_S(_Nyq[_ifct]) ) ) ) )
             { _END_ADJ(); return FATAL; }
           else if( !_pos_fct )
@@ -811,7 +811,7 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
         }
         // Add initial state contribution to derivative bounds
         else if( !_IC_PM_SET( options )
-              || !_IC_PM_ADJ( options, _t, _vec_sta[ns].data(), NV_DATA_S(_Ny[_ifct]) )
+              || !_IC_PM_ADJ( options, _t, _vec_sta[_istg-1].data(), NV_DATA_S(_Ny[_ifct]) )
               || ( _Nyq && _Nyq[_ifct] && !_IC_PM_QUAD( options, NV_DATA_S(_Nyq[_ifct]) ) ) )
           { _END_ADJ(); return FATAL; }
 

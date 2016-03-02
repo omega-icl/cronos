@@ -29,7 +29,9 @@ namespace mc
 //! ordinary differential equations (ODEs) using GSL.
 ////////////////////////////////////////////////////////////////////////
 template <typename T>
-class ODESLV_GSL: public virtual BASE_DE, public virtual BASE_GSL
+class ODESLV_GSL:
+  public virtual BASE_DE,
+  public virtual BASE_GSL
 {
 private:
   //! @brief GSL data type for ODE integration
@@ -260,16 +262,6 @@ protected:
     ( const unsigned ns, const double*tk, const T*Ip, T**Ixk, T*Iq, T*If,
       const unsigned nsamp, unsigned* vsamp, const unsigned ip,
       double*p, double**xk, double*q, double*f, std::ostream&os );
-
-  //! @brief Function to display intermediate results
-  template<typename U> static void _print_interm
-    ( const double t, const unsigned nx, const U*x, const std::string&var,
-      std::ostream&os=std::cout );
-
-  //! @brief Function to display intermediate results
-  template<typename U> static void _print_interm
-    ( const unsigned nx, const U*x, const std::string&var,
-      std::ostream&os=std::cout );
 
 private:
   //! @brief Private methods to block default compiler methods
@@ -729,29 +721,6 @@ ODESLV_GSL<T>::bounds
   delete[] vsamp;
   
   return flag;
-}
-
-template <typename T> template<typename U> inline void
-ODESLV_GSL<T>::_print_interm
-( const double t, const unsigned nx, const U*x, const std::string&var,
-  std::ostream&os )
-{
-  os << " @t = " << std::scientific << std::setprecision(6)
-                 << std::left << t << " :" << std::endl;
-  for( unsigned ix=0; ix<nx; ix++ )
-    os << " " << var.c_str() << "[" << ix << "] = " << x[ix] << std::endl;
-  return;
-}
-
-template <typename T> template<typename U> inline void
-ODESLV_GSL<T>::_print_interm
-( const unsigned nx, const U*x, const std::string&var, std::ostream&os )
-{
-  if( !nx || !x ) return;
-  os << std::scientific << std::setprecision(6) << std::left;
-  for( unsigned ix=0; ix<nx; ix++ )
-    os << " " << var.c_str() << "[" << ix << "] = " << x[ix] << std::endl;
-  return;
 }
 
 template <typename T> inline void

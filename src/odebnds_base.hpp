@@ -1962,11 +1962,12 @@ ODEBNDS_BASE<T,PMT,PVT>::_CC_PM_ADJ
     else{
       *_MVYXPt = t; // set current time 
       for( unsigned jx=0; jx<_nx; jx++ ){
-        _MVYXPw[jx].set( _MVYXPenv, _npar+jx, T(-1.,1.) );
+        //_MVYXPw[jx].set( _MVYXPenv, _npar+jx, T(-1.,1.) );
+        _MVYXPr[jx].set( _MVYXPenv, _npar+jx, _Ir[jx] );
         _MVYXPd[jx].set( _MVYXPenv, _npar+_nx+jx, _Idy[jx] );
       }
       for( unsigned jx=0; jx<_nx; jx++ ){ // state bounds
-        _MVYXPr[jx] = _MVYXPw[jx] * 0.5*Op<T>::diam(_Ir[jx]);
+        //_MVYXPr[jx] = _MVYXPw[jx] * 0.5*Op<T>::diam(_Ir[jx]);
         _MVYXPx[jx].set( _MVYXPenv ).set( _PMx[jx].center().set( T(0.) ), true );
       }
       _e2x( _nx, _MVYXPr, _MVYXPx, false );

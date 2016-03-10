@@ -7,7 +7,6 @@
 
 #undef  MC__ODEBND_BASE_DINEQI_DEBUG
 #undef  MC__ODEBND_BASE_DINEQPM_DEBUG
-#undef  MC__ODEBND_BASE_MVXP_USE
 
 #include <stdexcept>
 #include <cassert>
@@ -442,6 +441,15 @@ class ODEBND_BASE:
   //! @brief Function converting rotated interval remainder bound back into original coordinates
   template <typename U> static void _e2x
     ( const unsigned nx, const U*d, U*x, const bool reinit=true );
+
+  //! @brief Function converting rotated interval remainder bound back into original coordinates
+  template <typename U> static void _e2x
+    ( const unsigned nx, const T*w, const U*d, U*x, const bool reinit=true );
+
+  //! @brief Function converting rotated interval remainder bound back into original coordinates
+  template <typename U> static void _e2x
+    ( const unsigned nx, const CPPL::dsymatrix&w, const U*d, U*x,
+      const bool reinit=true );
 
   //! @brief Function converting ellipsoidal remainder bound into interval remainder bound
   static void _e2x
@@ -1349,7 +1357,8 @@ ODEBND_BASE<T,PMT,PVT>::_INI_I_STA
   _Iq = _It + 1;
 
   // Reset _MVXPVenv and related variables
-  if( _MVXPenv && ( _MVXPenv->nord() != options.ORDMIT 
+  unsigned ordmit = options.ORDMIT<0? -options.ORDMIT: options.ORDMIT;
+  if( _MVXPenv && ( _MVXPenv->nord() != ordmit 
                  || _MVXPenv->nvar() != _nx+_npar ) ){
     delete[] _MVXPf;   _MVXPf = 0;
     delete[] _MVXPd;   _MVXPd = 0;
@@ -1393,7 +1402,7 @@ ODEBND_BASE<T,PMT,PVT>::_INI_I_STA
     delete[] _Irdot;   _Irdot   = new T[_nx];
     delete[] _Irqdot;  _Irqdot  = _nq? new T[_nq]: 0;
 
-    delete   _MVXPenv; _MVXPenv = new PMT( _nx+_npar, options.ORDMIT );
+    delete   _MVXPenv; _MVXPenv = new PMT( _nx+_npar, ordmit );
     _MVXPenv->options = options.PMOPT;
     delete[] _MVXPd;   _MVXPd   = new PVT[_nx];
     delete[] _MVXPf;   _MVXPf   = new PVT[_nx];
@@ -1526,6 +1535,32 @@ ODEBND_BASE<T,PMT,PVT>::_e2x
   for( unsigned ix=0; ix<nx; ix++ ){   
     if( reinit ) x[ix] = 0.;
     x[ix] += d[ix];
+  }
+  return;
+}
+
+template <typename T, typename PMT, typename PVT>
+template <typename U> inline void
+ODEBND_BASE<T,PMT,PVT>::_e2x
+( const unsigned nx, const T*w, const U*d, U*x, const bool reinit )
+{
+  for( unsigned ix=0; ix<nx; ix++ ){   
+    if( reinit ) x[ix] = 0.;
+    x[ix] += d[ix] * Op<T>::diam(w[ix]) / 2.;
+  }
+  return;
+}
+
+template <typename T, typename PMT, typename PVT>
+template <typename U> inline void
+ODEBND_BASE<T,PMT,PVT>::_e2x
+( const unsigned nx, const CPPL::dsymatrix&w, const U*d, U*x,
+  const bool reinit )
+{
+  for( unsigned ix=0; ix<nx; ix++ ){   
+    if( reinit ) x[ix] = 0.;
+    for( unsigned jx=0; jx<nx; jx++ )
+      x[ix] += w(ix,jx) * d[jx];
   }
   return;
 }
@@ -1776,20 +1811,29 @@ ODEBND_BASE<T,PMT,PVT>::_CC_PM_STA
     }
 
     // In this variant a polynomial model of the Jacobian matrix is computed and the
-    // linear part is taken as the mid-point of this matrix
-    else if( _PMenv->nord() >= _MVXPenv->nord() ){
-#ifdef MC__ODEBND_BASE_MVXP_USE
+    // linear part is taken as the mid-point of this matrix - reduced space
+    else if( options.ORDMIT < 0 ){
+      for( unsigned jx=0; jx<_nx; jx++ ){
+        _MVXPx[jx].set( _MVXPenv ).set( _PMx[jx].center(), true );
+        _PMx[jx].set( T(0.) );
+      }
+      *_MVXPt = t; // current time
+      _pDIC = _pDAG->FAD( _nx, _pIC, _nx, _pVAR );
+      _opDIC = _pDAG->subgraph( _nx*_nx, _pDIC );
+      _PMDIC = new PVT[ _opDIC.size() ];
+      _pDAG->eval( _opIC, _PMIC, _nx, _pIC, _PMxdot, _nVAR-_nq, _pVAR, _PMVAR );
+      _pDAG->eval( _opDIC, _PMDIC, _nx*_nx, _pDIC, _MVXPdfdx, _nVAR-_nq, _pVAR, _MVXPVAR );
+      _RHS_PM_ELL1( _nx, _PMxdot, _MVXPdfdx, _Ir, _A, _Irdot );
+    }
+
+    // In this variant a polynomial model of the Jacobian matrix is computed and the
+    // linear part is taken as the mid-point of this matrix - full space
+    else if( _MVXPenv->nord() <= _PMenv->nord() ){
       for( unsigned jx=0; jx<_nx; jx++ ){
         _MVXPd[jx].set( _MVXPenv, _npar+jx, _Ir[jx] );
         _MVXPx[jx].set( _MVXPenv ).set( _PMx[jx].center().set( T(0.) ), true );
       }
       _e2x( _nx, _MVXPd, _MVXPx, false );
-#else
-      for( unsigned jx=0; jx<_nx; jx++ ){
-        _MVXPx[jx].set( _MVXPenv ).set( _PMx[jx].center(), true );
-        _PMx[jx].set( T(0.) );
-      }
-#endif
       *_MVXPt = t; // current time
       _pDIC = _pDAG->FAD( _nx, _pIC, _nx, _pVAR );
       _opDIC = _pDAG->subgraph( _nx*_nx, _pDIC );
@@ -1940,21 +1984,29 @@ ODEBND_BASE<T,PMT,PVT>::_RHS_PM_STA
 
     // In this variant a polynomial model of the Jacobian matrix is computed and the
     // linear part is taken as the mid-point of this matrix
-    else if( _PMenv->nord() > _MVXPenv->nord() ){
-    //else if( _PMenv->nord() >= _MVXPenv->nord() ){
+    else if( options.ORDMIT < 0 ){
       *_MVXPt = t; // set current time
-#ifdef MC__ODEBND_BASE_MVXP_USE
+      for( unsigned jx=0; jx<_nx; jx++ ){
+        _MVXPx[jx].set( _MVXPenv ).set( _PMx[jx].center(), true );
+        _PMx[jx].set( T(0.) );
+      }
+#ifdef MC__ODEBND_BASE_DINEQPM_DEBUG
+      _print_interm( t, _nx, _MVXPx, "MVXPx Intermediate", std::cerr );
+#endif
+      _pDAG->eval( _opRHS, _PMRHS, _nx, _pRHS, _PMxdot, _nVAR-_nq, _pVAR, _PMVAR );
+      _pDAG->eval( _opJAC, _PMJAC, _nx*_nx, _pJAC, _MVXPdfdx, _nVAR-_nq, _pVAR, _MVXPVAR );
+      _RHS_PM_ELL1( _nx, _PMxdot, _MVXPdfdx, _Ir, _A, _Irdot );
+    }
+
+    // In this variant a polynomial model of the Jacobian matrix is computed and the
+    // linear part is taken as the mid-point of this matrix
+    else if( _MVXPenv->nord() <= _PMenv->nord() ){
+      *_MVXPt = t; // set current time
       for( unsigned jx=0; jx<_nx; jx++ ){
         _MVXPd[jx].set( _MVXPenv, _npar+jx, _Ir[jx] );
         _MVXPx[jx].set( _MVXPenv ).set( _PMx[jx].center().set( T(0.) ), true );
       }
       _e2x( _nx, _MVXPd, _MVXPx, false );
-#else
-      for( unsigned jx=0; jx<_nx; jx++ ){
-        _MVXPx[jx].set( _MVXPenv ).set( _PMx[jx].center(), true );
-        _PMx[jx].set( T(0.) );
-      }
-#endif
 #ifdef MC__ODEBND_BASE_DINEQPM_DEBUG
       _print_interm( t, _nx, _MVXPx, "MVXPx Intermediate", std::cerr );
 #endif
@@ -2203,12 +2255,9 @@ ODEBND_BASE<T,PMT,PVT>::_INI_PM_STA
   _PMq = _PMt + 1;
 
   // Reset _MVXPVenv and related variables
-  unsigned MVXPsize = ( options.ORDMIT<_PMenv->nord()? options.ORDMIT: _PMenv->nord() ); 
-#ifdef MC__ODEBND_BASE_MVXP_USE
-  unsigned MVXPdim  = _nx+_npar; 
-#else
-  unsigned MVXPdim  = ( options.ORDMIT<_PMenv->nord()? _npar: _nx+_npar ); 
-#endif
+  unsigned ordmit = options.ORDMIT<0? -options.ORDMIT: options.ORDMIT;
+  unsigned MVXPsize = ( options.ORDMIT<(int)_PMenv->nord()? ordmit: _PMenv->nord() ); 
+  unsigned MVXPdim  = ( options.ORDMIT<0? _npar: _nx+_npar  );
   if( _MVXPenv && ( _MVXPenv->nord() != MVXPsize || _MVXPenv->nvar() != MVXPdim ) ){
     delete[] _MVXPf;    _MVXPf = 0;
     delete[] _MVXPdfdx; _MVXPdfdx = 0;

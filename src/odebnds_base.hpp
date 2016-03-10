@@ -1,4 +1,4 @@
-// Copyright (C) 2015 Benoit Chachuat & Nikola Peric, Imperial College London.
+// Copyright (C) 2015-2016 Benoit Chachuat & Nikola Peric, Imperial College London.
 // All Rights Reserved.
 // This code is published under the Eclipse Public License.
 
@@ -7,7 +7,6 @@
 
 #undef  MC__ODEBNDS_BASE_DINEQI_DEBUG
 #undef  MC__ODEBNDS_BASE_DINEQPM_DEBUG
-#undef  MC__ODEBNDS_BASE_MVYXP_USE
 
 #include "odebnd_base.hpp"
 
@@ -221,8 +220,14 @@ protected:
   //! @brief adjoint RHS Jacobian interval bounds
   T *_Idgdy;
 
+  //! @brief adjoint RHS Jacobian interval bounds (scaled states)
+  T *_Idgdw;
+
   //! @brief linear transformed adjoint ellipsoidal bounds
   E _Edy;
+
+  //! @brief scaled state ellipsoidal bounds (unit ball)
+  E _Ew;
 
   //! @brief shape matrix (lower triangular) in ellipsoidal bounds (adjoint system)
   double *_Qy;
@@ -262,6 +267,9 @@ protected:
 
   //! @brief adjoint RHS Jacobian polynomial model
   PVT *_MVYXPdgdy;
+
+  //! @brief adjoint RHS Jacobian polynomial model (scaled states)
+  PVT *_MVYXPdgdw;
 
   //! @brief adjoint quadrature RHS polynomial model
   PVT *_MVYXPyqdot;
@@ -355,7 +363,7 @@ protected:
       const T*W=0 );
 
   //! @brief Static function to calculate the RHS of adjoint ODEs w/ ellipsoidal contractor
-  template <typename U> static void _RHS_ELL
+  template <typename U> static void _RHS_I_ELL
     ( const unsigned nx, const double*Qy, const double*Ay, const double *Ax,
       const T*Idydot, double*Qydot, const double QTOL, const double EPS,
       const double QSCALE, const bool neg, const U*W );
@@ -425,18 +433,26 @@ protected:
 
   //! @brief Static function to calculate the RHS of auxiliary adjoint ODEs in polynomial model arithmetic w/ ellipsoidal contractor - approximation using mean-value theorem and interval analysis
   static void _RHS_PM_ELL0
-    ( const unsigned nx, PVT*PMg, T*Idgdy, const T*Ix, double*Ax,
-      const T*Iy, double*Ay, T*Idydot, const bool scaled=false );
+    ( const unsigned nx, PVT*PMg, const T*Idgdyx, T*Idgdw,
+      const CPPL::dsymatrix&sqrtQx, double*Ax, const T*Iy, double*Ay,
+      T*Idydot );
 
   //! @brief Static function to calculate the RHS of auxiliary adjoint ODEs in polynomial model arithmetic w/ ellipsoidal contractor - approximation using mean-value theorem and PM arithmetic
   static void _RHS_PM_ELL1
-    ( const unsigned nx, PVT*PMg, PVT*MVYXPdgdy, const T*Ix, double*Ax,
-      const T*Iy, double*Ay, T*Idydot, const bool scaled=false );
+    ( const unsigned nx, PVT*PMg, PVT*MVYXPdgdyx, PVT*MVYXPdgdw,
+      const CPPL::dsymatrix&sqrtQx, double*Ax, const T*Iy, double*Ay,
+      T*Idydot );
 
   //! @brief Static function to calculate the RHS of auxiliary adjoint ODEs in polynomial model arithmetic w/ ellipsoidal contractor - joint polynomial model in states and parameters
   static void _RHS_PM_ELL2
     ( const unsigned nx, PMT*PMenv, PVT*PMg, PVT*MVYXPg, const unsigned np,
-      const T*Ix, double*Ax, const T*Iy, double*Ay, T*Idydot );
+      double*Ax, double*Ay, T*Idydot );
+
+  //! @brief Static function to calculate the RHS of adjoint ODEs in polynomial model arithmetic w/ ellipsoidal contractor
+  template <typename U> static void _RHS_PM_ELL
+    ( const unsigned nx, const double*Qy, const double*Ay, const double *Ax,
+      const T*Idydot, double*Qydot, const double QTOL, const double EPS,
+      const double QSCALE, const bool neg, const U*W );
 
   //! @brief Function to calculate the RHS of auxiliary ODEs in polynomial model arithmetic
   template <typename REALTYPE, typename OPT> bool _RHS_PM_QUAD
@@ -463,13 +479,13 @@ ODEBNDS_BASE<T,PMT,PVT>::ODEBNDS_BASE
   // Initialize parameterization arrays
   _zref = _yref = _yrefdot = 0;
   _Ay = _Ax = _By = _Byq = _Qy = _Bydot = _Byqdot = _Qydot = 0;
-  _Idy = _Idydot = _Iydot = _Iyqdot = _Idgdy = _Idyq = _Idyqdot = 0;
+  _Idy = _Idydot = _Iydot = _Iyqdot = _Idgdy = _Idgdw = _Idyq = _Idyqdot = 0;
   _yLdot = _yUdot = _yqLdot = _yqUdot = _RyLdot = _RyUdot = _Ryqdot = 0;
 
   // Initialize Taylor model environments
   _MVYXPenv = 0;//_MVXPenv = 0;
-  _MVYXPd = _MVYXPr = _MVYXPw = _MVYXPg = _MVYXPdgdy = _MVYXPyqdot = _MVYXPVAR =
-  _MVYXPy = _MVYXPx = _MVYXPp = _MVYXPt = 0;
+  _MVYXPd = _MVYXPr = _MVYXPw = _MVYXPg = _MVYXPdgdy = _MVYXPdgdw =
+  _MVYXPyqdot = _MVYXPVAR = _MVYXPy = _MVYXPx = _MVYXPp = _MVYXPt = 0;
   _MVXPy  = _MVXPyq = 0; //_MVXPd  = _MVXPVAR  = _MVXPx  = _MVXPp = _MVXPt = 0;
 }
 
@@ -525,6 +541,7 @@ ODEBNDS_BASE<T,PMT,PVT>::~ODEBNDS_BASE
   delete[] _Idyqdot;
   delete[] _Qydot;
   delete[] _Idgdy;
+  delete[] _Idgdw;
   // ** DO NOT DELETE _MVYXPy, _MVYXPx, _MVYXPp, _MVYXPt **
   delete   _MVYXPenv;
   delete[] _MVYXPd;
@@ -532,6 +549,7 @@ ODEBNDS_BASE<T,PMT,PVT>::~ODEBNDS_BASE
   delete[] _MVYXPw;
   delete[] _MVYXPg;
   delete[] _MVYXPdgdy;
+  delete[] _MVYXPdgdw;
   delete[] _MVYXPVAR;
   delete[] _MVYXPyqdot;
   // ** DO NOT DELETE _MVXPx, _MVXPp, _MVXPt **
@@ -570,7 +588,8 @@ ODEBNDS_BASE<T,PMT,PVT>::_INI_I_ADJ
   for( unsigned ip=0; ip<_npar; ip++ ) _Ip[ip] = Ip[ip];
 
   // Reset _MVYZVenv and related variables
-  if( _MVYXPenv && ( _MVYXPenv->nord() != options.ORDMIT 
+  unsigned ordmit = options.ORDMIT<0? -options.ORDMIT: options.ORDMIT;
+  if( _MVYXPenv && ( _MVYXPenv->nord() != ordmit 
                   || _MVYXPenv->nvar() != 2*_nx+_npar ) ){
     delete[] _MVYXPg;   _MVYXPg = 0;
     delete[] _MVYXPd;   _MVYXPd = 0;
@@ -613,7 +632,7 @@ ODEBNDS_BASE<T,PMT,PVT>::_INI_I_ADJ
     delete[] _Idydot;  _Idydot  = new T[_nx];
     delete[] _Idyqdot; _Idyqdot = new T[_npar];
 
-    if( !_MVYXPenv )  _MVYXPenv = new PMT( 2*_nx+_npar, options.ORDMIT );
+    if( !_MVYXPenv )  _MVYXPenv = new PMT( 2*_nx+_npar, ordmit );
     _MVYXPenv->options = options.PMOPT;
     if( !_MVYXPd )    _MVYXPd   = new PVT[_nx];
     if( !_MVYXPr )    _MVYXPr   = new PVT[_nx];
@@ -1403,13 +1422,13 @@ ODEBNDS_BASE<T,PMT,PVT>::_RHS_I_ELL
 #ifdef MC__ODEBNDS_BASE_DINEQI_DEBUG
     { int dum; std::cin >> dum; }
 #endif
-  return _RHS_ELL( nx, Qy, Ay, Ax, Idydot, Qydot, QTOL, EPS, QSCALE, neg, W );
+  return _RHS_I_ELL( nx, Qy, Ay, Ax, Idydot, Qydot, QTOL, EPS, QSCALE, neg, W );
 }
 
 template <typename T, typename PMT, typename PVT>
 template <typename U>
 inline void
-ODEBNDS_BASE<T,PMT,PVT>::_RHS_ELL
+ODEBNDS_BASE<T,PMT,PVT>::_RHS_I_ELL
 ( const unsigned nx, const double*Qy, const double*Ay, const double *Ax,
   const T*Idydot, double*Qydot, const double QTOL, const double EPS,
   const double QSCALE, const bool neg, const U*W )
@@ -1558,16 +1577,14 @@ ODEBNDS_BASE<T,PMT,PVT>::_INI_PM_ADJ
   for( unsigned ip=0; ip<_npar; ip++ ) _PMp[ip] = PMp[ip];
   
   // Reset _MVYXPenv and related variables
-  unsigned MVYZsize = ( options.ORDMIT<_PMenv->nord()? options.ORDMIT: _PMenv->nord() ); 
-#ifdef MC__ODEBNDS_BASE_MVYXP_USE
-  unsigned MVYZdim  = 2*_nx+_npar;
-#else
-  unsigned MVYZdim  = ( options.ORDMIT<_PMenv->nord()? _nx+_npar: 2*_nx+_npar ); 
-#endif
-  if( _MVYXPenv && ( _MVYXPenv->nord() != MVYZsize
-                  || _MVYXPenv->nvar() != MVYZdim  ) ){
+  unsigned ordmit = options.ORDMIT<0? -options.ORDMIT: options.ORDMIT;
+  unsigned MVYXPsize = ( options.ORDMIT<(int)_PMenv->nord()? ordmit: _PMenv->nord() ); 
+  unsigned MVYXPdim  = ( options.ORDMIT<0? _npar: 2*_nx+_npar  );
+  if( _MVYXPenv && ( _MVYXPenv->nord() != MVYXPsize
+                  || _MVYXPenv->nvar() != MVYXPdim  ) ){
     delete[] _MVYXPg;    _MVYXPg = 0;
     delete[] _MVYXPdgdy; _MVYXPdgdy = 0;
+    delete[] _MVYXPdgdw; _MVYXPdgdw = 0;
     delete[] _MVYXPw;    _MVYXPw = 0;
     delete[] _MVYXPr;    _MVYXPr = 0;
     delete[] _MVYXPd;    _MVYXPd = 0;
@@ -1596,14 +1613,16 @@ ODEBNDS_BASE<T,PMT,PVT>::_INI_PM_ADJ
     delete[] _Qydot;    _Qydot    = new double[_nx*(_nx+1)/2];
     delete[] _Idydot;   _Idydot   = new T[_nx];
     delete[] _Idgdy;    _Idgdy    = new T[2*_nx*_nx];
+    delete[] _Idgdw;    _Idgdw    = new T[_nx*_nx];
 
-    if( !_MVYXPenv ) _MVYXPenv    = new PMT( MVYZdim, MVYZsize );
+    if( !_MVYXPenv ) _MVYXPenv    = new PMT( MVYXPdim, MVYXPsize );
     _MVYXPenv->options = _PMenv->options;
     if( !_MVYXPw )    _MVYXPw     = new PVT[_nx];
     if( !_MVYXPr )    _MVYXPr     = new PVT[_nx];
     if( !_MVYXPd )    _MVYXPd     = new PVT[_nx];
     if( !_MVYXPg )    _MVYXPg     = new PVT[_nx];
     if( !_MVYXPdgdy ) _MVYXPdgdy  = new PVT[2*_nx*_nx];
+    if( !_MVYXPdgdw ) _MVYXPdgdw  = new PVT[_nx*_nx];
     if( !_MVYXPVAR )  _MVYXPVAR   = new PVT[_nVAR];
     _MVYXPy = _MVYXPVAR;
     _MVYXPx = _MVYXPy + _nx;
@@ -1611,6 +1630,8 @@ ODEBNDS_BASE<T,PMT,PVT>::_INI_PM_ADJ
     _MVYXPt = _MVYXPp + _npar;
     for( unsigned ip=0; ip<_npar; ip++ )
       _MVYXPp[ip].set( _MVYXPenv, ip, _PMp[ip].B() );
+
+    _Ew.unitball(_nx);
     break;
   }
 
@@ -1711,7 +1732,7 @@ ODEBNDS_BASE<T,PMT,PVT>::_TC_PM_ADJ
         _PMx[ix].center().set( T(0.) ); // cancel remainder term
       _pDAG->eval( _opADJTC, _PMADJTC, _nx, _pADJTC, _PMy, _nx+_npar+1, _pVAR+_nx, _PMVAR+_nx );
       _pDAG->eval( _opADJDTC, _IADJDTC, _nx*_nx, _pADJDTC, _Idfdx, _nx+_npar+1, _pVAR+_nx, _IVAR+_nx );
-      ODEBND_BASE<T,PMT,PVT>::_RHS_PM_ELL0( _nx, _PMy, _Idfdx, _Ir, _Ax, _Idy );
+      ODEBND_BASE<T,PMT,PVT>::_RHS_PM_ELL0( _nx, _PMy, _Idfdx, _Ir, _Ay, _Idy );
     }
 
     // In this variant a polynomial model of the Jacobian matrix is computed and the
@@ -1732,7 +1753,7 @@ ODEBNDS_BASE<T,PMT,PVT>::_TC_PM_ADJ
 #endif
       _pDAG->eval( _opADJTC, _PMADJTC, _nx, _pADJTC, _PMy, _nx+_npar+1, _pVAR+_nx, _PMVAR+_nx );
       _pDAG->eval( _opADJDTC, _PMADJDTC, _nx*_nx, _pADJDTC, _MVXPdfdx, _nx+_npar+1, _pVAR+_nx, _MVXPVAR );
-      ODEBND_BASE<T,PMT,PVT>::_RHS_PM_ELL1( _nx, _PMy, _MVXPdfdx, _Ir, _Ax, _Idy );
+      ODEBND_BASE<T,PMT,PVT>::_RHS_PM_ELL1( _nx, _PMy, _MVXPdfdx, _Ir, _Ay, _Idy );
     }
 
     // In this variant a polynomial model in the joint state-parameter and
@@ -1745,14 +1766,14 @@ ODEBNDS_BASE<T,PMT,PVT>::_TC_PM_ADJ
       }
       _e2x( _nx, _MVXPd, _MVXPx, false );
       _pDAG->eval( _opADJTC, _nx, _pADJTC, _MVXPf, _nx+_npar+1, _pVAR+_nx, _MVXPVAR );
-      ODEBND_BASE<T,PMT,PVT>::_RHS_PM_ELL2( _nx, _PMenv, _PMy, _MVXPf, _npar, _Ir, _Ax, _Idy );
+      ODEBND_BASE<T,PMT,PVT>::_RHS_PM_ELL2( _nx, _PMenv, _PMy, _MVXPf, _npar, _Ir, _Ay, _Idy );
     }
 
 #ifdef MC__ODEBND_BASE_DINEQPM_DEBUG
       for( unsigned ix=0; ix<_nx; ix++ ){
-        std::cout << "Ax[" << ix << ",#] = ";
+        std::cout << "Ay[" << ix << ",#] = ";
         for( unsigned jx=0; jx<_nx; jx++ )
-          std::cout << _Ax[ix+jx*_nx] << "  ";
+          std::cout << _Ay[ix+jx*_nx] << "  ";
         std::cout << std::endl;
       }
       for( unsigned ix=0; ix<_nx; ix++ ){
@@ -1764,7 +1785,7 @@ ODEBNDS_BASE<T,PMT,PVT>::_TC_PM_ADJ
 
     // Whether or not to ignore the remainder
     if( !options.PMNOREM ){
-      ODEBND_BASE<T,PMT,PVT>::_CC_PM_ELL( _nx, _Er, _Ax, _Idy, _PMy, _Qy, options.QTOL, machprec() );
+      ODEBND_BASE<T,PMT,PVT>::_CC_PM_ELL( _nx, _Er, _Ay, _Idy, _PMy, _Qy, options.QTOL, machprec() );
 #ifdef MC__ODEBND_BASE_DINEQPM_DEBUG
       std::cout << "Edy" << E(_nx, _Qy) << std::endl;
       { int dum; std::cin >> dum; }
@@ -1884,13 +1905,11 @@ ODEBNDS_BASE<T,PMT,PVT>::_CC_PM_ADJ
   default:
     *_PMt = t; // current time
     _vec2PME( x, _PMenv, _nx, _PMx, _Q, _Er, _Ir );// set current state bounds
-#ifdef MC__ODEBNDS_BASE_DINEQPM_DEBUG
-    std::cout << "Function:" << ifct << std::endl;
-    _print_interm( t, _nx, _PMx, _Er, "PMx Intermediate [CC1]", std::cerr );
-#endif
     _vec2PME( y, _PMenv, _nx, _PMy, _Qy, _Edy, _Idy ); // set current adjoint bounds
 #ifdef MC__ODEBNDS_BASE_DINEQPM_DEBUG
-    _print_interm( t, _nx, _PMy, _Edy, "PMy Intermediate [CC1]", std::cerr );
+    std::cout << "Function:" << ifct << std::endl;
+    _print_interm( t, _nx, _PMx, _Er, "PMx Intermediate [CC]", std::cerr );
+    _print_interm( t, _nx, _PMy, _Edy, "PMy Intermediate [CC]", std::cerr );
 #endif
 
     // In this variant a bound on the Jacobian matrix is computed and the
@@ -1900,61 +1919,73 @@ ODEBNDS_BASE<T,PMT,PVT>::_CC_PM_ADJ
       for( unsigned ix=0; ix<_nx; ix++ ){
         _Ix[ix] = _PMx[ix].bound(); // set current state bounds
         _Iy[ix] = _PMy[ix].bound(); // set current adjoint bounds
-#ifdef MC__ODEBNDS_BASE_DINEQPM_DEBUG
-        std::cout << "Iy[" << ix << "] = " << _Iy[ix] << std::endl;
-#endif
         ( _PMx[ix].center() ).set( T(0.) ); // cancel state remainder term
         ( _PMy[ix].center() ).set( T(0.) ); // cancel adjoint remainder term
       }
+#ifdef MC__ODEBNDS_BASE_DINEQPM_DEBUG
+      _print_interm( t, _nx, _Ix, "Ix Intermediate [CC]", std::cerr );
+      _print_interm( t, _nx, _Iy, "Iy Intermediate [CC]", std::cerr );
+#endif
       _pDAG->eval( _opADJTC, _PMADJTC, _nx, _pADJCC, _PMydot, _nVAR-_npar,
                    _pVAR, _PMVAR );
-      _pDAG->eval( _opADJDTC, _IADJDTC, 2*_nx*_nx, _pADJDTC, _Idgdy, _nVAR-_npar,
-                   _pVAR, _IVAR );
-      _RHS_PM_ELL0( _nx, _PMydot, _Idgdy, _Ir, _Ax, _Idy, _Ay, _Idydot, false );
+      _pDAG->eval( _opADJDTC, _IADJDTC, 2*_nx*_nx, _pADJDTC, _Idgdy,
+                   _nVAR-_npar, _pVAR, _IVAR );
+      _RHS_PM_ELL0( _nx, _PMydot, _Idgdy, _Idgdw, _Er.sqrtQ(), _Ax, _Idy,
+                    _Ay, _Idydot );
     }
 
     // In this variant a polynomial model of the Jacobian matrix is computed and the
-    // linear part is taken as the mid-point of this matrix
-    else if( _PMenv->nord() > _MVYXPenv->nord() ){
+    // linear part is taken as the mid-point of this matrix - reduced space
+    else if( options.ORDMIT < 0 ){
       // Setup polynomial model expansion of adjoint RHS
       *_MVYXPt = t; // time
-//#ifdef MC__ODEBNDS_BASE_MVYXP_USE
-      for( unsigned jx=0; jx<_nx; jx++ ){ // state bounds
-        //_MVYXPw[jx].set( _MVYXPenv, _npar+jx, T(-1.,1.) );
-        //_MVYXPr[jx] = _MVYXPw[jx] * 0.5*Op<T>::diam(_Ir[jx]);
-        _MVYXPr[jx].set( _MVYXPenv, _npar+jx, _Ir[jx] );
-        _MVYXPx[jx].set( _MVYXPenv ).set( _PMx[jx].center().set( T(0.) ), true );
+      for( unsigned jx=0; jx<_nx; jx++ ){
+        _MVYXPx[jx].set( _MVYXPenv ).set( _PMx[jx].center(), true );
+        _PMx[jx].set( T(0.) );
       }
-      _e2x( _nx, _MVYXPr, _MVYXPx, false );
-//#else
-//      for( unsigned jx=0; jx<_nx; jx++ ){
-//        _MVYXPx[jx].set( _MVYXPenv ).set( _PMx[jx].center(), true );
-//        _PMx[jx].set( T(0.) );
-//      }
-//#endif
-#ifdef MC__ODEBNDS_BASE_DINEQPM_DEBUG
-      _print_interm( t, _nx, _MVYXPx, "MVYXPx Intermediate", std::cerr );
-#endif
-#ifdef MC__ODEBNDS_BASE_MVYXP_USE
-      for( unsigned jx=0; jx<_nx; jx++ ){ // adjoint bounds
-        _MVYXPd[jx].set( _MVYXPenv, _npar+_nx+jx, _Idy[jx] );
-        _MVYXPy[jx].set( _MVYXPenv ).set( _PMy[jx].center().set( T(0.) ), true );
-      }
-      _e2x( _nx, _MVYXPd, _MVYXPy, false );
-#else
       for( unsigned jx=0; jx<_nx; jx++ ){
         _MVYXPy[jx].set( _MVYXPenv ).set( _PMy[jx].center(), true );
         _PMy[jx].set( T(0.) );
       }
-#endif
 #ifdef MC__ODEBNDS_BASE_DINEQPM_DEBUG
-      _print_interm( t, _nx, _MVYXPy, "MVYXPy Intermediate", std::cerr );
+      _print_interm( t, _nx, _MVYXPx, "MVYXPx Intermediate [CC]", std::cerr );
+      _print_interm( t, _nx, _MVYXPy, "MVYXPy Intermediate [CC]", std::cerr );
 #endif
       _pDAG->eval( _opADJTC, _PMADJTC, _nx, _pADJCC, _PMydot, _nVAR-_npar,
                    _pVAR, _PMVAR );
-      _pDAG->eval( _opADJDTC, _PMADJDTC, 2*_nx*_nx, _pADJDTC, _MVYXPdgdy, _nVAR-_npar,
-                   _pVAR, _MVYXPVAR );
-      _RHS_PM_ELL1( _nx, _PMydot, _MVYXPdgdy, _Ir, _Ax, _Idy, _Ay, _Idydot, false );
+      _pDAG->eval( _opADJDTC, _PMADJDTC, 2*_nx*_nx, _pADJDTC, _MVYXPdgdy,
+                   _nVAR-_npar, _pVAR, _MVYXPVAR );
+      _RHS_PM_ELL1( _nx, _PMydot, _MVYXPdgdy, _MVYXPdgdw, _Er.sqrtQ(), _Ax,
+                    _Idy, _Ay, _Idydot );
+    }
+
+    // In this variant a polynomial model of the Jacobian matrix is computed and the
+    // linear part is taken as the mid-point of this matrix - full space
+    else if( _MVYXPenv->nord() <= _PMenv->nord() ){
+      // Setup polynomial model expansion of adjoint RHS
+      *_MVYXPt = t; // time
+      for( unsigned jx=0; jx<_nx; jx++ ){
+        _MVYXPw[jx].set( _MVYXPenv, _npar+jx, T(-1.,1.) );
+        _MVYXPd[jx].set( _MVYXPenv, _npar+_nx+jx, _Idy[jx] );
+      }
+      for( unsigned jx=0; jx<_nx; jx++ ){ // state bounds
+        _MVYXPx[jx].set( _MVYXPenv ).set( _PMx[jx].center().set( T(0.) ), true );
+      }
+      _e2x( _nx, _Er.sqrtQ(), _MVYXPw, _MVYXPx, false );
+      for( unsigned jx=0; jx<_nx; jx++ ){ // adjoint bounds
+        _MVYXPy[jx].set( _MVYXPenv ).set( _PMy[jx].center().set( T(0.) ), true );
+      }
+      _e2x( _nx, _MVYXPd, _MVYXPy, false );
+#ifdef MC__ODEBNDS_BASE_DINEQPM_DEBUG
+      _print_interm( t, _nx, _MVYXPx, "MVYXPx Intermediate [CC]", std::cerr );
+      _print_interm( t, _nx, _MVYXPy, "MVYXPy Intermediate [CC]", std::cerr );
+#endif
+      _pDAG->eval( _opADJTC, _PMADJTC, _nx, _pADJCC, _PMydot, _nVAR-_npar,
+                   _pVAR, _PMVAR );
+      _pDAG->eval( _opADJDTC, _PMADJDTC, 2*_nx*_nx, _pADJDTC, _MVYXPdgdy,
+                   _nVAR-_npar, _pVAR, _MVYXPVAR );
+      _RHS_PM_ELL1( _nx, _PMydot, _MVYXPdgdy, _MVYXPdgdw, _Er.sqrtQ(), _Ax,
+                    _Idy, _Ay, _Idydot );
     }
 
     // In this variant a polynomial model in the joint adjoint-parameter and
@@ -1962,35 +1993,30 @@ ODEBNDS_BASE<T,PMT,PVT>::_CC_PM_ADJ
     else{
       *_MVYXPt = t; // set current time 
       for( unsigned jx=0; jx<_nx; jx++ ){
-        //_MVYXPw[jx].set( _MVYXPenv, _npar+jx, T(-1.,1.) );
-        _MVYXPr[jx].set( _MVYXPenv, _npar+jx, _Ir[jx] );
+        _MVYXPw[jx].set( _MVYXPenv, _npar+jx, T(-1.,1.) );
         _MVYXPd[jx].set( _MVYXPenv, _npar+_nx+jx, _Idy[jx] );
       }
       for( unsigned jx=0; jx<_nx; jx++ ){ // state bounds
-        //_MVYXPr[jx] = _MVYXPw[jx] * 0.5*Op<T>::diam(_Ir[jx]);
         _MVYXPx[jx].set( _MVYXPenv ).set( _PMx[jx].center().set( T(0.) ), true );
       }
-      _e2x( _nx, _MVYXPr, _MVYXPx, false );
-#ifdef MC__ODEBNDS_BASE_DINEQPM_DEBUG
-      for( unsigned jx=0; jx<_nx; jx++ )
-        std::cout << "MVYXPx[" << jx << "] = " << _MVYXPx[jx] << std::endl;
-#endif
+      _e2x( _nx, _Er.sqrtQ(), _MVYXPw, _MVYXPx, false );
       for( unsigned jx=0; jx<_nx; jx++ ){ // adjoint bounds
         _MVYXPy[jx].set( _MVYXPenv ).set( _PMy[jx].center().set( T(0.) ), true );
       }
       _e2x( _nx, _MVYXPd, _MVYXPy, false );
 #ifdef MC__ODEBNDS_BASE_DINEQPM_DEBUG
-      for( unsigned jx=0; jx<_nx; jx++ )
-        std::cout << "MVYXPy[" << jx << "] = " << _MVYXPy[jx] << std::endl;
+      _print_interm( t, _nx, _MVYXPx, "MVYXPx Intermediate [CC]", std::cerr );
+      _print_interm( t, _nx, _MVYXPy, "MVYXPy Intermediate [CC]", std::cerr );
 #endif
       _pDAG->eval( _opADJTC, _PMADJTC, _nx, _pADJCC, _MVYXPg, _nVAR-_npar,
                    _pVAR, _MVYXPVAR );
-      _RHS_PM_ELL2( _nx, _PMenv, _PMydot, _MVYXPg, _npar, _Ir, _Ax, _Idy, _Ay, _Idydot );
+      _RHS_PM_ELL2( _nx, _PMenv, _PMydot, _MVYXPg, _npar, _Ax, _Ay, _Idydot );
     }
 
     // Whether or not to ignore the remainder
     if( !options.PMNOREM ){
-      _CC_PM_ELL( _nx, _Edy, _Ay, _Er, _Ax, _Idydot, _PMydot, _Qydot, options.QTOL, machprec() );
+      _CC_PM_ELL( _nx, _Edy, _Ay, _Ew, _Ax, _Idydot, _PMydot, _Qydot,
+        options.QTOL, machprec() );
       _PME2vec( _PMenv, _nx, _PMydot, _Qydot, y );
     }
     else
@@ -2337,13 +2363,10 @@ ODEBNDS_BASE<T,PMT,PVT>::_RHS_PM_ADJ
   default:
     *_PMt = t; // current time
     _vec2PME( x, _PMenv, _nx, _PMx, _Q, _Er, _Ir );// set current state bounds
-#ifdef MC__ODEBNDS_BASE_DINEQPM_DEBUG
-    std::cout << "Function:" << ifct << std::endl;
-    _print_interm( t, _nx, _PMx, _Er, "PMx Intermediate", std::cerr );
-#endif
     _vec2PME( y, _PMenv, _nx, _PMy, _Qy, _Edy, _Idy ); // set current adjoint bounds
 #ifdef MC__ODEBNDS_BASE_DINEQPM_DEBUG
     std::cout << "Function:" << ifct << std::endl;
+    _print_interm( t, _nx, _PMx, _Er, "PMx Intermediate", std::cerr );
     _print_interm( t, _nx, _PMy, _Edy, "PMy Intermediate", std::cerr );
 #endif
 
@@ -2354,60 +2377,72 @@ ODEBNDS_BASE<T,PMT,PVT>::_RHS_PM_ADJ
       for( unsigned ix=0; ix<_nx; ix++ ){
         _Ix[ix] = _PMx[ix].bound(); // set current state bounds
         _Iy[ix] = _PMy[ix].bound(); // set current adjoint bounds
-#ifdef MC__ODEBNDS_BASE_DINEQPM_DEBUG
-        std::cout << "Iy[" << ix << "] = " << _Iy[ix] << std::endl;
-#endif
         _PMx[ix].set( T(0.) ); // cancel state remainder term
         _PMy[ix].set( T(0.) ); // cancel adjoint remainder term
       }
+#ifdef MC__ODEBNDS_BASE_DINEQPM_DEBUG
+      _print_interm( t, _nx, _Ix, "Ix Intermediate", std::cerr );
+      _print_interm( t, _nx, _Iy, "Iy Intermediate", std::cerr );
+#endif
       _pDAG->eval( _opADJRHS[ifct], _PMADJRHS, _nx, _pADJRHS+ifct*_nx, _PMydot,
                    _nVAR-_npar, _pVAR, _PMVAR );
       _pDAG->eval( _opADJJAC[ifct], _IADJJAC, 2*_nx*_nx, _pADJJAC+ifct*2*_nx*_nx,
                    _Idgdy, _nVAR-_npar, _pVAR, _IVAR );
-      _RHS_PM_ELL0( _nx, _PMydot, _Idgdy, _Ir, _Ax, _Idy, _Ay, _Idydot, true );
+      _RHS_PM_ELL0( _nx, _PMydot, _Idgdy, _Idgdw, _Er.sqrtQ(), _Ax,
+                    _Idy, _Ay, _Idydot );
     }
 
     // In this variant a polynomial model of the Jacobian matrix is computed and the
-    // linear part is taken as the mid-point of this matrix
-    else if( _PMenv->nord() > _MVYXPenv->nord() ){
+    // linear part is taken as the mid-point of this matrix - reduced space
+    else if( options.ORDMIT < 0 ){
       // Setup polynomial model expansion of adjoint RHS
       *_MVYXPt = t; // time
-//#ifdef MC__ODEBNDS_BASE_MVYXP_USE
-      for( unsigned jx=0; jx<_nx; jx++ ){ // state bounds
-        _MVYXPw[jx].set( _MVYXPenv, _npar+jx, T(-1.,1.) );
-        _MVYXPr[jx] = _MVYXPw[jx] * 0.5*Op<T>::diam(_Ir[jx]);
-        _MVYXPx[jx].set( _MVYXPenv ).set( _PMx[jx].set( T(0.) ), true );
-      }
-      _e2x( _nx, _MVYXPr, _MVYXPx, false );
-//#else
-//      for( unsigned jx=0; jx<_nx; jx++ ){
-//        _MVYXPx[jx].set( _MVYXPenv ).set( _PMx[jx], true );
-//        _PMx[jx].set( T(0.) );
-//      }
-//#endif
-#ifdef MC__ODEBNDS_BASE_DINEQPM_DEBUG
-      _print_interm( t, _nx, _MVYXPx, "MVYXPx Intermediate", std::cerr );
-#endif
-#ifdef MC__ODEBNDS_BASE_MVYXP_USE
-      for( unsigned jx=0; jx<_nx; jx++ ){ // adjoint bounds
-        _MVYXPd[jx].set( _MVYXPenv, _npar+_nx+jx, _Idy[jx] );
-        _MVYXPy[jx].set( _MVYXPenv ).set( _PMy[jx].set( T(0.) ), true );
-      }
-      _e2x( _nx, _MVYXPd, _MVYXPy, false );
-#else
       for( unsigned jx=0; jx<_nx; jx++ ){
+        _MVYXPx[jx].set( _MVYXPenv ).set( _PMx[jx], true );
+        _PMx[jx].set( T(0.) );
         _MVYXPy[jx].set( _MVYXPenv ).set( _PMy[jx], true );
         _PMy[jx].set( T(0.) );
       }
-#endif
 #ifdef MC__ODEBNDS_BASE_DINEQPM_DEBUG
+      _print_interm( t, _nx, _MVYXPx, "MVYXPx Intermediate", std::cerr );
       _print_interm( t, _nx, _MVYXPy, "MVYXPy Intermediate", std::cerr );
 #endif
       _pDAG->eval( _opADJRHS[ifct], _PMADJRHS, _nx, _pADJRHS+ifct*_nx, _PMydot,
                    _nVAR-_npar, _pVAR, _PMVAR );
       _pDAG->eval( _opADJJAC[ifct], _PMADJJAC, 2*_nx*_nx, _pADJJAC+ifct*2*_nx*_nx,
                    _MVYXPdgdy, _nVAR-_npar, _pVAR, _MVYXPVAR );
-      _RHS_PM_ELL1( _nx, _PMydot, _MVYXPdgdy, _Ir, _Ax, _Idy, _Ay, _Idydot, true );
+      _RHS_PM_ELL1( _nx, _PMydot, _MVYXPdgdy, _MVYXPdgdw, _Er.sqrtQ(), _Ax,
+                    _Idy, _Ay, _Idydot );
+    }
+
+    // In this variant a polynomial model of the Jacobian matrix is computed and the
+    // linear part is taken as the mid-point of this matrix - full space
+    else if( _MVYXPenv->nord() <= _PMenv->nord() ){
+      // Setup polynomial model expansion of adjoint RHS
+      *_MVYXPt = t; // time
+      for( unsigned jx=0; jx<_nx; jx++ ){
+        _MVYXPw[jx].set( _MVYXPenv, _npar+jx, T(-1.,1.) );
+        _MVYXPd[jx].set( _MVYXPenv, _npar+_nx+jx, _Idy[jx] );
+      }
+      for( unsigned jx=0; jx<_nx; jx++ ){ // state bounds
+        _MVYXPx[jx].set( _MVYXPenv ).set( _PMx[jx].set( T(0.) ), true );
+      }
+      _e2x( _nx, _Er.sqrtQ(), _MVYXPw, _MVYXPx, false );
+      for( unsigned jx=0; jx<_nx; jx++ ){ // adjoint bounds
+        _MVYXPd[jx].set( _MVYXPenv, _npar+_nx+jx, _Idy[jx] );
+        _MVYXPy[jx].set( _MVYXPenv ).set( _PMy[jx].set( T(0.) ), true );
+      }
+      _e2x( _nx, _MVYXPd, _MVYXPy, false );
+#ifdef MC__ODEBNDS_BASE_DINEQPM_DEBUG
+      _print_interm( t, _nx, _MVYXPx, "MVYXPx Intermediate", std::cerr );
+      _print_interm( t, _nx, _MVYXPy, "MVYXPy Intermediate", std::cerr );
+#endif
+      _pDAG->eval( _opADJRHS[ifct], _PMADJRHS, _nx, _pADJRHS+ifct*_nx, _PMydot,
+                   _nVAR-_npar, _pVAR, _PMVAR );
+      _pDAG->eval( _opADJJAC[ifct], _PMADJJAC, 2*_nx*_nx, _pADJJAC+ifct*2*_nx*_nx,
+                   _MVYXPdgdy, _nVAR-_npar, _pVAR, _MVYXPVAR );
+      _RHS_PM_ELL1( _nx, _PMydot, _MVYXPdgdy, _MVYXPdgdw, _Er.sqrtQ(), _Ax,
+                    _Idy, _Ay, _Idydot );
     }
 
     // In this variant a polynomial model in the joint adjoint-parameter and
@@ -2419,25 +2454,20 @@ ODEBNDS_BASE<T,PMT,PVT>::_RHS_PM_ADJ
         _MVYXPd[jx].set( _MVYXPenv, _npar+_nx+jx, _Idy[jx] );
       }
       for( unsigned jx=0; jx<_nx; jx++ ){ // state bounds
-        _MVYXPr[jx] = _MVYXPw[jx] * 0.5*Op<T>::diam(_Ir[jx]);
         _MVYXPx[jx].set( _MVYXPenv ).set( _PMx[jx].set( T(0.) ), true );
       }
-      _e2x( _nx, _MVYXPr, _MVYXPx, false );
-#ifdef MC__ODEBNDS_BASE_DINEQPM_DEBUG
-      for( unsigned jx=0; jx<_nx; jx++ )
-        std::cout << "MVYXPx[" << jx << "] = " << _MVYXPx[jx] << std::endl;
-#endif
+      _e2x( _nx, _Er.sqrtQ(), _MVYXPw, _MVYXPx, false );
       for( unsigned jx=0; jx<_nx; jx++ ){ // adjoint bounds
         _MVYXPy[jx].set( _MVYXPenv ).set( _PMy[jx].set( T(0.) ), true );
       }
       _e2x( _nx, _MVYXPd, _MVYXPy, false );
 #ifdef MC__ODEBNDS_BASE_DINEQPM_DEBUG
-      for( unsigned jx=0; jx<_nx; jx++ )
-        std::cout << "MVYXPy[" << jx << "] = " << _MVYXPy[jx] << std::endl;
+      _print_interm( t, _nx, _MVYXPx, "MVYXPx Intermediate", std::cerr );
+      _print_interm( t, _nx, _MVYXPy, "MVYXPy Intermediate", std::cerr );
 #endif
       _pDAG->eval( _opADJRHS[ifct], _PMADJRHS, _nx, _pADJRHS+ifct*_nx, _MVYXPg,
                    _nVAR-_npar, _pVAR, _MVYXPVAR );
-      _RHS_PM_ELL2( _nx, _PMenv, _PMydot, _MVYXPg, _npar, _Ir, _Ax, _Idy, _Ay, _Idydot );
+      _RHS_PM_ELL2( _nx, _PMenv, _PMydot, _MVYXPg, _npar, _Ax, _Ay, _Idydot );
     }
 
     // Regenerate _PMx and _PMy, whose remainder terms where canceled
@@ -2447,7 +2477,7 @@ ODEBNDS_BASE<T,PMT,PVT>::_RHS_PM_ADJ
     }
 
     // Construct the ellipsoidal remainder derivatives
-    _RHS_ELL( _nx, _Qy, _Ay, _Ax, _Idydot, _Qydot, options.QTOL, machprec(),
+    _RHS_PM_ELL( _nx, _Qy, _Ay, _Ax, _Idydot, _Qydot, options.QTOL, machprec(),
       options.QSCALE, neg, _Idy );
 
     // Whether or not to ignore the adjoint remainder
@@ -2468,27 +2498,30 @@ ODEBNDS_BASE<T,PMT,PVT>::_RHS_PM_ADJ
 template <typename T, typename PMT, typename PVT>
 inline void
 ODEBNDS_BASE<T,PMT,PVT>::_RHS_PM_ELL0
-( const unsigned nx, PVT*PMg, T*Idgdy, const T*Idx, double*Ax,
-  const T*Idy, double*Ay, T*Idydot, const bool scaled )
+( const unsigned nx, PVT*PMg, const T*Idgdyx, T*Idgdw,
+  const CPPL::dsymatrix&sqrtQx, double*Aw, const T*Idy, double*Ay,
+  T*Idydot )
 {
 #ifdef MC__ODEBND_BASE_DINEQPM_DEBUG
   for( unsigned ix=0; ix<nx; ix++ ){
-    std::cout << "Idgdy[" << ix << ",#] = ";
+    std::cout << "Idgdyx[" << ix << ",#] = ";
     for( unsigned jx=0; jx<2*nx; jx++ )
-      std::cout << Idgdy[ix*2*nx+jx] << "  ";
+      std::cout << Idgdyx[ix*2*nx+jx] << "  ";
     std::cout << std::endl;
   }
 #endif
   for( unsigned ix=0; ix<nx; ix++ ){
     for( unsigned jx=0; jx<nx; jx++ ){
-      Ay[ix+jx*nx] = Op<T>::mid( Idgdy[ix*2*nx+jx] );
-      if( scaled ) Idgdy[ix*2*nx+nx+jx] *= 0.5*Op<T>::diam(Idx[jx]);
-      Ax[ix+jx*nx] = Op<T>::mid( Idgdy[ix*2*nx+nx+jx] );
+      Ay[ix+jx*nx] = Op<T>::mid( Idgdyx[ix*2*nx+jx] );
+      Idgdw[ix+jx*nx] = 0.;
+      for( unsigned kx=0; kx<nx; kx++ )
+        Idgdw[ix+jx*nx] += Idgdyx[ix*2*nx+nx+kx] * sqrtQx(kx,jx);
+      Aw[ix+jx*nx] = Op<T>::mid( Idgdw[ix+jx*nx] );
     }
 #ifdef MC__ODEBND_BASE_DINEQPM_DEBUG
-    std::cout << "Ax[" << ix << ",#] = ";
+    std::cout << "Aw[" << ix << ",#] = ";
     for( unsigned jx=0; jx<nx; jx++ )
-      std::cout << Ax[ix+jx*nx] << "  ";
+      std::cout << Aw[ix+jx*nx] << "  ";
     std::cout << std::endl;
     std::cout << "Ay[" << ix << ",#] = ";
     for( unsigned jx=0; jx<nx; jx++ )
@@ -2497,8 +2530,8 @@ ODEBNDS_BASE<T,PMT,PVT>::_RHS_PM_ELL0
 #endif
     Idydot[ix] = PMg[ix].remainder();
     for( unsigned jx=0; jx<nx; jx++ )
-      Idydot[ix] += ( Idgdy[ix*2*nx+nx+jx] - Ax[ix+jx*nx] ) * (scaled? 1.: Idx[jx])
-                  + ( Idgdy[ix*2*nx+jx] - Ay[ix+jx*nx] ) * Idy[jx];
+      Idydot[ix] += ( Idgdw[ix+jx*nx] - Aw[ix+jx*nx] )
+                  + ( Idgdyx[ix*2*nx+jx] - Ay[ix+jx*nx] ) * Idy[jx];
 #ifdef MC__ODEBNDS_BASE_DINEQPM_DEBUG
     std::cout << "Idydot[" << ix << "] = " << Idydot[ix]
               << " : " << Op<T>::mid(Idydot[ix]) << std::endl;
@@ -2512,36 +2545,39 @@ ODEBNDS_BASE<T,PMT,PVT>::_RHS_PM_ELL0
 template <typename T, typename PMT, typename PVT>
 inline void
 ODEBNDS_BASE<T,PMT,PVT>::_RHS_PM_ELL1
-( const unsigned nx, PVT*PMg, PVT*MVYXPdgdy, const T*Idx, double*Ax,
-  const T*Idy, double*Ay, T*Idydot, const bool scaled )
+( const unsigned nx, PVT*PMg, PVT*MVYXPdgdyx, PVT*MVYXPdgdw,
+  const CPPL::dsymatrix&sqrtQx, double*Aw, const T*Idy, double*Ay,
+  T*Idydot )
 {
-  for( unsigned ix=0; ix<nx; ix++ ){
 #ifdef MC__ODEBNDS_BASE_DINEQPM_DEBUG
+  for( unsigned ix=0; ix<nx; ix++ ){
     for( unsigned jx=0; jx<2*nx; jx++ )
-      std::cout << "MVYXPdgdy[" << ix << "," << jx << "] = " << MVYXPdgdy[ix*nx+jx] << std::endl;
+      std::cout << "MVYXPdgdyx[" << ix << "," << jx << "] = "
+                << MVYXPdgdyx[ix*nx+jx] << std::endl;
 #endif
-    // Extract constant coefficients and set to 0
+  // Extract constant coefficients and set to 0
+  for( unsigned ix=0; ix<nx; ix++ ){
     for( unsigned jx=0; jx<nx; jx++ ){
-      Ay[ix+jx*nx] = ( MVYXPdgdy[ix*2*nx+jx].center() ).constant( true );
-      if( scaled ) MVYXPdgdy[ix*2*nx+nx+jx] *= 0.5*Op<T>::diam(Idx[jx]);
-      Ax[ix+jx*nx] = ( MVYXPdgdy[ix*2*nx+nx+jx].center() ).constant( true );
+      Ay[ix+jx*nx] = ( MVYXPdgdyx[ix*2*nx+jx].center() ).constant( true );
+      MVYXPdgdw[ix+jx*nx] = 0.;
+      for( unsigned kx=0; kx<nx; kx++ )
+        MVYXPdgdw[ix+jx*nx] += MVYXPdgdyx[ix*2*nx+nx+kx] * sqrtQx(kx,jx);
+      Aw[ix+jx*nx] = ( MVYXPdgdw[ix+jx*nx].center() ).constant( true );
     }
 #ifdef MC__ODEBNDS_BASE_DINEQPM_DEBUG
-    std::cout << "Ax[" << ix << ",#] = ";
+    std::cout << "Aw[" << ix << ",#] = ";
     for( unsigned jx=0; jx<nx; jx++ )
-      std::cout << Ax[ix+jx*nx] << "  ";
+      std::cout << Aw[ix+jx*nx] << "  ";
     std::cout << "Ay[" << ix << ",#] = ";
     for( unsigned jx=0; jx<nx; jx++ )
       std::cout << Ay[ix+jx*nx] << "  ";
     std::cout << std::endl;
-    //for( unsigned jx=0; jx<2*nx; jx++ )
-    //  std::cout << "MVYXPdgdy[" << ix << "," << jx << "] = " << MVYXPdgdy[ix*nx+jx] << std::endl;
 #endif
     // Bound remaining terms
     Idydot[ix] = PMg[ix].remainder();
     for( unsigned jx=0; jx<nx; jx++ )
-      Idydot[ix] += MVYXPdgdy[ix*2*nx+nx+jx].bound() * (scaled? 1.: Idx[jx])
-                  + MVYXPdgdy[ix*2*nx+jx].bound() * Idy[jx];
+      Idydot[ix] += MVYXPdgdw[ix+jx*nx].bound()
+                  + MVYXPdgdyx[ix*2*nx+jx].bound() * Idy[jx];
 #ifdef MC__ODEBND_BASES_DINEQPM_DEBUG
     std::cout << "Idydot[" << ix << "] = " << Idydot[ix]
               << " : " << Op<T>::mid(Idydot[ix]) << std::endl;
@@ -2553,7 +2589,7 @@ template <typename T, typename PMT, typename PVT>
 inline void
 ODEBNDS_BASE<T,PMT,PVT>::_RHS_PM_ELL2
 ( const unsigned nx, PMT*PMenv, PVT*PMg, PVT*MVYXPg, const unsigned np,
-  const T*Idx, double*Ax, const T*Idy, double*Ay, T*Idydot )
+  double*Ax, double*Ay, T*Idydot )
 {
   for( unsigned ix=0; ix<nx; ix++ ){
 #ifdef MC__ODEBNDS_BASE_DINEQPM_DEBUG
@@ -2591,6 +2627,69 @@ ODEBNDS_BASE<T,PMT,PVT>::_RHS_PM_ELL2
   }
 #ifdef MC__ODEBNDS_BASE_DINEQPM_DEBUG
   { std::cout << "--paused "; int dum; std::cin >> dum; }
+#endif
+}
+
+template <typename T, typename PMT, typename PVT>
+template <typename U>
+inline void
+ODEBNDS_BASE<T,PMT,PVT>::_RHS_PM_ELL
+( const unsigned nx, const double*Qy, const double*Ay, const double *Ax,
+  const T*Idydot, double*Qydot, const double QTOL, const double EPS,
+  const double QSCALE, const bool neg, const U*W )
+{
+  // Construct trajectories kappa and eta
+  double trQW = 0., WMAX = 0.;
+  for( unsigned ix=0; ix<nx; ix++ ){
+    if( Op<U>::abs(W[ix]) > WMAX ) WMAX = Op<U>::abs(W[ix]);
+#ifdef MC__ODEBNDS_BASE_DINEQPM_DEBUG
+    std::cout << "W[" << ix << "] = " << W[ix] << std::endl;
+#endif
+  }
+#ifdef MC__ODEBNDS_BASE_DINEQPM_DEBUG
+    std::cout << "WMAX = " << WMAX << std::endl;
+#endif
+  for( unsigned ix=0; ix<nx; ix++ ){
+    double sqr_wi = sqr(_scaling(ix,W,WMAX,EPS,QSCALE));
+    trQW += ( Qy[_ndxLT(ix,ix,nx)]/sqr_wi>EPS? Qy[_ndxLT(ix,ix,nx)]/sqr_wi: EPS );
+  }
+  double sumkappa = 0., trAxTWAx = 0.;
+  const double srqt_trQW = (trQW>0? std::sqrt( trQW ): 0.) + QTOL;
+  for( unsigned ix=0; ix<nx; ix++ ){
+    double wi = _scaling(ix,W,WMAX,EPS,QSCALE);
+    //sumkappa += .1;
+    sumkappa += Op<T>::diam( Idydot[ix] ) / ( 2. * wi * srqt_trQW );
+#ifdef MC__ODEBNDS_BASE_DINEQPM_DEBUG
+    std::cout << "kappa[" << ix << "] = "
+              << Op<T>::diam( Idydot[ix] ) / ( 2. * wi * srqt_trQW )
+              << std::endl;
+#endif
+    for( unsigned jx=0; jx<nx; jx++)
+      trAxTWAx += Ax[ix+jx*nx] * Ax[ix+jx*nx] / sqr(wi);
+  }
+  double eta = std::sqrt( trAxTWAx ) / srqt_trQW;
+#ifdef MC__ODEBNDS_BASE_DINEQPM_DEBUG
+  std::cout << "eta = " << eta << std::endl;
+#endif
+
+  // Set ellipsoidal remainder RHS
+  double pm = neg? -1.: 1.;
+  for( unsigned jx=0; jx<nx; jx++ ){
+   double wj = _scaling(jx,W,WMAX,EPS,QSCALE);
+   for( unsigned ix=jx; ix<nx; ix++ ){
+      Qydot[_ndxLT(ix,jx,nx)] = pm * ( sumkappa + eta ) * Qy[_ndxLT(ix,jx,nx)];
+      for( unsigned kx=0; kx<nx; kx++ ){
+        Qydot[_ndxLT(ix,jx,nx)] += Qy[_ndxLT(ix,kx,nx)] * Ay[jx+kx*nx]
+          + Ay[ix+kx*nx] * Qy[_ndxLT(kx,jx,nx)]
+          + pm * Ax[ix+kx*nx] * Ax[jx+kx*nx] * sqr(wj) / eta;
+      }
+    }
+    Qydot[_ndxLT(jx,jx,nx)] += pm * Op<T>::diam( Idydot[jx] ) / 2. * wj * srqt_trQW;
+  }
+#ifdef MC__ODEBNDS_BASE_DINEQI_DEBUG
+  E Eydot( nx, Qydot );
+  std::cout << "Eydot =" << Eydot << std::endl;
+  { int dum; std::cin >> dum; }
 #endif
 }
 

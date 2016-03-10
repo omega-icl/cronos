@@ -170,8 +170,8 @@ public:
     };
     //! @brief Wrapping mitigation strategy
     WRAPPING_STRATEGY WRAPMIT;
-    //! @brief Order of wrapping mitigation strategy (Default: 2)
-    unsigned ORDMIT;
+    //! @brief Option for wrapping mitigation strategy with ellipsoidal bounder (Default: 2)
+    int ORDMIT;
     //! @brief Options of internal polynomial model arithmetic for wrapping mitigation
     typename PMT::Options PMOPT;
     //! @brief Tolerance when dividing by trace of shape matrix in ellipsoidal bounds (Default: machprec())

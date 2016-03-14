@@ -1675,7 +1675,7 @@ ODEBNDS_BASE<T,PMT,PVT>::_TC_PM_SET
       _IADJDTC = new T[ _opADJDTC.size() ];
     }
 
-    else if( _PMenv->nord() >= _MVXPenv->nord() ){
+    else if( options.ORDMIT < 0 || _PMenv->nord() >= _MVYXPenv->nord() ){
       _pADJDTC = _pDAG->FAD( _nx, _pADJTC, _nx, _pVAR+_nx );
       _opADJDTC = _pDAG->subgraph( _nx*_nx, _pADJDTC );
       _PMADJDTC = new PVT[ _opADJDTC.size() ];
@@ -1857,7 +1857,7 @@ ODEBNDS_BASE<T,PMT,PVT>::_CC_PM_SET
       _IADJDTC = new T[ _opADJDTC.size() ];
     }
 
-    else if( _PMenv->nord() > _MVYXPenv->nord() ){
+    else if( options.ORDMIT < 0 || _PMenv->nord() >= _MVYXPenv->nord() ){
       _pADJDTC = _pDAG->FAD( _nx, _pADJCC, 2*_nx, _pVAR );
       _opADJDTC = _pDAG->subgraph( 2*_nx*_nx, _pADJDTC );
       _PMADJDTC = new PVT[ _opADJDTC.size() ];
@@ -2274,7 +2274,7 @@ ODEBNDS_BASE<T,PMT,PVT>::_RHS_PM_SET
       if( PMopmax < _opADJRHS[ifct].size() ) PMopmax = _opADJRHS[ifct].size();
       if( Iopmax < _opADJQUAD[ifct].size() ) Iopmax  = _opADJQUAD[ifct].size();
     }
-    if( options.ORDMIT && _PMenv->nord() <= _MVYXPenv->nord() ) break;
+    if( options.ORDMIT > 0 && _PMenv->nord() < _MVYXPenv->nord() ) break;
     _opADJJAC  = new std::list<const FFOp*>[_nf];
     _pADJJAC = _pDAG->FAD( _nx*_nf, _pADJRHS, 2*_nx, _pVAR );
     for( unsigned ifct=0; ifct<_nf; ifct++ ){
@@ -2297,7 +2297,7 @@ ODEBNDS_BASE<T,PMT,PVT>::_RHS_PM_SET
     }
     if( !options.ORDMIT )
       _IADJJAC  = JACopmax?  new T[ JACopmax ]: 0;
-    else if( _PMenv->nord() > _MVYXPenv->nord() )
+    else if( options.ORDMIT < 0 || _PMenv->nord() >= _MVYXPenv->nord() )
       _PMADJJAC = JACopmax?  new PVT[ JACopmax ]: 0;
   }
 

@@ -6,7 +6,7 @@ INC_MC = -I$(PATH_MC)/include -I$(PATH_MC)/src/3rdparty/fadbad++ -I$(PATH_MC)/sr
 LIB_GSL = -lgsl -lgslcblas -lm
 INC_GSL = 
 
-PATH_SUNDIALS = /opt/sundials-2.5.0
+PATH_SUNDIALS = /opt/sundials-2.6.2
 #PATH_SUNDIALS = /usr/local
 LIB_SUNDIALS = -L$(PATH_SUNDIALS)/lib -lsundials_cvodes -lsundials_nvecserial \
                -llapack -lblas
@@ -23,6 +23,7 @@ INC_FILIB  = -I$(PATH_FILIB)/include/ -I$(PATH_FILIB)/include/interval
 FLAG_FILIB = -frounding-math -ffloat-store
 
 FLAG_ALL = -g -Wall -std=c++11 $(FLAG_FILIB)
+#FLAG_ALL = -g -O3 -Wall -std=c++11 $(FLAG_FILIB)
 LIB_ALL  = $(LIB_MC) $(LIB_PROFIL) $(LIB_FILIB) $(LIB_GSL) $(LIB_SUNDIALS) $(LIB_LAPACK)
 INC_ALL  = $(INC_MC) $(INC_PROFIL) $(INC_FILIB) $(INC_GSL) $(INC_SUNDIALS) $(INC_LAPACK)
 

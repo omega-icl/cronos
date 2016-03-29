@@ -258,7 +258,7 @@ ODESLVS_GSL<T>::_INI_ADJ
     delete[] _dVAR; _dVAR = new double[_nVAR];
   }
 
-  BASE_DE::set_adjoint();
+  BASE_DE::set_sensitivity( _nx, _np );
   for( unsigned ix=0; ix<_nx; ix++ ) _pVAR[ix] = _pY[ix];
   for( unsigned ix=0; ix<_nx; ix++ ) _pVAR[_nx+ix] = _pX[ix];
   for( unsigned ip=0; ip<_np; ip++ ) _pVAR[2*_nx+ip] = _pP[ip];

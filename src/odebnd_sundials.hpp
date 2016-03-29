@@ -39,52 +39,38 @@ class ODEBND_SUNDIALS:
   typedef int (*CVRhsFn)( realtype t, N_Vector y, N_Vector ydot, void *user_data );
 
  protected:
-  using ODEBND_BASE<T,PMT,PVT>::NORMAL;
-  using ODEBND_BASE<T,PMT,PVT>::FAILURE;
-  using ODEBND_BASE<T,PMT,PVT>::FATAL;
+  using ODEBND_BASE<T,PMT,PVT>::_diam;
+  using ODEBND_BASE<T,PMT,PVT>::_hausdorff;
+  using ODEBND_BASE<T,PMT,PVT>::_print_interm;
+  using ODEBND_BASE<T,PMT,PVT>::_PMenv;
 
-  using ODEBND_BASE<T,PMT,PVT>::_Q;
-  using ODEBND_BASE<T,PMT,PVT>::_Er;
-  using ODEBND_BASE<T,PMT,PVT>::_Ir;
-  using ODEBND_BASE<T,PMT,PVT>::_Irq;
-  using ODEBND_BASE<T,PMT,PVT>::_pref;
-  using ODEBND_BASE<T,PMT,PVT>::_Ip;
-  using ODEBND_BASE<T,PMT,PVT>::_B;
-  using ODEBND_BASE<T,PMT,PVT>::_Bq;
-  using ODEBND_BASE<T,PMT,PVT>::_xref;
   using ODEBND_BASE<T,PMT,PVT>::_Ix;
+  using ODEBND_BASE<T,PMT,PVT>::_Ir;
   using ODEBND_BASE<T,PMT,PVT>::_Iq;
-  using ODEBND_BASE<T,PMT,PVT>::_vec2I;
-  using ODEBND_BASE<T,PMT,PVT>::_vec2E;
+  using ODEBND_BASE<T,PMT,PVT>::_PMx;
+  using ODEBND_BASE<T,PMT,PVT>::_PMq;
+  using ODEBND_BASE<T,PMT,PVT>::_GET_I_STA;
+  using ODEBND_BASE<T,PMT,PVT>::_IC_I_SET;
   using ODEBND_BASE<T,PMT,PVT>::_IC_I_STA;
   using ODEBND_BASE<T,PMT,PVT>::_IC_I_QUAD;
+  using ODEBND_BASE<T,PMT,PVT>::_CC_I_SET;
   using ODEBND_BASE<T,PMT,PVT>::_CC_I_STA;
-  using ODEBND_BASE<T,PMT,PVT>::_SET_I_STA;
+  using ODEBND_BASE<T,PMT,PVT>::_RHS_I_SET;
   using ODEBND_BASE<T,PMT,PVT>::_RHS_I_STA;
   using ODEBND_BASE<T,PMT,PVT>::_RHS_I_QUAD;
   using ODEBND_BASE<T,PMT,PVT>::_JAC_I_STA;
   using ODEBND_BASE<T,PMT,PVT>::_FCT_I_STA;
-
-  using ODEBND_BASE<T,PMT,PVT>::_PMenv;
-  using ODEBND_BASE<T,PMT,PVT>::_PMx;
-  using ODEBND_BASE<T,PMT,PVT>::_PMp;
-  using ODEBND_BASE<T,PMT,PVT>::_PMq;
-  using ODEBND_BASE<T,PMT,PVT>::_vec2PMI;
-  using ODEBND_BASE<T,PMT,PVT>::_vec2PME;
+  using ODEBND_BASE<T,PMT,PVT>::_GET_PM_STA;
+  using ODEBND_BASE<T,PMT,PVT>::_IC_PM_SET;
   using ODEBND_BASE<T,PMT,PVT>::_IC_PM_STA;
   using ODEBND_BASE<T,PMT,PVT>::_IC_PM_QUAD;
+  using ODEBND_BASE<T,PMT,PVT>::_CC_PM_SET;
   using ODEBND_BASE<T,PMT,PVT>::_CC_PM_STA;
-  using ODEBND_BASE<T,PMT,PVT>::_SET_PM_STA;
+  using ODEBND_BASE<T,PMT,PVT>::_RHS_PM_SET;
   using ODEBND_BASE<T,PMT,PVT>::_RHS_PM_STA;
   using ODEBND_BASE<T,PMT,PVT>::_RHS_PM_QUAD;
   using ODEBND_BASE<T,PMT,PVT>::_JAC_PM_STA;
   using ODEBND_BASE<T,PMT,PVT>::_FCT_PM_STA;
-
-  using ODEBND_BASE<T,PMT,PVT>::_diam;
-  using ODEBND_BASE<T,PMT,PVT>::_dH;
-  using ODEBND_BASE<T,PMT,PVT>::_hausdorff;
-  using ODEBND_BASE<T,PMT,PVT>::_remainders;
-  using ODEBND_BASE<T,PMT,PVT>::_print_interm;
 
  protected:
   //! @brief Pointer to the CVODE memory block
@@ -121,7 +107,7 @@ class ODEBND_SUNDIALS:
   std::vector< std::vector<realtype> > _vec_sta;
 
   //! @brief static pointer to class
-  static ODEBND_SUNDIALS<T,PMT,PVT> *_pODEBND;
+  static ODEBND_SUNDIALS<T,PMT,PVT> *pODEBND;
 
 public:
   typedef typename ODEBND_BASE<T,PMT,PVT>::Results Results;
@@ -307,7 +293,7 @@ protected:
 };
 
 template <typename T, typename PMT, typename PVT>
- ODEBND_SUNDIALS<T,PMT,PVT>* ODEBND_SUNDIALS<T,PMT,PVT>::_pODEBND = 0;
+ ODEBND_SUNDIALS<T,PMT,PVT>* ODEBND_SUNDIALS<T,PMT,PVT>::pODEBND = 0;
 
 template <typename T, typename PMT, typename PVT> inline
 ODEBND_SUNDIALS<T,PMT,PVT>::ODEBND_SUNDIALS
@@ -353,7 +339,7 @@ ODEBND_SUNDIALS<T,PMT,PVT>::_INI_CVODE
   if( _check_cv_flag(&_cv_flag, "CVodeInit", 1) ) return false;
 
    // Specify the Jacobian approximation and linear solver
-  if( options.INTMETH == Options::MSBDF ){
+  if( options.INTMETH == Options::MSBDF ){ // Applies to Newton iteration only
     switch( options.JACAPPROX ){
      case Options::CV_DIAG: default:
        _cv_flag = CVDiag( _cv_mem );
@@ -363,15 +349,17 @@ ODEBND_SUNDIALS<T,PMT,PVT>::_INI_CVODE
      case Options::CV_LAPACKDENSE:
        //_cv_flag = CVLapackDense( _cv_mem, NV_LENGTH_S( _Nx ) );
        //if( _check_cv_flag(&_cv_flag, "CVLapackDense", 1)) return false;
+       //_cv_flag = CVDlsSetDenseJacFn( _cv_mem, NULL );
+       //if ( _check_cv_flag(&_cv_flag, "CVDlsSetDenseJacFn", 1) ) return false;
        //break;
 
      case Options::CV_DENSE:
        _cv_flag = CVDense( _cv_mem, NV_LENGTH_S( _Nx ) );
        if( _check_cv_flag(&_cv_flag, "CVDense", 1)) return false;
+       _cv_flag = CVDlsSetDenseJacFn( _cv_mem, NULL );
+       if ( _check_cv_flag(&_cv_flag, "CVDlsSetDenseJacFn", 1) ) return false;
        break;
     }
-    _cv_flag = CVDlsSetDenseJacFn( _cv_mem, NULL );
-    if ( _check_cv_flag(&_cv_flag, "CVDlsSetDenseJacFn", 1) ) return false;
   }
 
   // Specify the relative and absolute tolerances for states
@@ -381,6 +369,10 @@ ODEBND_SUNDIALS<T,PMT,PVT>::_INI_CVODE
   // Set maximum number of error test failures
   _cv_flag = CVodeSetMaxErrTestFails( _cv_mem, options.MAXFAIL );
   if ( _check_cv_flag(&_cv_flag, "CVodeSetMaxErrTestFails", 1) ) return false;
+
+  // Set maximum number of error test failures
+  _cv_flag = CVodeSetMaxConvFails( _cv_mem, options.MAXFAIL );
+  if ( _check_cv_flag(&_cv_flag, "CVodeSetMaxConvFails", 1) ) return false;
 
   // Specify minimum stepsize
   _cv_flag = CVodeSetMinStep( _cv_mem, options.HMIN>0.? options.HMIN:0. );
@@ -490,10 +482,19 @@ template <typename T, typename PMT, typename PVT> inline int
 ODEBND_SUNDIALS<T,PMT,PVT>::MC_CVRHSI__
 ( realtype t, N_Vector y, N_Vector ydot, void *user_data )
 {
-  ODEBND_SUNDIALS<T,PMT,PVT> *pODEBND = ODEBND_SUNDIALS<T,PMT,PVT>::_pODEBND;
+  ODEBND_SUNDIALS<T,PMT,PVT> *pODEBND = ODEBND_SUNDIALS<T,PMT,PVT>::pODEBND;
+//#ifdef MC__ODEBNDS_SUNDIALS_DEBUG
+  std::cout << "@t=" << t << "\nx:\n";
+  for( unsigned i=0; i<NV_LENGTH_S( y ); i++ ) std::cout << NV_Ith_S( y, i ) << std::endl;
+//#endif
   bool flag = pODEBND->_RHS_I_STA( pODEBND->options, t, NV_DATA_S( y ),
     NV_DATA_S( ydot ) );
-  ODEBND_SUNDIALS<T,PMT,PVT>::_pODEBND = pODEBND;
+//#ifdef MC__ODEBNDS_SUNDIALS_DEBUG
+  std::cout << "xdot:\n";
+  for( unsigned i=0; i<NV_LENGTH_S( ydot ); i++ ) std::cout << NV_Ith_S( ydot, i ) << std::endl;
+  { int dum; std::cin >> dum; }
+//#endif
+  ODEBND_SUNDIALS<T,PMT,PVT>::pODEBND = pODEBND;
   pODEBND->stats_sta.numRHS++;
   return( flag? 0: -1 );
 }
@@ -502,10 +503,10 @@ template <typename T, typename PMT, typename PVT> inline int
 ODEBND_SUNDIALS<T,PMT,PVT>::MC_CVQUADI__
 ( realtype t, N_Vector y, N_Vector qdot, void *user_data )
 {
-  ODEBND_SUNDIALS<T,PMT,PVT> *pODEBND = ODEBND_SUNDIALS<T,PMT,PVT>::_pODEBND;
+  ODEBND_SUNDIALS<T,PMT,PVT> *pODEBND = ODEBND_SUNDIALS<T,PMT,PVT>::pODEBND;
   bool flag = pODEBND->_RHS_I_QUAD( pODEBND->options, t, NV_DATA_S( y ),
     NV_DATA_S( qdot ) );
-  ODEBND_SUNDIALS<T,PMT,PVT>::_pODEBND = pODEBND;
+  ODEBND_SUNDIALS<T,PMT,PVT>::pODEBND = pODEBND;
   return( flag? 0: -1 );
 }
 
@@ -521,16 +522,13 @@ ODEBND_SUNDIALS<T,PMT,PVT>::_bounds
   try{
     // Initialize trajectory integration
     if( !_INI_I_STA( _np, Ip, ns ) ) return FATAL;
+    _t = tk[0];
 
     // Bounds on initial states/quadratures
-    _t = tk[0];
-    if( !_IC_I_STA( options, _t, NV_DATA_S( _Nx ) )
+    if( !_IC_I_SET( options )
+     || !_IC_I_STA( options, _t, NV_DATA_S( _Nx ) )
      || (_Nq && !_IC_I_QUAD( options, NV_DATA_S( _Nq )) ) )
       { _END_STA(); return FATAL; }
-    if( options.DISPLAY >= 1 ){
-      _print_interm( _t, _nx, _Ix, "x", os );
-      _print_interm( _nq, _Iq, "q", os );
-    }
     if( Ixk && !Ixk[0] ) Ixk[0] = new T[_nx];
     for( unsigned ix=0; Ixk[0] && ix<_nx; ix++ ) Ixk[0][ix] = _Ix[ix];
 
@@ -541,12 +539,16 @@ ODEBND_SUNDIALS<T,PMT,PVT>::_bounds
       _vec_sta.push_back( std::vector<realtype>( vsta, vsta+lsta ) );
     }
 
-    // Record initial results
+    // Display & record initial results
+    if( options.DISPLAY >= 1 ){
+      _print_interm( _t, _nx, _Ix, "x", os );
+      _print_interm( _nq, _Iq, "q", os );
+    }
     if( options.RESRECORD )
       results_sta.push_back( Results( tk[0], _nx, Ixk[0] ) );
 
     // Integrate ODEs through each stage using SUNDIALS
-    _pODEBND = this;
+    pODEBND = this;
     if( !_INI_CVODE( MC_CVRHSI__, MC_CVQUADI__ ) )
       { _END_STA(); return FATAL; }
 
@@ -555,7 +557,8 @@ ODEBND_SUNDIALS<T,PMT,PVT>::_bounds
       // and integrator reinitialization (if applicable)
       _pos_ic = ( _vIC.size()>=ns? _istg:0 );
       if( _pos_ic
-       && ( !_CC_I_STA( options, _pos_ic, _t, NV_DATA_S( _Nx ) )
+       && ( !_CC_I_SET( options, _pos_ic )
+         || !_CC_I_STA( options, _t, NV_DATA_S( _Nx ) )
          || !_CC_CVODE() ) )
         { _END_STA(); return FAILURE; }
 
@@ -563,7 +566,7 @@ ODEBND_SUNDIALS<T,PMT,PVT>::_bounds
       _pos_rhs  = ( _vRHS.size()<=1? 0: _istg );
       _pos_quad = ( _vQUAD.size()<=1? 0: _istg );
       if( (!_istg || _pos_rhs || _pos_quad)
-        && !_SET_I_STA( options, _pos_rhs, _pos_quad ) )
+        && !_RHS_I_SET( options, _pos_rhs, _pos_quad ) )
         { _END_STA(); return FATAL; }
 
       // integrate till end of time stage
@@ -581,11 +584,6 @@ ODEBND_SUNDIALS<T,PMT,PVT>::_bounds
           throw Exceptions( Exceptions::INTERN );
         stats_sta.numSteps++;
       }
-      if( _nq ){
-        _cv_flag = CVodeGetQuad( _cv_mem, &_t, _Nq );
-        if( _check_cv_flag(&_cv_flag, "CVodeGetQuad", 1) )
-          { _END_STA(); return FATAL; }
-      }
 
       // Store full state at stage time
       if( store ){
@@ -595,20 +593,12 @@ ODEBND_SUNDIALS<T,PMT,PVT>::_bounds
       }
 
       // Bounds on intermediate states and quadratures
-      switch( options.WRAPMIT){
-      case Options::NONE:
-      case Options::DINEQ:
-        _vec2I( NV_DATA_S( _Nx ), _nx, _Ix );
-        if( _nq) _vec2I( NV_DATA_S( _Nq ), _nq, _Iq );
-        break;
-      case Options::ELLIPS:
-      default:
-        _vec2E( NV_DATA_S( _Nx ), _nx, _np, _Q, _Er, _Ir, _pref, _Ip, _B, _xref, _Ix );
-        if( _nq) _vec2I( NV_DATA_S( _Nq ), _nq, _np, _pref, _Ip, _Bq, _Irq, _Iq );
-        break;
+      if( _nq ){
+        _cv_flag = CVodeGetQuad( _cv_mem, &_t, _Nq );
+        if( _check_cv_flag(&_cv_flag, "CVodeGetQuad", 1) )
+          { _END_STA(); return FATAL; }
       }
-
-      // Bounds on intermediate quadratures
+     _GET_I_STA( options, NV_DATA_S(_Nx), _nq && _Nq? NV_DATA_S(_Nq): 0 );
 
       // Keep track/display/record stage results
       if( options.DISPLAY >= 1 ){
@@ -693,22 +683,31 @@ template <typename T, typename PMT, typename PVT> inline int
 ODEBND_SUNDIALS<T,PMT,PVT>::MC_CVRHSPM__
 ( realtype t, N_Vector y, N_Vector ydot, void *user_data )
 {
-  ODEBND_SUNDIALS<T,PMT,PVT> *pODEBND = ODEBND_SUNDIALS<T,PMT,PVT>::_pODEBND;
-  bool flag = pODEBND->_RHS_PM_STA( pODEBND->options, t, NV_DATA_S( y ),
+  ODEBND_SUNDIALS<T,PMT,PVT> *pODEBND = ODEBND_SUNDIALS<T,PMT,PVT>::pODEBND;
+#ifdef MC__ODEBNDS_SUNDIALS_DEBUG
+  std::cout << "@t=" << t << "\nx:\n";
+  for( unsigned i=0; i<NV_LENGTH_S( y ); i++ ) std::cout << NV_Ith_S( y, i ) << std::endl;
+#endif
+  int flag = pODEBND->_RHS_PM_STA( pODEBND->options, t, NV_DATA_S( y ),
     NV_DATA_S( ydot ) );
-  ODEBND_SUNDIALS<T,PMT,PVT>::_pODEBND = pODEBND;
+#ifdef MC__ODEBNDS_SUNDIALS_DEBUG
+  std::cout << "xdot:\n";
+  for( unsigned i=0; i<NV_LENGTH_S( ydot ); i++ ) std::cout << NV_Ith_S( ydot, i ) << std::endl;
+  { int dum; std::cin >> dum; }
+#endif
+  ODEBND_SUNDIALS<T,PMT,PVT>::pODEBND = pODEBND;
   pODEBND->stats_sta.numRHS++;
-  return( flag? 0: -1 );
+  return flag;
 }
 
 template <typename T, typename PMT, typename PVT> inline int
 ODEBND_SUNDIALS<T,PMT,PVT>::MC_CVQUADPM__
 ( realtype t, N_Vector y, N_Vector qdot, void *user_data )
 {
-  ODEBND_SUNDIALS<T,PMT,PVT> *pODEBND = ODEBND_SUNDIALS<T,PMT,PVT>::_pODEBND;
+  ODEBND_SUNDIALS<T,PMT,PVT> *pODEBND = ODEBND_SUNDIALS<T,PMT,PVT>::pODEBND;
   bool flag = pODEBND->_RHS_PM_QUAD( pODEBND->options, t, NV_DATA_S( y ),
     NV_DATA_S( qdot ) );
-  ODEBND_SUNDIALS<T,PMT,PVT>::_pODEBND = pODEBND;
+  ODEBND_SUNDIALS<T,PMT,PVT>::pODEBND = pODEBND;
   //pODEBND->stats_sta.numRHS++;
   return( flag? 0: -1 );
 }
@@ -773,16 +772,13 @@ ODEBND_SUNDIALS<T,PMT,PVT>::_bounds
   try{
     // Initialize trajectory integration
     if( !_INI_PM_STA( _np, PMp, ns ) ) return FATAL;
+    _t = tk[0];
 
     // Bounds on initial states/quadratures
-    _t = tk[0];
-    if( !_IC_PM_STA( options, _t, NV_DATA_S( _Nx ) )
-     || (_Nq && !_IC_PM_QUAD( options, NV_DATA_S( _Nq )) ) )
+    if( !_IC_PM_SET( options )
+     || !_IC_PM_STA( options, _t, NV_DATA_S( _Nx ) )
+     || ( _Nq && !_IC_PM_QUAD( options, NV_DATA_S( _Nq ) ) ) )
       { _END_STA(); return FATAL; }
-    if( options.DISPLAY >= 1 ){
-      _print_interm( _t, _nx, _PMx, "x", os );
-      _print_interm( _nq, _PMq, "q", os );
-    }
     if( PMxk && !PMxk[0] ) PMxk[0] = new PVT[_nx];
     for( unsigned ix=0; PMxk[0] && ix<_nx; ix++ ) PMxk[0][ix] = _PMx[ix];
 
@@ -793,12 +789,16 @@ ODEBND_SUNDIALS<T,PMT,PVT>::_bounds
       _vec_sta.push_back( std::vector<realtype>( vsta, vsta+lsta ) );
     }
 
-    // Record initial results
+    // Display & record initial results
+    if( options.DISPLAY >= 1 ){
+      _print_interm( _t, _nx, _PMx, "x", os );
+      _print_interm( _nq, _PMq, "q", os );
+    }
     if( options.RESRECORD )
       results_sta.push_back( Results( tk[0], _nx, PMxk[0] ) );
 
     // Integrate ODEs through each stage using SUNDIALS
-    _pODEBND = this;
+    pODEBND = this;
     if( !_INI_CVODE( MC_CVRHSPM__, MC_CVQUADPM__ ) )
       { _END_STA(); return FATAL; }
 
@@ -807,7 +807,8 @@ ODEBND_SUNDIALS<T,PMT,PVT>::_bounds
       // and integrator reinitialization (if applicable)
       _pos_ic = ( _vIC.size()>=ns? _istg:0 );
       if( _pos_ic
-       && ( !_CC_PM_STA( options, _pos_ic, _t, NV_DATA_S( _Nx ) )
+       && ( !_CC_PM_SET( options, _pos_ic )
+         || !_CC_PM_STA( options, _t, NV_DATA_S( _Nx ) )
          || !_CC_CVODE() ) )
         { _END_STA(); return FAILURE; }
 
@@ -815,7 +816,7 @@ ODEBND_SUNDIALS<T,PMT,PVT>::_bounds
       _pos_rhs  = ( _vRHS.size()<=1? 0: _istg );
       _pos_quad = ( _vQUAD.size()<=1? 0: _istg );
       if( (!_istg || _pos_rhs || _pos_quad)
-        && !_SET_PM_STA( options, _pos_rhs, _pos_quad ) )
+        && !_RHS_PM_SET( options, _pos_rhs, _pos_quad ) )
         { _END_STA(); return FATAL; }
 
       // integrate till end of time stage
@@ -842,28 +843,13 @@ ODEBND_SUNDIALS<T,PMT,PVT>::_bounds
         _vec_sta.push_back( std::vector<realtype>( vsta, vsta+lsta ) );
       }
 
-      // Bounds on intermediate states
-      switch( options.WRAPMIT){
-      case Options::NONE:
-        _vec2PMI( NV_DATA_S( _Nx ), _PMenv, _nx, _PMx, true );
-        break;
-      case Options::DINEQ:
-        _vec2PMI( NV_DATA_S( _Nx ), _PMenv, _nx, _PMx, false );
-        break;
-      case Options::ELLIPS:
-      default:
-        _vec2PME( NV_DATA_S( _Nx ), _PMenv, _nx, _PMx, _Q, _Er, _Ir );
-        //std::cout << _Er.eigQ().first;
-        break;
-      }
-
-      // Bounds on intermediate quadratures
+      // Bounds on intermediate states and quadratures
       if( _nq ){
         _cv_flag = CVodeGetQuad( _cv_mem, &_t, _Nq );
         if( _check_cv_flag(&_cv_flag, "CVodeGetQuad", 1) )
           { _END_STA(); return FATAL; }
-        _vec2PMI( NV_DATA_S( _Nq ), _PMenv, _nq, _PMq, true );
       }
+     _GET_PM_STA( options, NV_DATA_S(_Nx), _nq && _Nq? NV_DATA_S(_Nq): 0 );
 
       // Keep track/display/record stage results
       if( options.DISPLAY >= 1 ){

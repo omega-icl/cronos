@@ -45,9 +45,9 @@ public:
     Options():
       INTMETH(MSADAMS), H0(0e0), HMIN(0e0), HMAX(0e0), NMAX(0),
       RTOL(1e-7), ATOL(1e-8), QERR(true), MAXFAIL(10), JACAPPROX(CV_DIAG),
-      AUTOTOLS(true), RTOLS(1e-7), ATOLS(1e-8), FSACORR(STAGGERED),
-      FSAERR(true), RTOLB(1e-7), ATOLB(1e-8), QERRB(true), ASAINTERP(HERMITE),
-      ASACHKPT(1000), RTOLFD(1e-3), ATOLFD(1e-3), CENFD(true)
+      AUTOTOLS(false), RTOLS(1e-7), ATOLS(1e-8), FSACORR(STAGGERED),
+      FSAERR(true), QERRS(true), RTOLB(1e-7), ATOLB(1e-8), QERRB(true),
+      ASAINTERP(HERMITE), ASACHKPT(1000), RTOLFD(1e-3), ATOLFD(1e-3), CENFD(true)
       {}
     //! @brief Assignment operator
     template <typename U> Options& operator=
@@ -66,6 +66,8 @@ public:
         RTOLS     = options.RTOLS;
         ATOLS     = options.ATOLS;
         FSACORR   = options.FSACORR;
+        FSAERR    = options.FSAERR;
+        QERRS     = options.QERRS;
         RTOLB     = options.RTOLB;
         ATOLB     = options.ATOLB;
         QERRB     = options.QERRB;
@@ -128,6 +130,8 @@ public:
     FSA_STRATEGY FSACORR;
     //! @brief Whether or not FSA error control is performed?
     bool FSAERR;
+    //! @brief Whether or not FSA quadrature error control is performed?
+    bool QERRS;
     //! @brief Relative (scalar) integration tolerance for AS
     realtype RTOLB;
     //! @brief Absolute (scalar) integration tolerance for AS
@@ -166,23 +170,9 @@ public:
     //! @brief Number of Jacobian evaluations
     unsigned int numJAC;
   };
-
-  //! @brief Return last successful integration time
-  //double final_time() const
-  //  { return _t; }
-
-  //! @brief Return last successful integration stage
-  //double final_stage() const
-  //  { return _istg; }
   /** @} */
 
 protected:
-  //! @brief current time
-  //double _t;
-
-  //! @brief current stage
-  //unsigned _istg;
-
   //! @brief Function to initialize GSL statistics
   static void _init_stats
     ( Stats&stats );

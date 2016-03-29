@@ -52,7 +52,7 @@ public:
       const short info=0 );
   //! @brief Add new data (must be of dimension <a>ndim</a>) to stage <a>istg</a> of mesh
   bool add
-    ( const unsigned istg, const double&t, const double*x, const bool index );
+    ( const unsigned istg, const double&t, const double*x, const bool index=false );
   //! @brief Interpolate data (all <a>ndim</a> dimensions) in stage <a>istg</a> of mesh
   bool interp
     ( const unsigned istg, const INTERPOLATION_METHOD type=CSPLINE );
@@ -78,7 +78,8 @@ MESH_GSL::set
 {
   try{
     // (Re)initialize mesh data and indexing
-    data.assign( ndim+1, std::vector<double>( prealloc ) );
+    data.assign( ndim+1, std::vector<double>() );
+    for( auto it=data.begin(); it!=data.end(); ++it ) it->reserve(prealloc);
     index.assign( nstg, 0 );
   }
   catch(...){

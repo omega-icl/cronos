@@ -11,9 +11,7 @@
 #define MC__ODEBNDS_GSL_USE_BAD
 
 //! @TODO
-//! - handle state quadratures in adjoint sensitivity ==> OK
 //! - handle state discontinuities in adjoint sensitivity 
-//! - propagation of polynomial models in adjoint sensitivity
 
 
 //! @brief C++ class computing enclosures of the reachable set of parametric ODEs and adjoint sensitivity analysis using GSL and MC++.
@@ -48,41 +46,56 @@ class ODEBNDS_GSL:
 
   using ODEBND_BASE<T,PMT,PVT>::_diam;
   using ODEBND_BASE<T,PMT,PVT>::_print_interm;
+  using ODEBND_BASE<T,PMT,PVT>::_Ix;
+  using ODEBND_BASE<T,PMT,PVT>::_Iq;
   using ODEBND_BASE<T,PMT,PVT>::_PMenv;
+  using ODEBND_BASE<T,PMT,PVT>::_PMx;
+  using ODEBND_BASE<T,PMT,PVT>::_PMq;
 
+  using ODEBNDS_BASE<T,PMT,PVT>::_Ir;
   using ODEBNDS_BASE<T,PMT,PVT>::_Iy;
   using ODEBNDS_BASE<T,PMT,PVT>::_Iyq;
   using ODEBNDS_BASE<T,PMT,PVT>::_PMy;
   using ODEBNDS_BASE<T,PMT,PVT>::_PMyq;
-  using ODEBNDS_BASE<T,PMT,PVT>::_GET_I_ADJ;
-  using ODEBNDS_BASE<T,PMT,PVT>::_IC_I_SET;
-  using ODEBNDS_BASE<T,PMT,PVT>::_IC_I_ADJ;
-  using ODEBNDS_BASE<T,PMT,PVT>::_IC_I_QUAD;
-  using ODEBNDS_BASE<T,PMT,PVT>::_TC_I_SET;
-  using ODEBNDS_BASE<T,PMT,PVT>::_TC_I_ADJ;
-  using ODEBNDS_BASE<T,PMT,PVT>::_TC_I_QUAD;
+  using ODEBNDS_BASE<T,PMT,PVT>::_IC_SET_FSA;
+  using ODEBNDS_BASE<T,PMT,PVT>::_CC_SET_FSA;
+  using ODEBNDS_BASE<T,PMT,PVT>::_CC_SET_ASA;
+  using ODEBNDS_BASE<T,PMT,PVT>::_RHS_SET_FSA;
+  using ODEBNDS_BASE<T,PMT,PVT>::_RHS_SET_ASA;
+  using ODEBNDS_BASE<T,PMT,PVT>::_GET_I_SEN;
+  using ODEBNDS_BASE<T,PMT,PVT>::_INI_I_SEN;
+  using ODEBNDS_BASE<T,PMT,PVT>::_IC_I_SET_ASA;
+  using ODEBNDS_BASE<T,PMT,PVT>::_IC_I_SEN;
+  using ODEBNDS_BASE<T,PMT,PVT>::_IC_I_QUAD_ASA;
+  using ODEBNDS_BASE<T,PMT,PVT>::_TC_I_SET_ASA;
+  using ODEBNDS_BASE<T,PMT,PVT>::_TC_I_SEN;
+  using ODEBNDS_BASE<T,PMT,PVT>::_TC_I_QUAD_ASA;
   using ODEBNDS_BASE<T,PMT,PVT>::_CC_I_SET;
-  using ODEBNDS_BASE<T,PMT,PVT>::_CC_I_ADJ;
-  using ODEBNDS_BASE<T,PMT,PVT>::_CC_I_QUAD;
+  using ODEBNDS_BASE<T,PMT,PVT>::_CC_I_SEN;
+  using ODEBNDS_BASE<T,PMT,PVT>::_CC_I_QUAD_ASA;
   using ODEBNDS_BASE<T,PMT,PVT>::_RHS_I_SET;
-  using ODEBNDS_BASE<T,PMT,PVT>::_RHS_I_ADJ;
+  using ODEBNDS_BASE<T,PMT,PVT>::_RHS_I_SEN;
   using ODEBNDS_BASE<T,PMT,PVT>::_RHS_I_QUAD;
-  using ODEBNDS_BASE<T,PMT,PVT>::_GET_PM_ADJ;
-  using ODEBNDS_BASE<T,PMT,PVT>::_IC_PM_SET;
-  using ODEBNDS_BASE<T,PMT,PVT>::_IC_PM_ADJ;
-  using ODEBNDS_BASE<T,PMT,PVT>::_IC_PM_QUAD;
-  using ODEBNDS_BASE<T,PMT,PVT>::_TC_PM_SET;
-  using ODEBNDS_BASE<T,PMT,PVT>::_TC_PM_ADJ;
-  using ODEBNDS_BASE<T,PMT,PVT>::_TC_PM_QUAD;
+  using ODEBNDS_BASE<T,PMT,PVT>::_FCT_I_SEN;
+  using ODEBNDS_BASE<T,PMT,PVT>::_GET_PM_SEN;
+  using ODEBNDS_BASE<T,PMT,PVT>::_INI_PM_SEN;
+  using ODEBNDS_BASE<T,PMT,PVT>::_IC_PM_SET_ASA;
+  using ODEBNDS_BASE<T,PMT,PVT>::_IC_PM_SEN;
+  using ODEBNDS_BASE<T,PMT,PVT>::_IC_PM_QUAD_ASA;
+  using ODEBNDS_BASE<T,PMT,PVT>::_TC_PM_SET_ASA;
+  using ODEBNDS_BASE<T,PMT,PVT>::_TC_PM_SEN;
+  using ODEBNDS_BASE<T,PMT,PVT>::_TC_PM_QUAD_ASA;
   using ODEBNDS_BASE<T,PMT,PVT>::_CC_PM_SET;
-  using ODEBNDS_BASE<T,PMT,PVT>::_CC_PM_ADJ;
-  using ODEBNDS_BASE<T,PMT,PVT>::_CC_PM_QUAD;
+  using ODEBNDS_BASE<T,PMT,PVT>::_CC_PM_SEN;
+  using ODEBNDS_BASE<T,PMT,PVT>::_CC_PM_QUAD_ASA;
   using ODEBNDS_BASE<T,PMT,PVT>::_RHS_PM_SET;
-  using ODEBNDS_BASE<T,PMT,PVT>::_RHS_PM_ADJ;
+  using ODEBNDS_BASE<T,PMT,PVT>::_RHS_PM_SEN;
   using ODEBNDS_BASE<T,PMT,PVT>::_RHS_PM_QUAD;
+  using ODEBNDS_BASE<T,PMT,PVT>::_FCT_PM_SEN;
 
   using ODEBND_GSL<T,PMT,PVT>::_vec_sta;
   using ODEBND_GSL<T,PMT,PVT>::_mesh_sta;
+  using ODEBND_GSL<T,PMT,PVT>::_pos_ic;
   using ODEBND_GSL<T,PMT,PVT>::_pos_rhs;
   using ODEBND_GSL<T,PMT,PVT>::_pos_quad;
   using ODEBND_GSL<T,PMT,PVT>::_pos_fct;
@@ -90,6 +103,9 @@ class ODEBNDS_GSL:
   using ODEBND_GSL<T,PMT,PVT>::_init_stats;
   using ODEBND_GSL<T,PMT,PVT>::_final_stats;
   using ODEBND_GSL<T,PMT,PVT>::_print_stats;
+  using ODEBND_GSL<T,PMT,PVT>::_END_STA;
+  using ODEBND_GSL<T,PMT,PVT>::stats_sta;
+  using ODEBND_GSL<T,PMT,PVT>::results_sta;
 
  template <typename U, typename PMU, typename PVU>
  friend int MC_GSLADJRHSI__
@@ -112,13 +128,13 @@ protected:
   unsigned _ifct;
 
   //! @brief vector storing stepsize during adjoint integration
-  std::vector<double> _h_adj; // In GSL and SUNDIALS headers seperately
+  std::vector<double> _h_adj; // In GSL and GSLS headers seperately
 
   //! @brief array for adjoint GSL integration
-  double *_vec_adj; // In GSL and SUNDIALS headers seperately
+  double *_vec_adj; // In GSL and GSLS headers seperately
   
   //! @brief position in _vec_adj
-  unsigned _pos_adj; // In GSL and SUNDIALS headers seperately
+  unsigned _pos_adj; // In GSL and GSLS headers seperately
 
   //! @brief static pointer to class
   static ODEBNDS_GSL<T,PMT,PVT> *pODEBNDS;
@@ -154,10 +170,10 @@ public: // EVERYTHING to be called/used from outside (mostly functions and a few
   } options;
 
   //! @brief Statistics for adjoint integration
-  Stats stats_adj;
+  Stats stats_sen;
 
   //! @brief Vector storing interval adjoint bounds (see Options::RESRECORD)
-  std::vector< Results > _results_adj;
+  std::vector< Results > results_sen;
 
   //! @brief Propagate state/quadrature interval bounds forward in time through every time stages
   STATUS bounds
@@ -187,7 +203,7 @@ public: // EVERYTHING to be called/used from outside (mostly functions and a few
   void record
     ( std::ofstream&obndsta, std::ofstream&obndsa, const unsigned iprec=5 ) const
     { this->ODEBND_GSL<T,PMT,PVT>::record( obndsta, iprec );
-      this->ODEBND_BASE<T,PMT,PVT>::_record( obndsa, _results_adj, iprec ); }
+      this->ODEBND_BASE<T,PMT,PVT>::_record( obndsa, results_sen, iprec ); }
 
   //! @brief Record state bounds in file <a>obndsta</a>, with accuracy of <a>iprec</a> digits
   void record
@@ -201,7 +217,7 @@ private:
     ( double t, const double* y, double* ydot, void* user_data );
 
   //! @brief Function to initialize adjoint interval bounding
-  bool _INI_I_ADJ //split
+  bool _INI_I_SEN //split
     ( const unsigned np, const T *Ip );
 
   //! @brief Static wrapper to function to calculate the adjoint DINEQ-PM RHS values
@@ -209,7 +225,7 @@ private:
     ( double t, const double* y, double* ydot, void* user_data );
 
   //! @brief Function to initialize GSL for adjoint polynomial models
-  bool _INI_PM_ADJ //split
+  bool _INI_PM_SEN //split
     ( const unsigned np, const PVT*PMp );
 
   //! @brief Function to initialize GSL numerical integration drivers
@@ -217,7 +233,7 @@ private:
     ( gsl_odeiv2_system &sys, std::vector<gsl_odeiv2_driver*>&driver );
 
   //! @brief Function to finalize adjoint bounding
-  void _END_ADJ();
+  void _END_SEN();
 
 };
 
@@ -278,18 +294,18 @@ ODEBNDS_GSL<T,PMT,PVT>::_INI_GSL
 }
 
 template <typename T, typename PMT, typename PVT> inline void
-ODEBNDS_GSL<T,PMT,PVT>::_END_ADJ()
+ODEBNDS_GSL<T,PMT,PVT>::_END_SEN()
 {
   // Get final CPU time
-  _final_stats( stats_adj );
+  _final_stats( stats_sen );
 }
 
 template <typename T, typename PMT, typename PVT> inline bool
-ODEBNDS_GSL<T,PMT,PVT>::_INI_I_ADJ
+ODEBNDS_GSL<T,PMT,PVT>::_INI_I_SEN
 ( const unsigned np, const T* Ip )
 { 
   // Initialize bound propagation
-  if( !ODEBNDS_BASE<T,PMT,PVT>::_INI_I_ADJ( options, np, Ip ) )
+  if( !ODEBNDS_BASE<T,PMT,PVT>::_INI_I_SEN( options, np, Ip, _nf, np ) )
     return false;
 
   // Define adjoint ODE system in GSL format
@@ -314,8 +330,8 @@ ODEBNDS_GSL<T,PMT,PVT>::_INI_I_ADJ
   _vec_adj  = new double[ _sys_adj.dimension*_nf ];
 
   // Reset result record and statistics
-  _results_adj.clear();
-  _init_stats( stats_adj );
+  results_sen.clear();
+  _init_stats( stats_sen );
 
   return true;
 }
@@ -327,13 +343,14 @@ ODEBNDS_GSL<T,PMT,PVT>::MC_GSLADJRHSI__
   ODEBNDS_GSL<T,PMT,PVT> *pODEBNDS = ODEBNDS_GSL<T,PMT,PVT>::pODEBNDS;
   if( !pODEBNDS->_mesh_sta.eval( pODEBNDS->_istg, -t, pODEBNDS->_vec_sta ) )
     { return GSL_EBADFUNC; } // set interpolated state
-  bool flag = pODEBNDS->_RHS_I_ADJ( pODEBNDS->options, -t, pODEBNDS->_vec_sta,
+  bool flag = pODEBNDS->_RHS_I_SEN( pODEBNDS->options, -t, pODEBNDS->_vec_sta,
     y, ydot, pODEBNDS->_ifct );
   if( flag ){
     double* qdot = ydot + pODEBNDS->_offset_quad;
-    flag = pODEBNDS->_RHS_I_QUAD( pODEBNDS->options, qdot, pODEBNDS->_ifct );
+    flag = pODEBNDS->_RHS_I_QUAD( pODEBNDS->options, pODEBNDS->_np, qdot,
+      pODEBNDS->_ifct );
   }
-  pODEBNDS->stats_adj.numRHS++; // increment RHS counter
+  pODEBNDS->stats_sen.numRHS++; // increment RHS counter
   ODEBNDS_GSL<T,PMT,PVT>::pODEBNDS = pODEBNDS;
   return ( flag? GSL_SUCCESS: GSL_EBADFUNC );
 }
@@ -374,23 +391,23 @@ ODEBNDS_GSL<T,PMT,PVT>::bounds_ASA
 
   try{
     // Initialize adjoint bound integration using GSL
-    if( !_INI_I_ADJ( _np, Ip )) return FATAL;
+    if( !_INI_I_SEN( _np, Ip )) return FATAL;
 
     // Interpolate state mesh in final stage
     _t = -tk[ns];
     if( !_mesh_sta.interp( ns, options.INTERPMETH ) )
-      { _END_ADJ(); return FAILURE; }
+      { _END_SEN(); return FAILURE; }
 
     // Bounds on terminal adjoints/quadratures
     if( !_mesh_sta.eval( ns, tk[ns], _vec_sta ) )
-      { _END_ADJ(); return FAILURE; }
+      { _END_SEN(); return FAILURE; }
     if( Ilk && !Ilk[ns] ) Ilk[ns] = new T[_nx*_nf];
     for( _ifct=_pos_adj=0; _ifct < _nf; _ifct++, _pos_adj+=_sys_adj.dimension ){
       _pos_fct = ( _vFCT.size()>=ns? ns-1:0 );
-      if( !_TC_I_SET( options, _pos_fct, _ifct )
-       || !_TC_I_ADJ( options, -_t, _vec_sta, _vec_adj+_pos_adj )
-       || !_TC_I_QUAD( options, _vec_adj+_pos_adj+_offset_quad ) )
-        { _END_ADJ(); return FATAL; }
+      if( !_TC_I_SET_ASA( options, _pos_fct, _ifct )
+       || !_TC_I_SEN( options, -_t, _vec_sta, _vec_adj+_pos_adj )
+       || !_TC_I_QUAD_ASA( options, _vec_adj+_pos_adj+_offset_quad ) )
+        { _END_SEN(); return FATAL; }
       for( unsigned iy=0; Ilk[ns] && iy<_nx; iy++ )
         Ilk[ns][_ifct*_nx+iy] = _Iy[iy];
       for( unsigned iq=0; iq<_np; iq++ )
@@ -403,7 +420,7 @@ ODEBNDS_GSL<T,PMT,PVT>::bounds_ASA
       //_print_interm( _nf*_np, Idf, "df", os );
     }
     if( options.RESRECORD )
-      _results_adj.push_back( Results( tk[ns], _nf*_nx, Ilk[ns] ) );
+      results_sen.push_back( Results( tk[ns], _nf*_nx, Ilk[ns] ) );
 
     // Integrate adjoint ODEs through each stage using GSL
     _h_adj.assign( _nf, options.H0 );
@@ -412,13 +429,14 @@ ODEBNDS_GSL<T,PMT,PVT>::bounds_ASA
 
       // Interpolate state mesh in current stage
       if( _istg<ns && !_mesh_sta.interp( _istg, options.INTERPMETH ) )
-        { _END_ADJ(); return FAILURE; }
+        { _END_SEN(); return FAILURE; }
 
       // Update list of operations in RHSADJ and QUADADJ
       _pos_rhs  = ( _vRHS.size() <=1? 0: _istg-1 );
       _pos_quad = ( _vQUAD.size()<=1? 0: _istg-1 );
-      if( !_RHS_I_SET( options, _pos_rhs, _pos_quad, _pos_fct, false ) )
-        { _END_ADJ(); return FATAL; }
+      if( !_RHS_SET_ASA( _pos_rhs, _pos_quad, _pos_fct, false )
+       || !_RHS_I_SET( options, _nf, _np ) )
+        { _END_SEN(); return FATAL; }
 
       // Integrate backward through current stage for each function
       for( _ifct=_pos_adj=0; _ifct < _nf; _ifct++, _pos_adj+=_sys_adj.dimension ){
@@ -438,10 +456,10 @@ ODEBNDS_GSL<T,PMT,PVT>::bounds_ASA
               _driver_adj[_ifct]->s, &_sys_adj, &_t, -tk[_istg-1], &_h_adj[_ifct],
               _vec_adj+_pos_adj ) != GSL_SUCCESS
            || _h_adj[_ifct] < options.HMIN
-           || (options.NMAX && stats_adj.numSteps > options.NMAX)
+           || (options.NMAX && stats_sen.numSteps > options.NMAX)
            || _diam(_nx, _Iy) > options.DMAX )
             throw Exceptions( Exceptions::INTERN );
-          stats_adj.numSteps++;    
+          stats_sen.numSteps++;    
           if( options.HMAX > 0 && _h_adj[_ifct] > options.HMAX ) _h_adj[_ifct] = options.HMAX;
         }
 #ifdef MC__ODEBNDS_GSL_DINEQI_DEBUG
@@ -453,25 +471,26 @@ ODEBNDS_GSL<T,PMT,PVT>::bounds_ASA
 
         // Add function contribution to adjoint bounds (discontinuities)
         if( !_mesh_sta.eval( _istg, tk[_istg-1], _vec_sta ) )
-          { _END_ADJ(); return FATAL; }
+          { _END_SEN(); return FATAL; }
         if( _istg > 1  ){
           _pos_fct = ( _vFCT.size()>=ns? _istg-1:0 );
           if( _pos_fct
-           && ( !_CC_I_SET( options, _pos_fct, _ifct )
-             || !_CC_I_ADJ( options, _t, _vec_sta, _vec_adj+_pos_adj )
-             || !_CC_I_QUAD( options, _vec_adj+_pos_adj+_offset_quad ) ) )
-            { _END_ADJ(); return FATAL; }
+           && ( !_CC_SET_ASA( _pos_fct, _ifct )
+             || !_CC_I_SET( options )
+             || !_CC_I_SEN( options, _t, _vec_sta, _vec_adj+_pos_adj )
+             || !_CC_I_QUAD_ASA( options, _vec_adj+_pos_adj+_offset_quad ) ) )
+            { _END_SEN(); return FATAL; }
           else if( !_pos_fct )
-             _GET_I_ADJ( options, _vec_adj+_pos_adj, _vec_adj+_pos_adj+_offset_quad );
+             _GET_I_SEN( options, _vec_adj+_pos_adj, _np, _vec_adj+_pos_adj+_offset_quad );
 
           // Reset ODE solver - needed in case of discontinuity (used to be in _CC_PM_ADJ)
           gsl_odeiv2_driver_reset( _driver_adj[_ifct] );
         }
         // Add initial state contribution to derivative bounds
-        else if( !_IC_I_SET( options )
-              || !_IC_I_ADJ( options, _t, _vec_sta, _vec_adj+_pos_adj )
-              || !_IC_I_QUAD( options, _vec_adj+_pos_adj+_offset_quad ) )
-          { _END_ADJ(); return FATAL; }
+        else if( !_IC_I_SET_ASA( options )
+              || !_IC_I_SEN( options, _t, _vec_sta, _vec_adj+_pos_adj )
+              || !_IC_I_QUAD_ASA( options, _vec_adj+_pos_adj+_offset_quad ) )
+          { _END_SEN(); return FATAL; }
 
         // Keep track of results at stage times
         if( Ilk && !Ilk[_istg-1] ) Ilk[_istg-1] = new T[_nx*_nf];
@@ -487,29 +506,29 @@ ODEBNDS_GSL<T,PMT,PVT>::bounds_ASA
         //_print_interm( _nf*_np, Idf, "df", os );
       }
       if( options.RESRECORD )
-         _results_adj.push_back( Results( tk[_istg-1], _nf*_nx, Ilk[_istg-1] ) );
+         results_sen.push_back( Results( tk[_istg-1], _nf*_nx, Ilk[_istg-1] ) );
     }
 
     if( options.DISPLAY >= 1 )
       _print_interm( _nf*_np, Idf, "df", os );
   }
   catch(...){
-    _END_ADJ();
-    if( options.DISPLAY >= 1 ) _print_stats( stats_adj, os );
+    _END_SEN();
+    if( options.DISPLAY >= 1 ) _print_stats( stats_sen, os );
     return FAILURE;
   }
-  _END_ADJ();
-  if( options.DISPLAY >= 1 ) _print_stats( stats_adj, os );
+  _END_SEN();
+  if( options.DISPLAY >= 1 ) _print_stats( stats_sen, os );
 
   return NORMAL;
 }
 
 template <typename T, typename PMT, typename PVT> inline bool
-ODEBNDS_GSL<T,PMT,PVT>::_INI_PM_ADJ
+ODEBNDS_GSL<T,PMT,PVT>::_INI_PM_SEN
 ( const unsigned np, const PVT* PMp )
 {
   // Initialize bound propagation
-  if( !ODEBNDS_BASE<T,PMT,PVT>::_INI_PM_ADJ( options, np, PMp ) )
+  if( !ODEBNDS_BASE<T,PMT,PVT>::_INI_PM_SEN( options, np, PMp, _nf, np ) )
     return false;
 
   // Define Adjoint system in GSL format
@@ -535,8 +554,8 @@ ODEBNDS_GSL<T,PMT,PVT>::_INI_PM_ADJ
   _vec_adj = new double[_sys_adj.dimension*_nf];
 
   // Reset result record and statistics
-  _results_adj.clear();
-  _init_stats( stats_adj );
+  results_sen.clear();
+  _init_stats( stats_sen );
 
   return true;
 }
@@ -548,13 +567,14 @@ ODEBNDS_GSL<T,PMT,PVT>::MC_GSLADJRHSPM__
   ODEBNDS_GSL<T,PMT,PVT> *pODEBNDS = ODEBNDS_GSL<T,PMT,PVT>::pODEBNDS;
   if( !pODEBNDS->_mesh_sta.eval( pODEBNDS->_istg, -t, pODEBNDS->_vec_sta ) )
     { return GSL_EBADFUNC; } // set interpolated state
-  bool flag = pODEBNDS->_RHS_PM_ADJ( pODEBNDS->options, -t, pODEBNDS->_vec_sta,
+  bool flag = pODEBNDS->_RHS_PM_SEN( pODEBNDS->options, -t, pODEBNDS->_vec_sta,
     y, ydot, pODEBNDS->_ifct );
   if( flag ){
     double* qdot = ydot + pODEBNDS->_offset_quad;
-    flag = pODEBNDS->_RHS_PM_QUAD( pODEBNDS->options, qdot, pODEBNDS->_ifct );
+    flag = pODEBNDS->_RHS_PM_QUAD( pODEBNDS->options, pODEBNDS->_np, qdot,
+      pODEBNDS->_ifct );
   }
-  pODEBNDS->stats_adj.numRHS++; // increment RHS counter
+  pODEBNDS->stats_sen.numRHS++; // increment RHS counter
   ODEBNDS_GSL<T,PMT,PVT>::pODEBNDS = pODEBNDS;
   return ( flag? GSL_SUCCESS: GSL_EBADFUNC );
 }
@@ -598,24 +618,24 @@ ODEBNDS_GSL<T,PMT,PVT>::bounds_ASA
 
   try{
     // Initialize adjoint bound integration using GSL
-    if( !_INI_PM_ADJ( _np, PMp ) ) return FATAL;
+    if( !_INI_PM_SEN( _np, PMp ) ) return FATAL;
     _t = -tk[ns];
 
     // Interpolate state mesh in final stage
     if( !_mesh_sta.interp( ns, options.INTERPMETH ) )
-      { _END_ADJ(); return FAILURE; }
+      { _END_SEN(); return FAILURE; }
 
 
     // Bounds on terminal adjoints/quadratures
     if( !_mesh_sta.eval( ns, tk[ns], _vec_sta ) )
-      { _END_ADJ(); return FAILURE; }
+      { _END_SEN(); return FAILURE; }
     if( PMlk && !PMlk[ns] ) PMlk[ns] = new PVT[_nx*_nf];
     for( _ifct=_pos_adj=0; _ifct < _nf; _ifct++, _pos_adj+=_sys_adj.dimension ){
       _pos_fct = ( _vFCT.size()>=ns? ns-1:0 );
-      if( !_TC_PM_SET( options, _pos_fct, _ifct )
-       || !_TC_PM_ADJ( options, -_t, _vec_sta, _vec_adj+_pos_adj )
-       || !_TC_PM_QUAD( options, _vec_adj+_pos_adj+_offset_quad ) )
-        { _END_ADJ(); return FATAL; }
+      if( !_TC_PM_SET_ASA( options, _pos_fct, _ifct )
+       || !_TC_PM_SEN( options, -_t, _vec_sta, _vec_adj+_pos_adj )
+       || !_TC_PM_QUAD_ASA( options, _vec_adj+_pos_adj+_offset_quad ) )
+        { _END_SEN(); return FATAL; }
       for( unsigned iy=0; PMlk[ns] && iy<_nx; iy++ )
         PMlk[ns][_ifct*_nx+iy] = _PMy[iy];
       for( unsigned iq=0; iq<_np; iq++ )
@@ -628,7 +648,7 @@ ODEBNDS_GSL<T,PMT,PVT>::bounds_ASA
       //_print_interm( _np, PMdf, "df", os );
     }
     if( options.RESRECORD )
-      _results_adj.push_back( Results( tk[ns], _nf*_nx, PMlk[ns] ) );
+      results_sen.push_back( Results( tk[ns], _nf*_nx, PMlk[ns] ) );
 
     // Integrate adjoint ODEs through each stage using GSL
     _h_adj.assign( _nf, options.H0 );
@@ -637,13 +657,14 @@ ODEBNDS_GSL<T,PMT,PVT>::bounds_ASA
 
       // Interpolate state mesh in current stage
       if(_istg<ns && !_mesh_sta.interp(_istg, options.INTERPMETH) )
-        {_END_ADJ(); return FAILURE;}
+        {_END_SEN(); return FAILURE;}
 
       // Update list of operations in RHSADJ and QUADADJ
       _pos_rhs  = ( _vRHS.size() <=1? 0: _istg-1 );
       _pos_quad = ( _vQUAD.size()<=1? 0: _istg-1 );
-      if( !_RHS_PM_SET( options, _pos_rhs, _pos_quad, _pos_fct, false ) )
-        { _END_ADJ(); return FATAL; }
+      if( !_RHS_SET_ASA( _pos_rhs, _pos_quad, _pos_fct, false ) 
+       || !_RHS_PM_SET( options, _nf, _np ) )
+        { _END_SEN(); return FATAL; }
 
       // Integrate backward through current stage for each function
       for( _ifct=_pos_adj=0; _ifct < _nf; _ifct++, _pos_adj+=_sys_adj.dimension ){
@@ -662,10 +683,10 @@ ODEBNDS_GSL<T,PMT,PVT>::bounds_ASA
               _driver_adj[_ifct]->s, &_sys_adj, &_t, -tk[_istg-1], &_h_adj[_ifct],
               _vec_adj+_pos_adj ) != GSL_SUCCESS
            || _h_adj[_ifct] < options.HMIN
-           || (options.NMAX && stats_adj.numSteps > options.NMAX)
+           || (options.NMAX && stats_sen.numSteps > options.NMAX)
            || _diam(_nx, _PMy) > options.DMAX )
             throw Exceptions( Exceptions::INTERN );
-          stats_adj.numSteps++;
+          stats_sen.numSteps++;
           if( options.HMAX > 0 && _h_adj[_ifct] > options.HMAX ) _h_adj[_ifct] = options.HMAX;
         }
 #ifdef MC__ODEBNDS_GSL_DINEQI_DEBUG
@@ -676,25 +697,26 @@ ODEBNDS_GSL<T,PMT,PVT>::bounds_ASA
 #endif
         // Add function contribution to adjoint bounds (discontinuities)
         if( !_mesh_sta.eval( _istg, tk[_istg-1], _vec_sta ) )
-          { _END_ADJ(); return FATAL; }
+          { _END_SEN(); return FATAL; }
         if( _istg > 1  ){
           _pos_fct = ( _vFCT.size()>=ns? _istg-1:0 );
           if( _pos_fct
-           && ( !_CC_PM_SET( options, _pos_fct, _ifct )
-             || !_CC_PM_ADJ( options, _t, _vec_sta, _vec_adj+_pos_adj )
-             || !_CC_PM_QUAD( options, _vec_adj+_pos_adj+_offset_quad ) ) )
-            { _END_ADJ(); return FATAL; }
+           && ( !_CC_SET_ASA( _pos_fct, _ifct )
+             || !_CC_PM_SET( options )
+             || !_CC_PM_SEN( options, _t, _vec_sta, _vec_adj+_pos_adj )
+             || !_CC_PM_QUAD_ASA( options, _vec_adj+_pos_adj+_offset_quad ) ) )
+            { _END_SEN(); return FATAL; }
           else if( !_pos_fct )
-             _GET_PM_ADJ( options, _vec_adj+_pos_adj, _vec_adj+_pos_adj+_offset_quad );
+             _GET_PM_SEN( options, _vec_adj+_pos_adj, _np, _vec_adj+_pos_adj+_offset_quad );
 
-          // Reset ODE solver - needed in case of discontinuity (used to be in _CC_PM_ADJ)
+          // Reset ODE solver - needed in case of discontinuity (used to be in _CC_PM_SEN)
           gsl_odeiv2_driver_reset( _driver_adj[_ifct] );
         }
         // Add initial state contribution to derivative bounds
-        else if( !_IC_PM_SET( options )
-              || !_IC_PM_ADJ( options, _t, _vec_sta, _vec_adj+_pos_adj )
-              || !_IC_PM_QUAD( options, _vec_adj+_pos_adj+_offset_quad ) )
-          { _END_ADJ(); return FATAL; }
+        else if( !_IC_PM_SET_ASA( options )
+              || !_IC_PM_SEN( options, _t, _vec_sta, _vec_adj+_pos_adj )
+              || !_IC_PM_QUAD_ASA( options, _vec_adj+_pos_adj+_offset_quad ) )
+          { _END_SEN(); return FATAL; }
 
         // Keep track of results at stage times
         if( PMlk && !PMlk[_istg-1] ) PMlk[_istg-1] = new PVT[_nx*_nf];
@@ -710,20 +732,20 @@ ODEBNDS_GSL<T,PMT,PVT>::bounds_ASA
         //_print_interm( _np, PMdf, "df", os );
       }
       if( options.RESRECORD )
-        _results_adj.push_back( Results( tk[_istg-1], _nf*_nx, PMlk[_istg-1] ) );
+        results_sen.push_back( Results( tk[_istg-1], _nf*_nx, PMlk[_istg-1] ) );
     }
 
     if( options.DISPLAY >= 1 )
       _print_interm( _nf*_np, PMdf, "df", os );
   }
   catch(...){
-    _END_ADJ();
-    if( options.DISPLAY >= 1 ) _print_stats( stats_adj, os );
+    _END_SEN();
+    if( options.DISPLAY >= 1 ) _print_stats( stats_sen, os );
     return FAILURE;
   }
 
-  _END_ADJ();
-  if( options.DISPLAY >= 1 ) {_print_stats( stats_adj, os );}
+  _END_SEN();
+  if( options.DISPLAY >= 1 ) {_print_stats( stats_sen, os );}
 
   return NORMAL;
 }

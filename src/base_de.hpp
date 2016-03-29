@@ -42,10 +42,10 @@ protected:
   //! @brief number of initial states
   unsigned _nx0;
 
-  //! @brief number of adjoints
+  //! @brief number of sensitivity/adjoint variables
   unsigned _ny;
 
-  //! @brief pointer to adjoint variables (differential costates)
+  //! @brief pointer to sensitivity/adjoint variables
   FFVar* _pY;
 
   //! @brief number of parameters
@@ -59,6 +59,12 @@ protected:
 
   //! @brief pointer to quadrature variables
   const FFVar* _pQ;
+
+  //! @brief number of sensitivity/adjoint quadratures
+  unsigned _nyq;
+
+  //! @brief pointer to sensitivity/adjoint quadratures
+  FFVar* _pYQ;
 
   //! @brief vector of const pointers to initial value in each stage of IVP-DAE system
   std::vector<const FFVar*> _vIC;
@@ -101,12 +107,12 @@ public:
   BASE_DE()
     : _pDAG(0), _pT(0), _nd(0), _na(0), _pDX(0), _nx(0), _pX(0),
       _nx0(0), _ny(0), _pY(0), _np(0), _pP(0), _nq(0), _pQ(0),
-      _ni(0), _nf(0)
+      _nyq(0), _pYQ(0), _ni(0), _nf(0)
     {}
 
   //! @brief Class destructor
   virtual ~BASE_DE()
-    { delete[] _pY; delete[] _pDX; }
+    { delete[] _pY; delete[] _pYQ; delete[] _pDX; }
 
   //! @brief Integrator status
   enum STATUS{
@@ -260,15 +266,27 @@ public:
   /** @} */
 
 protected:
-  //! @brief Get pointer to adjoint
-  const FFVar* adjoint() const
+  //! @brief Get pointer to sensitivity/adjoint variables
+  const FFVar* sensitivity() const
     { return _pY; }
 
-  //! @brief Set pointer to adjoint
-  void set_adjoint()
-    { if( _ny != _nx ){ delete[] _pY; _ny = _nx; _pY = new FFVar[_ny]; }
+  //! @brief Get pointer to quadratures
+  const FFVar* quadrature() const
+    { return _pQ; }
+
+  //! @brief Get pointer to sensitivity/adjoint quadratures
+  const FFVar* sensquadrature() const
+    { return _pYQ; }
+
+  //! @brief Set sensitivity/adjoint arrays
+  void set_sensitivity
+    ( const unsigned ny, const unsigned nyq )
+    { if( _ny != ny ){ delete[] _pY; _ny = ny; _pY = new FFVar[_ny]; }
       for( unsigned iy=0; iy<_ny; iy++ )
-        if( _pY[iy].dag() != _pDAG ) _pY[iy].set( _pDAG ); }
+        if( _pY[iy].dag() != _pDAG ) _pY[iy].set( _pDAG );
+      if( _nyq != nyq ){ delete[] _pYQ; _nyq = nyq; _pYQ = new FFVar[_nyq]; }
+      for( unsigned iyq=0; iyq<_nyq; iyq++ )
+        if( _pYQ[iyq].dag() != _pDAG ) _pYQ[iyq].set( _pDAG ); }
 
   //! @brief Function to display intermediate results
   template<typename U> static void _print_interm

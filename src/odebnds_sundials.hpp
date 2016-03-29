@@ -42,6 +42,10 @@ class ODEBNDS_SUNDIALS:
   typedef BASE_DE::STATUS STATUS;
   typedef int (*CVRhsFn)( realtype t, N_Vector y, N_Vector ydot, void *user_data );
   typedef int (*CVADJRhsFn)( realtype t, N_Vector x, N_Vector y, N_Vector ydot, void *user_data );
+  typedef int (*CVSENRhs1Fn)( int Ns, realtype t, N_Vector x, N_Vector xdot, int is,
+    N_Vector y, N_Vector ydot, void *user_data, N_Vector tmp1, N_Vector tmp2 );
+  typedef int (*CVSENQuadFn)( int Ns, realtype t, N_Vector x, N_Vector *y, N_Vector qdot,
+    N_Vector *qSdot, void *user_data, N_Vector tmp1, N_Vector tmp2 );
 
   using ODEBND_BASE<T,PMT,PVT>::NORMAL; 
   using ODEBND_BASE<T,PMT,PVT>::FAILURE;
@@ -49,56 +53,78 @@ class ODEBNDS_SUNDIALS:
 
   using ODEBND_BASE<T,PMT,PVT>::_diam;
   using ODEBND_BASE<T,PMT,PVT>::_print_interm;
+  using ODEBND_BASE<T,PMT,PVT>::_Ix;
+  using ODEBND_BASE<T,PMT,PVT>::_Iq;
   using ODEBND_BASE<T,PMT,PVT>::_PMenv;
+  using ODEBND_BASE<T,PMT,PVT>::_PMx;
+  using ODEBND_BASE<T,PMT,PVT>::_PMq;
 
+  using ODEBNDS_BASE<T,PMT,PVT>::_Ir;
   using ODEBNDS_BASE<T,PMT,PVT>::_Iy;
   using ODEBNDS_BASE<T,PMT,PVT>::_Iyq;
   using ODEBNDS_BASE<T,PMT,PVT>::_PMy;
   using ODEBNDS_BASE<T,PMT,PVT>::_PMyq;
-  using ODEBNDS_BASE<T,PMT,PVT>::_GET_I_ADJ;
-  using ODEBNDS_BASE<T,PMT,PVT>::_IC_I_SET;
-  using ODEBNDS_BASE<T,PMT,PVT>::_IC_I_ADJ;
-  using ODEBNDS_BASE<T,PMT,PVT>::_IC_I_QUAD;
-  using ODEBNDS_BASE<T,PMT,PVT>::_TC_I_SET;
-  using ODEBNDS_BASE<T,PMT,PVT>::_TC_I_ADJ;
-  using ODEBNDS_BASE<T,PMT,PVT>::_TC_I_QUAD;
+  using ODEBNDS_BASE<T,PMT,PVT>::_IC_SET_FSA;
+  using ODEBNDS_BASE<T,PMT,PVT>::_CC_SET_FSA;
+  using ODEBNDS_BASE<T,PMT,PVT>::_CC_SET_ASA;
+  using ODEBNDS_BASE<T,PMT,PVT>::_RHS_SET_FSA;
+  using ODEBNDS_BASE<T,PMT,PVT>::_RHS_SET_ASA;
+  using ODEBNDS_BASE<T,PMT,PVT>::_GET_I_SEN;
+  using ODEBNDS_BASE<T,PMT,PVT>::_INI_I_SEN;
+  using ODEBNDS_BASE<T,PMT,PVT>::_IC_I_SET_ASA;
+  using ODEBNDS_BASE<T,PMT,PVT>::_IC_I_SEN;
+  using ODEBNDS_BASE<T,PMT,PVT>::_IC_I_QUAD_ASA;
+  using ODEBNDS_BASE<T,PMT,PVT>::_TC_I_SET_ASA;
+  using ODEBNDS_BASE<T,PMT,PVT>::_TC_I_SEN;
+  using ODEBNDS_BASE<T,PMT,PVT>::_TC_I_QUAD_ASA;
   using ODEBNDS_BASE<T,PMT,PVT>::_CC_I_SET;
-  using ODEBNDS_BASE<T,PMT,PVT>::_CC_I_ADJ;
-  using ODEBNDS_BASE<T,PMT,PVT>::_CC_I_QUAD;
+  using ODEBNDS_BASE<T,PMT,PVT>::_CC_I_SEN;
+  using ODEBNDS_BASE<T,PMT,PVT>::_CC_I_QUAD_ASA;
   using ODEBNDS_BASE<T,PMT,PVT>::_RHS_I_SET;
-  using ODEBNDS_BASE<T,PMT,PVT>::_RHS_I_ADJ;
+  using ODEBNDS_BASE<T,PMT,PVT>::_RHS_I_SEN;
   using ODEBNDS_BASE<T,PMT,PVT>::_RHS_I_QUAD;
-  using ODEBNDS_BASE<T,PMT,PVT>::_GET_PM_ADJ;
-  using ODEBNDS_BASE<T,PMT,PVT>::_IC_PM_SET;
-  using ODEBNDS_BASE<T,PMT,PVT>::_IC_PM_ADJ;
-  using ODEBNDS_BASE<T,PMT,PVT>::_IC_PM_QUAD;
-  using ODEBNDS_BASE<T,PMT,PVT>::_TC_PM_SET;
-  using ODEBNDS_BASE<T,PMT,PVT>::_TC_PM_ADJ;
-  using ODEBNDS_BASE<T,PMT,PVT>::_TC_PM_QUAD;
+  using ODEBNDS_BASE<T,PMT,PVT>::_FCT_I_SEN;
+  using ODEBNDS_BASE<T,PMT,PVT>::_GET_PM_SEN;
+  using ODEBNDS_BASE<T,PMT,PVT>::_INI_PM_SEN;
+  using ODEBNDS_BASE<T,PMT,PVT>::_IC_PM_SET_ASA;
+  using ODEBNDS_BASE<T,PMT,PVT>::_IC_PM_SEN;
+  using ODEBNDS_BASE<T,PMT,PVT>::_IC_PM_QUAD_ASA;
+  using ODEBNDS_BASE<T,PMT,PVT>::_TC_PM_SET_ASA;
+  using ODEBNDS_BASE<T,PMT,PVT>::_TC_PM_SEN;
+  using ODEBNDS_BASE<T,PMT,PVT>::_TC_PM_QUAD_ASA;
   using ODEBNDS_BASE<T,PMT,PVT>::_CC_PM_SET;
-  using ODEBNDS_BASE<T,PMT,PVT>::_CC_PM_ADJ;
-  using ODEBNDS_BASE<T,PMT,PVT>::_CC_PM_QUAD;
+  using ODEBNDS_BASE<T,PMT,PVT>::_CC_PM_SEN;
+  using ODEBNDS_BASE<T,PMT,PVT>::_CC_PM_QUAD_ASA;
   using ODEBNDS_BASE<T,PMT,PVT>::_RHS_PM_SET;
-  using ODEBNDS_BASE<T,PMT,PVT>::_RHS_PM_ADJ;
+  using ODEBNDS_BASE<T,PMT,PVT>::_RHS_PM_SEN;
   using ODEBNDS_BASE<T,PMT,PVT>::_RHS_PM_QUAD;
+  using ODEBNDS_BASE<T,PMT,PVT>::_FCT_PM_SEN;
 
   using ODEBND_SUNDIALS<T,PMT,PVT>::_cv_mem;
   using ODEBND_SUNDIALS<T,PMT,PVT>::_cv_flag;
   using ODEBND_SUNDIALS<T,PMT,PVT>::_Nx;
+  using ODEBND_SUNDIALS<T,PMT,PVT>::_Nq;
   using ODEBND_SUNDIALS<T,PMT,PVT>::_vec_sta;
+  using ODEBND_SUNDIALS<T,PMT,PVT>::_pos_ic;
   using ODEBND_SUNDIALS<T,PMT,PVT>::_pos_rhs;
   using ODEBND_SUNDIALS<T,PMT,PVT>::_pos_quad;
   using ODEBND_SUNDIALS<T,PMT,PVT>::_pos_fct;
   using ODEBND_SUNDIALS<T,PMT,PVT>::_init_stats;
   using ODEBND_SUNDIALS<T,PMT,PVT>::_final_stats;
   using ODEBND_SUNDIALS<T,PMT,PVT>::_print_stats;
+  using ODEBND_SUNDIALS<T,PMT,PVT>::_END_STA;
+  using ODEBND_SUNDIALS<T,PMT,PVT>::stats_sta;
+  using ODEBND_SUNDIALS<T,PMT,PVT>::results_sta;
 
  protected:
-  //! @brief current function
+  //! @brief current function index
   unsigned _ifct;
 
-  //! @brief number of function in N_vector arrays
-  unsigned _nfct;
+  //! @brief current parameter sensitivity index
+  unsigned _isen;
+
+  //! @brief size of N_vector arrays
+  unsigned _nvec;
 
   //! @brief N_Vector object holding current adjoints
   N_Vector *_Ny;
@@ -150,10 +176,10 @@ class ODEBNDS_SUNDIALS:
   } options;
 
   //! @brief Statistics for adjoint integration
-  Stats stats_adj;
+  Stats stats_sen;
 
   //! @brief Vector storing interval adjoint bounds (see Options::RESRECORD)
-  std::vector< Results > _results_adj;
+  std::vector< Results > results_sen;
 
   //! @brief Propagate state/quadrature interval bounds forward in time through every time stages
   STATUS bounds
@@ -168,22 +194,32 @@ class ODEBNDS_SUNDIALS:
       PVT*PMq, PVT*PMf, std::ostream&os=std::cout )
       { ODEBND_SUNDIALS<T,PMT,PVT>::options = options;
         return ODEBND_SUNDIALS<T,PMT,PVT>::_bounds( ns, tk, PMp, PMxk, PMq, PMf, false, os); }
+        
+ //! @brief Propagate state and sensitivity interval bounds forward and backward in time through every time stages
+  STATUS bounds_FSA
+    ( const unsigned ns, const double*tk, const T*Ip, T**Ixk, T*Iq, T*If, T**Ixpk, T*Iqp,
+      T*Ifp, std::ostream&os=std::cout );
+        
+ //! @brief Propagate state and sensitivity polynomial models forward and backward in time through every time stages
+  STATUS bounds_FSA
+    ( const unsigned ns, const double*tk, const PVT*PMp, PVT**PMxk, PVT*PMq, PVT*PMf,
+      PVT**PMxpk, PVT*PMqp, PVT*PMfp, std::ostream&os=std::cout );
 
   //! @brief Propagate state and adjoint interval bounds forward and backward in time through every time stages
   STATUS bounds_ASA
-    ( const unsigned ns, const double*tk, const T*Ip, T**Ixk, T*Iq, T*If, T**Ilk, T*Idf,
+    ( const unsigned ns, const double*tk, const T*Ip, T**Ixk, T*Iq, T*If, T**Ilk, T*Ifp,
       std::ostream&os=std::cout );
 
   //! @brief Propagate state and adjoint polynomial models forward and backward in time through every time stages
   STATUS bounds_ASA
     ( const unsigned ns, const double*tk, const PVT*PMp, PVT**PMxk, PVT*PMq, PVT*PMf,
-      PVT**PMlk, PVT*PMdf, std::ostream&os=std::cout );
+      PVT**PMlk, PVT*PMfp, std::ostream&os=std::cout );
 
   //! @brief Record state and sensitivity bounds in files <a>obndsta</a> and <a>obndsa</a>, with accuracy of <a>iprec</a> digits
   void record
     ( std::ofstream&obndsta, std::ofstream&obndsa, const unsigned iprec=5 ) const
     { this->ODEBND_SUNDIALS<T,PMT,PVT>::record( obndsta, iprec );
-      this->ODEBND_BASE<T,PMT,PVT>::_record( obndsa, _results_adj, iprec ); }
+      this->ODEBND_BASE<T,PMT,PVT>::_record( obndsa, results_sen, iprec ); }
 
   //! @brief Record state and sensitivity bounds in files <a>obndsta</a> and <a>obndsa</a>, with accuracy of <a>iprec</a> digits
   void record
@@ -195,42 +231,78 @@ class ODEBNDS_SUNDIALS:
   virtual bool _INI_CVODE
     ( CVRhsFn MC_CVRHS, CVRhsFn MC_CVQUAD );
 
-  //! @brief Function to initialize CVodeS memory block
+  //! @brief Function to initialize CVodeS memory block for forward sensitivity
+  bool _INI_CVODES
+    ( CVSENRhs1Fn MC_CVSENRHS, CVSENQuadFn MC_CVSENQUAD );
+
+  //! @brief Function to initialize CVodeS memory block for adjoint sensitivity
   bool _INI_CVODES
     ( CVADJRhsFn MC_CVADJRHS, CVADJRhsFn MC_CVADJQUAD, const unsigned ifct,
       int&indexB, unsigned&iusrB );
 
-  //! @brief Function to reinitialize CVodeS memory block
-  bool _CC_CVODES
+  //! @brief Function to reinitialize CVodeS memory block for forward sensitivity
+  bool _CC_CVODES_FSA
+    ();
+
+  //! @brief Function to reinitialize CVodeS memory block for adjoint sensitivity
+  bool _CC_CVODES_ASA
     ( const unsigned ifct, const int indexB );
 
-  //! @brief Function to finalize adjoint bounding
-  void _END_ADJ
+  //! @brief Function to finalize sensitivity/adjoint bounding
+  void _END_SEN
     ();
 
   //! @brief Function to initialize adjoint interval bounding
-  bool _INI_I_ADJ
+  bool _INI_I_ASA
     ( const unsigned np, const T *Ip );
 
-  //! @brief Static wrapper to function computing the adjoint DINEQ RHS values
-  static int MC_CVADJRHSI__
+  //! @brief Static wrapper to function computing the adjoint DINEQ RHS
+  static int MC_CVASARHSI__
     ( realtype t, N_Vector x, N_Vector y, N_Vector ydot, void *user_data );
 
-  //! @brief Static wrapper to function computing the quadratures RHS in interval arithmetic
-  static int MC_CVADJQUADI__
+  //! @brief Static wrapper to function computing the adjoint quadrature RHS
+  static int MC_CVASAQUADI__
     ( realtype t, N_Vector x, N_Vector y, N_Vector qdot, void *user_data );
 
   //! @brief Function to initialize adjoint polynomial models
-  bool _INI_PM_ADJ
+  bool _INI_PM_ASA
     ( const unsigned np, const PVT *PMp );
 
-  //! @brief Static wrapper to function to calculate the adjoint DINEQ-PM RHS values
-  static int MC_CVADJRHSPM__
+  //! @brief Static wrapper to function to calculate the adjoint DINEQ-PM RHS
+  static int MC_CVASARHSPM__
     ( realtype t, N_Vector x, N_Vector y, N_Vector ydot, void *user_data );
 
-  //! @brief Static wrapper to function computing the PM-quadratures RHS values
-  static int MC_CVADJQUADPM__
+  //! @brief Static wrapper to function computing the adjoint PM-quadrature RHS
+  static int MC_CVASAQUADPM__
     ( realtype t, N_Vector x, N_Vector y, N_Vector qdot, void *user_data );
+
+  //! @brief Function to initialize adjoint polynomial models
+  bool _INI_I_FSA
+    ( const unsigned np, const T *Ip );
+
+  //! @brief Static wrapper to function to calculate the sensitivity DINEQ RHS
+  static int MC_CVFSARHSI__
+    ( int Ns, realtype t, N_Vector x, N_Vector xdot, int is, N_Vector y,
+      N_Vector ydot, void *user_data, N_Vector tmp1, N_Vector tmp2 );
+
+  //! @brief Static wrapper to function computing the sensitivity quadrature RHS
+  static int MC_CVFSAQUADI__
+    ( int Ns, realtype t, N_Vector x, N_Vector *y, N_Vector qdot, N_Vector *qSdot, 
+      void *user_data, N_Vector tmp1, N_Vector tmp2 );
+
+  //! @brief Function to initialize adjoint polynomial models
+  bool _INI_PM_FSA
+    ( const unsigned np, const PVT *PMp );
+
+  //! @brief Static wrapper to function to calculate the sensitivity DINEQ-PM RHS
+  static int MC_CVFSARHSPM__
+    ( int Ns, realtype t, N_Vector x, N_Vector xdot, int is, N_Vector y,
+      N_Vector ydot, void *user_data, N_Vector tmp1, N_Vector tmp2 );
+
+  //! @brief Static wrapper to function computing the sensitivity PM-quadrature RHS
+  static int MC_CVFSAQUADPM__
+    ( int Ns, realtype t, N_Vector x, N_Vector *y, N_Vector qdot, N_Vector *qSdot, 
+      void *user_data, N_Vector tmp1, N_Vector tmp2 );
 
   //! @brief Private methods to block default compiler methods
   ODEBNDS_SUNDIALS(const ODEBNDS_SUNDIALS&);
@@ -244,15 +316,15 @@ template <typename T, typename PMT, typename PVT> inline
 ODEBNDS_SUNDIALS<T,PMT,PVT>::ODEBNDS_SUNDIALS
 ()
 : BASE_SUNDIALS(), ODEBNDS_BASE<T,PMT,PVT>(), ODEBND_SUNDIALS<T,PMT,PVT>(),
-  _ifct(0), _nfct(0), _Ny(0), _Nyq(0), _indexB(0), _iusrB(0)
+  _ifct(0), _isen(0), _nvec(0), _Ny(0), _Nyq(0), _indexB(0), _iusrB(0)
 {}
 
 template <typename T, typename PMT, typename PVT> inline
 ODEBNDS_SUNDIALS<T,PMT,PVT>::~ODEBNDS_SUNDIALS
 ()
 {
-  if( _Ny )   N_VDestroyVectorArray_Serial( _Ny,  _nfct );
-  if( _Nyq )  N_VDestroyVectorArray_Serial( _Nyq, _nfct );
+  if( _Ny )   N_VDestroyVectorArray_Serial( _Ny,  _nvec );
+  if( _Nyq )  N_VDestroyVectorArray_Serial( _Nyq, _nvec );
   delete[] _indexB;
   delete[] _iusrB;
 }
@@ -263,24 +335,16 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::_INI_CVODE
 {
   // Call _INI_CVODE in ODEBND_SUNDIALS
   this->ODEBND_SUNDIALS<T,PMT,PVT>::_INI_CVODE( MC_CVRHS, MC_CVQUAD );
-  
+
   // Allocate memory for adjoint integration
   _cv_flag = CVodeAdjInit( _cv_mem, options.ASACHKPT, options.ASAINTERP );
   if( _check_cv_flag(&_cv_flag, "CVodeAdjInit", 1) ) return false;
 
   // Reinitialize adjoint holding vectors
-  if( _nfct != _nf ){
-    if( _Ny )   N_VDestroyVectorArray_Serial( _Ny,  _nfct );
-    if( _Nyq )  N_VDestroyVectorArray_Serial( _Nyq, _nfct );
-    delete[] _indexB;
-    delete[] _iusrB;
-    _nfct = _nf;
-    _Ny  = N_VCloneVectorArray_Serial( _nfct, _Nx );
-    _Nyq = N_VCloneVectorArray_Serial( _nfct, _Nx );
-    _indexB = new int[_nfct];
-    _iusrB = new unsigned[_nfct];
-  }
-  
+  //{std::cout<<"here!\n"; int dum; std::cin>>dum;}
+  delete[] _indexB; _indexB = new int[_nf];
+  delete[] _iusrB;  _iusrB  = new unsigned[_nf];
+
   return true;
 }
 
@@ -327,15 +391,17 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::_INI_CVODES
      case Options::CV_LAPACKDENSE:
        //_cv_flag = CVLapackDenseB( _cv_mem, indexB, NV_LENGTH_S( _Ny[ifct] ) );
        //if( _check_cv_flag(&_cv_flag, "CVLapackDenseB", 1)) return false;
+       //_cv_flag = CVDlsSetDenseJacFnB( _cv_mem, indexB, NULL );
+       //if ( _check_cv_flag(&_cv_flag, "CVDlsSetDenseJacFnB", 1) ) return false;
        //break;
 
      case Options::CV_DENSE:
        _cv_flag = CVDenseB( _cv_mem, indexB, NV_LENGTH_S( _Ny[ifct] ) );
        if( _check_cv_flag(&_cv_flag, "CVDenseB", 1)) return false;
+       _cv_flag = CVDlsSetDenseJacFnB( _cv_mem, indexB, NULL );
+       if ( _check_cv_flag(&_cv_flag, "CVDlsSetDenseJacFnB", 1) ) return false;
        break;
     }
-    _cv_flag = CVDlsSetDenseJacFnB( _cv_mem, indexB, NULL );
-    if ( _check_cv_flag(&_cv_flag, "CVDlsSetDenseJacFnB", 1) ) return false;
   }
 
   // Specify the relative and absolute tolerances for states
@@ -371,16 +437,67 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::_INI_CVODES
 }
 
 template <typename T, typename PMT, typename PVT> inline bool
-ODEBNDS_SUNDIALS<T,PMT,PVT>::_CC_CVODES
+ODEBNDS_SUNDIALS<T,PMT,PVT>::_INI_CVODES
+( CVSENRhs1Fn MC_CVSENRHS, CVSENQuadFn MC_CVSENQUAD )
+{
+  // Allocate memory for sensitivity integration
+  _cv_flag = CVodeSensInit1( _cv_mem, _np, options.FSACORR, MC_CVSENRHS, _Ny );
+  if( _check_cv_flag(&_cv_flag, "CVodeSensInit1", 1) ) return false;
+
+  // Specify absolute and relative tolerances for sensitivities
+  if( options.AUTOTOLS ){
+    _cv_flag = CVodeSensEEtolerances( _cv_mem );
+    if( _check_cv_flag(&_cv_flag, "CVodeSensEEtolerances", 1)) return false;
+  }
+  else{
+    realtype ATOLS[_np];
+    for( unsigned int ip=0; ip<_np; ip++ ) ATOLS[ip] = options.ATOLS;
+    _cv_flag = CVodeSensSStolerances( _cv_mem, options.RTOLS, ATOLS );
+    if( _check_cv_flag(&_cv_flag, "CVodeSensSStolerances", 1)) return false;
+  }
+
+  // Specify the error control strategy for sensitivity variables
+  _cv_flag = CVodeSetSensErrCon( _cv_mem, options.FSAERR );
+  if( _check_cv_flag(&_cv_flag, "CVodeSetSensErrCon", 1) ) return false;
+
+  // Specify problem parameter information for sensitivity calculations
+  _cv_flag = CVodeSetSensParams( _cv_mem, 0, 0, 0 );
+  if( _check_cv_flag(&_cv_flag, "CVodeSetSensParams", 1) ) return false;
+
+  // Initialize integrator memory for quadratures
+  if( !_nq ) return true;
+  _cv_flag = CVodeQuadSensInit( _cv_mem, MC_CVSENQUAD, _Nyq );
+  if( _check_cv_flag(&_cv_flag, "CVodeQuadSensInit", 1) ) return false;
+  
+  // Specify whether or not to perform error control on quadrature
+  _cv_flag = CVodeSetQuadSensErrCon( _cv_mem, options.QERRS );
+  if( _check_cv_flag(&_cv_flag, "CVodeSetQuadSensErrCon", 1) ) return false;
+  
+  // Specify absolute and relative tolerances for quadratures
+  if( options.AUTOTOLS ){
+    _cv_flag = CVodeQuadSensEEtolerances( _cv_mem );
+    if( _check_cv_flag(&_cv_flag, "CVodeQuadSensEEtolerances", 1) ) return false;
+  }
+  else{
+    realtype ATOLS[_np];
+    for( unsigned int ip=0; ip<_np; ip++ ) ATOLS[ip] = options.ATOLS;
+    _cv_flag = CVodeQuadSensSStolerances(_cv_mem, options.RTOLS, ATOLS);
+    if( _check_cv_flag(&_cv_flag, "CVodeQuadSensSStolerances", 1) ) return false;
+  }
+
+  return true;
+}
+
+template <typename T, typename PMT, typename PVT> inline bool
+ODEBNDS_SUNDIALS<T,PMT,PVT>::_CC_CVODES_ASA
 ( const unsigned ifct, const int indexB )
 {
-  // Reinitialize CVodeS memory block for current time _t and
-  // current adjoint _Ny
+  // Reinitialize CVodeS memory block for current time _t and adjoint _Ny
   _cv_flag = CVodeReInitB( _cv_mem, indexB, _t, _Ny[ifct] );
   if( _check_cv_flag(&_cv_flag, "CVodeReInitB", 1) ) return false;
 
-  // Reinitialize CVodeS memory block for current quarature _Nq
-  if( !_Nyq ) return true;
+  // Reinitialize CVodeS memory block for current adjoint quarature _Nyq
+  if( !_np ) return true;
   _cv_flag = CVodeQuadReInitB( _cv_mem, indexB, _Nyq[ifct] );
   if( _check_cv_flag(&_cv_flag, "CVodeQuadReInitB", 1) ) return false;
 
@@ -388,11 +505,27 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::_CC_CVODES
 }
 
 template <typename T, typename PMT, typename PVT> inline bool
-ODEBNDS_SUNDIALS<T,PMT,PVT>::_INI_I_ADJ
+ODEBNDS_SUNDIALS<T,PMT,PVT>::_CC_CVODES_FSA
+()
+{
+  // Reinitialize CVodeS memory block for current sensitivity _Ny
+  _cv_flag = CVodeSensReInit( _cv_mem, options.FSACORR, _Ny );
+  if( _check_cv_flag(&_cv_flag, "CVodeSensReInit", 1) ) return false;
+
+  // Reinitialize CVode memory block for current sensitivity quarature _Nyq
+  if( !_nq ) return true;
+  _cv_flag = CVodeQuadSensReInit( _cv_mem, _Nyq );
+  if( _check_cv_flag(&_cv_flag, "CVodeQuadSensReInit", 1) ) return false;
+
+  return true;
+}
+
+template <typename T, typename PMT, typename PVT> inline bool
+ODEBNDS_SUNDIALS<T,PMT,PVT>::_INI_I_ASA
 ( const unsigned np, const T*Ip )
 {
   // Initialize bound propagation
-  if( !ODEBNDS_BASE<T,PMT,PVT>::_INI_I_ADJ( options, np, Ip ) )
+  if( !_INI_I_SEN( options, np, Ip, _nf, np ) )
     return false;
 
   // Set SUNDIALS adjoint/quadrature arrays
@@ -409,6 +542,13 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::_INI_I_ADJ
     cv_Nyq_size = _np*(2+np);
     break;
   }
+  if( _nvec != _nf ){
+    if( _Ny )   N_VDestroyVectorArray_Serial( _Ny,  _nvec );
+    if( _Nyq )  N_VDestroyVectorArray_Serial( _Nyq, _nvec );
+    _nvec = _nf;
+    _Ny  = N_VCloneVectorArray_Serial( _nvec, _Nx );
+    _Nyq = N_VCloneVectorArray_Serial( _nvec, _Nx );
+  }
   for( unsigned i=0; i<_nf; i++ ){
     if( !_Ny[i] || cv_Ny_size != NV_LENGTH_S( _Ny[i] ) ){
       if( _Ny[i] ) N_VDestroy_Serial( _Ny[i] );
@@ -421,39 +561,39 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::_INI_I_ADJ
   }
 
   // Reset result record and statistics
-  _results_adj.clear();
-  _init_stats( stats_adj );
+  results_sen.clear();
+  _init_stats( stats_sen );
 
   return true;
 }
 
 template <typename T, typename PMT, typename PVT> inline void
-ODEBNDS_SUNDIALS<T,PMT,PVT>::_END_ADJ()
+ODEBNDS_SUNDIALS<T,PMT,PVT>::_END_SEN()
 {
   // Get final CPU time
-  _final_stats( stats_adj );
+  _final_stats( stats_sen );
 }
 
 template <typename T, typename PMT, typename PVT> inline int
-ODEBNDS_SUNDIALS<T,PMT,PVT>::MC_CVADJRHSI__
+ODEBNDS_SUNDIALS<T,PMT,PVT>::MC_CVASARHSI__
 ( realtype t, N_Vector x, N_Vector y, N_Vector ydot, void *user_data )
 {
   ODEBNDS_SUNDIALS<T,PMT,PVT> *pODEBNDS = ODEBNDS_SUNDIALS<T,PMT,PVT>::pODEBNDS;
   pODEBNDS->_ifct = *static_cast<unsigned*>( user_data );
-  bool flag = pODEBNDS->_RHS_I_ADJ( pODEBNDS->options, t, NV_DATA_S( x ), NV_DATA_S( y ),
+  bool flag = pODEBNDS->_RHS_I_SEN( pODEBNDS->options, t, NV_DATA_S( x ), NV_DATA_S( y ),
     NV_DATA_S( ydot ), pODEBNDS->_ifct, true );
   ODEBNDS_SUNDIALS<T,PMT,PVT>::pODEBNDS = pODEBNDS;
-  pODEBNDS->stats_adj.numRHS++;
+  pODEBNDS->stats_sen.numRHS++;
   return( (flag && _diam( pODEBNDS->_nx, pODEBNDS->_Iy ) < pODEBNDS->options.DMAX)? 0: -1 );
 }
 
 template <typename T, typename PMT, typename PVT> inline int
-ODEBNDS_SUNDIALS<T,PMT,PVT>::MC_CVADJQUADI__
+ODEBNDS_SUNDIALS<T,PMT,PVT>::MC_CVASAQUADI__
 ( realtype t, N_Vector x, N_Vector y, N_Vector qdot, void *user_data )
 {
   ODEBNDS_SUNDIALS<T,PMT,PVT> *pODEBNDS = ODEBNDS_SUNDIALS<T,PMT,PVT>::pODEBNDS;
   pODEBNDS->_ifct = *static_cast<unsigned*>( user_data );
-  bool flag = pODEBNDS->_RHS_I_QUAD( pODEBNDS->options, NV_DATA_S( qdot ),
+  bool flag = pODEBNDS->_RHS_I_QUAD( pODEBNDS->options, pODEBNDS->_np, NV_DATA_S( qdot ),
     pODEBNDS->_ifct, true );
   ODEBNDS_SUNDIALS<T,PMT,PVT>::pODEBNDS = pODEBNDS;
   return( flag? 0: -1 );
@@ -461,25 +601,27 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::MC_CVADJQUADI__
 
 //! @fn template <typename T, typename PMT, typename PVT> inline typename ODEBND_GSL<T,PMT,PVT>::STATUS ODEBND_GSL<T,PMT,PVT>::bounds_ASA
 //!( const unsigned ns, const double*tk, const T*Ip, T**Ixk,
-//!  T*Iq, T*If, T**Ilk, T*Idf, std::ostream&os=std::cout )
+//!  T*Iq, T*If, T**Ilk, T*Ifp, std::ostream&os=std::cout )
 //!
 //! This function computes an interval enclosure on the functional defined
 //! in F together with its derivatives as well as an interval enclosure of the reachable set of 
 //! the parametric ODEs defined in IVP using equally spaced samples:
-//!   - <a>ns</a> [input] number of time stages
-//!   - <a>tk</a> [input] stage times, including the initial time
-//!   - <a>Ip</a> [input] parameters interval parameter set
-//!   - <a>Ixk</a> [output] states interval enclosures at stage times
-//!   - <a>If</a> [output] functions interval enclosures at stage times
-//!   - <a>Idf</a> [output] function derivatives interval enclosures at stage times
-//!   - <a>os</a> [input] output stream
+//!  - <a>ns</a>  [input] number of time stages
+//!  - <a>tk</a>  [input] stage times, including the initial time
+//!  - <a>Ip</a>  [input] parameters interval parameter set
+//!  - <a>Ixk</a> [output] states interval enclosures at stage times
+//!  - <a>Iq</a>  [output] quadrature interval enclosures
+//!  - <a>If</a>  [output] functions interval enclosures at stage times
+//!  - <a>Ilk</a> [output] adjoint interval enclosures at stage times
+//!  - <a>Ifp</a> [output] function derivatives interval enclosures at stage times
+//!  - <a>os</a>  [input] output stream (default: std::cout)
 //! .
 //! The return value is the status.
 template <typename T, typename PMT, typename PVT>
 inline typename ODEBNDS_SUNDIALS<T,PMT,PVT>::STATUS
 ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
 ( const unsigned ns, const double*tk, const T*Ip, T**Ixk, T*Iq, T*If,
-  T**Ilk, T*Idf, std::ostream&os )
+  T**Ilk, T*Ifp, std::ostream&os )
 {
   // Compute state bounds and store intermediate results
   STATUS flag = NORMAL;
@@ -491,40 +633,40 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
   if( !_nf ) return NORMAL;
 
   // Check size
-  if( !Ilk || !Idf ) return FATAL;
+  if( !Ilk || !Ifp ) return FATAL;
 
   try{
     // Initialize adjoint bound integration
-    if( !_INI_I_ADJ( _np, Ip )) return FATAL;
+    if( !_INI_I_ASA( _np, Ip )) return FATAL;
     _t = tk[ns];
 
     // Bounds on terminal adjoints/quadratures
     if( Ilk && !Ilk[ns] ) Ilk[ns] = new T[_nx*_nf];
     for( _ifct=0; _ifct < _nf; _ifct++ ){
       _pos_fct = ( _vFCT.size()>=ns? ns-1:0 );
-      if( !_TC_I_SET( options, _pos_fct, _ifct)
-       || !_TC_I_ADJ( options, _t, _vec_sta[ns].data(), NV_DATA_S(_Ny[_ifct]) )
-       || ( _Nyq && _Nyq[_ifct] && !_TC_I_QUAD( options, NV_DATA_S(_Nyq[_ifct]) ) ) )
-        { _END_ADJ(); return FATAL; }
+      if( !_TC_I_SET_ASA( options, _pos_fct, _ifct )
+       || !_TC_I_SEN( options, _t, _vec_sta[ns].data(), NV_DATA_S(_Ny[_ifct]) )
+       || ( _Nyq && _Nyq[_ifct] && !_TC_I_QUAD_ASA( options, NV_DATA_S(_Nyq[_ifct]) ) ) )
+        { _END_SEN(); return FATAL; }
       for( unsigned iy=0; Ilk[ns] && iy<_nx; iy++ )
         Ilk[ns][_ifct*_nx+iy] = _Iy[iy];
       for( unsigned iq=0; iq<_np; iq++ )
-        Idf[_ifct*_np+iq] = _Iyq[iq];
+        Ifp[_ifct*_np+iq] = _Iyq[iq];
     }
 
     // Display & record adjoint terminal results
     if( options.DISPLAY >= 1 ){
       _print_interm( tk[ns], _nf*_nx, Ilk[ns], "l", os );//_nf
-      //_print_interm( _nf*_np, Idf, "df", os );
+      //_print_interm( _nf*_np, Ifp, "fp", os );
     }
     if( options.RESRECORD )
-      _results_adj.push_back( Results( tk[ns], _nx*_nf, Ilk[ns] ) );//_nf
+      results_sen.push_back( Results( tk[ns], _nx*_nf, Ilk[ns] ) );//_nf
 
     // Initialization of adjoint integration
     for( _ifct=0; _ifct < _nf; _ifct++ )
-      if( !_INI_CVODES( MC_CVADJRHSI__, MC_CVADJQUADI__, _ifct,
+      if( !_INI_CVODES( MC_CVASARHSI__, MC_CVASAQUADI__, _ifct,
         _indexB[_ifct], _iusrB[_ifct] ) )
-        { _END_ADJ(); return FATAL;}
+        { _END_SEN(); return FATAL;}
 
     // Integrate adjoint ODEs through each stage using SUNDIALS
     pODEBNDS = this;
@@ -533,39 +675,49 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
       // Update list of operations in RHSADJ and QUADADJ
       _pos_rhs  = ( _vRHS.size() <=1? 0: _istg-1 );
       _pos_quad = ( _vQUAD.size()<=1? 0: _istg-1 );
-      if( !_RHS_I_SET( options, _pos_rhs, _pos_quad, _pos_fct ) )
-        { _END_ADJ(); return FATAL; }
+      if( !_RHS_SET_ASA( _pos_rhs, _pos_quad, _pos_fct )
+       || !_RHS_I_SET( options, _nf, _np ) )
+        { _END_SEN(); return FATAL; }
 
       // Propagate bounds backward to previous stage time
       _cv_flag = CVodeB( _cv_mem, tk[_istg-1], CV_NORMAL );
       if( _check_cv_flag(&_cv_flag, "CVodeB", 1) )
-        { _END_ADJ(); return FATAL; }
+        { _END_SEN(); return FATAL; }
       _t = tk[_istg-1];
 
       // Bounds on states/adjoints/quadratures at stage time
-      //stats_adj.numSteps = 0; 
+      //stats_sen.numSteps = 0; 
       for( _ifct=0; _ifct < _nf; _ifct++ ){
         _cv_flag = CVodeGetB( _cv_mem, _indexB[_ifct], &_t, _Ny[_ifct]);
         if( _check_cv_flag( &_cv_flag, "CVodeGetB", 1) )
-          { _END_ADJ(); return FATAL; }
+          { _END_SEN(); return FATAL; }
         _cv_flag = CVodeGetQuadB( _cv_mem, _indexB[_ifct], &_t, _Nyq[_ifct]);
+#ifdef MC__ODEBNDS_SUNDIALS_DEBUG
+          for( unsigned iy=0; iy<NV_LENGTH_S(_Ny[_ifct]); iy++ )
+            std::cout << "_Ny" << _ifct << "[iy] = " << NV_Ith_S(_Ny[_ifct],iy) << std::endl;
+#endif
         if( _check_cv_flag( &_cv_flag, "CVodeGetQuadB", 1) )
-          { _END_ADJ(); return FATAL; }
+          { _END_SEN(); return FATAL; }
+#ifdef MC__ODEBNDS_SUNDIALS_DEBUG
+          for( unsigned iy=0; iy<NV_LENGTH_S(_Nyq[_ifct]); iy++ )
+            std::cout << "_Nyq" << _ifct << "[iy] = " << NV_Ith_S(_Nyq[_ifct],iy) << std::endl;
+#endif
         void *cv_memB = CVodeGetAdjCVodeBmem(_cv_mem, _indexB[_ifct] );
         long int nstpB;
         _cv_flag = CVodeGetNumSteps( cv_memB, &nstpB );
-        stats_adj.numSteps += nstpB;
+        stats_sen.numSteps += nstpB;
 
         // Add function contribution to adjoint bounds (discontinuities)
         if( _istg > 1  ){
           _pos_fct = ( _vFCT.size()>=ns? _istg-1:0 );
           if( _pos_fct
-           && ( !_CC_I_SET( options, _pos_fct, _ifct )
-             || !_CC_I_ADJ( options, _t, _vec_sta[_istg-1].data(), NV_DATA_S(_Ny[_ifct]) )
-             || ( _Nyq && _Nyq[_ifct] && !_CC_I_QUAD( options, NV_DATA_S(_Nyq[_ifct]) ) ) ) )
-            { _END_ADJ(); return FATAL; }
+           && ( !_CC_SET_ASA( _pos_fct, _ifct )
+             || !_CC_I_SET( options )
+             || !_CC_I_SEN( options, _t, _vec_sta[_istg-1].data(), NV_DATA_S(_Ny[_ifct]) )
+             || ( _Nyq && _Nyq[_ifct] && !_CC_I_QUAD_ASA( options, NV_DATA_S(_Nyq[_ifct]) ) ) ) )
+            { _END_SEN(); return FATAL; }
           else if( !_pos_fct )
-             _GET_I_ADJ( options, NV_DATA_S(_Ny[_ifct]), _Nyq && _Nyq[_ifct]? NV_DATA_S(_Nyq[_ifct]): 0 );
+             _GET_I_SEN( options, NV_DATA_S(_Ny[_ifct]), _np, _Nyq && _Nyq[_ifct]? NV_DATA_S(_Nyq[_ifct]): 0 );
 #ifdef MC__ODEBNDS_SUNDIALS_DEBUG
           for( unsigned iy=0; iy<NV_LENGTH_S(_Ny[_ifct]); iy++ )
             std::cout << "_Ny" << _ifct << "[iy] = " << NV_Ith_S(_Ny[_ifct],iy) << std::endl;
@@ -574,51 +726,349 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
 #endif
 
           // Reset ODE solver - needed in case of discontinuity
-          if( !_CC_CVODES( _ifct, _indexB[_ifct] ) )
-            { _END_ADJ(); return FATAL; }
+          if( !_CC_CVODES_ASA( _ifct, _indexB[_ifct] ) )
+            { _END_SEN(); return FATAL; }
         }
         // Add initial state contribution to derivative bounds
-        else if( !_IC_I_SET( options )
-              || !_IC_I_ADJ( options, _t, _vec_sta[_istg-1].data(), NV_DATA_S(_Ny[_ifct]) )
-              || ( _Nyq && _Nyq[_ifct] && !_IC_I_QUAD( options, NV_DATA_S(_Nyq[_ifct]) ) ) )
-          { _END_ADJ(); return FATAL; }
+        else if( !_IC_I_SET_ASA( options )
+              || !_IC_I_SEN( options, _t, _vec_sta[_istg-1].data(), NV_DATA_S(_Ny[_ifct]) )
+              || ( _Nyq && _Nyq[_ifct] && !_IC_I_QUAD_ASA( options, NV_DATA_S(_Nyq[_ifct]) ) ) )
+          { _END_SEN(); return FATAL; }
 
         // Keep track of results at stage times
         if( Ilk && !Ilk[_istg-1] ) Ilk[_istg-1] = new T[_nx*_nf];
         for( unsigned iy=0; Ilk[_istg-1] && iy<_nx; iy++ )
           Ilk[_istg-1][_ifct*_nx+iy] = _Iy[iy];
         for( unsigned iq=0; iq<_np; iq++ )
-          Idf[_ifct*_np+iq] = _Iyq[iq];
+          Ifp[_ifct*_np+iq] = _Iyq[iq];
       }
 
       // Display & record adjoint intermediate results
       if( options.DISPLAY >= 1 ){
         _print_interm( tk[_istg-1], _nf*_nx, Ilk[_istg-1], "l", os );
-        //_print_interm( _nf*_np, Idf, "df", os );
+        //_print_interm( _nf*_np, Ifp, "fp", os );
       }
       if( options.RESRECORD )
-        _results_adj.push_back( Results( tk[_istg-1], _nf*_nx, Ilk[_istg-1] ) );
+        results_sen.push_back( Results( tk[_istg-1], _nf*_nx, Ilk[_istg-1] ) );
     }
     if( options.DISPLAY >= 1 )
-      _print_interm( _nf*_np, Idf, "df", os );
+      _print_interm( _nf*_np, Ifp, "fp", os );
   }
   catch(...){
-    _END_ADJ();
-    if( options.DISPLAY >= 1 ) _print_stats( stats_adj, os );
+    _END_SEN();
+    if( options.DISPLAY >= 1 ) _print_stats( stats_sen, os );
     return FAILURE;
   }
-  _END_ADJ();
-  if( options.DISPLAY >= 1 ) _print_stats( stats_adj, os );
+  _END_SEN();
+  if( options.DISPLAY >= 1 ) _print_stats( stats_sen, os );
 
   return NORMAL;
 }
 
 template <typename T, typename PMT, typename PVT> inline bool
-ODEBNDS_SUNDIALS<T,PMT,PVT>::_INI_PM_ADJ
+ODEBNDS_SUNDIALS<T,PMT,PVT>::_INI_I_FSA
+( const unsigned np, const T *Ip )
+{
+  // Initialize bound propagation
+  if( !_INI_I_SEN( options, np, Ip, np, _nq ) )
+    return false;
+
+  // Set SUNDIALS sensitivity/quadrature arrays
+  unsigned cv_Ny_size, cv_Nyq_size;
+  switch( options.WRAPMIT){
+  case Options::NONE:
+  case Options::DINEQ:
+    cv_Ny_size  = 2*_nx;
+    cv_Nyq_size = 2*_nq;
+    break;
+  case Options::ELLIPS:
+  default:
+    cv_Ny_size  = _nx*(1+np)+_nx*(_nx+1)/2;
+    cv_Nyq_size = _nq*(2+np);
+    break;
+  }
+  if( _nvec != np ){
+    if( _Ny )   N_VDestroyVectorArray_Serial( _Ny,  _nvec ); _Ny = 0;
+    if( _Nyq )  N_VDestroyVectorArray_Serial( _Nyq, _nvec ); _Nyq = 0;
+    _nvec = np;
+    _Ny  = N_VCloneVectorArray_Serial( np, _Nx );
+    if( _nq ) _Nyq = N_VCloneVectorArray_Serial( np, _Nq );
+  }
+  for( unsigned i=0; i<np; i++ ){
+    if( !_Ny[i] || cv_Ny_size != NV_LENGTH_S( _Ny[i] ) ){
+      if( _Ny[i] ) N_VDestroy_Serial( _Ny[i] );
+      _Ny[i] = N_VNew_Serial( cv_Ny_size );
+    }
+    if( _Nyq && (!_Nyq[i] || cv_Nyq_size != NV_LENGTH_S( _Nyq[i]) ) ){
+      if( _Nyq[i] ) N_VDestroy_Serial( _Nyq[i] );
+      _Nyq[i] = cv_Nyq_size? N_VNew_Serial( cv_Nyq_size ): 0;
+    }
+  }
+
+  // Reset result record and statistics
+  results_sen.clear();
+  _init_stats( stats_sen );
+
+  return true;
+}
+
+template <typename T, typename PMT, typename PVT> inline int
+ODEBNDS_SUNDIALS<T,PMT,PVT>::MC_CVFSARHSI__
+( int Ns, realtype t, N_Vector x, N_Vector xdot, int is, N_Vector y,
+  N_Vector ydot, void *user_data, N_Vector tmp1, N_Vector tmp2 )
+{
+  ODEBNDS_SUNDIALS<T,PMT,PVT> *pODEBNDS = ODEBNDS_SUNDIALS<T,PMT,PVT>::pODEBNDS;
+//#ifdef MC__ODEBNDS_SUNDIALS_DEBUG
+  std::cout << "@t=" << t << "\nx:\n";
+  for( unsigned i=0; i<NV_LENGTH_S( x ); i++ ) std::cout << NV_Ith_S( x, i ) << std::endl;
+  std::cout << "y:\n";
+  for( unsigned i=0; i<NV_LENGTH_S( y ); i++ ) std::cout << NV_Ith_S( y, i ) << std::endl;
+//#endif
+  bool flag = pODEBNDS->_RHS_I_SEN( pODEBNDS->options, t, NV_DATA_S( x ), NV_DATA_S( y ),
+    NV_DATA_S( ydot ), is );
+//#ifdef MC__ODEBNDS_SUNDIALS_DEBUG
+  std::cout << "ydot:\n";
+  for( unsigned i=0; i<NV_LENGTH_S( ydot ); i++ ) std::cout << NV_Ith_S( ydot, i ) << std::endl;
+  { int dum; std::cin >> dum; }
+//#endif
+  ODEBNDS_SUNDIALS<T,PMT,PVT>::pODEBNDS = pODEBNDS;
+  pODEBNDS->stats_sen.numRHS++;
+  return( (flag && _diam( pODEBNDS->_nx, pODEBNDS->_Iy ) < pODEBNDS->options.DMAX)? 0: -1 );
+}
+
+template <typename T, typename PMT, typename PVT> inline int
+ODEBNDS_SUNDIALS<T,PMT,PVT>::MC_CVFSAQUADI__
+( int Ns, realtype t, N_Vector x, N_Vector *y, N_Vector qdot, N_Vector *qSdot, 
+  void *user_data, N_Vector tmp1, N_Vector tmp2 )
+{
+  ODEBNDS_SUNDIALS<T,PMT,PVT> *pODEBNDS = ODEBNDS_SUNDIALS<T,PMT,PVT>::pODEBNDS;
+//#ifdef MC__ODEBNDS_SUNDIALS_DEBUG
+  std::cout << "@t=" << t << "\nx:\n";
+  for( unsigned i=0; i<NV_LENGTH_S( x ); i++ ) std::cout << NV_Ith_S( x, i ) << std::endl;
+  std::cout << "qdot:\n";
+  for( unsigned i=0; i<NV_LENGTH_S( qdot ); i++ ) std::cout << NV_Ith_S( qdot, i ) << std::endl;
+//#endif
+  bool flag = true;
+  for( int is=0; is<Ns && flag; is++ ){
+    pODEBNDS->_GET_I_SEN( pODEBNDS->options, NV_DATA_S(x), NV_DATA_S(y[is]), (realtype*)0, 0, (realtype*)0 );
+//#ifdef MC__ODEBNDS_SUNDIALS_DEBUG
+    std::cout << "y:\n";
+    for( unsigned i=0; i<NV_LENGTH_S( y[is] ); i++ ) std::cout << NV_Ith_S( y[is], i ) << std::endl;
+//#endif
+    flag = pODEBNDS->_RHS_I_QUAD( pODEBNDS->options, pODEBNDS->_nq, NV_DATA_S( qSdot[is] ), is );
+//#ifdef MC__ODEBNDS_SUNDIALS_DEBUG
+    std::cout << "qSdot:\n";
+    for( unsigned i=0; i<NV_LENGTH_S( qSdot[is] ); i++ ) std::cout << NV_Ith_S( qSdot[is], i ) << std::endl;
+    { int dum; std::cin >> dum; }
+//#endif
+  }
+  ODEBNDS_SUNDIALS<T,PMT,PVT>::pODEBNDS = pODEBNDS;
+  return( flag? 0: -1 );
+}
+
+//! @fn template <typename T, typename PMT, typename PVT> inline typename ODEBNDS_GSL<T,PMT,PVT>::STATUS ODEBNDS_GSL<T,PMT,PVT>::bounds_FSA(
+//! const unsigned ns, const double*tk, const T*Ip, T**Ixk=0, 
+//! T*Iq=0, T*If=0, T**Ixpk=0, T*Iqp=0, T*Ifp=0, std::ostream&os=std::cout )
+//!
+//! This function computes an interval enclosure on the functional defined
+//! in F together with its derivatives as well as an interval enclosure of the reachable set of 
+//! the parametric ODEs defined in IVP using equally spaced samples:
+//!  - <a>ns</a>   [input] number of time stages
+//!  - <a>tk</a>   [input] stage times, including the initial time
+//!  - <a>Ip</a>   [input] parameters interval parameter set
+//!  - <a>Ixk</a>  [output] states interval enclosures at stage times
+//!  - <a>Iq</a>   [output] quadrature interval enclosures
+//!  - <a>If</a>   [output] functions interval enclosures at stage times
+//!  - <a>Ixpk</a> [output] state-sensitivity interval enclosures at stage times
+//!  - <a>Iqp</a>  [output] quadrature-sensitivity interval enclosures
+//!  - <a>Ifp</a>  [output] function derivatives interval enclosures at stage times
+//!  - <a>os</a>   [input] output stream
+//! .
+//! The return value is the status.
+template <typename T, typename PMT, typename PVT>
+inline typename ODEBNDS_SUNDIALS<T,PMT,PVT>::STATUS
+ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_FSA
+( const unsigned ns, const double*tk, const T*Ip, T**Ixk, T*Iq, T*If,
+  T**Ixpk, T*Iqp, T*Ifp, std::ostream&os )
+{
+  // Check arguments
+  if( !tk || !Ixk || !Ip || !Ixpk
+    || ( _nf && (!If || !Ifp) ) 
+    || ( _nq && (!Iq || !Iqp) ) ) return FATAL;
+
+  try{
+    // Initialize trajectory integration
+    if( !ODEBND_SUNDIALS<T,PMT,PVT>::_INI_I_STA( _np, Ip, ns ) 
+     || !_INI_I_FSA( _np, Ip ) ) return FATAL;
+    _t = tk[0];
+
+    // Bounds on initial states/quadratures
+    if( !ODEBND_BASE<T,PMT,PVT>::_IC_I_SET( options )
+     || !ODEBND_BASE<T,PMT,PVT>::_IC_I_STA( options, _t, NV_DATA_S( _Nx ) )
+     || ( _Nq && !ODEBND_BASE<T,PMT,PVT>::_IC_I_QUAD( options, NV_DATA_S( _Nq ) ) ) )
+      { _END_STA(); _END_SEN(); return FATAL; }
+    if( Ixk && !Ixk[0] ) Ixk[0] = new T[_nx];
+    for( unsigned ix=0; Ixk[0] && ix<_nx; ix++ ) Ixk[0][ix] = _Ix[ix];
+    for( unsigned iq=0; iq<_nq; iq++ ) Iq[iq] = _Iq[iq];
+
+    // Bounds on initial state/quadrature sensitivities
+    if( Ixpk && !Ixpk[0] ) Ixpk[0] = new T[_nx*_np];
+    for( _isen=0; _isen<_np; _isen++ ){
+      if( !_IC_SET_FSA( _isen )
+       || !ODEBND_BASE<T,PMT,PVT>::_IC_I_STA( options, _t, NV_DATA_S(_Ny[_isen]) )
+       || ( _Nyq && _Nyq[_isen] && !ODEBND_BASE<T,PMT,PVT>::_IC_I_QUAD( options, NV_DATA_S(_Nyq[_isen]) ) ) ) 
+        { _END_STA(); _END_SEN(); return FATAL; }
+      for( unsigned iy=0; Ixpk[0] && iy<_nx; iy++ ) Ixpk[0][_isen*_nx+iy] = _Ix[iy];
+      for( unsigned iq=0; iq<_nq; iq++ ) Iqp[_isen*_nq+iq] = _Iq[iq];
+#ifdef MC__ODEBNDS_SUNDIALS_DEBUG
+      std::cout << "qS[" << _isen << "]: " << _Nyq[_isen] << "(" << NV_LENGTH_S( _Nyq[_isen] ) << ")\n";
+      for( unsigned i=0; i<NV_LENGTH_S( _Nyq[_isen] ); i++ ) std::cout << NV_Ith_S( _Nyq[_isen], i ) << std::endl;
+      { int dum; std::cin >> dum; }
+#endif
+    }
+
+    // Display & record initial results
+    if( options.DISPLAY >= 1 ){
+      _print_interm( _t, _nx, Ixk[0], "x", os );
+      _print_interm( _nq, Iq, "q", os );
+      _print_interm( _nx*_np, Ixpk[0], "xp", os );
+      _print_interm( _nq*_np, Iqp, "qp", os );
+    }
+    if( options.RESRECORD ){
+      results_sta.push_back( Results( _t, _nx, Ixk[0] ) );
+      results_sen.push_back( Results( _t, _nx*_np, Ixpk[0] ) );
+    }
+
+    // Integrate ODEs through each stage using SUNDIALS
+    ODEBND_SUNDIALS<T,PMT,PVT>::pODEBND = pODEBNDS = this;
+    if( !ODEBND_SUNDIALS<T,PMT,PVT>::_INI_CVODE
+          ( ODEBND_SUNDIALS<T,PMT,PVT>::MC_CVRHSI__,
+            ODEBND_SUNDIALS<T,PMT,PVT>::MC_CVQUADI__ )
+     || !_INI_CVODES( MC_CVFSARHSI__, MC_CVFSAQUADI__ ) )
+      { _END_STA(); _END_SEN(); return FATAL; }
+
+    for( _istg=0; _istg<ns; _istg++ ){
+      // Bounds on state discontinuities (if any) at stage times
+      // and integrator reinitialization (if applicable)
+      _pos_ic = ( _vIC.size()>=ns? _istg:0 );
+      if( _pos_ic
+       && ( !ODEBND_BASE<T,PMT,PVT>::_CC_I_SET( options, _pos_ic )
+         || !ODEBND_BASE<T,PMT,PVT>::_CC_I_STA( options, _t, NV_DATA_S( _Nx ) )
+         || !ODEBND_SUNDIALS<T,PMT,PVT>::_CC_CVODE() ) )
+        { _END_STA(); _END_SEN(); return FATAL; }
+      for( _isen=0; _pos_ic && _isen<_np; _isen++ ){
+        if( !_CC_SET_FSA( _pos_ic, _isen )
+         || !_CC_I_SET( options )
+         || !_CC_I_SEN( options, _t, NV_DATA_S( _Nx ), NV_DATA_S(_Ny[_isen]) )
+         || ( !_isen && !_CC_CVODES_FSA() ) )
+          { _END_STA(); _END_SEN(); return FATAL; }
+#ifdef MC__ODEBNDS_SUNDIALS_DEBUG
+        for( unsigned iy=0; iy<NV_LENGTH_S(_Ny[_isen]); iy++ )
+          std::cout << "_Ny" << _isen << "[iy] = " << NV_Ith_S(_Ny[_isen],iy) << std::endl;
+        for( unsigned iy=0; iy<NV_LENGTH_S(_Nyq[_isen]); iy++ )
+          std::cout << "_Nyq" << _isen << "[iy] = " << NV_Ith_S(_Nyq[_isen],iy) << std::endl;
+#endif
+      }
+
+      // update list of operations in RHS, JAC, QUAD, RHSFSA and QUADFSA
+      _pos_rhs  = ( _vRHS.size()<=1?  0: _istg );
+      _pos_quad = ( _vQUAD.size()<=1? 0: _istg );
+      if( (!_istg || _pos_rhs || _pos_quad)
+        && ( !ODEBND_BASE<T,PMT,PVT>::_RHS_I_SET( options, _pos_rhs, _pos_quad )
+          || !_RHS_SET_FSA( _pos_rhs, _pos_quad )
+          || !_RHS_I_SET( options, _np, _nq ) ) )
+        { _END_STA(); _END_SEN(); return FATAL; }
+
+      // integrate till end of time stage
+      _cv_flag = CVodeSetStopTime( _cv_mem, tk[_istg+1] );
+      if( _check_cv_flag(&_cv_flag, "CVodeSetStopTime", 1) )
+        { _END_STA(); return FATAL; }
+      while( _t < tk[_istg+1] ){
+        _cv_flag = CVode( _cv_mem, tk[_istg+1], _Nx, &_t, CV_ONE_STEP );
+        if( _check_cv_flag(&_cv_flag, "CVode", 1)
+         || (options.NMAX && stats_sta.numSteps > options.NMAX)
+         || _diam( _nx, _Ix  ) > options.DMAX )
+          throw Exceptions( Exceptions::INTERN );
+        stats_sta.numSteps++;
+        stats_sen.numSteps++;
+      }
+
+      // Bounds on intermediate states, quadratures and their sensitivities
+      if( _nq ){
+        for( unsigned ip=0; ip<_np; ip++ ){
+          _cv_flag = CVodeGetQuadSens1(_cv_mem, &_t, ip, _Nyq[ip]);
+          if( _check_cv_flag( &_cv_flag, "CVodeGetQuadSens", 1) )
+            { _END_STA(); _END_SEN(); return FATAL; }
+#ifdef MC__ODEBNDS_SUNDIALS_DEBUG
+          std::cout << "qS[" << ip << "]: " << _Nyq[ip] << "(" << NV_LENGTH_S( _Nyq[ip] ) << ")\n";
+          for( unsigned i=0; i<NV_LENGTH_S( _Nyq[ip] ); i++ ) std::cout << NV_Ith_S( _Nyq[ip], i ) << std::endl;
+          { int dum; std::cin >> dum; }
+#endif
+        }
+        _cv_flag = CVodeGetQuad( _cv_mem, &_t, _Nq );
+        if( _check_cv_flag(&_cv_flag, "CVodeGetQuad", 1) )
+          { _END_STA(); _END_SEN(); return FATAL; }
+      }
+      _cv_flag = CVodeGetSens(_cv_mem, &_t, _Ny);
+      if( _check_cv_flag( &_cv_flag, "CVodeGetSens", 1) )
+         { _END_STA(); _END_SEN(); return FATAL; }
+
+      // Add intermediate function terms and derivatives
+      _pos_fct = ( _vFCT.size()>=ns? _istg:0 );
+      ODEBND_SUNDIALS<T,PMT,PVT>::_GET_I_STA( options, NV_DATA_S(_Nx), _nq && _Nq? NV_DATA_S(_Nq): 0 );
+      if( (_vFCT.size()>=ns || _istg==ns-1)
+       && !ODEBND_BASE<T,PMT,PVT>::_FCT_I_STA( _pos_fct, _t, If ) )
+        { _END_STA(); _END_SEN(); return FATAL; }
+      if( Ixk && !Ixk[_istg+1] ) Ixk[_istg+1] = new T[_nx];
+      for( unsigned ix=0; ix<_nx; ix++ ) Ixk[_istg+1][ix] = _Ix[ix];
+      for( unsigned iq=0; iq<_nq; iq++ ) Iq[iq] = _Iq[iq];
+      for( _isen=0; _isen<_np; _isen++ ){
+        _GET_I_SEN( options, NV_DATA_S(_Nx), NV_DATA_S(_Ny[_isen]), _nq && _Nq? NV_DATA_S(_Nq): 0,
+                    _nq, _nq && _Nyq[_isen]? NV_DATA_S(_Nyq[_isen]): 0 );
+        if( (_vFCT.size()>=ns || _istg==ns-1)
+         && !_FCT_I_SEN( _pos_fct, _isen, _t, Ifp+_isen*_nf ) )
+          { _END_STA(); _END_SEN(); return FATAL; }
+        if( Ixpk && !Ixpk[_istg+1] ) Ixpk[_istg+1] = new T[_nx*_np];
+        for( unsigned iy=0; iy<_nx; iy++ ) Ixpk[_istg+1][_isen*_nx+iy] = _Iy[iy];
+        for( unsigned iq=0; iq<_nq; iq++ ) Iqp[_isen*_nq+iq] = _Iyq[iq];
+      }
+
+      // Display & record stage results
+      if( options.DISPLAY >= 1 ){
+        _print_interm( _t, _nx, Ixk[_istg+1], "x", os );
+        _print_interm( _nq, Iq, "q", os );
+        _print_interm( _nx*_np, Ixpk[_istg+1], "xp", os );
+        _print_interm( _nq*_np, Iqp, "qp", os );
+      }
+      if( options.RESRECORD ){
+        results_sta.push_back( Results( tk[_istg+1], _nx, Ixk[_istg+1] ) );
+        results_sen.push_back( Results( tk[_istg+1], _nx*_np, Ixpk[_istg+1] ) );
+      }
+    }
+
+    // Bounds on final quadratures and functions
+    if( options.DISPLAY >= 1 ){
+      _print_interm( _nf, If, "f", os );
+      _print_interm( _nf*_np, Ifp, "fp", os );
+    }
+  }
+  catch(...){
+    _END_STA();
+    if( options.DISPLAY >= 1 ) _print_stats( stats_sta, os );
+    return FAILURE;
+  }
+
+  _END_STA();
+  if( options.DISPLAY >= 1 ) _print_stats( stats_sta, os );
+  return NORMAL;
+}
+
+template <typename T, typename PMT, typename PVT> inline bool
+ODEBNDS_SUNDIALS<T,PMT,PVT>::_INI_PM_ASA
 ( const unsigned np, const PVT *PMp )
 {
   // Initialize bound propagation
-  if( !ODEBNDS_BASE<T,PMT,PVT>::_INI_PM_ADJ( options, np, PMp ) )
+  if( !_INI_PM_SEN( options, np, PMp, _nf, np ) )
     return false;
 
   // Set SUNDIALS adjoint/quadrature arrays
@@ -636,7 +1086,13 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::_INI_PM_ADJ
     break;
   }
   unsigned cv_Nyq_size = (_PMenv->nmon()+1)*_np;
-
+  if( _nvec != _nf ){
+    if( _Ny )   N_VDestroyVectorArray_Serial( _Ny,  _nvec );
+    if( _Nyq )  N_VDestroyVectorArray_Serial( _Nyq, _nvec );
+    _nvec = _nf;
+    _Ny  = N_VCloneVectorArray_Serial( _nvec, _Nx );
+    _Nyq = N_VCloneVectorArray_Serial( _nvec, _Nx );
+  }
   for( unsigned i=0; i<_nf; i++ ){
     if( !_Ny[i] || cv_Ny_size != NV_LENGTH_S( _Ny[i] ) ){
       if( _Ny[i] ) N_VDestroy_Serial( _Ny[i] );
@@ -649,40 +1105,40 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::_INI_PM_ADJ
   }
 
   // Reset result record and statistics
-  _results_adj.clear();
-  _init_stats( stats_adj );
+  results_sen.clear();
+  _init_stats( stats_sen );
 
   return true;
 }
 
 template <typename T, typename PMT, typename PVT> inline int
-ODEBNDS_SUNDIALS<T,PMT,PVT>::MC_CVADJRHSPM__
+ODEBNDS_SUNDIALS<T,PMT,PVT>::MC_CVASARHSPM__
 ( realtype t, N_Vector x, N_Vector y, N_Vector ydot, void *user_data )
 {
   ODEBNDS_SUNDIALS<T,PMT,PVT> *pODEBNDS = ODEBNDS_SUNDIALS<T,PMT,PVT>::pODEBNDS;
   pODEBNDS->_ifct = *static_cast<unsigned*>( user_data );
-  bool flag = pODEBNDS->_RHS_PM_ADJ( pODEBNDS->options, t, NV_DATA_S( x ), NV_DATA_S( y ),
+  bool flag = pODEBNDS->_RHS_PM_SEN( pODEBNDS->options, t, NV_DATA_S( x ), NV_DATA_S( y ),
     NV_DATA_S( ydot ), pODEBNDS->_ifct, true );
   ODEBNDS_SUNDIALS<T,PMT,PVT>::pODEBNDS = pODEBNDS;
-  pODEBNDS->stats_adj.numRHS++;
+  pODEBNDS->stats_sen.numRHS++;
   return( (flag && _diam( pODEBNDS->_nx, pODEBNDS->_PMy ) < pODEBNDS->options.DMAX)? 0: -1 );
 }
 
 template <typename T, typename PMT, typename PVT> inline int
-ODEBNDS_SUNDIALS<T,PMT,PVT>::MC_CVADJQUADPM__
+ODEBNDS_SUNDIALS<T,PMT,PVT>::MC_CVASAQUADPM__
 ( realtype t, N_Vector x, N_Vector y, N_Vector qdot, void *user_data )
 {
   ODEBNDS_SUNDIALS<T,PMT,PVT> *pODEBNDS = ODEBNDS_SUNDIALS<T,PMT,PVT>::pODEBNDS;
   pODEBNDS->_ifct = *static_cast<unsigned*>( user_data );
-  bool flag = pODEBNDS->_RHS_PM_QUAD( pODEBNDS->options, NV_DATA_S( qdot ),
-    pODEBNDS->_ifct, true );
+  bool flag = pODEBNDS->_RHS_PM_QUAD( pODEBNDS->options, pODEBNDS->_np,
+    NV_DATA_S( qdot ), pODEBNDS->_ifct, true );
   ODEBNDS_SUNDIALS<T,PMT,PVT>::pODEBNDS = pODEBNDS;
   return( flag? 0: -1 );
 }
 
 //! @fn template <typename T, typename PMT, typename PVT> inline typename ODEBNDS_GSL<T,PMT,PVT>::STATUS ODEBNDS_GSL<T,PMT,PVT>::bounds_ASA(
 //! const unsigned ns, const double*tk, const PVT*PMp, PVT**PMxk=0, 
-//! PVT*PMq=0, PVT*PMf=0, PVT**PMlk=0, PVT*PMdf=0, std::ostream&os=std::cout )
+//! PVT*PMq=0, PVT*PMf=0, PVT**PMlk=0, PVT*PMfp=0, std::ostream&os=std::cout )
 //!
 //! This function computes an enclosure on the functional defined in F together with its
 //! derivatives, as well as an enclosure of the reachable set of the parametric ODEs defined in
@@ -695,7 +1151,7 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::MC_CVADJQUADPM__
 //!  - <a>PMq</a> [output] polynomial model of quadrature variables (default: NULL)
 //!  - <a>PMf</a> [output] polynomial model of state/quadrature functionals (default: NULL)
 //!  - <a>PMlk</a> [output] polynomial model of adjoint enclosures at stage times (default: NULL)
-//!  - <a>PMdf</a> [output] polynomial model of functional derivatives (default: NULL)
+//!  - <a>PMfp</a> [output] polynomial model of functional derivatives (default: NULL)
 //!  - <a>os</a> [input] output stream (default: std::cout)
 //! .
 //! The return value is the status.
@@ -703,7 +1159,7 @@ template <typename T, typename PMT, typename PVT>
 inline typename ODEBNDS_SUNDIALS<T,PMT,PVT>::STATUS
 ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
 ( const unsigned ns, const double*tk, const PVT*PMp, PVT**PMxk, PVT*PMq, PVT*PMf, PVT**PMlk,
-  PVT*PMdf, std::ostream&os )
+  PVT*PMfp, std::ostream&os )
 {
   // Compute state bounds and store intermediate results
   STATUS flag = NORMAL;
@@ -715,39 +1171,39 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
   if( !_nf ) return NORMAL;
 
   // Check size
-  if( !PMlk || !PMdf ) return FATAL;
+  if( !PMlk || !PMfp ) return FATAL;
 
   try{
     // Initialize adjoint bound integration
-    if( !_INI_PM_ADJ( _np, PMp )) return FATAL;
+    if( !_INI_PM_ASA( _np, PMp )) return FATAL;
     _t = tk[ns];
 
     // Bounds on terminal adjoints/quadratures
     if( PMlk && !PMlk[ns] ) PMlk[ns] = new PVT[_nx*_nf];
+    _pos_fct = ( _vFCT.size()>=ns? ns-1:0 );
     for( _ifct=0; _ifct < _nf; _ifct++ ){
-      _pos_fct = ( _vFCT.size()>=ns? ns-1:0 );
-      if( !_TC_PM_SET( options, _pos_fct, _ifct )
-       || !_TC_PM_ADJ( options, _t, _vec_sta[ns].data(), NV_DATA_S(_Ny[_ifct]) )
-       || ( _Nyq && _Nyq[_ifct] && !_TC_PM_QUAD( options, NV_DATA_S(_Nyq[_ifct]) ) ) )
-        { _END_ADJ(); return FATAL; }
+      if( !_TC_PM_SET_ASA( options, _pos_fct, _ifct )
+       || !_TC_PM_SEN( options, _t, _vec_sta[ns].data(), NV_DATA_S(_Ny[_ifct]) )
+       || ( _Nyq && _Nyq[_ifct] && !_TC_PM_QUAD_ASA( options, NV_DATA_S(_Nyq[_ifct]) ) ) )
+        { _END_SEN(); return FATAL; }
       for( unsigned iy=0; PMlk[ns] && iy<_nx; iy++ )
         PMlk[ns][_ifct*_nx+iy] = _PMy[iy];
       for( unsigned iq=0; iq<_np; iq++ )
-        PMdf[_ifct*_np+iq] = _PMyq[iq];
+        PMfp[_ifct*_np+iq] = _PMyq[iq];
     }
     // Display & record adjoint terminal results
     if( options.DISPLAY >= 1 ){
       _print_interm( tk[ns], _nx*_nf, PMlk[ns], "l", os );
-      //_print_interm( _np, PMdf, "df", os );
+      //_print_interm( _np, PMfp, "fp", os );
     }
     if( options.RESRECORD )
-      _results_adj.push_back( Results( tk[ns], _nf*_nx, PMlk[ns] ) );
+      results_sen.push_back( Results( tk[ns], _nf*_nx, PMlk[ns] ) );
 
     // Initialization of adjoint integration
     for( _ifct=0; _ifct < _nf; _ifct++ )
-      if( !_INI_CVODES( MC_CVADJRHSPM__, MC_CVADJQUADPM__, _ifct,
+      if( !_INI_CVODES( MC_CVASARHSPM__, MC_CVASAQUADPM__, _ifct,
         _indexB[_ifct], _iusrB[_ifct] ) )
-        { _END_ADJ(); return FATAL;}
+        { _END_SEN(); return FATAL;}
 
     // Integrate adjoint ODEs through each stage using SUNDIALS
     pODEBNDS = this;
@@ -756,49 +1212,50 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
       // Update list of operations in RHSADJ and QUADADJ
       _pos_rhs  = ( _vRHS.size() <=1? 0: _istg-1 );
       _pos_quad = ( _vQUAD.size()<=1? 0: _istg-1 );
-      if( !_RHS_PM_SET( options, _pos_rhs, _pos_quad, _pos_fct ) )
-        { _END_ADJ(); return FATAL; }
+      if( !_RHS_SET_ASA( _pos_rhs, _pos_quad, _pos_fct ) 
+       || !_RHS_PM_SET( options, _nf, _np ) )
+        { _END_SEN(); return FATAL; }
 
       // Propagate bounds backward to previous stage time
-      //_cv_flag = CVodeSetStopTimeB( _cv_mem, tk[_istg-1] );
-      //if( _check_cv_flag(&_cv_flag, "CVodeSetStopTimeB", 1) )
-      //  { _END_ADJ(); return FATAL; }
       _cv_flag = CVodeB( _cv_mem, tk[_istg-1], CV_NORMAL );
       if( _check_cv_flag(&_cv_flag, "CVodeB", 1) )
-        { _END_ADJ(); return FATAL; }
+        { _END_SEN(); return FATAL; }
       _t = tk[_istg-1];
 
       // Bounds on states/adjoints/quadratures at stage time
-      //stats_adj.numSteps = 0; 
+      //stats_sen.numSteps = 0; 
       for( _ifct=0; _ifct < _nf; _ifct++ ){
         _cv_flag = CVodeGetB( _cv_mem, _indexB[_ifct], &_t, _Ny[_ifct]);
         if( _check_cv_flag( &_cv_flag, "CVodeGetB", 1) )
-          { _END_ADJ(); return FATAL; }
+          { _END_SEN(); return FATAL; }
 #ifdef MC__ODEBNDS_SUNDIALS_DEBUG
         for( unsigned iy=0; iy<NV_LENGTH_S(_Ny[_ifct]); iy++ )
           std::cout << "_Ny" << _ifct << "[iy] = " << NV_Ith_S(_Ny[_ifct],iy) << std::endl;
-        for( unsigned iy=0; iy<NV_LENGTH_S(_Nyq[_ifct]); iy++ )
-          std::cout << "_Nyq" << _ifct << "[iy] = " << NV_Ith_S(_Nyq[_ifct],iy) << std::endl;
 #endif
         _cv_flag = CVodeGetQuadB( _cv_mem, _indexB[_ifct], &_t, _Nyq[_ifct]);
         if( _check_cv_flag( &_cv_flag, "CVodeGetQuadB", 1) )
-          { _END_ADJ(); return FATAL; }
+          { _END_SEN(); return FATAL; }
+#ifdef MC__ODEBNDS_SUNDIALS_DEBUG
+        for( unsigned iy=0; iy<NV_LENGTH_S(_Nyq[_ifct]); iy++ )
+          std::cout << "_Nyq" << _ifct << "[iy] = " << NV_Ith_S(_Nyq[_ifct],iy) << std::endl;
+#endif
         void *cv_memB = CVodeGetAdjCVodeBmem(_cv_mem, _indexB[_ifct] );
         long int nstpB;
         _cv_flag = CVodeGetNumSteps( cv_memB, &nstpB );
-        stats_adj.numSteps += nstpB;
+        stats_sen.numSteps += nstpB;
         //{ int dum; std::cin >> dum; }
 
         // Add function contribution to adjoint bounds (discontinuities)
         if( _istg > 1  ){
           _pos_fct = ( _vFCT.size()>=ns? _istg-1:0 );
           if( _pos_fct 
-           && ( !_CC_PM_SET( options, _pos_fct, _ifct )
-             || !_CC_PM_ADJ( options, _t, _vec_sta[_istg-1].data(), NV_DATA_S(_Ny[_ifct]) )
-             || ( _Nyq && _Nyq[_ifct] && !_CC_PM_QUAD( options, NV_DATA_S(_Nyq[_ifct]) ) ) ) )
-            { _END_ADJ(); return FATAL; }
+           && ( !_CC_SET_ASA( _pos_fct, _ifct )
+             || !_CC_PM_SET( options )
+             || !_CC_PM_SEN( options, _t, _vec_sta[_istg-1].data(), NV_DATA_S(_Ny[_ifct]) )
+             || ( _Nyq && _Nyq[_ifct] && !_CC_PM_QUAD_ASA( options, NV_DATA_S(_Nyq[_ifct]) ) ) ) )
+            { _END_SEN(); return FATAL; }
           else if( !_pos_fct )
-             _GET_PM_ADJ( options, NV_DATA_S(_Ny[_ifct]), _Nyq && _Nyq[_ifct]? NV_DATA_S(_Nyq[_ifct]): 0 );
+             _GET_PM_SEN( options, NV_DATA_S(_Ny[_ifct]), _np, _Nyq && _Nyq[_ifct]? NV_DATA_S(_Nyq[_ifct]): 0 );
 #ifdef MC__ODEBNDS_SUNDIALS_DEBUG
           for( unsigned iy=0; iy<NV_LENGTH_S(_Ny[_ifct]); iy++ )
             std::cout << "_Ny" << _ifct << "[iy] = " << NV_Ith_S(_Ny[_ifct],iy) << std::endl;
@@ -806,45 +1263,346 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
             std::cout << "_Nyq" << _ifct << "[iy] = " << NV_Ith_S(_Nyq[_ifct],iy) << std::endl;
 #endif
           // Reset ODE solver - needed in case of discontinuity
-          if( !_CC_CVODES( _ifct, _indexB[_ifct] ) )
-            { _END_ADJ(); return FATAL; }
+          if( !_CC_CVODES_ASA( _ifct, _indexB[_ifct] ) )
+            { _END_SEN(); return FATAL; }
         }
         // Add initial state contribution to derivative bounds
-        else if( !_IC_PM_SET( options )
-              || !_IC_PM_ADJ( options, _t, _vec_sta[_istg-1].data(), NV_DATA_S(_Ny[_ifct]) )
-              || ( _Nyq && _Nyq[_ifct] && !_IC_PM_QUAD( options, NV_DATA_S(_Nyq[_ifct]) ) ) )
-          { _END_ADJ(); return FATAL; }
+        else if( !_IC_PM_SET_ASA( options )
+              || !_IC_PM_SEN( options, _t, _vec_sta[_istg-1].data(), NV_DATA_S(_Ny[_ifct]) )
+              || ( _Nyq && _Nyq[_ifct] && !_IC_PM_QUAD_ASA( options, NV_DATA_S(_Nyq[_ifct]) ) ) )
+          { _END_SEN(); return FATAL; }
 
         // Keep track of results at stage times
         if( PMlk && !PMlk[_istg-1] ) PMlk[_istg-1] = new PVT[_nx*_nf];
         for( unsigned iy=0; PMlk[_istg-1] && iy<_nx; iy++)
           PMlk[_istg-1][_ifct*_nx+iy] =_PMy[iy];
         for( unsigned iq=0; iq<_np; iq++ )
-          PMdf[_ifct*_np+iq] = _PMyq[iq];
+          PMfp[_ifct*_np+iq] = _PMyq[iq];
       }
 
       // Display & record adjoint intermediate results
       if( options.DISPLAY >= 1 ){
         _print_interm( tk[_istg-1], _nf*_nx, PMlk[_istg-1], "l", os );
-        //_print_interm( _np, PMdf, "df", os );
+        //_print_interm( _np, PMfp, "fp", os );
       }
       if( options.RESRECORD )
-        _results_adj.push_back( Results( tk[_istg-1], _nf*_nx, PMlk[_istg-1] ) );
+        results_sen.push_back( Results( tk[_istg-1], _nf*_nx, PMlk[_istg-1] ) );
       //{ int dum; std::cin >> dum; }
     }
 
     if( options.DISPLAY >= 1 )
-      _print_interm( _nf*_np, PMdf, "df", os );
+      _print_interm( _nf*_np, PMfp, "fp", os );
   }
   catch(...){
-    _END_ADJ();
-    if( options.DISPLAY >= 1 ) _print_stats( stats_adj, os );
+    _END_SEN();
+    if( options.DISPLAY >= 1 ) _print_stats( stats_sen, os );
     return FAILURE;
   }
 
-  _END_ADJ();
-  if( options.DISPLAY >= 1 ) {_print_stats( stats_adj, os );}
+  _END_SEN();
+  if( options.DISPLAY >= 1 ) {_print_stats( stats_sen, os );}
 
+  return NORMAL;
+}
+
+template <typename T, typename PMT, typename PVT> inline bool
+ODEBNDS_SUNDIALS<T,PMT,PVT>::_INI_PM_FSA
+( const unsigned np, const PVT *PMp )
+{
+  // Initialize bound propagation
+  if( !_INI_PM_SEN( options, np, PMp, np, _nq ) )
+    return false;
+
+  // Set SUNDIALS adjoint/quadrature arrays
+  unsigned cv_Ny_size;
+  switch( options.WRAPMIT){
+  case Options::NONE:
+    cv_Ny_size = (_PMenv->nmon()+1)*_nx;
+    break;
+  case Options::DINEQ:
+    cv_Ny_size = _PMenv->nmon()*_nx + 2*_nx ;
+    break;
+  case Options::ELLIPS:
+  default:
+    cv_Ny_size = _PMenv->nmon()*_nx + _nx*(_nx+1)/2;
+    break;
+  }
+  unsigned cv_Nyq_size = (_PMenv->nmon()+1)*_nq;
+  if( _nvec != np ){
+    if( _Ny )   N_VDestroyVectorArray_Serial( _Ny,  _nvec ); _Ny = 0;
+    if( _Nyq )  N_VDestroyVectorArray_Serial( _Nyq, _nvec ); _Nyq = 0;
+    _nvec = np;
+    _Ny  = N_VCloneVectorArray_Serial( np, _Nx );
+    if( _nq ) _Nyq = N_VCloneVectorArray_Serial( np, _Nq );
+  }
+  for( unsigned i=0; i<np; i++ ){
+    if( !_Ny[i] || cv_Ny_size != NV_LENGTH_S( _Ny[i] ) ){
+      if( _Ny[i] ) N_VDestroy_Serial( _Ny[i] );
+      _Ny[i] = N_VNew_Serial( cv_Ny_size );
+    }
+    if( _Nyq && (!_Nyq[i] || cv_Nyq_size != NV_LENGTH_S( _Nyq[i]) ) ){
+      if( _Nyq[i] ) N_VDestroy_Serial( _Nyq[i] );
+      _Nyq[i] = cv_Nyq_size? N_VNew_Serial( cv_Nyq_size ): 0;
+    }
+  }
+
+  // Reset result record and statistics
+  results_sen.clear();
+  _init_stats( stats_sen );
+
+  return true;
+}
+
+template <typename T, typename PMT, typename PVT> inline int
+ODEBNDS_SUNDIALS<T,PMT,PVT>::MC_CVFSARHSPM__
+( int Ns, realtype t, N_Vector x, N_Vector xdot, int is, N_Vector y,
+  N_Vector ydot, void *user_data, N_Vector tmp1, N_Vector tmp2 )
+{
+  ODEBNDS_SUNDIALS<T,PMT,PVT> *pODEBNDS = ODEBNDS_SUNDIALS<T,PMT,PVT>::pODEBNDS;
+#ifdef MC__ODEBNDS_SUNDIALS_DEBUG
+  std::cout << "@t=" << t << "\nx:\n";
+  for( unsigned i=0; i<NV_LENGTH_S( x ); i++ ) std::cout << NV_Ith_S( x, i ) << std::endl;
+  std::cout << "y:\n";
+  for( unsigned i=0; i<NV_LENGTH_S( y ); i++ ) std::cout << NV_Ith_S( y, i ) << std::endl;
+#endif
+  bool flag = pODEBNDS->_RHS_PM_SEN( pODEBNDS->options, t, NV_DATA_S( x ), NV_DATA_S( y ),
+    NV_DATA_S( ydot ), is );
+#ifdef MC__ODEBNDS_SUNDIALS_DEBUG
+  std::cout << "ydot:\n";
+  for( unsigned i=0; i<NV_LENGTH_S( ydot ); i++ ) std::cout << NV_Ith_S( ydot, i ) << std::endl;
+  { int dum; std::cin >> dum; }
+#endif
+  ODEBNDS_SUNDIALS<T,PMT,PVT>::pODEBNDS = pODEBNDS;
+  pODEBNDS->stats_sen.numRHS++;
+  return( (flag && _diam( pODEBNDS->_nx, pODEBNDS->_PMy ) < pODEBNDS->options.DMAX)? 0: -1 );
+}
+
+template <typename T, typename PMT, typename PVT> inline int
+ODEBNDS_SUNDIALS<T,PMT,PVT>::MC_CVFSAQUADPM__
+( int Ns, realtype t, N_Vector x, N_Vector *y, N_Vector qdot, N_Vector *qSdot, 
+  void *user_data, N_Vector tmp1, N_Vector tmp2 )
+{
+  ODEBNDS_SUNDIALS<T,PMT,PVT> *pODEBNDS = ODEBNDS_SUNDIALS<T,PMT,PVT>::pODEBNDS;
+#ifdef MC__ODEBNDS_SUNDIALS_DEBUG
+  std::cout << "@t=" << t << "\nx:\n";
+  for( unsigned i=0; i<NV_LENGTH_S( x ); i++ ) std::cout << NV_Ith_S( x, i ) << std::endl;
+  std::cout << "qdot:\n";
+  for( unsigned i=0; i<NV_LENGTH_S( qdot ); i++ ) std::cout << NV_Ith_S( qdot, i ) << std::endl;
+#endif
+  bool flag = true;
+  for( int is=0; is<Ns && flag; is++ ){
+    pODEBNDS->_GET_PM_SEN( pODEBNDS->options, NV_DATA_S(x), NV_DATA_S(y[is]), (realtype*)0, 0, (realtype*)0 );
+#ifdef MC__ODEBNDS_SUNDIALS_DEBUG
+    std::cout << "y:\n";
+    for( unsigned i=0; i<NV_LENGTH_S( y[is] ); i++ ) std::cout << NV_Ith_S( y[is], i ) << std::endl;
+#endif
+    flag = pODEBNDS->_RHS_PM_QUAD( pODEBNDS->options, pODEBNDS->_nq, NV_DATA_S( qSdot[is] ), is );
+#ifdef MC__ODEBNDS_SUNDIALS_DEBUG
+    std::cout << "qSdot:\n";
+    for( unsigned i=0; i<NV_LENGTH_S( qSdot[is] ); i++ ) std::cout << NV_Ith_S( qSdot[is], i ) << std::endl;
+    { int dum; std::cin >> dum; }
+#endif
+  }
+  ODEBNDS_SUNDIALS<T,PMT,PVT>::pODEBNDS = pODEBNDS;
+  return( flag? 0: -1 );
+}
+
+//! @fn template <typename T, typename PMT, typename PVT> inline typename ODEBNDS_GSL<T,PMT,PVT>::STATUS ODEBNDS_GSL<T,PMT,PVT>::bounds_FSA(
+//! const unsigned ns, const double*tk, const PVT*PMp, PVT**PMxk=0, 
+//! PVT*PMq=0, PVT*PMf=0, PVT**PMxpk=0, PVT*PMqp=0, PVT*PMfp=0, std::ostream&os=std::cout )
+//!
+//! This function computes an enclosure on the functional defined in F together with its
+//! derivatives, as well as an enclosure of the reachable set of the parametric ODEs defined in
+//! IVP using equally spaced samples, using the propagation of polynomial models with convex
+//! remainders (intervals, ellipsoids):
+//!  - <a>ns</a> [input] number of time stages
+//!  - <a>tk</a> [input] stage times, including the initial time
+//!  - <a>PMp</a> [input] polynomial model of parameter set
+//!  - <a>PMxk</a> [output] polynomial model of state variables at stage times (default: NULL)
+//!  - <a>PMq</a> [output] polynomial model of quadrature variables (default: NULL)
+//!  - <a>PMf</a> [output] polynomial model of state-dependent functionals (default: NULL)
+//!  - <a>PMxpk</a> [output] polynomial model of state sensitivity variables at stage times (default: NULL)
+//!  - <a>PMqp</a> [output] polynomial model of quadrature sensitivity variables (default: NULL)
+//!  - <a>PMfp</a> [output] polynomial model of state-dependent functional derivatives (default: NULL)
+//!  - <a>os</a> [input] output stream (default: std::cout)
+//! .
+//! The return value is the status.
+template <typename T, typename PMT, typename PVT>
+inline typename ODEBNDS_SUNDIALS<T,PMT,PVT>::STATUS
+ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_FSA
+( const unsigned ns, const double*tk, const PVT*PMp, PVT**PMxk, PVT*PMq, PVT*PMf,
+  PVT**PMxpk, PVT*PMqp, PVT*PMfp, std::ostream&os )
+{
+  // Check arguments
+  if( !tk || !PMxk || !PMp || !PMxpk
+    || ( _nf && (!PMf || !PMfp) ) 
+    || ( _nq && (!PMq || !PMqp) ) ) return FATAL;
+
+  try{
+    // Initialize trajectory integration
+    if( !ODEBND_SUNDIALS<T,PMT,PVT>::_INI_PM_STA( _np, PMp, ns ) 
+     || !_INI_PM_FSA( _np, PMp ) ) return FATAL;
+    _t = tk[0];
+
+    // Bounds on initial states/quadratures
+    if( !ODEBND_BASE<T,PMT,PVT>::_IC_PM_SET( options )
+     || !ODEBND_BASE<T,PMT,PVT>::_IC_PM_STA( options, _t, NV_DATA_S( _Nx ) )
+     || ( _Nq && !ODEBND_BASE<T,PMT,PVT>::_IC_PM_QUAD( options, NV_DATA_S( _Nq ) ) ) )
+      { _END_STA(); _END_SEN(); return FATAL; }
+    if( PMxk && !PMxk[0] ) PMxk[0] = new PVT[_nx];
+    for( unsigned ix=0; PMxk[0] && ix<_nx; ix++ ) PMxk[0][ix] = _PMx[ix];
+    for( unsigned iq=0; iq<_nq; iq++ ) PMq[iq] = _PMq[iq];
+
+    // Bounds on initial state/quadrature sensitivities
+    if( PMxpk && !PMxpk[0] ) PMxpk[0] = new PVT[_nx*_np];
+    for( _isen=0; _isen<_np; _isen++ ){
+      if( !_IC_SET_FSA( _isen )
+       || !ODEBND_BASE<T,PMT,PVT>::_IC_PM_STA( options, _t, NV_DATA_S(_Ny[_isen]) )
+       || ( _Nyq && _Nyq[_isen] && !ODEBND_BASE<T,PMT,PVT>::_IC_PM_QUAD( options, NV_DATA_S(_Nyq[_isen]) ) ) ) 
+        { _END_STA(); _END_SEN(); return FATAL; }
+      for( unsigned iy=0; PMxpk[0] && iy<_nx; iy++ ) PMxpk[0][_isen*_nx+iy] = _PMx[iy];
+      for( unsigned iq=0; iq<_nq; iq++ ) PMqp[_isen*_nq+iq] = _PMq[iq];
+#ifdef MC__ODEBNDS_SUNDIALS_DEBUG
+      std::cout << "qS[" << _isen << "]: " << _Nyq[_isen] << "(" << NV_LENGTH_S( _Nyq[_isen] ) << ")\n";
+      for( unsigned i=0; i<NV_LENGTH_S( _Nyq[_isen] ); i++ ) std::cout << NV_Ith_S( _Nyq[_isen], i ) << std::endl;
+      { int dum; std::cin >> dum; }
+#endif
+    }
+
+    // Display & record initial results
+    if( options.DISPLAY >= 1 ){
+      _print_interm( _t, _nx, PMxk[0], "x", os );
+      _print_interm( _nq, PMq, "q", os );
+      _print_interm( _nx*_np, PMxpk[0], "xp", os );
+      _print_interm( _nq*_np, PMqp, "qp", os );
+    }
+    if( options.RESRECORD ){
+      results_sta.push_back( Results( _t, _nx, PMxk[0] ) );
+      results_sen.push_back( Results( _t, _nx*_np, PMxpk[0] ) );
+    }
+
+    // Integrate ODEs through each stage using SUNDIALS
+    ODEBND_SUNDIALS<T,PMT,PVT>::pODEBND = pODEBNDS = this;
+    if( !ODEBND_SUNDIALS<T,PMT,PVT>::_INI_CVODE
+          ( ODEBND_SUNDIALS<T,PMT,PVT>::MC_CVRHSPM__,
+            ODEBND_SUNDIALS<T,PMT,PVT>::MC_CVQUADPM__ )
+     || !_INI_CVODES( MC_CVFSARHSPM__, MC_CVFSAQUADPM__ ) )
+      { _END_STA(); _END_SEN(); return FATAL; }
+
+    for( _istg=0; _istg<ns; _istg++ ){
+      // Bounds on state discontinuities (if any) at stage times
+      // and integrator reinitialization (if applicable)
+      _pos_ic = ( _vIC.size()>=ns? _istg:0 );
+      if( _pos_ic
+       && ( !ODEBND_BASE<T,PMT,PVT>::_CC_PM_SET( options, _pos_ic )
+         || !ODEBND_BASE<T,PMT,PVT>::_CC_PM_STA( options, _t, NV_DATA_S( _Nx ) )
+         || !ODEBND_SUNDIALS<T,PMT,PVT>::_CC_CVODE() ) )
+        { _END_STA(); _END_SEN(); return FATAL; }
+      for( _isen=0; _pos_ic && _isen<_np; _isen++ ){
+        if( !_CC_SET_FSA( _pos_ic, _isen )
+         || !_CC_PM_SET( options )
+         || !_CC_PM_SEN( options, _t, NV_DATA_S( _Nx ), NV_DATA_S(_Ny[_isen]) )
+         || ( !_isen && !_CC_CVODES_FSA() ) )
+          { _END_STA(); _END_SEN(); return FATAL; }
+#ifdef MC__ODEBNDS_SUNDIALS_DEBUG
+        for( unsigned iy=0; iy<NV_LENGTH_S(_Ny[_isen]); iy++ )
+          std::cout << "_Ny" << _isen << "[iy] = " << NV_Ith_S(_Ny[_isen],iy) << std::endl;
+        for( unsigned iy=0; iy<NV_LENGTH_S(_Nyq[_isen]); iy++ )
+          std::cout << "_Nyq" << _isen << "[iy] = " << NV_Ith_S(_Nyq[_isen],iy) << std::endl;
+#endif
+      }
+
+      // update list of operations in RHS, JAC, QUAD, RHSFSA and QUADFSA
+      _pos_rhs  = ( _vRHS.size()<=1?  0: _istg );
+      _pos_quad = ( _vQUAD.size()<=1? 0: _istg );
+      if( (!_istg || _pos_rhs || _pos_quad)
+        && ( !ODEBND_BASE<T,PMT,PVT>::_RHS_PM_SET( options, _pos_rhs, _pos_quad )
+          || !_RHS_SET_FSA( _pos_rhs, _pos_quad )
+          || !_RHS_PM_SET( options, _np, _nq ) ) )
+        { _END_STA(); _END_SEN(); return FATAL; }
+
+      // integrate till end of time stage
+      _cv_flag = CVodeSetStopTime( _cv_mem, tk[_istg+1] );
+      if( _check_cv_flag(&_cv_flag, "CVodeSetStopTime", 1) )
+        { _END_STA(); return FATAL; }
+      while( _t < tk[_istg+1] ){
+        _cv_flag = CVode( _cv_mem, tk[_istg+1], _Nx, &_t, CV_ONE_STEP );
+        if( _check_cv_flag(&_cv_flag, "CVode", 1)
+         || (options.NMAX && stats_sta.numSteps > options.NMAX)
+         || _diam( _nx, _PMx ) > options.DMAX
+         || _diam( _nx, _Ir  ) > options.DMAX )
+          throw Exceptions( Exceptions::INTERN );
+        stats_sta.numSteps++;
+        stats_sen.numSteps++;
+      }
+
+      // Bounds on intermediate states, quadratures and their sensitivities
+      if( _nq ){
+        for( unsigned ip=0; ip<_np; ip++ ){
+          _cv_flag = CVodeGetQuadSens1(_cv_mem, &_t, ip, _Nyq[ip]);
+          if( _check_cv_flag( &_cv_flag, "CVodeGetQuadSens", 1) )
+            { _END_STA(); _END_SEN(); return FATAL; }
+#ifdef MC__ODEBNDS_SUNDIALS_DEBUG
+          std::cout << "qS[" << ip << "]: " << _Nyq[ip] << "(" << NV_LENGTH_S( _Nyq[ip] ) << ")\n";
+          for( unsigned i=0; i<NV_LENGTH_S( _Nyq[ip] ); i++ ) std::cout << NV_Ith_S( _Nyq[ip], i ) << std::endl;
+          { int dum; std::cin >> dum; }
+#endif
+        }
+        _cv_flag = CVodeGetQuad( _cv_mem, &_t, _Nq );
+        if( _check_cv_flag(&_cv_flag, "CVodeGetQuad", 1) )
+          { _END_STA(); _END_SEN(); return FATAL; }
+      }
+      _cv_flag = CVodeGetSens(_cv_mem, &_t, _Ny);
+      if( _check_cv_flag( &_cv_flag, "CVodeGetSens", 1) )
+         { _END_STA(); _END_SEN(); return FATAL; }
+
+      // Add intermediate function terms and derivatives
+      _pos_fct = ( _vFCT.size()>=ns? _istg:0 );
+      ODEBND_SUNDIALS<T,PMT,PVT>::_GET_PM_STA( options, NV_DATA_S(_Nx), _nq && _Nq? NV_DATA_S(_Nq): 0 );
+      if( (_vFCT.size()>=ns || _istg==ns-1)
+       && !ODEBND_BASE<T,PMT,PVT>::_FCT_PM_STA( _pos_fct, _t, PMf ) )
+        { _END_STA(); _END_SEN(); return FATAL; }
+      if( PMxk && !PMxk[_istg+1] ) PMxk[_istg+1] = new PVT[_nx];
+      for( unsigned ix=0; ix<_nx; ix++ ) PMxk[_istg+1][ix] = _PMx[ix];
+      for( unsigned iq=0; iq<_nq; iq++ ) PMq[iq] = _PMq[iq];
+      for( _isen=0; _isen<_np; _isen++ ){
+        _GET_PM_SEN( options, NV_DATA_S(_Nx), NV_DATA_S(_Ny[_isen]), _nq && _Nq? NV_DATA_S(_Nq): 0,
+                     _nq, _nq && _Nyq[_isen]? NV_DATA_S(_Nyq[_isen]): 0 );
+        if( (_vFCT.size()>=ns || _istg==ns-1)
+         && !_FCT_PM_SEN( _pos_fct, _isen, _t, PMfp+_isen*_nf ) )
+          { _END_STA(); _END_SEN(); return FATAL; }
+        if( PMxpk && !PMxpk[_istg+1] ) PMxpk[_istg+1] = new PVT[_nx*_np];
+        for( unsigned iy=0; iy<_nx; iy++ ) PMxpk[_istg+1][_isen*_nx+iy] = _PMy[iy];
+        for( unsigned iq=0; iq<_nq; iq++ ) PMqp[_isen*_nq+iq] = _PMyq[iq];
+      }
+
+      // Display & record stage results
+      if( options.DISPLAY >= 1 ){
+        _print_interm( _t, _nx, PMxk[_istg+1], "x", os );
+        _print_interm( _nq, PMq, "q", os );
+        _print_interm( _nx*_np, PMxpk[_istg+1], "xp", os );
+        _print_interm( _nq*_np, PMqp, "qp", os );
+      }
+      if( options.RESRECORD ){
+        results_sta.push_back( Results( tk[_istg+1], _nx, PMxk[_istg+1] ) );
+        results_sen.push_back( Results( tk[_istg+1], _nx*_np, PMxpk[_istg+1] ) );
+      }
+    }
+
+    // Bounds on final quadratures and functions
+    if( options.DISPLAY >= 1 ){
+      _print_interm( _nf, PMf, "f", os );
+      _print_interm( _nf*_np, PMfp, "fp", os );
+    }
+  }
+  catch(...){
+    _END_STA();
+    if( options.DISPLAY >= 1 ) _print_stats( stats_sta, os );
+    return FAILURE;
+  }
+
+  _END_STA();
+  if( options.DISPLAY >= 1 ) _print_stats( stats_sta, os );
   return NORMAL;
 }
 

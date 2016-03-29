@@ -36,50 +36,42 @@ class ODEBND_GSL:
   public virtual BASE_GSL,
   public virtual ODEBND_BASE<T,PMT,PVT>
 {
- protected:
-  //typedef Ellipsoid E;
+  typedef Ellipsoid E;
+  typedef BASE_DE::STATUS STATUS;
 
-  using ODEBND_BASE<T,PMT,PVT>::_Q;
-  using ODEBND_BASE<T,PMT,PVT>::_Er;
-  using ODEBND_BASE<T,PMT,PVT>::_Ir;
-  using ODEBND_BASE<T,PMT,PVT>::_Irq;
-  using ODEBND_BASE<T,PMT,PVT>::_pref;
-  using ODEBND_BASE<T,PMT,PVT>::_Ip;
-  using ODEBND_BASE<T,PMT,PVT>::_B;
-  using ODEBND_BASE<T,PMT,PVT>::_Bq;
-  using ODEBND_BASE<T,PMT,PVT>::_xref;
+ protected:
+  using ODEBND_BASE<T,PMT,PVT>::_diam;
+  using ODEBND_BASE<T,PMT,PVT>::_hausdorff;
+  using ODEBND_BASE<T,PMT,PVT>::_print_interm;
+  using ODEBND_BASE<T,PMT,PVT>::_PMenv;
+
   using ODEBND_BASE<T,PMT,PVT>::_Ix;
+  using ODEBND_BASE<T,PMT,PVT>::_Ir;
   using ODEBND_BASE<T,PMT,PVT>::_Iq;
-  using ODEBND_BASE<T,PMT,PVT>::_vec2I;
-  using ODEBND_BASE<T,PMT,PVT>::_vec2E;
+  using ODEBND_BASE<T,PMT,PVT>::_PMx;
+  using ODEBND_BASE<T,PMT,PVT>::_PMq;
+  using ODEBND_BASE<T,PMT,PVT>::_GET_I_STA;
+  using ODEBND_BASE<T,PMT,PVT>::_IC_I_SET;
   using ODEBND_BASE<T,PMT,PVT>::_IC_I_STA;
   using ODEBND_BASE<T,PMT,PVT>::_IC_I_QUAD;
+  using ODEBND_BASE<T,PMT,PVT>::_CC_I_SET;
   using ODEBND_BASE<T,PMT,PVT>::_CC_I_STA;
-  using ODEBND_BASE<T,PMT,PVT>::_SET_I_STA;
+  using ODEBND_BASE<T,PMT,PVT>::_RHS_I_SET;
   using ODEBND_BASE<T,PMT,PVT>::_RHS_I_STA;
   using ODEBND_BASE<T,PMT,PVT>::_RHS_I_QUAD;
   using ODEBND_BASE<T,PMT,PVT>::_JAC_I_STA;
   using ODEBND_BASE<T,PMT,PVT>::_FCT_I_STA;
-
-  using ODEBND_BASE<T,PMT,PVT>::_PMenv;
-  using ODEBND_BASE<T,PMT,PVT>::_PMx;
-  using ODEBND_BASE<T,PMT,PVT>::_PMp;
-  using ODEBND_BASE<T,PMT,PVT>::_PMq;
-  using ODEBND_BASE<T,PMT,PVT>::_vec2PMI;
-  using ODEBND_BASE<T,PMT,PVT>::_vec2PME;
+  using ODEBND_BASE<T,PMT,PVT>::_GET_PM_STA;
+  using ODEBND_BASE<T,PMT,PVT>::_IC_PM_SET;
   using ODEBND_BASE<T,PMT,PVT>::_IC_PM_STA;
   using ODEBND_BASE<T,PMT,PVT>::_IC_PM_QUAD;
+  using ODEBND_BASE<T,PMT,PVT>::_CC_PM_SET;
   using ODEBND_BASE<T,PMT,PVT>::_CC_PM_STA;
-  using ODEBND_BASE<T,PMT,PVT>::_SET_PM_STA;
+  using ODEBND_BASE<T,PMT,PVT>::_RHS_PM_SET;
   using ODEBND_BASE<T,PMT,PVT>::_RHS_PM_STA;
   using ODEBND_BASE<T,PMT,PVT>::_RHS_PM_QUAD;
   using ODEBND_BASE<T,PMT,PVT>::_JAC_PM_STA;
   using ODEBND_BASE<T,PMT,PVT>::_FCT_PM_STA;
-
-  using ODEBND_BASE<T,PMT,PVT>::_diam;
-  using ODEBND_BASE<T,PMT,PVT>::_hausdorff;
-  using ODEBND_BASE<T,PMT,PVT>::_remainders;
-  using ODEBND_BASE<T,PMT,PVT>::_print_interm;
 
   template <typename U, typename PMU, typename PVU>
   friend int MC_GSLRHSI__
@@ -453,17 +445,18 @@ ODEBND_GSL<T,PMT,PVT>::_bounds
 
     // Bounds on initial states/quadratures
     _t = tk[0];
-    if( !_IC_I_STA( options, _t, _vec_sta )
+    if( !_IC_I_SET( options )
+     || !_IC_I_STA( options, _t, _vec_sta )
      || !_IC_I_QUAD( options, _vec_quad ) )
       { _END_STA(); return FATAL; }
+    if( Ixk && !Ixk[0] ) Ixk[0] = new T[_nx];
+    for( unsigned ix=0; Ixk[0] && ix<_nx; ix++ ) Ixk[0][ix] = _Ix[ix];
+
+    // Display and record initial results
     if( options.DISPLAY >= 1 ){
       _print_interm( _t, _nx, _Ix, "x", os );
       _print_interm( _nq, _Iq, "q", os );
     }
-    if( Ixk && !Ixk[0] ) Ixk[0] = new T[_nx];
-    for( unsigned ix=0; Ixk[0] && ix<_nx; ix++ ) Ixk[0][ix] = _Ix[ix];
-
-    // Record initial results
     if( options.RESRECORD )
       results_sta.push_back( Results( tk[0], _nx, Ixk[0] ) );
 
@@ -476,7 +469,8 @@ ODEBND_GSL<T,PMT,PVT>::_bounds
       // and integrator reinitialization (if applicable)
       _pos_ic = ( _vIC.size()>=ns? _istg:0 );
       if( _pos_ic ){
-        if( !_CC_I_STA( options, _pos_ic, _t, _vec_sta ) )
+        if( !_CC_I_SET( options, _pos_ic )
+         || !_CC_I_STA( options, _t, _vec_sta ) )
           { _END_STA(); return FATAL; }
         gsl_odeiv2_driver_reset( _driver_sta );
       }
@@ -485,7 +479,7 @@ ODEBND_GSL<T,PMT,PVT>::_bounds
       _pos_rhs  = ( _vRHS.size()<=1? 0: _istg );
       _pos_quad = ( _vQUAD.size()<=1? 0: _istg );
       if( (!_istg || _pos_rhs || _pos_quad)
-        && !_SET_I_STA( options, _pos_rhs, _pos_quad ) )
+        && !_RHS_I_SET( options, _pos_rhs, _pos_quad ) )
         { _END_STA(); return FATAL; }
 
       // Store mesh point at time stage
@@ -509,26 +503,15 @@ ODEBND_GSL<T,PMT,PVT>::_bounds
       }
 
       // Bounds on intermediate states/quadratures
-      switch( options.WRAPMIT){
-      case Options::NONE:
-      case Options::DINEQ:
-        _vec2I( _vec_sta, _nx, _Ix );
-        if( _nq ) _vec2I( _vec_quad, _nq, _Iq );
-        break;
-      case Options::ELLIPS:
-      default:
-        _vec2E( _vec_sta, _nx, _np, _Q, _Er, _Ir, _pref, _Ip, _B, _xref, _Ix );
-        if( _nq ) _vec2I( _vec_quad, _nq, _np, _pref, _Ip, _Bq, _Irq, _Iq );
-        break;
-      }
+      _GET_I_STA( options, _vec_sta, _nq? _vec_quad: 0 );
+
+      // Keep track/display/record stage results
       if( options.DISPLAY >= 1 ){
         _print_interm( _t, _nx, _Ix, "x", os );
         _print_interm( _nq, _Iq, "q", os );
       }
       if( Ixk && !Ixk[_istg+1] ) Ixk[_istg+1] = new T[_nx];
       for( unsigned ix=0; Ixk[_istg+1] && ix<_nx; ix++ ) Ixk[_istg+1][ix] = _Ix[ix];
-
-      // Record intermediate results
       if( options.RESRECORD )
         results_sta.push_back( Results( tk[_istg+1], _nx, Ixk[_istg+1] ) );
 
@@ -606,14 +589,14 @@ ODEBND_GSL<T,PMT,PVT>::MC_GSLRHSPM__
 ( double t, const double* x, double* xdot, void* user_data )
 {
   ODEBND_GSL<T,PMT,PVT> *pODEBND = ODEBND_GSL<T,PMT,PVT>::_pODEBND;
-  bool flag = pODEBND->_RHS_PM_STA( pODEBND->options, t, x, xdot );
-  if( flag && pODEBND->_nq ){
+  int iflag = pODEBND->_RHS_PM_STA( pODEBND->options, t, x, xdot );
+  if( !iflag && pODEBND->_nq ){
     double* qdot = xdot + pODEBND->_offset_quad;
-    flag = pODEBND->_RHS_PM_QUAD( pODEBND->options, t, x, qdot );
+    iflag = pODEBND->_RHS_PM_QUAD( pODEBND->options, t, x, qdot )?0:-1;
   }
   pODEBND->stats_sta.numRHS++;
   ODEBND_GSL<T,PMT,PVT>::_pODEBND = pODEBND;
-  return( flag? GSL_SUCCESS: GSL_EBADFUNC );
+  return( !iflag? GSL_SUCCESS: GSL_EBADFUNC );
 }
 
 template <typename T, typename PMT, typename PVT> inline int
@@ -692,7 +675,8 @@ ODEBND_GSL<T,PMT,PVT>::_bounds
 
     // Bounds on initial states/quadratures
     _t = tk[0];
-    if( !_IC_PM_STA( options, _t, _vec_sta )
+    if( !_IC_PM_SET( options )
+     || !_IC_PM_STA( options, _t, _vec_sta )
      || !_IC_PM_QUAD( options, _vec_quad ) )
       { _END_STA(); return FATAL; }
     if( options.DISPLAY >= 1 ){
@@ -715,7 +699,8 @@ ODEBND_GSL<T,PMT,PVT>::_bounds
       // and integrator reinitialization (if applicable)
       _pos_ic = ( _vIC.size()>=ns? _istg:0 );
       if( _pos_ic ){
-        if( !_CC_PM_STA( options, _pos_ic, _t, _vec_sta ) )
+        if( !_CC_PM_SET( options, _pos_ic )
+         || !_CC_PM_STA( options, _t, _vec_sta ) )
           { _END_STA(); return FATAL; }
         gsl_odeiv2_driver_reset( _driver_sta );
       }
@@ -724,7 +709,7 @@ ODEBND_GSL<T,PMT,PVT>::_bounds
       _pos_rhs = ( _vRHS.size()<=1? 0: _istg );
       _pos_quad = ( _vQUAD.size()<=1? 0: _istg );
       if( (!_istg || _pos_rhs || _pos_quad)
-        && !_SET_PM_STA( options, _pos_rhs, _pos_quad ) )
+        && !_RHS_PM_SET( options, _pos_rhs, _pos_quad ) )
         { _END_STA(); return FATAL; }
 
       // Store mesh point at time stage
@@ -749,20 +734,7 @@ ODEBND_GSL<T,PMT,PVT>::_bounds
       }
 
       // Bounds on intermediate states/quadratures
-      switch( options.WRAPMIT){
-      case Options::NONE:
-        _vec2PMI( _vec_sta,  _PMenv, _nx, _PMx, true );
-        break;
-      case Options::DINEQ:
-        _vec2PMI( _vec_sta,  _PMenv, _nx, _PMx, false );
-        break;
-      case Options::ELLIPS:
-      default:
-        _vec2PME( _vec_sta, _PMenv, _nx, _PMx, _Q, _Er, _Ir );
-        //std::cout << _Er.eigQ().first;
-        break;
-      }
-      _vec2PMI( _vec_quad, _PMenv, _nq, _PMq, true );
+      _GET_PM_STA( options, _vec_sta, _nq? _vec_quad: 0 );
 
       // Keep track/display/record stage results
       if( options.DISPLAY >= 1 ){

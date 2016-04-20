@@ -1,6 +1,5 @@
 #include <fstream>
-#include "odeslv_gsl.hpp"
-#include "odebnd_gsl.hpp"
+#include "odebnd_sundials.hpp"
 #include "interval.hpp"
 typedef mc::Interval I;
 
@@ -25,14 +24,14 @@ int main()
       IC[0] = 1.2;
       IC[1] = 1.1;
 
-      mc::ODEBND_GSL<I> LV;
+      mc::ODEBND_SUNDIALS<I> LV;
       LV.set_dag( &IVP );
       LV.set_state( NX, X );
       LV.set_parameter( NP, P );
       LV.set_differential( NX, RHS );
       LV.set_initial( NX, IC );
       LV.options.RESRECORD = true;
-      LV.options.ORDMIT = 4;
+      LV.options.ORDMIT = -2;
 
       // Compute Interval Bounds
       I Ip[NP];
@@ -41,7 +40,7 @@ int main()
       I* Ixk[2] = {Ix0, Ixf};
       double tk[2] = {0., 5.};
 
-      LV.bounds( 1, tk, Ip, Ixk );
+      LV.bounds( 1, tk, Ip, Ixk, 0 );
       std::ofstream ofileI( "test0_outer_I.out", std::ios_base::out );
       LV.record( ofileI );
 
@@ -56,20 +55,13 @@ int main()
       TV TMx0[NX], TMxf[NX];
       TV* TMxk[2] = {TMx0, TMxf};
 
-      LV.bounds( 1, tk, TMp, TMxk );
+      LV.bounds( 1, tk, TMp, TMxk, 0 );
       std::ofstream ofilePM( "test0_outer_PM.out", std::ios_base::out );
       LV.record( ofilePM );
 
       // Compute Approximate Bounds (Sampling)
-       mc::ODESLV_GSL<I> LV0;
-      LV0.set_dag( &IVP );
-      LV0.set_state( NX, X );
-      LV0.set_parameter( NP, P );
-      LV0.set_differential( NX, RHS );
-      LV0.set_initial( NX, IC );
-
-      const unsigned int NSAMP = 100;  // Number of sample points
-      LV0.bounds( 1, tk, Ip, Ixk, 0, 0, NSAMP );
+      const unsigned int NSAMP = 50; // Number of sample points
+      LV.bounds( 1, tk, Ip, Ixk, 0, NSAMP );
       std::ofstream ofile0( "test0_inner.out", std::ios_base::out );
       LV.record( ofile0 );
 
@@ -77,8 +69,8 @@ int main()
       double Hx0[NX], Hxf[NX];
       double* Hxk[2] = {Hx0, Hxf};
 
-      LV.hausdorff( 1, tk, Ip, Hxk, LV0, NSAMP );
-      LV.hausdorff( 1, tk, TMp, Hxk, LV0, NSAMP );
+      LV.hausdorff( 1, tk, Ip, Hxk, 0, NSAMP );
+      LV.hausdorff( 1, tk, TMp, Hxk, 0, NSAMP );
 
       return 0;
 }

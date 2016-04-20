@@ -10,6 +10,7 @@
 
 #include "odebnds_base.hpp"
 #include "odebnd_sundials.hpp"
+#include "odeslvs_sundials.hpp"
 
 #define MC__ODEBNDS_SUNDIALS_USE_BAD
 
@@ -54,10 +55,8 @@ class ODEBNDS_SUNDIALS:
   using ODEBND_BASE<T,PMT,PVT>::_diam;
   using ODEBND_BASE<T,PMT,PVT>::_print_interm;
   using ODEBND_BASE<T,PMT,PVT>::_Ix;
-  using ODEBND_BASE<T,PMT,PVT>::_Iq;
   using ODEBND_BASE<T,PMT,PVT>::_PMenv;
   using ODEBND_BASE<T,PMT,PVT>::_PMx;
-  using ODEBND_BASE<T,PMT,PVT>::_PMq;
 
   using ODEBNDS_BASE<T,PMT,PVT>::_Ir;
   using ODEBNDS_BASE<T,PMT,PVT>::_Iy;
@@ -99,11 +98,14 @@ class ODEBNDS_SUNDIALS:
   using ODEBNDS_BASE<T,PMT,PVT>::_RHS_PM_SEN;
   using ODEBNDS_BASE<T,PMT,PVT>::_RHS_PM_QUAD;
   using ODEBNDS_BASE<T,PMT,PVT>::_FCT_PM_SEN;
+  using ODEBNDS_BASE<T,PMT,PVT>::_bounds_ASA;
+  using ODEBNDS_BASE<T,PMT,PVT>::_bounds_FSA;
 
   using ODEBND_SUNDIALS<T,PMT,PVT>::_cv_mem;
   using ODEBND_SUNDIALS<T,PMT,PVT>::_cv_flag;
   using ODEBND_SUNDIALS<T,PMT,PVT>::_Nx;
   using ODEBND_SUNDIALS<T,PMT,PVT>::_Nq;
+  using ODEBND_SUNDIALS<T,PMT,PVT>::_Nf;
   using ODEBND_SUNDIALS<T,PMT,PVT>::_vec_sta;
   using ODEBND_SUNDIALS<T,PMT,PVT>::_pos_ic;
   using ODEBND_SUNDIALS<T,PMT,PVT>::_pos_rhs;
@@ -116,6 +118,9 @@ class ODEBNDS_SUNDIALS:
   using ODEBND_SUNDIALS<T,PMT,PVT>::stats_sta;
   using ODEBND_SUNDIALS<T,PMT,PVT>::results_sta;
 
+public:
+  using ODEBND_SUNDIALS<T,PMT,PVT>::options;
+
  protected:
   //! @brief current function index
   unsigned _ifct;
@@ -126,12 +131,15 @@ class ODEBNDS_SUNDIALS:
   //! @brief size of N_vector arrays
   unsigned _nvec;
 
-  //! @brief N_Vector object holding current adjoints
+  //! @brief N_Vector object holding current sensitivity/adjoint parameterizations
   N_Vector *_Ny;
 
-  //! @brief N_Vector object holding current quadratures
+  //! @brief N_Vector object holding current quadrature sensitivity parameterizations
   N_Vector *_Nyq;
   
+  //! @brief N_Vector object holding current state function derivative parameterizations
+  N_Vector *_Nfp;
+
   //! @brief pointer to array holding identifiers of the backward problems
   int* _indexB;
   
@@ -147,10 +155,17 @@ class ODEBNDS_SUNDIALS:
   //! @brief static pointer to class
   static ODEBNDS_SUNDIALS<T,PMT,PVT> *pODEBNDS;
 
+  //! @brief static pointer to local integrator class
+  ODESLVS_SUNDIALS pODESLVS;
+
  public:
+  /** @defgroup ODEBNDS Continuous-time set-valued integration of parametric ODEs with sensitivity analysis
+   *  @{
+   */
   typedef BASE_SUNDIALS::Stats Stats;
   typedef typename ODEBND_BASE<T,PMT,PVT>::Results Results;
   typedef typename ODEBND_SUNDIALS<T,PMT,PVT>::Exceptions Exceptions;
+  typedef typename ODEBND_SUNDIALS<T,PMT,PVT>::Options Options;
 
   //! @brief Default constructor
   ODEBNDS_SUNDIALS
@@ -159,21 +174,6 @@ class ODEBNDS_SUNDIALS:
   //! @brief Virtual destructor
   virtual ~ODEBNDS_SUNDIALS
     ();
-
-  //! @brief Integrator options
-  struct Options: public ODEBND_SUNDIALS<T,PMT,PVT>::Options
-  {
-    //! @brief Constructor
-    Options():
-      ODEBND_SUNDIALS<T,PMT,PVT>::Options()
-      {}
-    //! @brief Assignment operator
-    template <typename U> Options& operator=
-      ( U&options ){
-        ODEBND_SUNDIALS<T,PMT,PVT>::Options::operator=(options);
-        return *this;
-      }
-  } options;
 
   //! @brief Statistics for adjoint integration
   Stats stats_sen;
@@ -184,36 +184,45 @@ class ODEBNDS_SUNDIALS:
   //! @brief Propagate state/quadrature interval bounds forward in time through every time stages
   STATUS bounds
     ( const unsigned ns, const double*tk, const T*Ip, T**Ixk,
-      T*Iq, T*If, std::ostream&os=std::cout )
-      { ODEBND_SUNDIALS<T,PMT,PVT>::options = options;
-        return ODEBND_SUNDIALS<T,PMT,PVT>::_bounds( ns, tk, Ip, Ixk, Iq, If, false, os); }
+      T*If, std::ostream&os=std::cout )
+      { return ODEBND_SUNDIALS<T,PMT,PVT>::bounds( ns, tk, Ip, Ixk, If, os); }
 
   //! @brief Propagate state/quadrature polynomial models forward in time through every time stages
   STATUS bounds
     ( const unsigned ns, const double*tk, const PVT*PMp, PVT**PMxk,
-      PVT*PMq, PVT*PMf, std::ostream&os=std::cout )
-      { ODEBND_SUNDIALS<T,PMT,PVT>::options = options;
-        return ODEBND_SUNDIALS<T,PMT,PVT>::_bounds( ns, tk, PMp, PMxk, PMq, PMf, false, os); }
-        
- //! @brief Propagate state and sensitivity interval bounds forward and backward in time through every time stages
+      PVT*PMf, std::ostream&os=std::cout )
+      { return ODEBND_SUNDIALS<T,PMT,PVT>::bounds( ns, tk, PMp, PMxk, PMf, os); }
+
+ //! @brief Propagate state and sensitivity interval bounds forward in time through every time stages
   STATUS bounds_FSA
-    ( const unsigned ns, const double*tk, const T*Ip, T**Ixk, T*Iq, T*If, T**Ixpk, T*Iqp,
+    ( const unsigned ns, const double*tk, const T*Ip, T**Ixk, T*If, T**Ixpk,
       T*Ifp, std::ostream&os=std::cout );
-        
- //! @brief Propagate state and sensitivity polynomial models forward and backward in time through every time stages
+
+ //! @brief Propagate state and sensitivity polynomial models forward in time through every time stages
   STATUS bounds_FSA
-    ( const unsigned ns, const double*tk, const PVT*PMp, PVT**PMxk, PVT*PMq, PVT*PMf,
-      PVT**PMxpk, PVT*PMqp, PVT*PMfp, std::ostream&os=std::cout );
+    ( const unsigned ns, const double*tk, const PVT*PMp, PVT**PMxk, PVT*PMf,
+      PVT**PMxpk, PVT*PMfp, std::ostream&os=std::cout );
+
+ //! @brief Compute approximate state and sensitivity interval bounds forward in time using sampling through every time stages
+  STATUS bounds_FSA
+    ( const unsigned ns, const double*tk, const T*Ip, T**Ixk, T*If, T**Ixpk,
+      T*Ifp, const unsigned nsamp, std::ostream&os=std::cout );
 
   //! @brief Propagate state and adjoint interval bounds forward and backward in time through every time stages
   STATUS bounds_ASA
-    ( const unsigned ns, const double*tk, const T*Ip, T**Ixk, T*Iq, T*If, T**Ilk, T*Ifp,
+    ( const unsigned ns, const double*tk, const T*Ip, T**Ixk, T*If, T**Ilk, T*Ifp,
       std::ostream&os=std::cout );
 
   //! @brief Propagate state and adjoint polynomial models forward and backward in time through every time stages
   STATUS bounds_ASA
-    ( const unsigned ns, const double*tk, const PVT*PMp, PVT**PMxk, PVT*PMq, PVT*PMf,
+    ( const unsigned ns, const double*tk, const PVT*PMp, PVT**PMxk, PVT*PMf,
       PVT**PMlk, PVT*PMfp, std::ostream&os=std::cout );
+
+ //! @brief Compute approximate state and adjoint interval bounds forward and backward in time using sampling through every time stages
+  STATUS bounds_ASA
+    ( const unsigned ns, const double*tk, const T*Ip, T**Ixk, T*If, T**Ilk,
+      T*Ifp, const unsigned nsamp, std::ostream&os=std::cout );
+
 
   //! @brief Record state and sensitivity bounds in files <a>obndsta</a> and <a>obndsa</a>, with accuracy of <a>iprec</a> digits
   void record
@@ -225,6 +234,7 @@ class ODEBNDS_SUNDIALS:
   void record
     ( std::ofstream&obndsta, const unsigned iprec=5 ) const
     { this->ODEBND_SUNDIALS<T,PMT,PVT>::record( obndsta, iprec ); }
+  /** @} */
 
  private:
   //! @brief Function to initialize CVode memory block (virtual)
@@ -242,6 +252,10 @@ class ODEBNDS_SUNDIALS:
 
   //! @brief Function to reinitialize CVodeS memory block for forward sensitivity
   bool _CC_CVODES_FSA
+    ();
+
+  //! @brief Function to reinitialize CVodeS memory block for forward sensitivity
+  bool _CC_CVODES_QUAD
     ();
 
   //! @brief Function to reinitialize CVodeS memory block for adjoint sensitivity
@@ -316,7 +330,8 @@ template <typename T, typename PMT, typename PVT> inline
 ODEBNDS_SUNDIALS<T,PMT,PVT>::ODEBNDS_SUNDIALS
 ()
 : BASE_SUNDIALS(), ODEBNDS_BASE<T,PMT,PVT>(), ODEBND_SUNDIALS<T,PMT,PVT>(),
-  _ifct(0), _isen(0), _nvec(0), _Ny(0), _Nyq(0), _indexB(0), _iusrB(0)
+  _ifct(0), _isen(0), _nvec(0), _Ny(0), _Nyq(0), _Nfp(0), _indexB(0), _iusrB(0),
+  pODESLVS()
 {}
 
 template <typename T, typename PMT, typename PVT> inline
@@ -325,6 +340,7 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::~ODEBNDS_SUNDIALS
 {
   if( _Ny )   N_VDestroyVectorArray_Serial( _Ny,  _nvec );
   if( _Nyq )  N_VDestroyVectorArray_Serial( _Nyq, _nvec );
+  if( _Nfp )  N_VDestroyVectorArray_Serial( _Nfp, _nvec );
   delete[] _indexB;
   delete[] _iusrB;
 }
@@ -512,6 +528,13 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::_CC_CVODES_FSA
   _cv_flag = CVodeSensReInit( _cv_mem, options.FSACORR, _Ny );
   if( _check_cv_flag(&_cv_flag, "CVodeSensReInit", 1) ) return false;
 
+  return true;
+}
+
+template <typename T, typename PMT, typename PVT> inline bool
+ODEBNDS_SUNDIALS<T,PMT,PVT>::_CC_CVODES_QUAD
+()
+{
   // Reinitialize CVode memory block for current sensitivity quarature _Nyq
   if( !_nq ) return true;
   _cv_flag = CVodeQuadSensReInit( _cv_mem, _Nyq );
@@ -545,7 +568,7 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::_INI_I_ASA
   if( _nvec != _nf ){
     if( _Ny )   N_VDestroyVectorArray_Serial( _Ny,  _nvec );
     if( _Nyq )  N_VDestroyVectorArray_Serial( _Nyq, _nvec );
-    _nvec = _nf;
+     _nvec = _nf;
     _Ny  = N_VCloneVectorArray_Serial( _nvec, _Nx );
     _Nyq = N_VCloneVectorArray_Serial( _nvec, _Nx );
   }
@@ -599,41 +622,39 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::MC_CVASAQUADI__
   return( flag? 0: -1 );
 }
 
-//! @fn template <typename T, typename PMT, typename PVT> inline typename ODEBND_GSL<T,PMT,PVT>::STATUS ODEBND_GSL<T,PMT,PVT>::bounds_ASA
-//!( const unsigned ns, const double*tk, const T*Ip, T**Ixk,
-//!  T*Iq, T*If, T**Ilk, T*Ifp, std::ostream&os=std::cout )
+//! @fn template <typename T, typename PMT, typename PVT> inline typename ODEBNDS_SUNDIALS<T,PMT,PVT>::STATUS ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA(
+//! const unsigned ns, const double*tk, const T*Ip, T**Ixk, 
+//! T*If, T**Ilk, T*Ifp, std::ostream&os=std::cout )
 //!
-//! This function computes an interval enclosure on the functional defined
-//! in F together with its derivatives as well as an interval enclosure of the reachable set of 
-//! the parametric ODEs defined in IVP using equally spaced samples:
-//!  - <a>ns</a>  [input] number of time stages
-//!  - <a>tk</a>  [input] stage times, including the initial time
-//!  - <a>Ip</a>  [input] parameters interval parameter set
-//!  - <a>Ixk</a> [output] states interval enclosures at stage times
-//!  - <a>Iq</a>  [output] quadrature interval enclosures
-//!  - <a>If</a>  [output] functions interval enclosures at stage times
-//!  - <a>Ilk</a> [output] adjoint interval enclosures at stage times
-//!  - <a>Ifp</a> [output] function derivatives interval enclosures at stage times
-//!  - <a>os</a>  [input] output stream (default: std::cout)
+//! This function computes an enclosure of the reachable set of the parametric ODEs
+//! using continuous-time propagation of convex sets (intervals, ellipsoids),
+//! together with adjoint sensitivity bounds:
+//!  - <a>ns</a>    [input]  number of time stages
+//!  - <a>tk</a>    [input]  stage times, including the initial time
+//!  - <a>Ip</a>    [input]  interval enclosure of parameter set
+//!  - <a>Ixk</a>   [output] interval enclosure of state variables at stage times
+//!  - <a>If</a>    [output] interval enclosure of state functions
+//!  - <a>Ilk</a>   [output] interval enclosure of adjoint variables at stage times
+//!  - <a>Ifp</a>   [output] interval enclosure of state function derivatives
+//!  - <a>os</a>    [input]  output stream [default: std::cout]
 //! .
 //! The return value is the status.
 template <typename T, typename PMT, typename PVT>
 inline typename ODEBNDS_SUNDIALS<T,PMT,PVT>::STATUS
 ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
-( const unsigned ns, const double*tk, const T*Ip, T**Ixk, T*Iq, T*If,
+( const unsigned ns, const double*tk, const T*Ip, T**Ixk, T*If,
   T**Ilk, T*Ifp, std::ostream&os )
 {
   // Compute state bounds and store intermediate results
   STATUS flag = NORMAL;
-  ODEBND_SUNDIALS<T,PMT,PVT>::options = options;
-  flag = ODEBND_SUNDIALS<T,PMT,PVT>::_bounds( ns, tk, Ip, Ixk, Iq, If, true, os);
+  flag = ODEBND_SUNDIALS<T,PMT,PVT>::_bounds( ns, tk, Ip, Ixk, If, true, os);
   if( flag != NORMAL ) return flag;
 
   // Nothing to do if no functions are defined
-  if( !_nf ) return NORMAL;
+  if( !_nf || !_np ) return NORMAL;
 
   // Check size
-  if( !Ilk || !Ifp ) return FATAL;
+  if( !Ilk || (_nf && !Ifp) ) return FATAL;
 
   try{
     // Initialize adjoint bound integration
@@ -774,25 +795,29 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::_INI_I_FSA
     return false;
 
   // Set SUNDIALS sensitivity/quadrature arrays
-  unsigned cv_Ny_size, cv_Nyq_size;
+  unsigned cv_Ny_size, cv_Nyq_size, cv_Nfp_size;
   switch( options.WRAPMIT){
   case Options::NONE:
   case Options::DINEQ:
     cv_Ny_size  = 2*_nx;
     cv_Nyq_size = 2*_nq;
+    cv_Nfp_size = 2*_nf;
     break;
   case Options::ELLIPS:
   default:
     cv_Ny_size  = _nx*(1+np)+_nx*(_nx+1)/2;
     cv_Nyq_size = _nq*(2+np);
+    cv_Nfp_size = _nf*(2+np);
     break;
   }
   if( _nvec != np ){
     if( _Ny )   N_VDestroyVectorArray_Serial( _Ny,  _nvec ); _Ny = 0;
     if( _Nyq )  N_VDestroyVectorArray_Serial( _Nyq, _nvec ); _Nyq = 0;
+    if( _Nfp )  N_VDestroyVectorArray_Serial( _Nfp, _nvec ); _Nfp = 0;
     _nvec = np;
     _Ny  = N_VCloneVectorArray_Serial( np, _Nx );
-    if( _nq ) _Nyq = N_VCloneVectorArray_Serial( np, _Nq );
+    if( _nq ) _Nyq = N_VCloneVectorArray_Serial( np, _Nx );
+    if( _nf ) _Nfp = N_VCloneVectorArray_Serial( np, _Nx );
   }
   for( unsigned i=0; i<np; i++ ){
     if( !_Ny[i] || cv_Ny_size != NV_LENGTH_S( _Ny[i] ) ){
@@ -802,6 +827,10 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::_INI_I_FSA
     if( _Nyq && (!_Nyq[i] || cv_Nyq_size != NV_LENGTH_S( _Nyq[i]) ) ){
       if( _Nyq[i] ) N_VDestroy_Serial( _Nyq[i] );
       _Nyq[i] = cv_Nyq_size? N_VNew_Serial( cv_Nyq_size ): 0;
+    }
+    if( _Nfp && (!_Nfp[i] || cv_Nfp_size != NV_LENGTH_S( _Nfp[i]) ) ){
+      if( _Nfp[i] ) N_VDestroy_Serial( _Nfp[i] );
+      _Nfp[i] = cv_Nfp_size? N_VNew_Serial( cv_Nfp_size ): 0;
     }
   }
 
@@ -818,19 +847,19 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::MC_CVFSARHSI__
   N_Vector ydot, void *user_data, N_Vector tmp1, N_Vector tmp2 )
 {
   ODEBNDS_SUNDIALS<T,PMT,PVT> *pODEBNDS = ODEBNDS_SUNDIALS<T,PMT,PVT>::pODEBNDS;
-//#ifdef MC__ODEBNDS_SUNDIALS_DEBUG
+#ifdef MC__ODEBNDS_SUNDIALS_DEBUG
   std::cout << "@t=" << t << "\nx:\n";
   for( unsigned i=0; i<NV_LENGTH_S( x ); i++ ) std::cout << NV_Ith_S( x, i ) << std::endl;
   std::cout << "y:\n";
   for( unsigned i=0; i<NV_LENGTH_S( y ); i++ ) std::cout << NV_Ith_S( y, i ) << std::endl;
-//#endif
+#endif
   bool flag = pODEBNDS->_RHS_I_SEN( pODEBNDS->options, t, NV_DATA_S( x ), NV_DATA_S( y ),
     NV_DATA_S( ydot ), is );
-//#ifdef MC__ODEBNDS_SUNDIALS_DEBUG
+#ifdef MC__ODEBNDS_SUNDIALS_DEBUG
   std::cout << "ydot:\n";
   for( unsigned i=0; i<NV_LENGTH_S( ydot ); i++ ) std::cout << NV_Ith_S( ydot, i ) << std::endl;
   { int dum; std::cin >> dum; }
-//#endif
+#endif
   ODEBNDS_SUNDIALS<T,PMT,PVT>::pODEBNDS = pODEBNDS;
   pODEBNDS->stats_sen.numRHS++;
   return( (flag && _diam( pODEBNDS->_nx, pODEBNDS->_Iy ) < pODEBNDS->options.DMAX)? 0: -1 );
@@ -842,63 +871,61 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::MC_CVFSAQUADI__
   void *user_data, N_Vector tmp1, N_Vector tmp2 )
 {
   ODEBNDS_SUNDIALS<T,PMT,PVT> *pODEBNDS = ODEBNDS_SUNDIALS<T,PMT,PVT>::pODEBNDS;
-//#ifdef MC__ODEBNDS_SUNDIALS_DEBUG
+#ifdef MC__ODEBNDS_SUNDIALS_DEBUG
   std::cout << "@t=" << t << "\nx:\n";
   for( unsigned i=0; i<NV_LENGTH_S( x ); i++ ) std::cout << NV_Ith_S( x, i ) << std::endl;
   std::cout << "qdot:\n";
   for( unsigned i=0; i<NV_LENGTH_S( qdot ); i++ ) std::cout << NV_Ith_S( qdot, i ) << std::endl;
-//#endif
+#endif
   bool flag = true;
   for( int is=0; is<Ns && flag; is++ ){
     pODEBNDS->_GET_I_SEN( pODEBNDS->options, NV_DATA_S(x), NV_DATA_S(y[is]), (realtype*)0, 0, (realtype*)0 );
-//#ifdef MC__ODEBNDS_SUNDIALS_DEBUG
+#ifdef MC__ODEBNDS_SUNDIALS_DEBUG
     std::cout << "y:\n";
     for( unsigned i=0; i<NV_LENGTH_S( y[is] ); i++ ) std::cout << NV_Ith_S( y[is], i ) << std::endl;
-//#endif
+#endif
     flag = pODEBNDS->_RHS_I_QUAD( pODEBNDS->options, pODEBNDS->_nq, NV_DATA_S( qSdot[is] ), is );
-//#ifdef MC__ODEBNDS_SUNDIALS_DEBUG
+#ifdef MC__ODEBNDS_SUNDIALS_DEBUG
     std::cout << "qSdot:\n";
     for( unsigned i=0; i<NV_LENGTH_S( qSdot[is] ); i++ ) std::cout << NV_Ith_S( qSdot[is], i ) << std::endl;
     { int dum; std::cin >> dum; }
-//#endif
+#endif
   }
   ODEBNDS_SUNDIALS<T,PMT,PVT>::pODEBNDS = pODEBNDS;
   return( flag? 0: -1 );
 }
 
-//! @fn template <typename T, typename PMT, typename PVT> inline typename ODEBNDS_GSL<T,PMT,PVT>::STATUS ODEBNDS_GSL<T,PMT,PVT>::bounds_FSA(
-//! const unsigned ns, const double*tk, const T*Ip, T**Ixk=0, 
-//! T*Iq=0, T*If=0, T**Ixpk=0, T*Iqp=0, T*Ifp=0, std::ostream&os=std::cout )
+//! @fn template <typename T, typename PMT, typename PVT> inline typename ODEBNDS_SUNDIALS<T,PMT,PVT>::STATUS ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_FSA(
+//! const unsigned ns, const double*tk, const T*Ip, T**Ixk, 
+//! T*If, T**Ixpk, T*Ifp, std::ostream&os=std::cout )
 //!
-//! This function computes an interval enclosure on the functional defined
-//! in F together with its derivatives as well as an interval enclosure of the reachable set of 
-//! the parametric ODEs defined in IVP using equally spaced samples:
-//!  - <a>ns</a>   [input] number of time stages
-//!  - <a>tk</a>   [input] stage times, including the initial time
-//!  - <a>Ip</a>   [input] parameters interval parameter set
-//!  - <a>Ixk</a>  [output] states interval enclosures at stage times
-//!  - <a>Iq</a>   [output] quadrature interval enclosures
-//!  - <a>If</a>   [output] functions interval enclosures at stage times
-//!  - <a>Ixpk</a> [output] state-sensitivity interval enclosures at stage times
-//!  - <a>Iqp</a>  [output] quadrature-sensitivity interval enclosures
-//!  - <a>Ifp</a>  [output] function derivatives interval enclosures at stage times
-//!  - <a>os</a>   [input] output stream
+//! This function computes an enclosure of the reachable set of the parametric ODEs
+//! using continuous-time propagation of convex sets (intervals, ellipsoids),
+//! together with forward sensitivity bounds:
+//!  - <a>ns</a>    [input]  number of time stages
+//!  - <a>tk</a>    [input]  stage times, including the initial time
+//!  - <a>Ip</a>   [input]   interval enclosure of parameter set
+//!  - <a>Ixk</a>  [output]  interval enclosure of state variables at stage times
+//!  - <a>If</a>   [output]  interval enclosure of state functions
+//!  - <a>Ixpk</a> [output]  interval enclosure of state sensitivity variables at stage times
+//!  - <a>Ifp</a>  [output]  interval enclosure of state function derivatives
+//!  - <a>os</a>    [input]  output stream [default: std::cout]
 //! .
 //! The return value is the status.
 template <typename T, typename PMT, typename PVT>
 inline typename ODEBNDS_SUNDIALS<T,PMT,PVT>::STATUS
 ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_FSA
-( const unsigned ns, const double*tk, const T*Ip, T**Ixk, T*Iq, T*If,
-  T**Ixpk, T*Iqp, T*Ifp, std::ostream&os )
+( const unsigned ns, const double*tk, const T*Ip, T**Ixk, T*If,
+  T**Ixpk, T*Ifp, std::ostream&os )
 {
+  if( !_np ) return bounds( ns, tk, Ip, Ixk, If, os );
+
   // Check arguments
-  if( !tk || !Ixk || !Ip || !Ixpk
-    || ( _nf && (!If || !Ifp) ) 
-    || ( _nq && (!Iq || !Iqp) ) ) return FATAL;
+  if( !tk || (_np && !Ip) || !Ixk || !Ixpk || ( _nf && (!If || !Ifp) ) ) return FATAL;
 
   try{
     // Initialize trajectory integration
-    if( !ODEBND_SUNDIALS<T,PMT,PVT>::_INI_I_STA( _np, Ip, ns ) 
+    if( !ODEBND_SUNDIALS<T,PMT,PVT>::_INI_I_STA( _np, Ip ) 
      || !_INI_I_FSA( _np, Ip ) ) return FATAL;
     _t = tk[0];
 
@@ -909,17 +936,16 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_FSA
       { _END_STA(); _END_SEN(); return FATAL; }
     if( Ixk && !Ixk[0] ) Ixk[0] = new T[_nx];
     for( unsigned ix=0; Ixk[0] && ix<_nx; ix++ ) Ixk[0][ix] = _Ix[ix];
-    for( unsigned iq=0; iq<_nq; iq++ ) Iq[iq] = _Iq[iq];
 
     // Bounds on initial state/quadrature sensitivities
     if( Ixpk && !Ixpk[0] ) Ixpk[0] = new T[_nx*_np];
     for( _isen=0; _isen<_np; _isen++ ){
       if( !_IC_SET_FSA( _isen )
        || !ODEBND_BASE<T,PMT,PVT>::_IC_I_STA( options, _t, NV_DATA_S(_Ny[_isen]) )
-       || ( _Nyq && _Nyq[_isen] && !ODEBND_BASE<T,PMT,PVT>::_IC_I_QUAD( options, NV_DATA_S(_Nyq[_isen]) ) ) ) 
+       || ( _Nyq && _Nyq[_isen]
+         && !ODEBND_BASE<T,PMT,PVT>::_IC_I_QUAD( options, NV_DATA_S(_Nyq[_isen]) ) ) ) 
         { _END_STA(); _END_SEN(); return FATAL; }
       for( unsigned iy=0; Ixpk[0] && iy<_nx; iy++ ) Ixpk[0][_isen*_nx+iy] = _Ix[iy];
-      for( unsigned iq=0; iq<_nq; iq++ ) Iqp[_isen*_nq+iq] = _Iq[iq];
 #ifdef MC__ODEBNDS_SUNDIALS_DEBUG
       std::cout << "qS[" << _isen << "]: " << _Nyq[_isen] << "(" << NV_LENGTH_S( _Nyq[_isen] ) << ")\n";
       for( unsigned i=0; i<NV_LENGTH_S( _Nyq[_isen] ); i++ ) std::cout << NV_Ith_S( _Nyq[_isen], i ) << std::endl;
@@ -930,9 +956,7 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_FSA
     // Display & record initial results
     if( options.DISPLAY >= 1 ){
       _print_interm( _t, _nx, Ixk[0], "x", os );
-      _print_interm( _nq, Iq, "q", os );
       _print_interm( _nx*_np, Ixpk[0], "xp", os );
-      _print_interm( _nq*_np, Iqp, "qp", os );
     }
     if( options.RESRECORD ){
       results_sta.push_back( Results( _t, _nx, Ixk[0] ) );
@@ -954,14 +978,23 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_FSA
       if( _pos_ic
        && ( !ODEBND_BASE<T,PMT,PVT>::_CC_I_SET( options, _pos_ic )
          || !ODEBND_BASE<T,PMT,PVT>::_CC_I_STA( options, _t, NV_DATA_S( _Nx ) )
-         || !ODEBND_SUNDIALS<T,PMT,PVT>::_CC_CVODE() ) )
+         || !ODEBND_SUNDIALS<T,PMT,PVT>::_CC_CVODE_STA() ) )
         { _END_STA(); _END_SEN(); return FATAL; }
-      for( _isen=0; _pos_ic && _isen<_np; _isen++ ){
-        if( !_CC_SET_FSA( _pos_ic, _isen )
-         || !_CC_I_SET( options )
-         || !_CC_I_SEN( options, _t, NV_DATA_S( _Nx ), NV_DATA_S(_Ny[_isen]) )
-         || ( !_isen && !_CC_CVODES_FSA() ) )
+      if( _istg 
+       && ( (_Nq && !ODEBND_BASE<T,PMT,PVT>::_IC_I_QUAD( options, NV_DATA_S( _Nq ) ) ) // quadrature reinitialization
+         || !ODEBND_SUNDIALS<T,PMT,PVT>::_CC_CVODE_QUAD() ) )
+        { _END_STA(); _END_SEN(); return FATAL; }
+      for( _isen=0; _isen<_np; _isen++ ){
+        if( _pos_ic
+         && ( !_CC_SET_FSA( _pos_ic, _isen )
+           || !_CC_I_SET( options )
+           || !_CC_I_SEN( options, _t, NV_DATA_S( _Nx ), NV_DATA_S(_Ny[_isen]) )
+           || ( !_isen && !_CC_CVODES_FSA() ) ) )
           { _END_STA(); _END_SEN(); return FATAL; }
+        if( _istg
+         && ( ( _Nyq && _Nyq[_isen] && !ODEBND_BASE<T,PMT,PVT>::_IC_I_QUAD( options, NV_DATA_S(_Nyq[_isen]) ) ) //quadrature sensitivity reinitialization
+           || ( !_isen && !_CC_CVODES_QUAD() ) ) )
+            { _END_STA(); _END_SEN(); return FATAL; }
 #ifdef MC__ODEBNDS_SUNDIALS_DEBUG
         for( unsigned iy=0; iy<NV_LENGTH_S(_Ny[_isen]); iy++ )
           std::cout << "_Ny" << _isen << "[iy] = " << NV_Ith_S(_Ny[_isen],iy) << std::endl;
@@ -1017,28 +1050,25 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_FSA
       _pos_fct = ( _vFCT.size()>=ns? _istg:0 );
       ODEBND_SUNDIALS<T,PMT,PVT>::_GET_I_STA( options, NV_DATA_S(_Nx), _nq && _Nq? NV_DATA_S(_Nq): 0 );
       if( (_vFCT.size()>=ns || _istg==ns-1)
-       && !ODEBND_BASE<T,PMT,PVT>::_FCT_I_STA( _pos_fct, _t, If ) )
+       && !ODEBND_BASE<T,PMT,PVT>::_FCT_I_STA( options, _pos_fct, _t, NV_DATA_S( _Nf ), If ) )
         { _END_STA(); _END_SEN(); return FATAL; }
       if( Ixk && !Ixk[_istg+1] ) Ixk[_istg+1] = new T[_nx];
       for( unsigned ix=0; ix<_nx; ix++ ) Ixk[_istg+1][ix] = _Ix[ix];
-      for( unsigned iq=0; iq<_nq; iq++ ) Iq[iq] = _Iq[iq];
       for( _isen=0; _isen<_np; _isen++ ){
         _GET_I_SEN( options, NV_DATA_S(_Nx), NV_DATA_S(_Ny[_isen]), _nq && _Nq? NV_DATA_S(_Nq): 0,
                     _nq, _nq && _Nyq[_isen]? NV_DATA_S(_Nyq[_isen]): 0 );
         if( (_vFCT.size()>=ns || _istg==ns-1)
-         && !_FCT_I_SEN( _pos_fct, _isen, _t, Ifp+_isen*_nf ) )
+         && !ODEBND_BASE<T,PMT,PVT>::_FCT_I_SEN( options, _pos_fct, _isen, _t,
+                    NV_DATA_S( _Nfp[_isen] ), Ifp+_isen*_nf ) )
           { _END_STA(); _END_SEN(); return FATAL; }
         if( Ixpk && !Ixpk[_istg+1] ) Ixpk[_istg+1] = new T[_nx*_np];
         for( unsigned iy=0; iy<_nx; iy++ ) Ixpk[_istg+1][_isen*_nx+iy] = _Iy[iy];
-        for( unsigned iq=0; iq<_nq; iq++ ) Iqp[_isen*_nq+iq] = _Iyq[iq];
       }
 
       // Display & record stage results
       if( options.DISPLAY >= 1 ){
         _print_interm( _t, _nx, Ixk[_istg+1], "x", os );
-        _print_interm( _nq, Iq, "q", os );
         _print_interm( _nx*_np, Ixpk[_istg+1], "xp", os );
-        _print_interm( _nq*_np, Iqp, "qp", os );
       }
       if( options.RESRECORD ){
         results_sta.push_back( Results( tk[_istg+1], _nx, Ixk[_istg+1] ) );
@@ -1054,7 +1084,12 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_FSA
   }
   catch(...){
     _END_STA();
-    if( options.DISPLAY >= 1 ) _print_stats( stats_sta, os );
+    if( options.DISPLAY >= 1 ){
+      os << " ABORT TIME  " << std::scientific << std::left
+                            << std::setprecision(5) << _t << std::endl;
+      _print_stats( stats_sta, os );
+      _print_stats( stats_sen, os );
+    }
     return FAILURE;
   }
 
@@ -1136,42 +1171,39 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::MC_CVASAQUADPM__
   return( flag? 0: -1 );
 }
 
-//! @fn template <typename T, typename PMT, typename PVT> inline typename ODEBNDS_GSL<T,PMT,PVT>::STATUS ODEBNDS_GSL<T,PMT,PVT>::bounds_ASA(
-//! const unsigned ns, const double*tk, const PVT*PMp, PVT**PMxk=0, 
-//! PVT*PMq=0, PVT*PMf=0, PVT**PMlk=0, PVT*PMfp=0, std::ostream&os=std::cout )
+//! @fn template <typename T, typename PMT, typename PVT> inline typename ODEBNDS_SUNDIALS<T,PMT,PVT>::STATUS ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA(
+//! const unsigned ns, const double*tk, const PVT*PMp, PVT**PMxk, 
+//! PVT*PMf, PVT**PMlk, PVT*PMfp, std::ostream&os=std::cout )
 //!
-//! This function computes an enclosure on the functional defined in F together with its
-//! derivatives, as well as an enclosure of the reachable set of the parametric ODEs defined in
-//! IVP using equally spaced samples, using the propagation of polynomial models with convex
-//! remainders (intervals, ellipsoids):
-//!  - <a>ns</a> [input] number of time stages
-//!  - <a>tk</a> [input] stage times, including the initial time
-//!  - <a>PMp</a> [input] polynomial model of parameter set
-//!  - <a>PMxk</a> [output] polynomial model of state enclosures at stage times (default: NULL)
-//!  - <a>PMq</a> [output] polynomial model of quadrature variables (default: NULL)
-//!  - <a>PMf</a> [output] polynomial model of state/quadrature functionals (default: NULL)
-//!  - <a>PMlk</a> [output] polynomial model of adjoint enclosures at stage times (default: NULL)
-//!  - <a>PMfp</a> [output] polynomial model of functional derivatives (default: NULL)
-//!  - <a>os</a> [input] output stream (default: std::cout)
+//! This function computes an enclosure of the reachable set of the parametric ODEs
+//! using continuous-time propagation of polynomial models with convex remainders
+//! (intervals, ellipsoids), together with adjoint sensitivity bounds:
+//!  - <a>ns</a>    [input]  number of time stages
+//!  - <a>tk</a>    [input]  stage times, including the initial time
+//!  - <a>PMp</a>   [input]  polynomial model of parameter set
+//!  - <a>PMxk</a>  [output] polynomial model of state variables at stage times
+//!  - <a>PMf</a>   [output] polynomial model of state functions
+//!  - <a>PMlk</a>  [output] polynomial model of adjoint variables at stage times
+//!  - <a>PMfp</a>  [output] polynomial model of state function derivatives
+//!  - <a>os</a>    [input]  output stream [default: std::cout]
 //! .
 //! The return value is the status.
 template <typename T, typename PMT, typename PVT>
 inline typename ODEBNDS_SUNDIALS<T,PMT,PVT>::STATUS
 ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
-( const unsigned ns, const double*tk, const PVT*PMp, PVT**PMxk, PVT*PMq, PVT*PMf, PVT**PMlk,
-  PVT*PMfp, std::ostream&os )
+( const unsigned ns, const double*tk, const PVT*PMp, PVT**PMxk, PVT*PMf,
+  PVT**PMlk, PVT*PMfp, std::ostream&os )
 {
   // Compute state bounds and store intermediate results
   STATUS flag = NORMAL;
-  ODEBND_SUNDIALS<T,PMT,PVT>::options = options;
-  flag = ODEBND_SUNDIALS<T,PMT,PVT>::_bounds( ns, tk, PMp, PMxk, PMq, PMf, true, os);
+  flag = ODEBND_SUNDIALS<T,PMT,PVT>::_bounds( ns, tk, PMp, PMxk, PMf, true, os);
   if( flag != NORMAL ) return flag;
 
   // Nothing to do if no functions are defined
-  if( !_nf ) return NORMAL;
+  if( !_nf || !_np ) return NORMAL;
 
   // Check size
-  if( !PMlk || !PMfp ) return FATAL;
+  if( !PMlk || (_nf && !PMfp) ) return FATAL;
 
   try{
     // Initialize adjoint bound integration
@@ -1281,10 +1313,8 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
       }
 
       // Display & record adjoint intermediate results
-      if( options.DISPLAY >= 1 ){
+      if( options.DISPLAY >= 1 )
         _print_interm( tk[_istg-1], _nf*_nx, PMlk[_istg-1], "l", os );
-        //_print_interm( _np, PMfp, "fp", os );
-      }
       if( options.RESRECORD )
         results_sen.push_back( Results( tk[_istg-1], _nf*_nx, PMlk[_istg-1] ) );
       //{ int dum; std::cin >> dum; }
@@ -1327,13 +1357,16 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::_INI_PM_FSA
     cv_Ny_size = _PMenv->nmon()*_nx + _nx*(_nx+1)/2;
     break;
   }
-  unsigned cv_Nyq_size = (_PMenv->nmon()+1)*_nq;
+  unsigned cv_Nyq_size = (_PMenv->nmon()+1)*_nq,
+           cv_Nfp_size = (_PMenv->nmon()+1)*_nf;
   if( _nvec != np ){
     if( _Ny )   N_VDestroyVectorArray_Serial( _Ny,  _nvec ); _Ny = 0;
     if( _Nyq )  N_VDestroyVectorArray_Serial( _Nyq, _nvec ); _Nyq = 0;
+    if( _Nfp )  N_VDestroyVectorArray_Serial( _Nfp, _nvec ); _Nfp = 0;
     _nvec = np;
     _Ny  = N_VCloneVectorArray_Serial( np, _Nx );
-    if( _nq ) _Nyq = N_VCloneVectorArray_Serial( np, _Nq );
+    if( _nq ) _Nyq = N_VCloneVectorArray_Serial( np, _Nx );
+    if( _nf ) _Nfp = N_VCloneVectorArray_Serial( np, _Nx );
   }
   for( unsigned i=0; i<np; i++ ){
     if( !_Ny[i] || cv_Ny_size != NV_LENGTH_S( _Ny[i] ) ){
@@ -1343,6 +1376,10 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::_INI_PM_FSA
     if( _Nyq && (!_Nyq[i] || cv_Nyq_size != NV_LENGTH_S( _Nyq[i]) ) ){
       if( _Nyq[i] ) N_VDestroy_Serial( _Nyq[i] );
       _Nyq[i] = cv_Nyq_size? N_VNew_Serial( cv_Nyq_size ): 0;
+    }
+    if( _Nfp && (!_Nfp[i] || cv_Nfp_size != NV_LENGTH_S( _Nfp[i]) ) ){
+      if( _Nfp[i] ) N_VDestroy_Serial( _Nfp[i] );
+      _Nfp[i] = cv_Nfp_size? N_VNew_Serial( cv_Nfp_size ): 0;
     }
   }
 
@@ -1407,40 +1444,35 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::MC_CVFSAQUADPM__
   return( flag? 0: -1 );
 }
 
-//! @fn template <typename T, typename PMT, typename PVT> inline typename ODEBNDS_GSL<T,PMT,PVT>::STATUS ODEBNDS_GSL<T,PMT,PVT>::bounds_FSA(
-//! const unsigned ns, const double*tk, const PVT*PMp, PVT**PMxk=0, 
-//! PVT*PMq=0, PVT*PMf=0, PVT**PMxpk=0, PVT*PMqp=0, PVT*PMfp=0, std::ostream&os=std::cout )
+//! @fn template <typename T, typename PMT, typename PVT> inline typename ODEBNDS_SUNDIALS<T,PMT,PVT>::STATUS ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_FSA(
+//! const unsigned ns, const double*tk, const PVT*PMp, PVT**PMxk, 
+//! PVT*PMf, PVT**PMxpk, PVT*PMfp, std::ostream&os=std::cout )
 //!
-//! This function computes an enclosure on the functional defined in F together with its
-//! derivatives, as well as an enclosure of the reachable set of the parametric ODEs defined in
-//! IVP using equally spaced samples, using the propagation of polynomial models with convex
-//! remainders (intervals, ellipsoids):
-//!  - <a>ns</a> [input] number of time stages
-//!  - <a>tk</a> [input] stage times, including the initial time
-//!  - <a>PMp</a> [input] polynomial model of parameter set
-//!  - <a>PMxk</a> [output] polynomial model of state variables at stage times (default: NULL)
-//!  - <a>PMq</a> [output] polynomial model of quadrature variables (default: NULL)
-//!  - <a>PMf</a> [output] polynomial model of state-dependent functionals (default: NULL)
-//!  - <a>PMxpk</a> [output] polynomial model of state sensitivity variables at stage times (default: NULL)
-//!  - <a>PMqp</a> [output] polynomial model of quadrature sensitivity variables (default: NULL)
-//!  - <a>PMfp</a> [output] polynomial model of state-dependent functional derivatives (default: NULL)
-//!  - <a>os</a> [input] output stream (default: std::cout)
+//! This function computes an enclosure of the reachable set of the parametric ODEs
+//! using continuous-time propagation of polynomial models with convex remainders
+//! (intervals, ellipsoids), together with forward sensitivity bounds:
+//!  - <a>ns</a>    [input]  number of time stages
+//!  - <a>tk</a>    [input]  stage times, including the initial time
+//!  - <a>PMp</a>   [input]  polynomial model of parameter set
+//!  - <a>PMxk</a>  [output] polynomial model of state variables at stage times
+//!  - <a>PMf</a>   [output] polynomial model of state functions
+//!  - <a>PMxpk</a> [output] polynomial model of state sensitivity variables at stage times
+//!  - <a>PMfp</a>  [output] polynomial model of state function derivatives
+//!  - <a>os</a>    [input]  output stream [default: std::cout]
 //! .
 //! The return value is the status.
 template <typename T, typename PMT, typename PVT>
 inline typename ODEBNDS_SUNDIALS<T,PMT,PVT>::STATUS
 ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_FSA
-( const unsigned ns, const double*tk, const PVT*PMp, PVT**PMxk, PVT*PMq, PVT*PMf,
-  PVT**PMxpk, PVT*PMqp, PVT*PMfp, std::ostream&os )
+( const unsigned ns, const double*tk, const PVT*PMp, PVT**PMxk, PVT*PMf,
+  PVT**PMxpk, PVT*PMfp, std::ostream&os )
 {
   // Check arguments
-  if( !tk || !PMxk || !PMp || !PMxpk
-    || ( _nf && (!PMf || !PMfp) ) 
-    || ( _nq && (!PMq || !PMqp) ) ) return FATAL;
+  if( !tk || !PMp || !PMxk || !PMxpk || ( _nf && (!PMf || !PMfp) ) ) return FATAL;
 
   try{
     // Initialize trajectory integration
-    if( !ODEBND_SUNDIALS<T,PMT,PVT>::_INI_PM_STA( _np, PMp, ns ) 
+    if( !ODEBND_SUNDIALS<T,PMT,PVT>::_INI_PM_STA( _np, PMp ) 
      || !_INI_PM_FSA( _np, PMp ) ) return FATAL;
     _t = tk[0];
 
@@ -1451,17 +1483,16 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_FSA
       { _END_STA(); _END_SEN(); return FATAL; }
     if( PMxk && !PMxk[0] ) PMxk[0] = new PVT[_nx];
     for( unsigned ix=0; PMxk[0] && ix<_nx; ix++ ) PMxk[0][ix] = _PMx[ix];
-    for( unsigned iq=0; iq<_nq; iq++ ) PMq[iq] = _PMq[iq];
 
     // Bounds on initial state/quadrature sensitivities
     if( PMxpk && !PMxpk[0] ) PMxpk[0] = new PVT[_nx*_np];
     for( _isen=0; _isen<_np; _isen++ ){
       if( !_IC_SET_FSA( _isen )
        || !ODEBND_BASE<T,PMT,PVT>::_IC_PM_STA( options, _t, NV_DATA_S(_Ny[_isen]) )
-       || ( _Nyq && _Nyq[_isen] && !ODEBND_BASE<T,PMT,PVT>::_IC_PM_QUAD( options, NV_DATA_S(_Nyq[_isen]) ) ) ) 
+       || ( _Nyq && _Nyq[_isen]
+         && !ODEBND_BASE<T,PMT,PVT>::_IC_PM_QUAD( options, NV_DATA_S(_Nyq[_isen]) ) ) ) 
         { _END_STA(); _END_SEN(); return FATAL; }
       for( unsigned iy=0; PMxpk[0] && iy<_nx; iy++ ) PMxpk[0][_isen*_nx+iy] = _PMx[iy];
-      for( unsigned iq=0; iq<_nq; iq++ ) PMqp[_isen*_nq+iq] = _PMq[iq];
 #ifdef MC__ODEBNDS_SUNDIALS_DEBUG
       std::cout << "qS[" << _isen << "]: " << _Nyq[_isen] << "(" << NV_LENGTH_S( _Nyq[_isen] ) << ")\n";
       for( unsigned i=0; i<NV_LENGTH_S( _Nyq[_isen] ); i++ ) std::cout << NV_Ith_S( _Nyq[_isen], i ) << std::endl;
@@ -1472,9 +1503,7 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_FSA
     // Display & record initial results
     if( options.DISPLAY >= 1 ){
       _print_interm( _t, _nx, PMxk[0], "x", os );
-      _print_interm( _nq, PMq, "q", os );
       _print_interm( _nx*_np, PMxpk[0], "xp", os );
-      _print_interm( _nq*_np, PMqp, "qp", os );
     }
     if( options.RESRECORD ){
       results_sta.push_back( Results( _t, _nx, PMxk[0] ) );
@@ -1496,14 +1525,23 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_FSA
       if( _pos_ic
        && ( !ODEBND_BASE<T,PMT,PVT>::_CC_PM_SET( options, _pos_ic )
          || !ODEBND_BASE<T,PMT,PVT>::_CC_PM_STA( options, _t, NV_DATA_S( _Nx ) )
-         || !ODEBND_SUNDIALS<T,PMT,PVT>::_CC_CVODE() ) )
+         || !ODEBND_SUNDIALS<T,PMT,PVT>::_CC_CVODE_STA() ) )
         { _END_STA(); _END_SEN(); return FATAL; }
-      for( _isen=0; _pos_ic && _isen<_np; _isen++ ){
-        if( !_CC_SET_FSA( _pos_ic, _isen )
-         || !_CC_PM_SET( options )
-         || !_CC_PM_SEN( options, _t, NV_DATA_S( _Nx ), NV_DATA_S(_Ny[_isen]) )
-         || ( !_isen && !_CC_CVODES_FSA() ) )
+      if( _istg 
+       && ( (_Nq && !ODEBND_BASE<T,PMT,PVT>::_IC_PM_QUAD( options, NV_DATA_S( _Nq ) ) ) // quadrature reinitialization
+         || !ODEBND_SUNDIALS<T,PMT,PVT>::_CC_CVODE_QUAD() ) )
+        { _END_STA(); _END_SEN(); return FATAL; }
+      for( _isen=0; _isen<_np; _isen++ ){
+        if( _pos_ic
+         && ( !_CC_SET_FSA( _pos_ic, _isen )
+           || !_CC_PM_SET( options )
+           || !_CC_PM_SEN( options, _t, NV_DATA_S( _Nx ), NV_DATA_S(_Ny[_isen]) )
+           || ( !_isen && !_CC_CVODES_FSA() ) ) )
           { _END_STA(); _END_SEN(); return FATAL; }
+        if( _istg
+         && ( ( _Nyq && _Nyq[_isen] && !ODEBND_BASE<T,PMT,PVT>::_IC_PM_QUAD( options, NV_DATA_S(_Nyq[_isen]) ) ) //quadrature sensitivity reinitialization
+           || ( !_isen && !_CC_CVODES_QUAD() ) ) )
+            { _END_STA(); _END_SEN(); return FATAL; }
 #ifdef MC__ODEBNDS_SUNDIALS_DEBUG
         for( unsigned iy=0; iy<NV_LENGTH_S(_Ny[_isen]); iy++ )
           std::cout << "_Ny" << _isen << "[iy] = " << NV_Ith_S(_Ny[_isen],iy) << std::endl;
@@ -1512,7 +1550,7 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_FSA
 #endif
       }
 
-      // update list of operations in RHS, JAC, QUAD, RHSFSA and QUADFSA
+      // update list of operations in RHS, QUAD, RHSFSA and QUADFSA
       _pos_rhs  = ( _vRHS.size()<=1?  0: _istg );
       _pos_quad = ( _vQUAD.size()<=1? 0: _istg );
       if( (!_istg || _pos_rhs || _pos_quad)
@@ -1564,7 +1602,6 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_FSA
         { _END_STA(); _END_SEN(); return FATAL; }
       if( PMxk && !PMxk[_istg+1] ) PMxk[_istg+1] = new PVT[_nx];
       for( unsigned ix=0; ix<_nx; ix++ ) PMxk[_istg+1][ix] = _PMx[ix];
-      for( unsigned iq=0; iq<_nq; iq++ ) PMq[iq] = _PMq[iq];
       for( _isen=0; _isen<_np; _isen++ ){
         _GET_PM_SEN( options, NV_DATA_S(_Nx), NV_DATA_S(_Ny[_isen]), _nq && _Nq? NV_DATA_S(_Nq): 0,
                      _nq, _nq && _Nyq[_isen]? NV_DATA_S(_Nyq[_isen]): 0 );
@@ -1573,15 +1610,12 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_FSA
           { _END_STA(); _END_SEN(); return FATAL; }
         if( PMxpk && !PMxpk[_istg+1] ) PMxpk[_istg+1] = new PVT[_nx*_np];
         for( unsigned iy=0; iy<_nx; iy++ ) PMxpk[_istg+1][_isen*_nx+iy] = _PMy[iy];
-        for( unsigned iq=0; iq<_nq; iq++ ) PMqp[_isen*_nq+iq] = _PMyq[iq];
       }
 
       // Display & record stage results
       if( options.DISPLAY >= 1 ){
         _print_interm( _t, _nx, PMxk[_istg+1], "x", os );
-        _print_interm( _nq, PMq, "q", os );
         _print_interm( _nx*_np, PMxpk[_istg+1], "xp", os );
-        _print_interm( _nq*_np, PMqp, "qp", os );
       }
       if( options.RESRECORD ){
         results_sta.push_back( Results( tk[_istg+1], _nx, PMxk[_istg+1] ) );
@@ -1604,6 +1638,117 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_FSA
   _END_STA();
   if( options.DISPLAY >= 1 ) _print_stats( stats_sta, os );
   return NORMAL;
+}
+
+//! @fn template <typename T, typename PMT, typename PVT> inline typename ODEBNDS_SUNDIALS<T,PMT,PVT>::STATUS ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_FSA(
+//! const unsigned ns, const double*tk, const T*Ip, T**Ixk, 
+//! T*If, T**Ixpk, T*Ifp, const unsigned nsamp,
+//! std::ostream&os=std::cout )
+//!
+//! This function computes projections of an inner-approximation enclosure of
+//! the reachable set of the parametric ODEs using sampling and continuous-time
+//! integration, together with forward sensitivity information:
+//!  - <a>ns</a>    [input]  number of time stages
+//!  - <a>tk</a>    [input]  stage times, including the initial time
+//!  - <a>Ip</a>    [input]  interval enclosure of parameter set
+//!  - <a>Ixk</a>   [output] interval enclosure of state variables at stage times
+//!  - <a>If</a>    [output] interval enclosure of state functions
+//!  - <a>Ixpk</a>  [output] interval enclosure of state sensitivity variables at stage times
+//!  - <a>Ifp</a>   [output] interval enclosure of state function derivatives
+//!  - <a>nsamp</a> [input]  number of samples for each parameter
+//!  - <a>os</a>    [input]  output stream [default: std::cout]
+//! .
+//! The return value is the status.
+template <typename T, typename PMT, typename PVT>
+inline typename ODEBNDS_SUNDIALS<T,PMT,PVT>::STATUS
+ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_FSA
+( const unsigned ns, const double*tk, const T*Ip, T**Ixk,
+  T*If, T**Ixpk, T*Ifp, const unsigned nsamp,
+  std::ostream&os )
+{
+  // Sample inner approximation
+  STATUS flag = NORMAL;
+  pODESLVS.set( *this );
+  pODESLVS.options = options.ODESLV;
+  if( !_bounds_FSA( ns, tk, Ip, Ixk, If, Ixpk, Ifp, pODESLVS, nsamp, os ) )
+    flag = FAILURE;
+
+  // Display results
+  if( options.DISPLAY >= 1 ){
+    for( unsigned is=0; Ixk && is<=ns; is++ ){
+      _print_interm( tk[is], _nx, Ixk[is], "x", os );
+      _print_interm( _nx*_np, Ixpk[is], "xp", os );
+    }
+    if( If )  _print_interm( _nf, If, "f", os );
+    if( Ifp ) _print_interm( _nf*_np, Ifp, "fp", os );
+  }
+
+  // Record intermediate results
+  results_sta.clear();
+  results_sen.clear();
+  if( options.RESRECORD ){
+    for( unsigned is=0; Ixk && is<=ns; is++ )
+      results_sta.push_back( Results( tk[is], _nx, Ixk[is] ) );
+    for( unsigned is=0; Ixpk && is<=ns; is++ )
+      results_sen.push_back( Results( tk[is], _nx*_np, Ixpk[is] ) );
+  }
+  
+  return flag;
+}
+
+//! @fn template <typename T, typename PMT, typename PVT> inline typename ODEBNDS_SUNDIALS<T,PMT,PVT>::STATUS ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA(
+//! const unsigned ns, const double*tk, const T*Ip, T**Ixk, 
+//! T*If, T**Ilk, T*Ifp, const unsigned nsamp, std::ostream&os=std::cout )
+//!
+//! This function computes projections of an inner-approximation enclosure of
+//! the reachable set of the parametric ODEs using sampling and continuous-time
+//! integration, together with forward sensitivity information:
+//!  - <a>ns</a>    [input]  number of time stages
+//!  - <a>tk</a>    [input]  stage times, including the initial time
+//!  - <a>Ip</a>    [input]  interval enclosure of parameter set
+//!  - <a>Ixk</a>   [output] interval enclosure of state variables at stage times
+//!  - <a>If</a>    [output] interval enclosure of state functions
+//!  - <a>Ilk</a>   [output] interval enclosure of adjoint variables at stage times
+//!  - <a>Ifp</a>   [output] interval enclosure of state function derivatives
+//!  - <a>nsamp</a> [input]  number of samples for each parameter
+//!  - <a>os</a>    [input]  output stream [default: std::cout]
+//! .
+//! The return value is the status.
+template <typename T, typename PMT, typename PVT>
+inline typename ODEBNDS_SUNDIALS<T,PMT,PVT>::STATUS
+ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
+( const unsigned ns, const double*tk, const T*Ip, T**Ixk,
+  T*If, T**Ilk, T*Ifp, const unsigned nsamp,
+  std::ostream&os )
+{
+  // Sample inner approximation
+  STATUS flag = NORMAL;
+  pODESLVS.set( *this );
+  pODESLVS.options = options.ODESLV;
+  if( !_bounds_ASA( ns, tk, Ip, Ixk, If, Ilk, Ifp, pODESLVS, nsamp, os ) )
+    flag = FAILURE;
+
+  // Display results
+  if( options.DISPLAY >= 1 ){
+    for( unsigned is=0; Ixk && is<=ns; is++ )
+      _print_interm( tk[is], _nx, Ixk[is], "x", os );
+    if( If )  _print_interm( _nf, If, "f", os );
+    for( unsigned is=ns; Ilk && is<=ns; is-- )
+      _print_interm( tk[is], _nx*_nf, Ilk[is], "l", os );
+    if( Ifp ) _print_interm( _nf*_np, Ifp, "fp", os );
+  }
+
+  // Record intermediate results
+  results_sta.clear();
+  results_sen.clear();
+  if( options.RESRECORD ){
+    for( unsigned is=0; Ixk && is<=ns; is++ )
+      results_sta.push_back( Results( tk[is], _nx, Ixk[is] ) );
+    for( unsigned is=0; Ilk && is<=ns; is++ )
+      results_sen.push_back( Results( tk[is], _nx*_nf, Ilk[is] ) );
+  }
+
+  return flag;
 }
 
 } // end namescape mc

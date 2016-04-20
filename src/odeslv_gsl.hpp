@@ -652,14 +652,14 @@ ODESLV_GSL<T>::states
 //! This function computes an approximate interval enclosure of the
 //! reachable set of the parametric ODEs defined in IVP using equally
 //! spaced samples:
-//!   - <a>ns</a> [input] number of time stages
-//!   - <a>tk</a> [input] stage times, including the initial time
-//!   - <a>Ip</a> [input] interval parameter set
-//!   - <a>Ixk</a> [output] approximate interval state enclosures at stage times
-//!   - <a>Iq</a>  [output] approximate quadrature enclosures at final time
-//!   - <a>If</a>  [output] approximate function enclosures
+//!   - <a>ns</a>    [input] number of time stages
+//!   - <a>tk</a>    [input] stage times, including the initial time
+//!   - <a>Ip</a>    [input] interval parameter set
+//!   - <a>Ixk</a>   [output] approximate interval state enclosures at stage times
+//!   - <a>Iq</a>    [output] approximate quadrature enclosures at final time
+//!   - <a>If</a>    [output] approximate function enclosures
 //!   - <a>nsamp</a> [input] number of samples for each parameter
-//!   - <a>os</a> [input] output stream
+//!   - <a>os</a>    [input] output stream
 //! .
 //! The return value is the status.
 template <typename T> inline typename ODESLV_GSL<T>::STATUS
@@ -667,41 +667,13 @@ ODESLV_GSL<T>::bounds
 ( const unsigned ns, const double*tk, const T*Ip, T**Ixk,
   T*Iq, T*If, const unsigned nsamp, std::ostream&os )
 {
-  int DISPLAY_SAVE = options.DISPLAY;
-  options.DISPLAY = 0;
+  // Sample inner approximation
   STATUS flag = NORMAL;
-  
-  // Initialization of sampled bounds at parameter lower bound
-  double *p = new double[_np];
-  for( unsigned ip=0; ip<_np; ip++ )
-    p[ip] = Op<T>::l(Ip[ip]);
-  double **xk = Ixk? new double*[ns+1]: 0;
-  for( unsigned is=0; Ixk && is<=ns; is++ ){
-    if( !Ixk[is] ) Ixk[is] = new T[ns];
-    xk[is] = new double[_nx];
-  }
-  double *q = Iq? new double[_nq]: 0;
-  double *f = If? new double[_nf]: 0;
-  flag = states( ns, tk, p, xk, q, f, os );
-  if( flag != NORMAL || nsamp <= 1 ){
-    delete[] p; delete[] f;
-    for( unsigned is=0; is<=ns; is++ ) delete[] xk[is]; delete[] xk;
-    return flag;
-  }   
-  for( unsigned is=0; Ixk && is<=ns; is++ )
-    for( unsigned ix=0; ix<_nx; ix++ )
-      Ixk[is][ix] = xk[is][ix];
-  for( unsigned iq=0; Iq && iq<_nq; iq++ )
-    Iq[iq] = q[iq];
-  for( unsigned ifn=0; If && ifn<_nf; ifn++ )
-    If[ifn] = f[ifn];
-
-  // Start sampling process
-  unsigned* vsamp = new unsigned[_np];
-  flag = _states( ns, tk, Ip, Ixk, Iq, If, nsamp, vsamp, 0, p, xk, q, f, os );
+  pODESLV_GSL.set( *this );
+  if( !_bounds( ns, tk, Ip, Ixk, Iq, If, pODESLV_GSL, nsamp, os ) )
+    flag = FAILURE;
 
   // Display results
-  options.DISPLAY = DISPLAY_SAVE;
   if( options.DISPLAY >= 1 ){
     for( unsigned is=0; Ixk && is<=ns; is++ )
       _print_interm( tk[is], _nx, Ixk[is], "x", os );
@@ -714,11 +686,6 @@ ODESLV_GSL<T>::bounds
   if( options.RESRECORD )
     for( unsigned is=0; Ixk && is<=ns; is++ )
       _results_sta.push_back( Results( tk[is], _nx, Ixk[is] ) );
-  
-  // Clean-up
-  delete[] p; delete[] q; delete[] f;
-  for( unsigned is=0; xk && is<=ns; is++ ) delete[] xk[is]; delete[] xk;
-  delete[] vsamp;
   
   return flag;
 }

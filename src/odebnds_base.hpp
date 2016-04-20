@@ -57,6 +57,7 @@ protected:
   using ODEBND_BASE<T,PMT,PVT>::_ndxLT;
   using ODEBND_BASE<T,PMT,PVT>::_pIC;
   using ODEBND_BASE<T,PMT,PVT>::_opIC;
+  using ODEBND_BASE<T,PMT,PVT>::_pFCT;
 
   using ODEBND_BASE<T,PMT,PVT>::_PMenv;
   using ODEBND_BASE<T,PMT,PVT>::_vec2PMI;
@@ -184,6 +185,9 @@ protected:
   //! @brief sensitivity/adjoint quadrature derivative interval bounds
   T *_Iyqdot;
 
+  //! @brief linear transformed state function derivative bounds
+  T *_Idfp;
+
   //! @brief sensitivity/adjoint quadrature lower bound time derivatives
   double *_yqLdot;
 
@@ -232,17 +236,20 @@ protected:
   //! @brief adjoint reference
   double *_yref;
 
-  //! @brief linear transformation A matrix (adjoint system)
+  //! @brief linear transformation A matrix (sensitivity/adjoint system)
   double *_Ay;
 
-  //! @brief linear transformation A matrix (adjoint system) (to multiply states)
+  //! @brief linear transformation A matrix (sensitivity/adjoint system) (to multiply states)
   double *_Ax;
 
-  //! @brief linear transformation B matrix (adjoint system)
+  //! @brief linear transformation B matrix (sensitivity/adjoint system)
   double *_By;
 
-  //! @brief linear transformation B matrix (adjoint quadrature)
+  //! @brief linear transformation B matrix (sensitivity/adjoint quadrature)
   double *_Byq;
+
+  //! @brief linear transformation B matrix (function sensitivity)
+  double *_Bfp;
 
   //! @brief linear transformed adjoint interval bounds
   T *_Idy;
@@ -300,6 +307,15 @@ protected:
 
   //! @brief rotated adjoint polynomial model
   PVT *_MVYXPd;
+
+  //! @brief pointer to quadrature polynomial model
+  PVT *_MVYXPq;
+
+  //! @brief pointer to sensitivity/adjoint quadrature polynomial model
+  PVT *_MVYXPyq;
+
+  //! @brief pointer to staet function derivative polynomial model
+  PVT *_MVYXPfp;
 
   //! @brief adjoint RHS polynomial model
   PVT *_MVYXPg;
@@ -434,8 +450,9 @@ protected:
       const unsigned ifct, const bool neg=false );
 
   //! @brief Function to calculate the function sensitivities at intermediate/end point
-  bool _FCT_I_SEN
-    ( const unsigned pos_fct, const unsigned isen, const double t, T*Ifp );
+  template <typename REALTYPE, typename OPT> bool _FCT_I_SEN
+    ( const OPT&options, const unsigned pos_fct, const unsigned isen,
+      const double t, REALTYPE*fp, T*Ifp );
 
   //! @brief Function to initialize sensitivity/adjoint polynomial models
   template <typename OPT> bool _INI_PM_SEN
@@ -534,6 +551,28 @@ protected:
   bool _FCT_PM_SEN
     ( const unsigned pos_fct, const unsigned isen, const double t, PVT*PMfp );
 
+  //! @brief Computes inner bounds approximation with forward sensitivity using parameter sampling
+  template <typename ODESLV> inline bool _bounds_FSA
+    ( const unsigned ns, const double*tk, const T*Ip, T**Ixk, T*If, T**Ixpk, T*Ifp,
+      ODESLV&traj, const unsigned nsamp, std::ostream&os );
+
+  //! @brief Recursive function computing bounds on ODE solutions with forward sensitivity using sampling
+  template <typename ODESLV> inline bool _sampling_FSA
+    ( const unsigned ns, const double*tk, const T*Ip, T**Ixk, T*If, T**Ixpk, T*Ifp,
+      ODESLV&traj, const unsigned nsamp, unsigned* vsamp, const unsigned ipar,
+      double*p, double**xk, double*f, double**xpk, double*fp, std::ostream&os );
+
+  //! @brief Computes inner bounds approximation with adjoint sensitivity using parameter sampling
+  template <typename ODESLV> inline bool _bounds_ASA
+    ( const unsigned ns, const double*tk, const T*Ip, T**Ixk, T*If, T**Ilk, T*Ifp,
+      ODESLV&traj, const unsigned nsamp, std::ostream&os );
+
+  //! @brief Recursive function computing bounds on ODE solutions with adjoint sensitivity using sampling
+  template <typename ODESLV> inline bool _sampling_ASA
+    ( const unsigned ns, const double*tk, const T*Ip, T**Ixk, T*If, T**Ilk, T*Ifp,
+      ODESLV&traj, const unsigned nsamp, unsigned* vsamp, const unsigned ipar,
+      double*p, double**xk, double*f, double**lk, double*fp, std::ostream&os );
+
   //! @brief Private methods to block default compiler methods
   ODEBNDS_BASE(const ODEBNDS_BASE&);
   ODEBNDS_BASE& operator=(const ODEBNDS_BASE&);
@@ -553,15 +592,16 @@ ODEBNDS_BASE<T,PMT,PVT>::ODEBNDS_BASE
 
   // Initialize parameterization arrays
   _zref = _yref = _yrefdot = 0;
-  _Ay = _Ax = _By = _Byq = _Qy = _Bydot = _Byqdot = _Qydot = 0;
-  _Idy = _Idydot = _Iydot = _Iyqdot = _Idgdy = _Idgdw = _Idyq = _Idyqdot = 0;
+  _Ay = _Ax = _By = _Byq = _Bfp = _Qy = _Bydot = _Byqdot = _Qydot = 0;
+  _Idy = _Idydot = _Iydot = _Iyqdot = _Idgdy = _Idgdw = _Idfp = _Idyq = _Idyqdot = 0;
   _yLdot = _yUdot = _yqLdot = _yqUdot = _RyLdot = _RyUdot = _Ryqdot = 0;
 
   // Initialize polynomial model environments
   _MVYXPenv = 0;
   _MVXPy  = _MVXPyq = 0; ;
   _MVYXPd = _MVYXPr = _MVYXPw = _MVYXPg = _MVYXPdgdy = _MVYXPdgdw =
-  _MVYXPyqdot = _MVYXPVAR = _MVYXPy = _MVYXPx = _MVYXPp = _MVYXPt = 0;
+  _MVYXPyqdot = _MVYXPVAR = _MVYXPy = _MVYXPx = _MVYXPp = _MVYXPt =
+  _MVYXPq = _MVYXPyq = _MVYXPfp =  0;
 }
 
 template <typename T, typename PMT, typename PVT> inline
@@ -613,12 +653,14 @@ ODEBNDS_BASE<T,PMT,PVT>::~ODEBNDS_BASE
   delete[] _Ax;
   delete[] _By;
   delete[] _Byq;
+  delete[] _Bfp;
   delete[] _Qy;
   delete[] _yrefdot;
   delete[] _Bydot;
   delete[] _Byqdot;
   delete[] _Idy;
   delete[] _Idyq;
+  delete[] _Idfp;
   delete[] _Idydot;
   delete[] _Idyqdot;
   delete[] _Qydot;
@@ -797,15 +839,17 @@ ODEBNDS_BASE<T,PMT,PVT>::_INI_I_SEN
     delete[] _MVYXPd;   _MVYXPd = 0;
     delete[] _MVYXPr;   _MVYXPr = 0;
     delete[] _MVYXPw;   _MVYXPw = 0;
+    delete[] _MVYXPq;   _MVYXPq = 0;
+    delete[] _MVYXPyq;  _MVYXPyq = 0;
     delete[] _MVYXPVAR; _MVYXPVAR = _MVYXPy = _MVYXPx = _MVYXPp = _MVYXPt = 0;
     delete[] _MVYXPyqdot; _MVYXPyqdot = 0;
     delete   _MVYXPenv; _MVYXPenv = 0;
   }
 
   // Set parameterization variables
-  delete[] _Iyqdot;   _Iyqdot = new T[nyq];
-  delete[] _yqLdot;   _yqLdot = new double[nyq];
-  delete[] _yqUdot;   _yqUdot = new double[nyq];
+  delete[] _Iyqdot;   _Iyqdot = nyq? new T[nyq]: 0;
+  delete[] _yqLdot;   _yqLdot = nyq? new double[nyq]: 0;
+  delete[] _yqUdot;   _yqUdot = nyq? new double[nyq]: 0;
 
   switch( options.WRAPMIT){
   case OPT::NONE:
@@ -823,24 +867,29 @@ ODEBNDS_BASE<T,PMT,PVT>::_INI_I_SEN
     delete[] _Ay;      _Ay      = new double[_nx*_nx];
     delete[] _Ax;      _Ax      = new double[_nx*_nx];
     delete[] _By;      _By      = new double[_nx*_npar];
-    delete[] _Byq;     _Byq     = new double[nyq*_npar];
+    delete[] _Byq;     _Byq     = nyq? new double[nyq*_npar]: 0;
+    delete[] _Bfp;     _Bfp     = new double[_nf*_npar];
     delete[] _Qy;      _Qy      = new double[_nx*(_nx+1)/2];
     delete[] _Idy;     _Idy     = new T[_nx];
-    delete[] _Idyq;    _Idyq    = new T[nyq];
+    delete[] _Idyq;    _Idyq    = nyq? new T[nyq]: 0;
+    delete[] _Idfp;    _Idfp    = _nf? new T[_nf]: 0;
     delete[] _yrefdot; _yrefdot = new double[_nx];
     delete[] _Bydot;   _Bydot   = new double[_nx*_npar];
-    delete[] _Byqdot;  _Byqdot  = new double[nyq*_npar];
+    delete[] _Byqdot;  _Byqdot  = nyq? new double[nyq*_npar]: 0;
     delete[] _Qydot;   _Qydot   = new double[_nx*(_nx+1)/2];
     delete[] _Idydot;  _Idydot  = new T[_nx];
-    delete[] _Idyqdot; _Idyqdot = new T[nyq];
+    delete[] _Idyqdot; _Idyqdot = nyq? new T[nyq]: 0;
 
     if( !_MVYXPenv )  _MVYXPenv = new PMT( 2*_nx+_npar, ordmit );
     _MVYXPenv->options = options.PMOPT;
     if( !_MVYXPd )    _MVYXPd   = new PVT[_nx];
     if( !_MVYXPr )    _MVYXPr   = new PVT[_nx];
     if( !_MVYXPw )    _MVYXPw   = new PVT[_nx];
+    if( !_MVYXPq )    _MVYXPq   = _nq? new PVT[_nq]: 0;
+    if( !_MVYXPyq )   _MVYXPyq  = nyq? new PVT[nyq]: 0;
+    if( !_MVYXPfp )   _MVYXPfp  = _nf? new PVT[_nf]: 0;
     if( !_MVYXPg )    _MVYXPg   = new PVT[_nx];
-    if( !_MVYXPyqdot ) _MVYXPyqdot = new PVT[nyq];
+    if( !_MVYXPyqdot ) _MVYXPyqdot = nyq? new PVT[nyq]: 0;
     if( !_MVYXPVAR )  _MVYXPVAR = new PVT[_nVAR0];
     _MVYXPy = _MVYXPVAR;
     _MVYXPx = _MVYXPy + _nx;
@@ -850,7 +899,7 @@ ODEBNDS_BASE<T,PMT,PVT>::_INI_I_SEN
       _MVYXPp[jp].set( _MVYXPenv, 2*_nx+jp, _Ip[jp] );
 
     delete[] _MVXPy;    _MVXPy    = new PVT[_nx];
-    delete[] _MVXPyq;   _MVXPyq   = new PVT[nyq];
+    delete[] _MVXPyq;   _MVXPyq   = nyq? new PVT[nyq]: 0;
 
     break;
   }
@@ -1381,8 +1430,8 @@ ODEBNDS_BASE<T,PMT,PVT>::_CC_I_QUAD_ASA
   case OPT::ELLIPS:
   default:
     _vec2I( yq, _npar, _npar, _pref, _Ip, _Byq, _Idyq, _Iyq );
-    _ep2x( _npar, _npar, (PVT*)0, _pref, _MVYXPp, _Byq, 0, _MVYXPyqdot );
-    for( unsigned ip=0; ip<_npar; ip++ ) _MVYXPyqdot[ip] += _Idyq[ip];
+    _ep2x( _npar, _npar, _Idyq, _pref, _MVYXPp, _Byq, 0, _MVYXPyqdot );
+    //for( unsigned ip=0; ip<_npar; ip++ ) _MVYXPyqdot[ip] += _Idyq[ip];
     _pDAG->eval( _opADJTQ, _PMADJTC, _npar, _pADJTC+_nx, _MVYXPyqdot, _nVAR0, _pVAR, _MVYXPVAR, true );
     _QUAD_I_ELL( _npar, _npar, 2*_nx, _MVYXPyqdot, _Byq, _Idyq, _Iyq );
     _I2vec( _npar, _npar, _Byq, _Idyq, yq );
@@ -1483,8 +1532,8 @@ ODEBNDS_BASE<T,PMT,PVT>::_RHS_I_SEN
     break;  
    
   case OPT::DINEQ:
-    _vec2I( x, _nx, _Ix );  // set current state bounds
-    _vec2I( y, _nx, _Iy );  // set current adjoint bounds
+    _vec2I( x, _nx, _Ix );  // current state bounds
+    _vec2I( y, _nx, _Iy );  // current adjoint bounds
     *_It = t; // set current time
     for( unsigned ix=0; ix<_nx; ix++ ){
       T Iyi = _IVAR[ix];
@@ -1504,8 +1553,8 @@ ODEBNDS_BASE<T,PMT,PVT>::_RHS_I_SEN
 
   case OPT::ELLIPS:
   default:
-    _vec2E( x, _nx, _npar, _Q, _Er, _Ir, _pref, _Ip, _B, _xref, _Ix ); // set current state bounds
-    _vec2E( y, _nx, _npar, _Qy, _Edy, _Idy, _pref, _Ip, _By, _yref, _Iy); // set current adjoint bounds
+    _vec2E( x, _nx, _npar, _Q, _Er, _Ir, _pref, _Ip, _B, _xref, _Ix );//, true ); // current state bounds
+    _vec2E( y, _nx, _npar, _Qy, _Edy, _Idy, _pref, _Ip, _By, _yref, _Iy); //, true); // current adjoint bounds
 #ifdef MC__ODEBNDS_BASE_DINEQI_DEBUG
     std::cout << "@t=" << t << std::endl;
     //E::options.PSDCHK = true;
@@ -1726,6 +1775,66 @@ ODEBNDS_BASE<T,PMT,PVT>::_RHS_I_QUAD
   return true;
 }
 
+template <typename T, typename PMT, typename PVT>
+template <typename REALTYPE, typename OPT> inline bool
+ODEBNDS_BASE<T,PMT,PVT>::_FCT_I_SEN
+( const OPT&options, const unsigned pos_fct, const unsigned isen,
+  const double t, REALTYPE*fp, T*Ifp )
+{
+  if( !_nf || !fp ) return true;
+  _pFCT = _vFCT.at( pos_fct );
+  for( unsigned iy=0; iy<_nx; iy++ )     _pADJCC[iy] = _pY[iy];
+  for( unsigned ip=0; ip<_npar+1; ip++ ) _pADJCC[_nx+ip] = (ip==isen? 1.: 0.); // includes time
+  for( unsigned iq=0; iq<_nq; iq++ )     _pADJCC[_nx+_npar+1+iq] = _pYQ[iq];
+  delete[] _pADJTC; _pADJTC = _pDAG->FAD( _nf, _pIC, _nx+_npar+1+_nq, _pVAR+_nx, _pADJCC );
+
+  switch( options.WRAPMIT){
+  case OPT::NONE:
+  case OPT::DINEQ:
+    *_It = t; // set current time
+    _pDAG->eval( _nf, _pADJTC, Ifp, _nVAR, _pVAR, _IVAR, pos_fct?true:false );
+    _I2vec( _nf, Ifp, fp );
+    break;
+
+  case OPT::ELLIPS:
+  default:
+    *_MVYXPt = t; // Current time
+    for( unsigned jx=0; jx<_nx; jx++ ){
+      _MVYXPw[jx].set( _MVYXPenv, _nx+jx, T(-1.,1.) );
+      _MVYXPr[jx] = _MVYXPw[jx] * 0.5*Op<T>::diam(_Ir[jx]);
+    }
+    _ep2x( _nx, _npar, _MVYXPr, _pref, _MVYXPp, _B, _xref, _MVYXPx );
+    for( unsigned jy=0; jy<_nx; jy++ )
+      _MVYXPd[jy].set( _MVYXPenv, jy, _Idy[jy] );
+    _ep2x( _nx, _npar, _MVYXPd, _pref, _MVYXPp, _By, _yref, _MVYXPy );
+    _ep2x( _nq, _npar, _Irq,  _pref, _MVYXPp, _Bq,  0, _MVYXPq  );
+    _ep2x( _nq, _npar, _Idyq, _pref, _MVYXPp, _Byq, 0, _MVYXPyq );
+//#ifdef MC__ODEBNDS_BASE_DINEQI_DEBUG
+    for( unsigned j=0; j<_nq; j++ )
+      std::cout << "MVYXPq[" << j << "] = " << _MVYXPq[j] << std::endl;
+    for( unsigned j=0; j<_nq; j++ )
+      std::cout << "MVYXPyq[" << j << "] = " << _MVYXPyq[j] << std::endl;
+//#endif
+    if( pos_fct ){
+      _vec2I( fp, _nf, _npar, _pref, _Ip, _Bfp, _Idfp, Ifp );
+      _ep2x( _nf, _npar, _Idfp, _pref, _MVYXPp, _Bfp, 0, _MVYXPfp );
+      _pDAG->eval( _nf, _pADJTC, _MVYXPfp, _nVAR, _pVAR, _MVYXPVAR, true );
+    }
+    else
+      _pDAG->eval( _nf, _pADJTC, _MVYXPfp, _nVAR, _pVAR, _MVYXPVAR );
+//#ifdef MC__ODEBNDS_BASE_DINEQI_DEBUG
+    for( unsigned j=0; j<_nf; j++ )
+      std::cout << "MVYXPfp[" << j << "] = " << _MVYXPfp[j] << std::endl;
+//#endif
+    _QUAD_I_ELL( _nf, _npar, _nx, _MVYXPfp, _Bfp, _Idfp, Ifp );
+    _I2vec( _nf, _npar, _Bfp, _Idfp, fp );
+    break;
+  }
+
+  return true;
+
+}
+/*
 template <typename T, typename PMT, typename PVT> inline bool
 ODEBNDS_BASE<T,PMT,PVT>::_FCT_I_SEN
 ( const unsigned pos_fct, const unsigned isen, const double t, T*Ifp )
@@ -1742,7 +1851,7 @@ ODEBNDS_BASE<T,PMT,PVT>::_FCT_I_SEN
 
   return true;
 }
-
+*/
 template <typename T, typename PMT, typename PVT>
 template <typename OPT> inline bool
 ODEBNDS_BASE<T,PMT,PVT>::_INI_PM_SEN
@@ -2935,14 +3044,226 @@ ODEBNDS_BASE<T,PMT,PVT>::_FCT_PM_SEN
 
   *_PMt = t; // set current time
   _pIC = _vFCT.at( pos_fct );
-  for( unsigned iy=0; iy<_nx; iy++ )   _pADJCC[iy] = _pY[iy];
+  for( unsigned iy=0; iy<_nx; iy++ )     _pADJCC[iy] = _pY[iy];
   for( unsigned ip=0; ip<_npar+1; ip++ ) _pADJCC[_nx+ip] = (ip==isen? 1.: 0.); // includes time
-  for( unsigned iq=0; iq<_nq; iq++ ) _pADJCC[_nx+_npar+1+iq] = _pYQ[iq];
+  for( unsigned iq=0; iq<_nq; iq++ )     _pADJCC[_nx+_npar+1+iq] = _pYQ[iq];
   delete[] _pADJTC; _pADJTC = _pDAG->FAD( _nf, _pIC, _nx+_npar+1+_nq, _pVAR+_nx, _pADJCC );
   _pDAG->eval( _nf, _pADJTC, PMfp, _nVAR, _pVAR, _PMVAR, pos_fct?true:false );
 
   return true;
 }
+
+template <typename T, typename PMT, typename PVT>
+template <typename ODESLV> inline bool
+ODEBNDS_BASE<T,PMT,PVT>::_bounds_FSA
+( const unsigned ns, const double*tk, const T*Ip, T**Ixk, T*If,
+  T**Ixpk, T*Ifp, ODESLV&traj, const unsigned nsamp, std::ostream&os )
+{
+  int DISPLAY_SAVE = traj.options.DISPLAY;
+  traj.options.DISPLAY = 0;
+
+  // Initialization of sampled bounds at parameter lower bound
+  double *p = new double[_np];
+  for( unsigned ip=0; ip<_np; ip++ )
+    p[ip] = Op<T>::l(Ip[ip]);
+  double **xk = Ixk? new double*[ns+1]: 0;
+  for( unsigned is=0; Ixk && is<=ns; is++ ){
+    if( !Ixk[is] ) Ixk[is] = new T[_nx];
+    xk[is] = new double[_nx];
+  }
+  double *f = If? new double[_nf]: 0;
+  double **xpk = Ixpk? new double*[ns+1]: 0;
+  for( unsigned is=0; Ixpk && is<=ns; is++ ){
+    if( !Ixpk[is] ) Ixpk[is] = new T[_nx*_np];
+    xpk[is] = new double[_nx*_np];
+  }
+  double *fp = Ifp? new double[_nf*_np]: 0;
+  STATUS stat = traj.states_FSA( ns, tk, p, xk, f, xpk, fp, os );
+  if( stat != NORMAL || nsamp <= 1 ){
+    delete[] p; delete[] f; delete[] fp;
+    for( unsigned is=0; is<=ns; is++ ) delete[] xk[is]; delete[] xk;
+    for( unsigned is=0; is<=ns; is++ ) delete[] xpk[is]; delete[] xpk;
+    return false;
+  }
+  for( unsigned is=0; Ixk && is<=ns; is++ )
+    for( unsigned ix=0; ix<_nx; ix++ )
+      Ixk[is][ix] = xk[is][ix];
+  for( unsigned is=0; Ixpk && is<=ns; is++ )
+    for( unsigned iy=0; iy<_nx*_np; iy++ )
+      Ixpk[is][iy] = xpk[is][iy];
+  for( unsigned ifn=0; If && ifn<_nf; ifn++ )
+    If[ifn] = f[ifn];
+  for( unsigned ifn=0; Ifp && ifn<_nf*_np; ifn++ )
+    Ifp[ifn] = fp[ifn];
+
+  // Start sampling process
+  unsigned* vsamp = new unsigned[_np];
+  bool flag = _sampling_FSA( ns, tk, Ip, Ixk, If, Ixpk, Ifp, traj, nsamp, vsamp,
+                             0, p, xk, f, xpk, fp, os );
+  traj.options.DISPLAY = DISPLAY_SAVE;
+
+  // Clean-up
+  delete[] p; delete[] f; delete[] fp;
+  for( unsigned is=0; xk && is<=ns; is++ ) delete[] xk[is]; delete[] xk;
+  for( unsigned is=0; xk && is<=ns; is++ ) delete[] xpk[is]; delete[] xpk;
+  delete[] vsamp;
+
+  return flag;
+}
+
+template <typename T, typename PMT, typename PVT>
+template <typename ODESLV> inline bool
+ODEBNDS_BASE<T,PMT,PVT>::_sampling_FSA
+( const unsigned ns, const double*tk, const T*Ip, T**Ixk, T*If, T**Ixpk, T*Ifp,
+  ODESLV&traj, const unsigned nsamp, unsigned* vsamp, const unsigned ipar,
+  double*p, double**xk, double*f, double**xpk, double*fp, std::ostream&os )
+{
+  // Update bounds for all sampling points
+  for( unsigned isamp=0; isamp<nsamp; isamp++ ){
+    vsamp[ipar] = isamp;
+
+    // Continue recursive call
+    if( ipar+1 < _np ){
+      if( !_sampling_FSA( ns, tk, Ip, Ixk, If, Ixpk, Ifp, traj, nsamp, vsamp,
+                          ipar+1, p, xk, f, xpk, fp, os ) ) return false;
+      continue;
+    }
+
+    // Update bounds for current point
+#ifdef MC__ODEBND_BASE_SAMPLE_DEBUG
+    std::cout << "Sample: ";
+#endif
+    for( unsigned ip=0; ip<_np; ip++ ){
+      p[ip] = Op<T>::l( Ip[ip] ) + vsamp[ip]/(nsamp-1.) * Op<T>::diam( Ip[ip] );
+#ifdef MC__ODEBND_BASE_SAMPLE_DEBUG
+      std::cout << p[ip] << "  ";
+#endif
+    }
+#ifdef MC__ODEBND_BASE_SAMPLE_DEBUG
+    std::cout << std::endl;
+#endif
+    typename ODESLV::STATUS flag = traj.states_FSA( ns, tk, p, xk, f, xpk, fp, os );
+    if( flag != ODESLV::NORMAL ) return flag;
+    for( unsigned is=0; Ixk && is<=ns; is++ )
+      for( unsigned ix=0; ix<_nx; ix++ )
+        Ixk[is][ix] = Op<T>::hull( xk[is][ix], Ixk[is][ix] );
+    for( unsigned ifn=0; If && ifn<_nf; ifn++ )
+      If[ifn] = Op<T>::hull( f[ifn], If[ifn] );
+    for( unsigned is=0; Ixpk && is<=ns; is++ )
+      for( unsigned iy=0; iy<_nx*_np; iy++ )
+        Ixpk[is][iy] = Op<T>::hull( xpk[is][iy], Ixpk[is][iy] );
+    for( unsigned ifn=0; Ifp && ifn<_nf*_np; ifn++ )
+      Ifp[ifn] = Op<T>::hull( fp[ifn], Ifp[ifn] );
+  }
+
+  return true;
+}  
+
+template <typename T, typename PMT, typename PVT>
+template <typename ODESLV> inline bool
+ODEBNDS_BASE<T,PMT,PVT>::_bounds_ASA
+( const unsigned ns, const double*tk, const T*Ip, T**Ixk, T*If,
+  T**Ilk, T*Ifp, ODESLV&traj, const unsigned nsamp, std::ostream&os )
+{
+  int DISPLAY_SAVE = traj.options.DISPLAY;
+  traj.options.DISPLAY = 0;
+
+  // Initialization of sampled bounds at parameter lower bound
+  double *p = new double[_np];
+  for( unsigned ip=0; ip<_np; ip++ )
+    p[ip] = Op<T>::l(Ip[ip]);
+  double **xk = Ixk? new double*[ns+1]: 0;
+  for( unsigned is=0; Ixk && is<=ns; is++ ){
+    if( !Ixk[is] ) Ixk[is] = new T[_nx];
+    xk[is] = new double[_nx];
+  }
+  double *f = If? new double[_nf]: 0;
+  double **lk = Ilk? new double*[ns+1]: 0;
+  for( unsigned is=0; Ilk && is<=ns; is++ ){
+    if( !Ilk[is] ) Ilk[is] = new T[_nx*_nf];
+    lk[is] = new double[_nx*_nf];
+  }
+  double *fp = Ifp? new double[_nf*_np]: 0;
+  STATUS stat = traj.states_ASA( ns, tk, p, xk, f, lk, fp, os );
+  if( stat != NORMAL || nsamp <= 1 ){
+    delete[] p; delete[] f; delete[] fp;
+    for( unsigned is=0; is<=ns; is++ ) delete[] xk[is]; delete[] xk;
+    for( unsigned is=0; is<=ns; is++ ) delete[] lk[is]; delete[] lk;
+    return false;
+  }
+  for( unsigned is=0; Ixk && is<=ns; is++ )
+    for( unsigned ix=0; ix<_nx; ix++ )
+      Ixk[is][ix] = xk[is][ix];
+  for( unsigned is=0; Ilk && is<=ns; is++ )
+    for( unsigned iy=0; iy<_nx*_nf; iy++ )
+      Ilk[is][iy] = lk[is][iy];
+  for( unsigned ifn=0; If && ifn<_nf; ifn++ )
+    If[ifn] = f[ifn];
+  for( unsigned ifn=0; Ifp && ifn<_nf*_np; ifn++ )
+    Ifp[ifn] = fp[ifn];
+
+  // Start sampling process
+  unsigned* vsamp = new unsigned[_np];
+  bool flag = _sampling_ASA( ns, tk, Ip, Ixk, If, Ilk, Ifp, traj, nsamp, vsamp,
+                             0, p, xk, f, lk, fp, os );
+  traj.options.DISPLAY = DISPLAY_SAVE;
+
+  // Clean-up
+  delete[] p; delete[] f; delete[] fp;
+  for( unsigned is=0; xk && is<=ns; is++ ) delete[] xk[is]; delete[] xk;
+  for( unsigned is=0; xk && is<=ns; is++ ) delete[] lk[is]; delete[] lk;
+  delete[] vsamp;
+
+  return flag;
+}
+
+template <typename T, typename PMT, typename PVT>
+template <typename ODESLV> inline bool
+ODEBNDS_BASE<T,PMT,PVT>::_sampling_ASA
+( const unsigned ns, const double*tk, const T*Ip, T**Ixk, T*If, T**Ilk, T*Ifp,
+  ODESLV&traj, const unsigned nsamp, unsigned* vsamp, const unsigned ipar,
+  double*p, double**xk, double*f, double**lk, double*fp, std::ostream&os )
+{
+  // Update bounds for all sampling points
+  for( unsigned isamp=0; isamp<nsamp; isamp++ ){
+    vsamp[ipar] = isamp;
+
+    // Continue recursive call
+    if( ipar+1 < _np ){
+      if( !_sampling_ASA( ns, tk, Ip, Ixk, If, Ilk, Ifp, traj, nsamp, vsamp,
+                          ipar+1, p, xk, f, lk, fp, os ) ) return false;
+      continue;
+    }
+
+    // Update bounds for current point
+#ifdef MC__ODEBND_BASE_SAMPLE_DEBUG
+    std::cout << "Sample: ";
+#endif
+    for( unsigned ip=0; ip<_np; ip++ ){
+      p[ip] = Op<T>::l( Ip[ip] ) + vsamp[ip]/(nsamp-1.) * Op<T>::diam( Ip[ip] );
+#ifdef MC__ODEBND_BASE_SAMPLE_DEBUG
+      std::cout << p[ip] << "  ";
+#endif
+    }
+#ifdef MC__ODEBND_BASE_SAMPLE_DEBUG
+    std::cout << std::endl;
+#endif
+    typename ODESLV::STATUS flag = traj.states_ASA( ns, tk, p, xk, f, lk, fp, os );
+    if( flag != ODESLV::NORMAL ) return flag;
+    for( unsigned is=0; Ixk && is<=ns; is++ )
+      for( unsigned ix=0; ix<_nx; ix++ )
+        Ixk[is][ix] = Op<T>::hull( xk[is][ix], Ixk[is][ix] );
+    for( unsigned ifn=0; If && ifn<_nf; ifn++ )
+      If[ifn] = Op<T>::hull( f[ifn], If[ifn] );
+    for( unsigned is=0; Ilk && is<=ns; is++ )
+      for( unsigned iy=0; iy<_nx*_nf; iy++ )
+        Ilk[is][iy] = Op<T>::hull( lk[is][iy], Ilk[is][iy] );
+    for( unsigned ifn=0; Ifp && ifn<_nf*_np; ifn++ )
+      Ifp[ifn] = Op<T>::hull( fp[ifn], Ifp[ifn] );
+  }
+
+  return true;
+}  
 
 } // end namescape mc
 

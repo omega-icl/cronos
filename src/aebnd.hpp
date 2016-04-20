@@ -238,6 +238,7 @@ public:
   //! @brief Compute symbolic solution (DAG) of parametric AEs
   STATUS solve
     ( FFVar*X, std::ostream&os=std::cout );
+  /** @} */
 
 private:
   //! @brief Flag for setup function

@@ -28,5 +28,5 @@ unset multiplot
 
 !ps2eps -B -f -l test1_DINEQ_STA.eps
 !mv test1_DINEQ_STA.eps.eps test1_DINEQ_STA.eps
+!gv test1_DINEQ_STA.eps
 
-pause 0

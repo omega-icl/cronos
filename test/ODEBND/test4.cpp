@@ -1,5 +1,4 @@
 #define SAVE_RESULTS		// <- Whether to save bounds to file
-#undef  TEST_CONVERGENCE	// <- Whether to test Hausdorff convergence of bounds
 #define USE_CMODEL		// <- whether to use Chebyshev models or Taylor models
 #define USE_SUNDIALS		// <- whether to use SUNDIALS or GSL integrator
 const unsigned NPM   = 3;	// <- Order of polynomial expansion
@@ -20,12 +19,12 @@ typedef mc::Ellipsoid E;
 
 #ifdef USE_CMODEL
   #include "cmodel.hpp"
-  typedef mc::CModel<I> TM;
-  typedef mc::CVar<I> TV;
+  typedef mc::CModel<I> PM;
+  typedef mc::CVar<I> PV;
 #else
   #include "tmodel.hpp"
-  typedef mc::TModel<I> TM;
-  typedef mc::TVar<I> TV;
+  typedef mc::TModel<I> PM;
+  typedef mc::TVar<I> PV;
 #endif
 
 int main()
@@ -69,20 +68,17 @@ int main()
   FCT[0] = X[0];
 
   I Ip[NP] = { I(350.,370.), I(290.,310.) };
-  I *Ixk[NS+1], Iq[NQ], If[NF];
+  I *Ixk[NS+1], If[NF];
   for( unsigned k=0; k<=NS; k++ )
     Ixk[k] = new I[NX];
 
-  TM TMEnv( NP, NPM );
-  TV TMp[NP];
-  for( unsigned i=0; i<NP; i++ ) TMp[i].set( &TMEnv, i, Ip[i] );
-  TV *TMxk[NS+1], TMq[NQ], TMf[NF];
-  double *Hxk[NS+1];
-  for( unsigned k=0; k<=NS; k++ ){
-    TMxk[k] = new TV[NX];
-    Hxk[k] = new double[NX];
-  }
-
+  PM PMEnv( NP, NPM );
+  PV PMp[NP];
+  for( unsigned i=0; i<NP; i++ ) PMp[i].set( &PMEnv, i, Ip[i] );
+  PV *PMxk[NS+1], PMf[NF];
+  for( unsigned k=0; k<=NS; k++ )
+    PMxk[k] = new PV[NX];
+/*
   /////////////////////////////////////////////////////////////////////////
   // Bound ODE trajectories - sampling
   mc::ODESLV_GSL<I> LV0;
@@ -109,94 +105,66 @@ int main()
   std::ofstream apprec( "test4_APPROX_STA.dat", std::ios_base::out );
   LV0.record( apprec );
 #endif
-
+*/
   /////////////////////////////////////////////////////////////////////////
   // Bound ODE trajectories - differential inequalities
-#ifndef USE_SUNDIALS // GSL integrator
-  mc::ODEBND_GSL<I,TM,TV> LV2;
+#ifndef USE_SUNDIALS             // GSL integrator
+  mc::ODEBND_GSL<I,PM,PV> CSTR;
+#else                            // SUNDIALS integrator
+  mc::ODEBND_SUNDIALS<I,PM,PV> CSTR;
+#endif
+  CSTR.set_dag( &IVP );
+  CSTR.set_state( NX, X );
+  CSTR.set_parameter( NP, P );
+  CSTR.set_differential( NX, RHS );
+  CSTR.set_initial( NX, IC );
+  CSTR.set_function( NF, FCT );
 
-  LV2.set_dag( &IVP );
-  LV2.set_state( NX, X );
-  LV2.set_parameter( NP, P );
-  LV2.set_differential( NX, RHS );
-  LV2.set_initial( NX, IC );
-  LV2.set_function( NF, FCT );
-
-  LV2.options.DISPLAY   = 1;
+#ifndef USE_SUNDIALS
+  CSTR.options.WRAPMIT   = mc::ODEBND_GSL<I,PM,PV>::Options::ELLIPS;//DINEQ;//NONE;
+#else
+  CSTR.options.INTMETH   = mc::ODEBND_SUNDIALS<I,PM,PV>::Options::MSADAMS;
+  CSTR.options.JACAPPROX = mc::ODEBND_SUNDIALS<I,PM,PV>::Options::CV_DIAG;//CV_DENSE;//
+  CSTR.options.WRAPMIT   = mc::ODEBND_SUNDIALS<I,PM,PV>::Options::ELLIPS;//DINEQ;//NONE;
+#endif
+  CSTR.options.DISPLAY   = 1;
 #if defined( SAVE_RESULTS )
-  LV2.options.RESRECORD = true;
+  CSTR.options.RESRECORD = true;
 #endif
-  LV2.options.ORDMIT    = 1; //TMp->nord()+1;
-  LV2.options.WRAPMIT   = mc::ODEBND_GSL<I,TM,TV>::Options::ELLIPS;//NONE;
+  CSTR.options.ORDMIT       = -1; //NPM;
+  CSTR.options.ATOL         = 1e-10;
+  CSTR.options.RTOL         = 1e-10;
+  CSTR.options.ODESLV.ATOL  = 1e-10;
+  CSTR.options.ODESLV.RTOL  = 1e-8;
 
-#else // SUNDIALS integrator
-  mc::ODEBND_SUNDIALS<I,TM,TV> LV2;
-
-  LV2.set_dag( &IVP );
-  LV2.set_state( NX, X );
-  LV2.set_parameter( NP, P );
-  LV2.set_differential( NX, RHS );
-  LV2.set_initial( NX, IC );
-  LV2.set_function( NF, FCT );
-
-  LV2.options.DISPLAY   = 1;
+  std::cout << "\nNON_VALIDATED INTEGRATION - INNER-APPROXIMATION OF REACHABLE SET:\n\n";
+  CSTR.bounds( NS, tk, Ip, Ixk, If, NSAMP );
 #if defined( SAVE_RESULTS )
-  LV2.options.RESRECORD = true;
+  std::ofstream apprec( "test4_APPROX_STA.dat", std::ios_base::out );
+  CSTR.record( apprec );
 #endif
-  LV2.options.ORDMIT    = 1; //NPM; //
-  LV2.options.HMIN      = 1e-10;
-  //LV2.options.ATOL      = LV2.options.RTOL = 1e-10;
-  //LV2.options.INTMETH   = mc::ODEBND_SUNDIALS<I,TM,TV>::Options::MSBDF;
-  LV2.options.JACAPPROX = mc::ODEBND_SUNDIALS<I,TM,TV>::Options::CV_DIAG;
-  LV2.options.WRAPMIT   = mc::ODEBND_SUNDIALS<I,TM,TV>::Options::ELLIPS;//DINEQ;//NONE;
-#endif
+  { int dum; std::cout << "PAUSED--"; std::cin >> dum; }
 
   std::cout << "\nCONTINUOUS SET-VALUED INTEGRATION - INTERVAL ENCLOSURE OF REACHABLE SET:\n\n";
-  LV2.options.DISPLAY = 1;
-  LV2.bounds( NS, tk, Ip, Ixk, Iq, If );
+  CSTR.bounds( NS, tk, Ip, Ixk, If );
 #if defined( SAVE_RESULTS )
-  std::ofstream bndrecIA( "test4_DINEQI_STA.dat", std::ios_base::out );
-  LV2.record( bndrecIA );
+  std::ofstream bnd2recI( "test4_DINEQI_STA.dat", std::ios_base::out );
+  CSTR.record( bnd2recI );
 #endif
-#if defined( TEST_CONVERGENCE )
-  LV2.hausdorff( NS, tk, Ip, Hxk, LV0, NSAMP );
-  LV2.options.DISPLAY = 0;
-  std::cout << std::scientific << std::setprecision(5);
-  for( unsigned k=0; k<20; k++ ){
-    I Ip0[NP] = { Ip[0]/std::pow(REDUC,k) };
-    double Hxk0 = (k? Hxk[NS][0]: 0. );
-    LV2.hausdorff( NS, tk, Ip0, Hxk, LV0, NSAMP );
-    std::cout << mc::Op<I>::diam( Ip0[0] ) << "  " << Hxk[NS][0]
-              << "  " << std::log(Hxk0/Hxk[NS][0])/log(REDUC)
-              << std::endl;
-  }
-#endif
+  { int dum; std::cout << "PAUSED--"; std::cin >> dum; }
 
   std::cout << "\nCONTINUOUS SET-VALUED INTEGRATION - POLYNOMIAL MODEL ENCLOSURE OF REACHABLE SET:\n\n";
-  LV2.options.DISPLAY = 1;
-  LV2.bounds( NS, tk, TMp, TMxk, TMq, TMf );
+  CSTR.options.PMNOREM = false;
+  CSTR.options.DMAX    = 5.;
+  CSTR.bounds( NS, tk, PMp, PMxk, PMf );
 #if defined( SAVE_RESULTS )
-  std::ofstream bndrecPM( "test4_DINEQPM_STA.dat", std::ios_base::out );
-  LV2.record( bndrecPM );
-#endif
-#if defined( TEST_CONVERGENCE )
-  LV2.hausdorff( NS, tk, TMp, Hxk, LV0, NSAMP );
-  LV2.options.DISPLAY = 0;
-  std::cout << std::scientific << std::setprecision(5);
-  for( unsigned k=0; k<20; k++ ){
-    TV TMp0[NP] = { TV( &TMEnv, 0, Ip[0]/std::pow(REDUC,k) ) };
-    double Hxk0 = (k? Hxk[NS][0]: 0. );
-    LV2.hausdorff( NS, tk, TMp0, Hxk, LV0, NSAMP );
-    std::cout << mc::Op<I>::diam( TMp0[0].B() ) << "  " << Hxk[NS][0]
-              << "  " << std::log(Hxk0/Hxk[NS][0])/log(REDUC)
-              << std::endl;
-  }
+  std::ofstream bnd2recPM( "test4_DINEQPM_STA.dat", std::ios_base::out );
+  CSTR.record( bnd2recPM );
 #endif
 
   for( unsigned k=0; k<=NS; k++ ){
     delete[] Ixk[k];
-    delete[] TMxk[k];
-    delete[] Hxk[k];
+    delete[] PMxk[k];
   }
 
   return 0;

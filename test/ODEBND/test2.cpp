@@ -1,11 +1,11 @@
-const unsigned int NPM   = 2;	// <- Order of polynomial expansion
+const unsigned int NPM   = 3;	// <- Order of polynomial expansion
 const unsigned int NSAMP = 3;	// <- Number of sampling points for inner approx.
 #define SAVE_RESULTS		// <- Saving the results to file
 #define USE_CMODEL		// <- whether to use Chebyshev models or Taylor models
 #define USE_SUNDIALS		// <- whether to use SUNDIALS or GSL integrator
 
-#include "odeslv_gsl.hpp"
 #ifndef USE_SUNDIALS
+  #include "odeslv_gsl.hpp"
   #include "odebnd_gsl.hpp"
 #else
   #include "odebnd_sundials.hpp"
@@ -74,15 +74,15 @@ int main()
   //// PARAMETER AND STATE BOUNDS
   I Ip[NP] = { I(6.48,6.52), I(4.98,5.02), I(14.98,15.02),
                I(0.46,0.47), I(1.074,1.076), I(2.19,2.21) };
-  I *Ixk[NS+1], Iq[NQ], If[NF];
+  I *Ixk[NS+1], If[NF];
   for( unsigned k=0; k<=NS; k++ ) Ixk[k] = new I[NX];
 
   PM PMEnv( NP, NPM );
   PV PMp[NP];
   for( unsigned i=0; i<NP; i++ ) PMp[i].set( &PMEnv, i, Ip[i] );
-  PV *PMxk[NS+1], PMq[NQ], PMf[NF];
+  PV *PMxk[NS+1], PMf[NF];
   for( unsigned k=0; k<=NS; k++ ) PMxk[k] = new PV[NX];
-
+/*
   /////////////////////////////////////////////////////////////////////////
   // Bound ODE trajectories - sampling
   mc::ODESLV_GSL<I> LV0;
@@ -107,7 +107,7 @@ int main()
   std::ofstream apprec( "test2_APPROX_STA.dat", std::ios_base::out );
   LV0.record( apprec );
 #endif
-/*
+
   /////////////////////////////////////////////////////////////////////////
   // Bound ODE trajectories - validated integrator
   mc::ODEBND_VAL<I,PM,PV> LV1;
@@ -135,29 +135,14 @@ int main()
   LV1.record( bnd1rec );
 #endif
 */
+
   /////////////////////////////////////////////////////////////////////////
   // Bound ODE trajectories - differential inequalities
-#ifndef USE_SUNDIALS // GSL integrator
+#ifndef USE_SUNDIALS             // GSL integrator
   mc::ODEBND_GSL<I,PM,PV> LV2;
-
-  LV2.set_dag( &IVP );
-  LV2.set_state( NX, X );
-  LV2.set_parameter( NP, P );
-  LV2.set_differential( NX, RHS );
-  LV2.set_initial( NX, IC );
-  LV2.set_quadrature( NQ, QUAD, Q );
-  LV2.set_function( NF, FCT );
-
-  LV2.options.DISPLAY   = 1;
-#if defined( SAVE_RESULTS )
-  LV2.options.RESRECORD = true;
-#endif
-  LV2.options.ORDMIT    = 1; //TMp->nord()+1;
-  LV2.options.WRAPMIT   = mc::ODEBND_GSL<I,PM,PV>::Options::ELLIPS;//NONE;
-
-#else // SUNDIALS integrator
+#else                            // SUNDIALS integrator
   mc::ODEBND_SUNDIALS<I,PM,PV> LV2;
-
+#endif
   LV2.set_dag( &IVP );
   LV2.set_state( NX, X );
   LV2.set_parameter( NP, P );
@@ -166,23 +151,43 @@ int main()
   LV2.set_quadrature( NQ, QUAD, Q );
   LV2.set_function( NF, FCT );
 
-  LV2.options.DISPLAY   = 1;
-#if defined( SAVE_RESULTS )
-  LV2.options.RESRECORD = true;
-#endif
-  LV2.options.ORDMIT    = 1; //TMp->nord();
-  //LV2.options.ATOL      = LV2.options.RTOL = 1e-10;
-  //LV2.options.INTMETH   = mc::ODEBND_SUNDIALS<I,PM,PV>::Options::MSBDF;
-  //LV2.options.JACAPPROX = mc::ODEBND_SUNDIALS<I,PM,PV>::Options::CV_DIAG;
+#ifndef USE_SUNDIALS
+  LV2.options.WRAPMIT   = mc::ODEBND_GSL<I,PM,PV>::Options::ELLIPS;//DINEQ;//NONE;
+#else
+  LV2.options.INTMETH   = mc::ODEBND_SUNDIALS<I,PM,PV>::Options::MSADAMS;
+  LV2.options.JACAPPROX = mc::ODEBND_SUNDIALS<I,PM,PV>::Options::CV_DIAG;//CV_DENSE;//
   LV2.options.WRAPMIT   = mc::ODEBND_SUNDIALS<I,PM,PV>::Options::ELLIPS;//DINEQ;//NONE;
 #endif
+  LV2.options.DISPLAY   = 1;
+#if defined( SAVE_RESULTS )
+  LV2.options.RESRECORD = true;
+#endif
+  LV2.options.ORDMIT       = -1; //NPM;
+  LV2.options.ATOL         = 1e-10;
+  LV2.options.RTOL         = 1e-10;
+  LV2.options.ODESLV.ATOL  = 1e-10;
+  LV2.options.ODESLV.RTOL  = 1e-8;
 
-  LV2.bounds( NS, tk, Ip, Ixk, Iq, If );
+  std::cout << "\nNON_VALIDATED INTEGRATION - INNER-APPROXIMATION OF REACHABLE SET:\n\n";
+  LV2.bounds( NS, tk, Ip, Ixk, If, NSAMP );
+#if defined( SAVE_RESULTS )
+  std::ofstream apprec( "test2_APPROX_STA.dat", std::ios_base::out );
+  LV2.record( apprec );
+#endif
+  { int dum; std::cout << "PAUSED--"; std::cin >> dum; }
+
+  std::cout << "\nCONTINUOUS SET-VALUED INTEGRATION - INTERVAL ENCLOSURE OF REACHABLE SET:\n\n";
+  LV2.bounds( NS, tk, Ip, Ixk, If );
 #if defined( SAVE_RESULTS )
   std::ofstream bnd2recI( "test2_DINEQI_STA.dat", std::ios_base::out );
   LV2.record( bnd2recI );
 #endif
-  LV2.bounds( NS, tk, PMp, PMxk, PMq, PMf );
+  { int dum; std::cout << "PAUSED--"; std::cin >> dum; }
+
+  std::cout << "\nCONTINUOUS SET-VALUED INTEGRATION - POLYNOMIAL MODEL ENCLOSURE OF REACHABLE SET:\n\n";
+  LV2.options.PMNOREM = false;
+  LV2.options.DMAX    = 5.;
+  LV2.bounds( NS, tk, PMp, PMxk, PMf );
 #if defined( SAVE_RESULTS )
   std::ofstream bnd2recPM( "test2_DINEQPM_STA.dat", std::ios_base::out );
   LV2.record( bnd2recPM );
@@ -195,5 +200,4 @@ int main()
 
   return 0;
 }
-
 

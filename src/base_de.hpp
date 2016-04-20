@@ -208,13 +208,13 @@ public:
 
   //! @brief Define quadrature equations in single-stage IVP-DAE
   void set_quadrature
-    ( const unsigned nq, const FFVar*const QUAD, const FFVar*pQ=0 )
+    ( const unsigned nq, const FFVar*const QUAD, const FFVar*pQ )
     { _nq = nq; _pQ = pQ; _vQUAD.clear(); _vQUAD.push_back( QUAD ); }
 
   //! @brief Define quadrature equations in multi-stage IVP-DAE with <a>ns</a> stages
   void set_quadrature
-    ( const unsigned ns, const unsigned nq, const FFVar*const QUAD )
-    { _nq = nq; _vQUAD.clear(); for( unsigned i=0; i<ns; i++ ) _vQUAD.push_back( QUAD+i*_nq ); }
+    ( const unsigned ns, const unsigned nq, const FFVar*const QUAD, const FFVar*pQ )
+    { _nq = nq; _pQ = pQ; _vQUAD.clear(); for( unsigned i=0; i<ns; i++ ) _vQUAD.push_back( QUAD+i*_nq ); }
 
   //! @brief Define invariant equations in single-stage IVP-DAE
   void set_invariant
@@ -243,17 +243,19 @@ public:
 
   //! @brief Define state function in multi-stage IVP-DAE with <a>ns</a> stages
   void set_function
-    ( const unsigned nf, const unsigned ns, const FFVar*const FCT )
+    ( const unsigned ns, const unsigned nf, const FFVar*const FCT )
     { _nf = nf; _vFCT.clear(); for( unsigned i=0; i<ns; i++ ) _vFCT.push_back( FCT+i*_nf ); }
 
   //! @brief Copy DAE-IVP
   void set
     ( const BASE_DE&de )
     { _pDAG = de._pDAG;
-      _nx = de._nx; _nx0 = de._nx0; _ny = de._ny; _np = de._np; _ni = de._ni; _nf = de._nf;
-      _pT = de._pT; _pX = de._pX; _pP = de._pP;
-      _pDX = (de._pDX && _nx? new FFVar[_nx]:0); _pY = 0; 
-      _vIC = de._vIC; _vRHS = de._vRHS; _vINV = de._vINV; _vFCT = de._vFCT; };
+      _nx = de._nx; _nx0 = de._nx0; _nq = de._nq; _np = de._np; _ni = de._ni; _nf = de._nf;
+      _pT = de._pT; _pX = de._pX; _pP = de._pP; _pQ = de._pQ;
+      delete[] _pDX; _pDX = (de._pDX && _nx? new FFVar[_nx]:0);
+      delete[] _pY; delete[] _pYQ; _pY = _pYQ = 0; _ny = _nyq = 0;
+      _vIC = de._vIC; _vRHS = de._vRHS; _vAE = de._vAE; _vQUAD = de._vQUAD;
+      _vINV = de._vINV; _vFCT = de._vFCT; };
 
   //! @brief Return last successful integration time
   double final_time() const

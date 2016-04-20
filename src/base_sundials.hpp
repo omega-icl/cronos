@@ -6,6 +6,7 @@
 #define MC__BASE_SUNDIALS_HPP
 
 #include <iostream>
+#include <iomanip>
 #include <sys/time.h>
 
 #include "cvodes.h"
@@ -44,9 +45,9 @@ public:
     //! @brief Constructor
     Options():
       INTMETH(MSADAMS), H0(0e0), HMIN(0e0), HMAX(0e0), NMAX(0),
-      RTOL(1e-7), ATOL(1e-8), QERR(true), MAXFAIL(10), JACAPPROX(CV_DIAG),
-      AUTOTOLS(false), RTOLS(1e-7), ATOLS(1e-8), FSACORR(STAGGERED),
-      FSAERR(true), QERRS(true), RTOLB(1e-7), ATOLB(1e-8), QERRB(true),
+      RTOL(1e-8), ATOL(1e-8), QERR(true), MAXFAIL(10), JACAPPROX(CV_DIAG),
+      AUTOTOLS(false), RTOLS(1e-8), ATOLS(1e-8), FSACORR(STAGGERED),
+      FSAERR(true), QERRS(true), RTOLB(1e-8), ATOLB(1e-8), QERRB(true),
       ASAINTERP(HERMITE), ASACHKPT(1000), RTOLFD(1e-3), ATOLFD(1e-3), CENFD(true)
       {}
     //! @brief Assignment operator
@@ -224,7 +225,7 @@ BASE_SUNDIALS::_print_stats
 ( const Stats&stats, std::ostream&os )
 {
   // Statistics
-  os << " No STEPS  " << stats.numSteps
+  os << " No STEPS    " << stats.numSteps
      << std::endl
      << " No EVALATIONS" << "   RHS: " << stats.numRHS
                          << "   JAC: " << stats.numJAC

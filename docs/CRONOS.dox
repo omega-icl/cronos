@@ -743,8 +743,15 @@ WARN_LOGFILE           =
 # Note: If this tag is empty the current directory is searched.
 
 INPUT                  = CRONOS.txt \
-                         ../src/nlpslv_ipopt.hpp ../src/nlgo_gurobi.hpp \
-                         ../src/nlcp_gurobi.hpp ../src/aebnd.hpp
+                         ../src/base_ae.hpp ../src/aebnd.hpp \
+                         ../src/base_de.hpp ../src/base_sundials.hpp \
+                         ../src/odeslv_base.hpp ../src/odeslvs_base.hpp \
+                         ../src/odeslv_sundials.hpp ../src/odeslvs_sundials.hpp \
+                         ../src/odebnd_base.hpp ../src/odebnds_base.hpp \
+                         ../src/iodebnd_base.hpp ../src/iodebnd_sundials.hpp \
+                         ../src/odebnd_sundials.hpp ../src/odebnds_sundials.hpp \
+                         ../src/base_opt.hpp ../src/base_nlp.hpp ../src/nlpslv_ipopt.hpp \
+                         ../src/nlgo_gurobi.hpp ../src/nlcp_gurobi.hpp
 
 # This tag can be used to specify the character encoding of the source files
 # that doxygen parses. Internally doxygen uses the UTF-8 encoding. Doxygen uses

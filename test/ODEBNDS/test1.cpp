@@ -4,8 +4,8 @@ const unsigned int NSAMP = 50;	// <- Number of sampling points for inner approx.
 #define USE_CMODEL		// <- whether to use Chebyshev models or Taylor models
 #define USE_SUNDIALS		// <- whether to use SUNDIALS or GSL integrator
 
-#include "odeslvs_gsl.hpp"
 #ifndef USE_SUNDIALS
+  #include "odeslvs_gsl.hpp"
   #include "odebnds_gsl.hpp"
 #else
   #include "odebnds_sundials.hpp"
@@ -29,8 +29,8 @@ int main()
 {
   mc::FFGraph IVP;  // DAG describing the problem
 
-  double t0 = 0., tf = 10.;  // Time span
-  const unsigned int NS = 100;//200;  // Time stages
+  double t0 = 0., tf = 6.;  // Time span
+  const unsigned int NS = 120;  // Time stages
   double tk[NS+1]; tk[0] = t0;
   for( unsigned k=0; k<NS; k++ ) tk[k+1] = tk[k] + (tf-t0)/(double)NS;
 
@@ -54,7 +54,13 @@ int main()
 
   mc::FFVar IC[NX];   // Initial value function
   IC[0] = 1.2;
-  IC[1] = 1.1 + 0.01*P[0];
+  IC[1] = 1.1 + 0.01*(P[0]-3.);
+
+  //mc::FFVar IC[NX*NS];   // Initial value function
+  //IC[0] = 1.2;
+  //IC[1] = 1.1 + 0.01*P[0];
+  //for( unsigned k=2; k<NX*NS; k++ ) IC[k] = X[k%NX];
+  ////if( NS > 1 ) IC[(NS/2)*NX+1] = X[1] - 0.5;
 
   mc::FFVar QUAD[NQ];  // Quadrature function
   QUAD[0] = X[1];
@@ -65,10 +71,10 @@ int main()
 
   mc::FFVar FCT[NF*NS];  // State functions
   for( unsigned k=0; k<NF*NS; k++ ) FCT[k] = 0.;
-  if( NS > 1 ) FCT[(NS/2)*NF+0] = X[0] + 0.1*P[0];
+  //if( NS > 1 ) FCT[((NS-1)/NF)*NF+0] = X[0] + 0.1*P[0];
   FCT[(NS-1)*NF+0] = X[0] * X[1];
   FCT[(NS-1)*NF+1] = P[0] * pow( X[0], 2 );
-  //for( unsigned k=0; k<NS; k++ ) FCT[k*NF+1] += Q[0];
+  for( unsigned k=0; k<NS; k++ ) FCT[k*NF+1] += Q[0];
 
   I Ip[NP] = { I(2.95,3.05) };
   I *Ixk[NS+1], *Iyk[NS+1], *Ixpk[NS+1];
@@ -77,7 +83,7 @@ int main()
     Iyk[k] = new I[NF*NX];
     Ixpk[k] = new I[NP*NX];
   }
-  I Iq[NQ], If[NF], Iqp[NQ*NP], Ifp[NF*NP];
+  I If[NF], Ifp[NF*NP];
 
   PM PMEnv( NP, NPM );
   PV PMp[NP] = { PV( &PMEnv, 0, Ip[0] ) };
@@ -87,8 +93,8 @@ int main()
     PMyk[k] = new PV[NF*NX];
     PMxpk[k] = new PV[NP*NX];
   }
-  PV PMq[NQ], PMf[NF], PMqp[NQ*NP], PMfp[NF*NP];
-
+  PV PMf[NF], PMfp[NF*NP];
+/*
   /////////////////////////////////////////////////////////////////////////////
   //// SAMPLING
   mc::ODESLVS_GSL<I> LV0;
@@ -98,9 +104,10 @@ int main()
   LV0.set_parameter( NP, P );
   LV0.set_differential( NX, RHS );
   LV0.set_initial( NX, IC );
+  //LV0.set_initial( NS, NX, IC );
   LV0.set_quadrature( NQ, QUAD, Q );
   //LV0.set_function( NF, FCT );
-  LV0.set_function( NF, NS, FCT );
+  LV0.set_function( NS, NF, FCT );
 
   LV0.options.DISPLAY   = 1;
 #if defined( SAVE_RESULTS )
@@ -109,7 +116,7 @@ int main()
   LV0.options.ATOL      = LV0.options.RTOL = 1e-10;
   LV0.options.INTMETH   = mc::ODESLV_GSL<I>::Options::MSBDF;
   //LV0.options.HMAX      = 1e-3;
-/*
+
   // Approximate adjoint bounds
   std::cout << "\nNON_VALIDATED INTEGRATION - APPROXIMATE ENCLOSURE OF REACHABLE SET:\n\n";
   //LV0.bounds( NS, tk, Ip, Ixk, Iq, If, NSAMP );
@@ -149,15 +156,18 @@ int main()
   LV.options.NMAX      = 20000;
   LV.options.MAXFAIL   = 10;
   LV.options.FSAERR    = true;
-  LV.options.QERRS     = false;
+  LV.options.QERRS     = true;
   //LV.options.AUTOTOLS  = true;
   LV.options.ASACHKPT  = 20000;
-  LV.options.INTMETH   = mc::ODEBNDS_SUNDIALS<I,PM,PV>::Options::MSADAMS;//MSBDF;
-  //LV.options.JACAPPROX = mc::ODEBNDS_SUNDIALS<I,PM,PV>::Options::CV_DENSE;//CV_DIAG;
-  LV.options.ORDMIT    = -2;//PMp->nord();
+  LV.options.INTMETH   = mc::ODEBNDS_SUNDIALS<I,PM,PV>::Options::MSBDF;//MSADAMS;//MSBDF;
+  LV.options.JACAPPROX = mc::ODEBNDS_SUNDIALS<I,PM,PV>::Options::CV_DIAG;//CV_DENSE;//CV_DIAG;
+  LV.options.ORDMIT    = -2; //PMp->nord();
   LV.options.WRAPMIT   = mc::ODEBNDS_SUNDIALS<I,PM,PV>::Options::ELLIPS;//NONE;//DINEQ;
   LV.options.QERRB     = true;
   LV.options.QSCALE    = 1e-5;
+  LV.options.ODESLV.NMAX = 20000;
+  LV.options.ODESLV.INTMETH   = mc::ODESLVS_SUNDIALS::Options::MSBDF;//MSADAMS;//MSBDF;
+  LV.options.ODESLV.JACAPPROX = mc::ODESLVS_SUNDIALS::Options::CV_DIAG;//CV_DENSE;//CV_DIAG;
 #endif
 
   LV.set_dag( &IVP );
@@ -165,44 +175,77 @@ int main()
   LV.set_parameter( NP, P );
   LV.set_differential( NX, RHS );
   LV.set_initial( NX, IC );
-  //LV.set_quadrature( NQ, QUAD, Q );
+  //LV.set_initial( NS, NX, IC );
+  LV.set_quadrature( NQ, QUAD, Q );
   //LV.set_function( NF, FCT );
-  LV.set_function( NF, NS, FCT );
+  LV.set_function( NS, NF, FCT );
+
+  std::ofstream ofSTA, ofSEN;
+
+  std::cout << "\nNON_VALIDATED INTEGRATION - INNER-APPROXIMATION OF REACHABLE SET AND ADJOINT SENSITIVITY:\n\n";
+  LV.bounds_ASA( NS, tk, Ip, Ixk, If, Iyk, Ifp, NSAMP );
+#if defined( SAVE_RESULTS )
+  ofSTA.open( "test1_APPROX_STA.dat", std::ios_base::out );
+  ofSEN.open( "test1_APPROX_ASA.dat", std::ios_base::out );
+  LV.record( ofSTA, ofSEN );
+  ofSTA.close();
+  ofSEN.close();
+#endif
+  { int dum; std::cout << "PAUSED--"; std::cin >> dum; }
 /*
   std::cout << "\nCONTINUOUS SET-VALUED INTEGRATION - INTERVAL ENCLOSURE OF REACHABLE SET AND ADJOINT SENSITIVITY:\n\n";
-  LV.bounds_ASA( NS, tk, Ip, Ixk, Iq, If, Iyk, Ifp );
+  LV.bounds_ASA( NS, tk, Ip, Ixk, If, Iyk, Ifp );
 #if defined( SAVE_RESULTS )
-  std::ofstream direcISTA( "test1_DINEQI_STA.dat", std::ios_base::out );
-  std::ofstream direcIADJ( "test1_DINEQI_ADJ.dat", std::ios_base::out );
-  LV.record( direcISTA, direcIADJ );
-#endif
-
-  std::cout << "\nCONTINUOUS SET-VALUED INTEGRATION - INTERVAL ENCLOSURE OF REACHABLE SET AND FORWARD SENSITIVITY:\n\n";
-  //LV.bounds( NS, tk, Ip, Ixk, Iq, If );
-  LV.bounds_FSA( NS, tk, Ip, Ixk, Iq, If, Ixpk, Iqp, Ifp );
-#if defined( SAVE_RESULTS )
-  std::ofstream direcISTA( "test1_DINEQI_STA.dat", std::ios_base::out );
-  std::ofstream direcISEN( "test1_DINEQI_SEN.dat", std::ios_base::out );
-  LV.record( direcISTA, direcISEN );
+  ofSTA.open( "test1_DINEQI_STA.dat", std::ios_base::out );
+  ofSEN.open( "test1_DINEQI_ASA.dat", std::ios_base::out );
+  LV.record( ofSTA, ofSEN );
+  ofSTA.close();
+  ofSEN.close();
 #endif
 */
   std::cout << "\nCONTINUOUS SET-VALUED INTEGRATION - POLYNOMIAL MODEL ENCLOSURE OF REACHABLE SET AND ADJOINT SENSITIVITY:\n\n";
-  //LV.bounds( NS, tk, PMp, PMxk, PMq, PMf );
-  LV.bounds_ASA( NS, tk, PMp, PMxk, PMq, PMf, PMyk, PMfp );
+  //LV.bounds( NS, tk, PMp, PMxk, PMf );
+  LV.bounds_ASA( NS, tk, PMp, PMxk, PMf, PMyk, PMfp );
 #if defined( SAVE_RESULTS )
-  std::ofstream direcPMSTA( "test1_DINEQPM_STA.dat", std::ios_base::out );
-  std::ofstream direcPMADJ( "test1_DINEQPM_ADJ.dat", std::ios_base::out );
-  LV.record( direcPMSTA, direcPMADJ );
+  ofSTA.open( "test1_DINEQPM_STA.dat", std::ios_base::out );
+  ofSEN.open( "test1_DINEQPM_ASA.dat", std::ios_base::out );
+  LV.record( ofSTA, ofSEN );
+  ofSTA.close();
+  ofSEN.close();
 #endif
   { int dum; std::cout << "--PAUSED "; std::cin >> dum; }
 
-  std::cout << "\nCONTINUOUS SET-VALUED INTEGRATION - POLYNOMIAL MODEL ENCLOSURE OF REACHABLE SET AND FORWARD SENSITIVITY:\n\n";
-  //LV.bounds( NS, tk, PMp, PMxk, PMq, PMf );
-  LV.bounds_FSA( NS, tk, PMp, PMxk, PMq, PMf, PMxpk, PMqp, PMfp );
+  std::cout << "\nNON_VALIDATED INTEGRATION - INNER-APPROXIMATION OF REACHABLE SET AND ADJOINT SENSITIVITY:\n\n";
+  LV.bounds_FSA( NS, tk, Ip, Ixk, If, Ixpk, Ifp, NSAMP );
 #if defined( SAVE_RESULTS )
-  //std::ofstream direcPMSTA( "test1_DINEQPM_STA.dat", std::ios_base::out );
-  std::ofstream direcPMSEN( "test1_DINEQPM_SEN.dat", std::ios_base::out );
-  LV.record( direcPMSTA, direcPMSEN );
+  ofSTA.open( "test1_APPROX_STA.dat", std::ios_base::out );
+  ofSEN.open( "test1_APPROX_FSA.dat", std::ios_base::out );
+  LV.record( ofSTA, ofSEN );
+  ofSTA.close();
+  ofSEN.close();
+#endif
+  { int dum; std::cout << "PAUSED--"; std::cin >> dum; }
+/*
+  std::cout << "\nCONTINUOUS SET-VALUED INTEGRATION - INTERVAL ENCLOSURE OF REACHABLE SET AND FORWARD SENSITIVITY:\n\n";
+  //LV.bounds( NS, tk, Ip, Ixk, If );
+  LV.bounds_FSA( NS, tk, Ip, Ixk, If, Ixpk, Ifp );
+#if defined( SAVE_RESULTS )
+  ofSTA.open( "test1_DINEQI_STA.dat", std::ios_base::out );
+  ofSEN.open( "test1_DINEQI_FSA.dat", std::ios_base::out );
+  LV.record( ofSTA, ofSEN );
+  ofSTA.close();
+  ofSEN.close();
+#endif
+*/
+  std::cout << "\nCONTINUOUS SET-VALUED INTEGRATION - POLYNOMIAL MODEL ENCLOSURE OF REACHABLE SET AND FORWARD SENSITIVITY:\n\n";
+  //LV.bounds( NS, tk, PMp, PMxk, PMf );
+  LV.bounds_FSA( NS, tk, PMp, PMxk, PMf, PMxpk, PMfp );
+#if defined( SAVE_RESULTS )
+  ofSTA.open( "test1_DINEQPM_STA.dat", std::ios_base::out );
+  ofSEN.open( "test1_DINEQPM_FSA.dat", std::ios_base::out );
+  LV.record( ofSTA, ofSEN );
+  ofSTA.close();
+  ofSEN.close();
 #endif
 
   // Clean up

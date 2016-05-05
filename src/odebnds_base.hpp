@@ -686,7 +686,7 @@ ODEBNDS_BASE<T,PMT,PVT>::_IC_SET_FSA
 ( const unsigned isen )
 {
   _pIC = _vIC.at(0);
-  delete[] _pADJTC; _pADJTC = _pDAG->FAD( _nx, _pIC, 1, _pVAR+2*_nx+isen);
+  delete[] _pADJTC; _pADJTC = _pDAG->FAD( _nx, _pIC, 1, _pVAR+2*_nx+isen );
   _pIC = _pADJTC;
   _opIC = _pDAG->subgraph( _nx, _pIC );
 

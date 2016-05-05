@@ -1,4 +1,3 @@
-// Copyright (C) 2016 Benoit Chachuat, Imperial College London.
 // All Rights Reserved.
 // This code is published under the Eclipse Public License.
 
@@ -298,15 +297,30 @@ ODESLVS_BASE::_RHS_SET_FSA
   if( _nq && _vQUAD.size() <= iQUAD ) return false;
 
   _pRHS =  _vRHS.at( iRHS );
+#ifdef MC__ODESLVS_BASE_DEBUG
+  std::ostringstream ofilename;
+  ofilename << "vRHS.dot";
+  std::ofstream ofile( ofilename.str(), std::ios_base::out );
+  _pDAG->dot_script( _nx, _pRHS, ofile );
+  ofile.close();
+#endif
   _pQUAD  = _nq? _vQUAD.at( iQUAD ): 0;
 
   // Set sensitivity ODEs using directional derivatives
   for( unsigned iy=0; iy<_nx; iy++ ) _pSAFCT[iy] = _pVAR[iy];
   for( unsigned ip=0; ip<_np; ip++ ){
-    for( unsigned jp=0; jp<_np; jp++ ) _pSAFCT[_nx+ip] = (ip==jp? 1.: 0.);
+    for( unsigned jp=0; jp<_np; jp++ ) _pSAFCT[_nx+jp] = (ip==jp? 1.: 0.);
     delete[] _vSARHS[ip];  _vSARHS[ip]  = _pDAG->FAD( _nx, _pRHS, _nx+_np, _pVAR+_nx, _pSAFCT );
+#ifdef MC__ODESLVS_BASE_DEBUG
+    std::ostringstream ofilename;
+    ofilename << "vSARHS" << ip << ".dot";
+    std::ofstream ofile( ofilename.str(), std::ios_base::out );
+    _pDAG->dot_script( _nx, _vSARHS[ip], ofile );
+    ofile.close();
+#endif
     if( !_nq ) continue;
     delete[] _vSAQUAD[ip]; _vSAQUAD[ip] = _pDAG->FAD( _nq, _pQUAD, _nx+_np, _pVAR+_nx, _pSAFCT );
+
   }
 
   return true;

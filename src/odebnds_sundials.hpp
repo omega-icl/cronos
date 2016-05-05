@@ -672,14 +672,12 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
       for( unsigned iy=0; Ilk[ns] && iy<_nx; iy++ )
         Ilk[ns][_ifct*_nx+iy] = _Iy[iy];
       for( unsigned iq=0; iq<_np; iq++ )
-        Ifp[_ifct*_np+iq] = _Iyq[iq];
+        Ifp[iq*_nf+_ifct] = _Iyq[iq];
     }
 
     // Display & record adjoint terminal results
-    if( options.DISPLAY >= 1 ){
+    if( options.DISPLAY >= 1 )
       _print_interm( tk[ns], _nf*_nx, Ilk[ns], "l", os );//_nf
-      //_print_interm( _nf*_np, Ifp, "fp", os );
-    }
     if( options.RESRECORD )
       results_sen.push_back( Results( tk[ns], _nx*_nf, Ilk[ns] ) );//_nf
 
@@ -761,7 +759,7 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
         for( unsigned iy=0; Ilk[_istg-1] && iy<_nx; iy++ )
           Ilk[_istg-1][_ifct*_nx+iy] = _Iy[iy];
         for( unsigned iq=0; iq<_np; iq++ )
-          Ifp[_ifct*_np+iq] = _Iyq[iq];
+          Ifp[iq*_nf+_ifct] = _Iyq[iq];
       }
 
       // Display & record adjoint intermediate results
@@ -1221,13 +1219,11 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
       for( unsigned iy=0; PMlk[ns] && iy<_nx; iy++ )
         PMlk[ns][_ifct*_nx+iy] = _PMy[iy];
       for( unsigned iq=0; iq<_np; iq++ )
-        PMfp[_ifct*_np+iq] = _PMyq[iq];
+        PMfp[iq*_nf+_ifct] = _PMyq[iq];
     }
     // Display & record adjoint terminal results
-    if( options.DISPLAY >= 1 ){
+    if( options.DISPLAY >= 1 )
       _print_interm( tk[ns], _nx*_nf, PMlk[ns], "l", os );
-      //_print_interm( _np, PMfp, "fp", os );
-    }
     if( options.RESRECORD )
       results_sen.push_back( Results( tk[ns], _nf*_nx, PMlk[ns] ) );
 
@@ -1309,7 +1305,7 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
         for( unsigned iy=0; PMlk[_istg-1] && iy<_nx; iy++)
           PMlk[_istg-1][_ifct*_nx+iy] =_PMy[iy];
         for( unsigned iq=0; iq<_np; iq++ )
-          PMfp[_ifct*_np+iq] = _PMyq[iq];
+          PMfp[iq*_nf+_ifct] = _PMyq[iq];
       }
 
       // Display & record adjoint intermediate results

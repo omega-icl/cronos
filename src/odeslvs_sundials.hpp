@@ -22,7 +22,6 @@ namespace mc
 ////////////////////////////////////////////////////////////////////////
 class ODESLVS_SUNDIALS:
   public virtual BASE_DE,
-  //public virtual BASE_SUNDIALS,
   public virtual ODESLVS_BASE, 
   public virtual ODESLV_SUNDIALS
 {
@@ -536,12 +535,13 @@ ODESLVS_SUNDIALS::states_ASA
       for( unsigned iy=0; lk[ns] && iy<_ny; iy++ )
         lk[ns][_ifct*_nx+iy] = _Dy[iy];
       for( unsigned iq=0; iq<_np; iq++ )
-        fp[_ifct*_np+iq] = _Dyq[iq];
+        fp[iq*_nf+_ifct] = _Dyq[iq];
+        //fp[_ifct*_np+iq] = _Dyq[iq];
     }
 
     // Display & record adjoint terminal results
     if( options.DISPLAY >= 1 )
-      _print_interm( tk[ns], _nf*_nx, lk[ns], "l", os );
+      _print_interm( tk[ns], _nf*_nx, lk[ns], " l", os );
     if( options.RESRECORD )
       results_sen.push_back( Results( tk[ns], _nx*_nf, lk[ns] ) );//_nf
 
@@ -626,17 +626,18 @@ ODESLVS_SUNDIALS::states_ASA
         for( unsigned iy=0; lk[_istg-1] && iy<_ny; iy++ )
           lk[_istg-1][_ifct*_nx+iy] = _Dy[iy];
         for( unsigned iq=0; iq<_np; iq++ )
-          fp[_ifct*_np+iq] = _Dyq[iq];
+          fp[iq*_nf+_ifct] = _Dyq[iq];
+          //fp[_ifct*_np+iq] = _Dyq[iq];
       }
 
       // Display & record adjoint intermediate results
       if( options.DISPLAY >= 1 )
-        _print_interm( tk[_istg-1], _nf*_nx, lk[_istg-1], "l", os );
+        _print_interm( tk[_istg-1], _nf*_nx, lk[_istg-1], " l", os );
       if( options.RESRECORD )
         results_sen.push_back( Results( tk[_istg-1], _nf*_nx, lk[_istg-1] ) );
     }
     if( options.DISPLAY >= 1 )
-      _print_interm( _nf*_np, fp, "fp", os );
+      _print_interm( _nf*_np, fp, " fp", os );
   }
   catch(...){
     _END_SEN();
@@ -666,9 +667,9 @@ ODESLVS_SUNDIALS::_INI_FSA
     if( _nq ) _Nyq = N_VCloneVectorArray_Serial( _np, _Nq );
   }
   for( unsigned i=0; i<_np; i++ ){
-    if( !_Ny[i] || NV_LENGTH_S( _Ny[i] ) != _ny ){
+    if( !_Ny[i] || NV_LENGTH_S( _Ny[i] ) != _nx ){
       if( _Ny[i] ) N_VDestroy_Serial( _Ny[i] );
-      _Ny[i] = N_VNew_Serial( _ny );
+      _Ny[i] = N_VNew_Serial( _nx );
     }
     if( _Nyq && (!_Nyq[i] || NV_LENGTH_S( _Nyq[i]) ) != _nq ){
       if( _Nyq[i] ) N_VDestroy_Serial( _Nyq[i] );
@@ -692,13 +693,13 @@ ODESLVS_SUNDIALS::MC_CVFSARHSD__
 #ifdef MC__ODESLVS_SUNDIALS_DEBUG
   std::cout << "@t=" << t << "\nx:\n";
   for( unsigned i=0; i<NV_LENGTH_S( x ); i++ ) std::cout << NV_Ith_S( x, i ) << std::endl;
-  std::cout << "y:\n";
+  std::cout << "y[" << is << "]:\n";
   for( unsigned i=0; i<NV_LENGTH_S( y ); i++ ) std::cout << NV_Ith_S( y, i ) << std::endl;
 #endif
   bool flag = pODESLVS->_RHS_D_SEN( t, NV_DATA_S( x ), NV_DATA_S( y ),
     NV_DATA_S( ydot ), is );
 #ifdef MC__ODESLVS_SUNDIALS_DEBUG
-  std::cout << "ydot:\n";
+  std::cout << "ydot[" << is << "]:\n";
   for( unsigned i=0; i<NV_LENGTH_S( ydot ); i++ ) std::cout << NV_Ith_S( ydot, i ) << std::endl;
   { int dum; std::cin >> dum; }
 #endif
@@ -794,8 +795,8 @@ ODESLVS_SUNDIALS::states_FSA
 
     // Display & record initial results
     if( options.DISPLAY >= 1 ){
-      _print_interm( _t, _nx, xk[0], "x", os );
-      _print_interm( _nx*_np, xpk[0], "xp", os );
+      _print_interm( _t, _nx, xk[0], " x", os );
+      _print_interm( _nx*_np, xpk[0], " xp", os );
     }
     if( options.RESRECORD ){
       results_sta.push_back( Results( _t, _nx, xk[0] ) );
@@ -833,9 +834,9 @@ ODESLVS_SUNDIALS::states_FSA
             { _END_STA(); _END_SEN(); return FATAL; }
 #ifdef MC__ODESLVS_SUNDIALS_DEBUG
         for( unsigned iy=0; iy<NV_LENGTH_S(_Ny[_isen]); iy++ )
-          std::cout << "_Ny" << _isen << "[iy] = " << NV_Ith_S(_Ny[_isen],iy) << std::endl;
-        for( unsigned iy=0; iy<NV_LENGTH_S(_Nyq[_isen]); iy++ )
-          std::cout << "_Nyq" << _isen << "[iy] = " << NV_Ith_S(_Nyq[_isen],iy) << std::endl;
+          std::cout << "_Ny" << _isen << "[" << iy << "] = " << NV_Ith_S(_Ny[_isen],iy) << std::endl;
+        for( unsigned iy=0; _nq && iy<NV_LENGTH_S(_Nyq[_isen]); iy++ )
+          std::cout << "_Nyq" << _isen << "[" << iy << "] = " << NV_Ith_S(_Nyq[_isen],iy) << std::endl;
 #endif
       }
 
@@ -901,8 +902,8 @@ ODESLVS_SUNDIALS::states_FSA
 
       // Display & record stage results
       if( options.DISPLAY >= 1 ){
-        _print_interm( _t, _nx, xk[_istg+1], "x", os );
-        _print_interm( _nx*_np, xpk[_istg+1], "xp", os );
+        _print_interm( _t, _nx, xk[_istg+1], " x", os );
+        _print_interm( _nx*_np, xpk[_istg+1], " xp", os );
       }
       if( options.RESRECORD ){
         results_sta.push_back( Results( tk[_istg+1], _nx, xk[_istg+1] ) );
@@ -912,8 +913,8 @@ ODESLVS_SUNDIALS::states_FSA
 
     // Bounds on final quadratures and functions
     if( options.DISPLAY >= 1 ){
-      _print_interm( _nf, f, "f", os );
-      _print_interm( _nf*_np, fp, "fp", os );
+      _print_interm( _nf, f, " f", os );
+      _print_interm( _nf*_np, fp, " fp", os );
     }
   }
   catch(...){

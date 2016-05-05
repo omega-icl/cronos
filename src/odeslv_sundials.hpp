@@ -76,7 +76,8 @@ public:
     ();
 
   //! @brief Integrator options
-  struct Options: public BASE_SUNDIALS::Options
+  struct Options:
+    public BASE_SUNDIALS::Options
   {
     //! @brief Constructor
     Options():
@@ -435,7 +436,7 @@ ODESLV_SUNDIALS::_states
 
     // Display & record initial results
     if( options.DISPLAY >= 1 )
-      _print_interm( _t, _nx, xk[0], "x", os );
+      _print_interm( _t, _nx, xk[0], " x", os );
     if( options.RESRECORD )
       results_sta.push_back( Results( tk[0], _nx, xk[0] ) );
 
@@ -499,7 +500,7 @@ ODESLV_SUNDIALS::_states
       if( xk && !xk[_istg+1] ) xk[_istg+1] = new double[_nx];
       for( unsigned ix=0; xk[_istg+1] && ix<_nx; ix++ ) xk[_istg+1][ix] = _Dx[ix];
       if( options.DISPLAY >= 1 )
-        _print_interm( _t, _nx, xk[_istg+1], "x", os );
+        _print_interm( _t, _nx, xk[_istg+1], " x", os );
       if( options.RESRECORD )
         results_sta.push_back( Results( tk[_istg+1], _nx, xk[_istg+1] ) );
 
@@ -510,7 +511,7 @@ ODESLV_SUNDIALS::_states
     }
 
     // Bounds on final quadratures and functions
-    if( options.DISPLAY >= 1 ) _print_interm( _nf, f, "f", os );
+    if( options.DISPLAY >= 1 ) _print_interm( _nf, f, " f", os );
   }
   catch(...){
     _END_STA();

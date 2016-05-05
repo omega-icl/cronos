@@ -48,7 +48,7 @@ public:
       RTOL(1e-8), ATOL(1e-8), QERR(true), MAXFAIL(10), JACAPPROX(CV_DIAG),
       AUTOTOLS(false), RTOLS(1e-8), ATOLS(1e-8), FSACORR(STAGGERED),
       FSAERR(true), QERRS(true), RTOLB(1e-8), ATOLB(1e-8), QERRB(true),
-      ASAINTERP(HERMITE), ASACHKPT(1000), RTOLFD(1e-3), ATOLFD(1e-3), CENFD(true)
+      ASAINTERP(POLYNOMIAL), ASACHKPT(1000), RTOLFD(1e-3), ATOLFD(1e-3), CENFD(true)
       {}
     //! @brief Assignment operator
     template <typename U> Options& operator=

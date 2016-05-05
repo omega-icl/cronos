@@ -90,7 +90,7 @@ Regarding options, the output level, maximum number of iterations, tolerance, ma
 #define MC__NLPSLV_IPOPT_HPP
 
 #include <stdexcept>
-#include <assert.h>
+#include <cassert>
 #include "coin/IpTNLP.hpp"
 #include "coin/IpIpoptApplication.hpp"
 
@@ -111,7 +111,9 @@ namespace mc
 //! mc::NLPSLV_IPOPT is a C++ derived class for solving NLP problems
 //! using IPOPT and MC++
 ////////////////////////////////////////////////////////////////////////
-class NLPSLV_IPOPT: public Ipopt::TNLP, public virtual BASE_NLP
+class NLPSLV_IPOPT:
+  public Ipopt::TNLP,
+  public virtual BASE_NLP
 {
   // Overloading stdout operator
   friend std::ostream& operator<<
@@ -151,7 +153,7 @@ private:
   //! @brief Internal DAG variable for Lagrangian structure
   FFVar _lagr;
 
-  //! @brief Structure holding solution information
+  //! @brief Structure holding optimization problem data
   struct DATA{
     const double*p0;
     std::pair<double,double>*P;
@@ -209,7 +211,7 @@ public:
   virtual ~NLPSLV_IPOPT()
     { _cleanup(); }
 
-  //! @brief Structure holding the NLP solver options
+  //! @brief NLP solver options
   struct Options
   {
     //! @brief Constructor
@@ -264,13 +266,13 @@ public:
     int DISPLAY;
   } options;
 
-  //! @brief Class managing exceptions for the NLP solver
+  //! @brief NLP solver exceptions
   class Exceptions
   {
   public:
     //! @brief Enumeration type for NLPSLV_IPOPT exception handling
     enum TYPE{
-      NLPOBJ=1,		//!< Undefined objective function in optimization problem
+      NOOBJ=1,		//!< Undefined objective function in optimization problem
       INTERN=-33	//!< Internal error
     };
     //! @brief Constructor for error <a>ierr</a>
@@ -280,8 +282,8 @@ public:
     //! @brief Inline function returning the error description
     std::string what(){
       switch( _ierr ){
-      case NLPOBJ:
-        return "NLP_IPTOP::Exceptions  Undefined objective function in optimization problem";
+      case NOOBJ:
+        return "NLPSLV_IPOPT::Exceptions  Undefined objective function in optimization problem";
       case INTERN: default:
         return "NLPSLV_IPOPT::Exceptions  Internal error";
       }
@@ -291,103 +293,17 @@ public:
   };
 
   //! @brief Setup DAG for function/gradient/Hessian evaluation
-  bool setup()
-  {
-    // full set of decision variables (independent & dependent)
-    _var = BASE_NLP::_var;
-    _var.insert( _var.end(), _dep.begin(), _dep.end() );
-    _nvar = _var.size();
-
-    // full set of constraints (main & equation system)
-    _ctr = BASE_NLP::_ctr;
-    for( auto its=_sys.begin(); its!=_sys.end(); ++its ){
-      std::get<0>(_ctr).push_back( EQ );
-      std::get<1>(_ctr).push_back( (*its) );
-      std::get<2>(_ctr).push_back( FFVar( _dag ) );
-    }
-    _nctr = std::get<0>(_ctr).size();
-
-    // setup objective and constraint evaluation
-    _cleanup();
-    if( std::get<0>(_obj).size() != 1 ) throw Exceptions( Exceptions::NLPOBJ );
-    _op_f = _dag->subgraph( std::get<1>(_obj).size(), std::get<1>(_obj).data() );
-    _op_g = _dag->subgraph( std::get<1>(_ctr).size(), std::get<1>(_ctr).data() );
-
-    // setup objective and constraint gradient evaluation
-    switch( options.GRADIENT ){
-      case Options::FORWARD:  // Forward AD
-        _obj_grad = _dag->FAD( std::get<1>(_obj).size(), std::get<1>(_obj).data(),
-                               _nvar, _var.data() ); 
-        _ctr_grad = _dag->SFAD( std::get<1>(_ctr).size(), std::get<1>(_ctr).data(),
-                                _nvar, _var.data() ); 
-        break;
-      case Options::BACKWARD: // Backward AD
-        _obj_grad = _dag->BAD( std::get<1>(_obj).size(), std::get<1>(_obj).data(),
-                               _nvar, _var.data() ); 
-        _ctr_grad = _dag->SBAD( std::get<1>(_ctr).size(), std::get<1>(_ctr).data(),
-                                _nvar, _var.data() ); 
-        break;
-    }
-#ifdef MC__NLPSLV_IPOPT_DEBUG
-    for( unsigned ie=0; ie<std::get<0>(_ctr_grad); ++ie )
-       std::cout << "  dg[" << std::get<1>(_ctr_grad)[ie]
-                 << "," << std::get<2>(_ctr_grad)[ie] << "]";
-    std::cout << std::endl;
-#endif
-    _op_df = _dag->subgraph( _nvar, _obj_grad );
-    _op_dg = _dag->subgraph( std::get<0>(_ctr_grad), std::get<3>(_ctr_grad) );
-
-    // setup Lagrangian Hessian evaluation
-    //if( options.HESSIAN == Options::EXACT ){
-      // form Lagrangian
-      FFVar lagr = std::get<1>(_obj)[0] * std::get<2>(_obj)[0];
-      for( unsigned ic=0; ic<_nctr; ic++ )
-        lagr += std::get<1>(_ctr)[ic] * std::get<2>(_ctr)[ic];
-      // differentiate twice
-      const FFVar* lagr_grad = _dag->BAD( 1, &lagr, _nvar, _var.data() );
-      _lagr_hess = _dag->SFAD( _nvar, lagr_grad, _nvar, _var.data(), true );
-      delete[] lagr_grad;
-#ifdef MC__NLPSLV_IPOPT_DEBUG
-      _dag->output( _dag->subgraph( std::get<0>(_lagr_hess), std::get<3>(_lagr_hess) ), std::cout );
-      for( unsigned ie=0; ie<std::get<0>(_lagr_hess); ++ie )
-         std::cout << "  d2L[" << std::get<1>(_lagr_hess)[ie]
-                   << "," << std::get<2>(_lagr_hess)[ie] << "]: "
-                   << std::get<3>(_lagr_hess)[ie];
-      std::cout << std::endl;
-#endif
-      _op_d2L = _dag->subgraph( std::get<0>(_lagr_hess), std::get<3>(_lagr_hess) );
-    //}
-
-    return true;
-  }
+  bool setup();
 
   //! @brief Solve NLP model -- return value is IPOPT status
   template <typename T>
   Ipopt::ApplicationReturnStatus solve
-    ( const T*P, const double*p0=0 )
-    {
-      Ipopt::SmartPtr<Ipopt::IpoptApplication> IpoptApp
-        = new Ipopt::IpoptApplication();
-
-      // Set (a few) IPOPT options
-      set_options( IpoptApp );
-
-      // Keep track of bounds and initial guess
-      _data.set( _nvar, p0, P );
-
-      // Run NLP solver
-      _solution.status = IpoptApp->Initialize();
-      if( _solution.status == Ipopt::Solve_Succeeded ){
-        _solution.status = IpoptApp->OptimizeTNLP( this );
-      }
-
-      return _solution.status;
-    }
+    ( const T*P, const double*p0=0 );
 
   //! @brief Get IPOPT internal scaling value
   double get_scaling()
     {
-      if( std::get<0>(_obj).size() != 1 ) throw Exceptions( Exceptions::NLPOBJ );
+      if( std::get<0>(_obj).size() != 1 ) throw Exceptions( Exceptions::NOOBJ );
       // set scaling factor. 1: minimize; -1: maximize
       switch( std::get<0>(_obj)[0] ){
         case MIN: _scaling =  1.; break;
@@ -468,38 +384,131 @@ protected:
 private:
   //! @brief Set IPOPT options
   void set_options
-    ( Ipopt::SmartPtr<Ipopt::IpoptApplication>&IpoptApp )
-    {
-      IpoptApp->Options()->SetNumericValue( "tol",
-        options.CVTOL<0.? 1e-12: options.CVTOL );
-      IpoptApp->Options()->SetNumericValue( "dual_inf_tol",
-        options.DUALTOL<=0.? 1e-12: options.DUALTOL );
-      IpoptApp->Options()->SetNumericValue( "constr_viol_tol",
-        options.PRIMALTOL<=0.? 1e-12: options.PRIMALTOL );
-      IpoptApp->Options()->SetNumericValue( "compl_inf_tol",
-        options.COMPLTOL<=0.? 1e-12: options.COMPLTOL );
-      IpoptApp->Options()->SetIntegerValue( "max_iter", options.MAXITER );
-      IpoptApp->Options()->SetNumericValue( "max_cpu_time", options.MAXCPU);
-      IpoptApp->Options()->SetNumericValue( "obj_scaling_factor", get_scaling() );
-      switch( options.HESSIAN ){
-      case Options::EXACT:
-        IpoptApp->Options()->SetStringValue( "hessian_approximation", "exact" );
-	break;
-      case Options::LBFGS:
-        IpoptApp->Options()->SetStringValue( "hessian_approximation", "limited-memory" );
-	break;
-      }
-      IpoptApp->Options()->SetStringValue( "derivative_test",
-        options.TESTDER? "second-order": "none" );
-      IpoptApp->Options()->SetIntegerValue( "print_level",
-        options.DISPLAY<0? 0: (options.DISPLAY>12? 12: options.DISPLAY ) );
-    }
+    ( Ipopt::SmartPtr<Ipopt::IpoptApplication>&IpoptApp );
 
   //! @brief Private methods to block default compiler methods
   NLPSLV_IPOPT(const NLPSLV_IPOPT&);
   NLPSLV_IPOPT& operator=(const NLPSLV_IPOPT&);
 };
 
+inline
+void
+NLPSLV_IPOPT::set_options
+( Ipopt::SmartPtr<Ipopt::IpoptApplication>&IpoptApp )
+{
+  IpoptApp->Options()->SetNumericValue( "tol", options.CVTOL<0.? 1e-12: options.CVTOL );
+  IpoptApp->Options()->SetNumericValue( "dual_inf_tol", options.DUALTOL<=0.? 1e-12: options.DUALTOL );
+  IpoptApp->Options()->SetNumericValue( "constr_viol_tol", options.PRIMALTOL<=0.? 1e-12: options.PRIMALTOL );
+  IpoptApp->Options()->SetNumericValue( "compl_inf_tol", options.COMPLTOL<=0.? 1e-12: options.COMPLTOL );
+  IpoptApp->Options()->SetIntegerValue( "max_iter", options.MAXITER );
+  IpoptApp->Options()->SetNumericValue( "max_cpu_time", options.MAXCPU);
+  IpoptApp->Options()->SetNumericValue( "obj_scaling_factor", get_scaling() );
+  switch( options.HESSIAN ){
+  case Options::EXACT:
+    IpoptApp->Options()->SetStringValue( "hessian_approximation", "exact" );
+    break;
+  case Options::LBFGS:
+    IpoptApp->Options()->SetStringValue( "hessian_approximation", "limited-memory" );
+    break;
+  }
+  IpoptApp->Options()->SetStringValue( "derivative_test", options.TESTDER? "second-order": "none" );
+  IpoptApp->Options()->SetIntegerValue( "print_level", options.DISPLAY<0? 0: (options.DISPLAY>12? 12: options.DISPLAY ) );
+}
+
+inline
+bool
+NLPSLV_IPOPT::setup
+()
+{
+  // full set of decision variables (independent & dependent)
+  _var = BASE_NLP::_var;
+  _var.insert( _var.end(), _dep.begin(), _dep.end() );
+  _nvar = _var.size();
+
+  // full set of constraints (main & equation system)
+  _ctr = BASE_NLP::_ctr;
+  for( auto its=_sys.begin(); its!=_sys.end(); ++its ){
+    std::get<0>(_ctr).push_back( EQ );
+    std::get<1>(_ctr).push_back( (*its) );
+    std::get<2>(_ctr).push_back( FFVar( _dag ) );
+  }
+  _nctr = std::get<0>(_ctr).size();
+
+  // setup objective and constraint evaluation
+  _cleanup();
+  if( std::get<0>(_obj).size() != 1 ) throw Exceptions( Exceptions::NOOBJ );
+  _op_f = _dag->subgraph( std::get<1>(_obj).size(), std::get<1>(_obj).data() );
+  _op_g = _dag->subgraph( std::get<1>(_ctr).size(), std::get<1>(_ctr).data() );
+
+  // setup objective and constraint gradient evaluation
+  switch( options.GRADIENT ){
+    case Options::FORWARD:  // Forward AD
+      _obj_grad = _dag->FAD( std::get<1>(_obj).size(), std::get<1>(_obj).data(),
+                             _nvar, _var.data() ); 
+      _ctr_grad = _dag->SFAD( std::get<1>(_ctr).size(), std::get<1>(_ctr).data(),
+                              _nvar, _var.data() ); 
+      break;
+    case Options::BACKWARD: // Backward AD
+      _obj_grad = _dag->BAD( std::get<1>(_obj).size(), std::get<1>(_obj).data(),
+                             _nvar, _var.data() ); 
+      _ctr_grad = _dag->SBAD( std::get<1>(_ctr).size(), std::get<1>(_ctr).data(),
+                              _nvar, _var.data() ); 
+      break;
+  }
+#ifdef MC__NLPSLV_IPOPT_DEBUG
+  for( unsigned ie=0; ie<std::get<0>(_ctr_grad); ++ie )
+     std::cout << "  dg[" << std::get<1>(_ctr_grad)[ie]
+               << "," << std::get<2>(_ctr_grad)[ie] << "]";
+  std::cout << std::endl;
+#endif
+  _op_df = _dag->subgraph( _nvar, _obj_grad );
+  _op_dg = _dag->subgraph( std::get<0>(_ctr_grad), std::get<3>(_ctr_grad) );
+
+  // setup Lagrangian Hessian evaluation
+  //if( options.HESSIAN == Options::EXACT ){
+    // form Lagrangian
+    FFVar lagr = std::get<1>(_obj)[0] * std::get<2>(_obj)[0];
+    for( unsigned ic=0; ic<_nctr; ic++ )
+      lagr += std::get<1>(_ctr)[ic] * std::get<2>(_ctr)[ic];
+    // differentiate twice
+    const FFVar* lagr_grad = _dag->BAD( 1, &lagr, _nvar, _var.data() );
+    _lagr_hess = _dag->SFAD( _nvar, lagr_grad, _nvar, _var.data(), true );
+    delete[] lagr_grad;
+#ifdef MC__NLPSLV_IPOPT_DEBUG
+    _dag->output( _dag->subgraph( std::get<0>(_lagr_hess), std::get<3>(_lagr_hess) ), std::cout );
+    for( unsigned ie=0; ie<std::get<0>(_lagr_hess); ++ie )
+       std::cout << "  d2L[" << std::get<1>(_lagr_hess)[ie]
+                 << "," << std::get<2>(_lagr_hess)[ie] << "]: "
+                 << std::get<3>(_lagr_hess)[ie];
+    std::cout << std::endl;
+#endif
+    _op_d2L = _dag->subgraph( std::get<0>(_lagr_hess), std::get<3>(_lagr_hess) );
+  //}
+
+  return true;
+}
+
+template <typename T>
+inline
+Ipopt::ApplicationReturnStatus
+NLPSLV_IPOPT::solve
+( const T*P, const double*p0 )
+{
+  Ipopt::SmartPtr<Ipopt::IpoptApplication> IpoptApp = new Ipopt::IpoptApplication();
+
+  // Set (a few) IPOPT options
+  set_options( IpoptApp );
+
+  // Keep track of bounds and initial guess
+  _data.set( _nvar, p0, P );
+
+  // Run NLP solver
+  _solution.status = IpoptApp->Initialize();
+  if( _solution.status == Ipopt::Solve_Succeeded )
+    _solution.status = IpoptApp->OptimizeTNLP( this );
+
+  return _solution.status;
+}
 
 inline
 bool
@@ -581,12 +590,12 @@ NLPSLV_IPOPT::get_starting_point
   if( !init_x || init_z || init_lambda ) return false;
 
   // initialize to the given starting point
-  unsigned ip = 0;
-  for( ; ip<_nvar; ip++ ){   
-    x[ip] = _data.p0? _data.p0[ip]: 0;
-#ifdef MC__NLPSLV_IPOPT_DEBUG
+  //if( !_data.p0 ) return false;
+  for( unsigned ip=0; ip<_nvar; ip++ ){   
+    x[ip] = _data.p0? _data.p0[ip]: 0.;
+//#ifdef MC__NLPSLV_IPOPT_DEBUG
     std::cout << "  x_0[" << ip << "] = " << x[ip] << std::endl;
-#endif
+//#endif
   }
   return true;
 }
@@ -598,9 +607,11 @@ NLPSLV_IPOPT::eval_f
   Ipopt::Number& f )
 {
   assert( (unsigned)n == _nvar );
-#ifdef MC__NLPSLV_IPOPT_TRACE
+//#ifdef MC__NLPSLV_IPOPT_TRACE
   std::cout << "  NLPSLV_IPOPT::eval_f  " << new_x << std::endl;
-#endif
+  for( unsigned ip=0; ip<n; ip++ )
+    std::cout << "  x[" << ip << "] = " << x[ip] << std::endl;
+//#endif
   // evaluate objective
   try{
     _dag->eval( _op_f, 1, std::get<1>(_obj).data(), &f, n, _var.data(), x );
@@ -608,9 +619,9 @@ NLPSLV_IPOPT::eval_f
   catch(...){
     return false;
   }
-#ifdef MC__NLPSLV_IPOPT_DEBUG
+//#ifdef MC__NLPSLV_IPOPT_DEBUG
   std::cout << "  f = " << f << std::endl;
-#endif
+//#endif
   return true;
 }
 
@@ -621,9 +632,11 @@ NLPSLV_IPOPT::eval_grad_f
   Ipopt::Number* df )
 {
   assert( (unsigned)n == _nvar );
-#ifdef MC__NLPSLV_IPOPT_TRACE
+//#ifdef MC__NLPSLV_IPOPT_TRACE
   std::cout << "  NLPSLV_IPOPT::eval_grad_f  " << new_x << std::endl;
-#endif
+  for( unsigned ip=0; ip<n; ip++ )
+    std::cout << "  x[" << ip << "] = " << x[ip] << std::endl;
+//#endif
   // evaluate objective gradient
   try{
     _dag->eval( _op_df, n, _obj_grad, df, n, _var.data(), x );
@@ -651,10 +664,10 @@ NLPSLV_IPOPT::eval_g
   // evaluate constraints
   try{
     _dag->eval( _op_g, m, std::get<1>(_ctr).data(), g, n, _var.data(), x );
-#ifdef MC__NLPSLV_IPOPT_DEBUG
+//#ifdef MC__NLPSLV_IPOPT_DEBUG
     for( Ipopt::Index ic=0; ic<m; ic++ )
       std::cout << "  g[" << ic << "] = " << g[ic] << std::endl;
-#endif
+//#endif
   }
   catch(...){
     return false;

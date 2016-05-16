@@ -1532,11 +1532,11 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_FSA
          && ( !_CC_SET_FSA( _pos_ic, _isen )
            || !_CC_PM_SET( options )
            || !_CC_PM_SEN( options, _t, NV_DATA_S( _Nx ), NV_DATA_S(_Ny[_isen]) )
-           || ( !_isen && !_CC_CVODES_FSA() ) ) )
+           || ( _isen==_np-1 && !_CC_CVODES_FSA() ) ) )
           { _END_STA(); _END_SEN(); return FATAL; }
         if( _istg
          && ( ( _Nyq && _Nyq[_isen] && !ODEBND_BASE<T,PMT,PVT>::_IC_PM_QUAD( options, NV_DATA_S(_Nyq[_isen]) ) ) //quadrature sensitivity reinitialization
-           || ( !_isen && !_CC_CVODES_QUAD() ) ) )
+           || ( _isen==_np-1 && !_CC_CVODES_QUAD() ) ) )
             { _END_STA(); _END_SEN(); return FATAL; }
 #ifdef MC__ODEBNDS_SUNDIALS_DEBUG
         for( unsigned iy=0; iy<NV_LENGTH_S(_Ny[_isen]); iy++ )

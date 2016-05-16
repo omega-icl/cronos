@@ -3048,7 +3048,22 @@ ODEBNDS_BASE<T,PMT,PVT>::_FCT_PM_SEN
   for( unsigned ip=0; ip<_npar+1; ip++ ) _pADJCC[_nx+ip] = (ip==isen? 1.: 0.); // includes time
   for( unsigned iq=0; iq<_nq; iq++ )     _pADJCC[_nx+_npar+1+iq] = _pYQ[iq];
   delete[] _pADJTC; _pADJTC = _pDAG->FAD( _nf, _pIC, _nx+_npar+1+_nq, _pVAR+_nx, _pADJCC );
+#ifdef MC__ODEBNDS_BASE_DEBUG
+  std::ostringstream ofilename;
+  ofilename << "dF[" << isen << "].dot";
+  std::ofstream ofile( ofilename.str(), std::ios_base::out );
+  _pDAG->dot_script( _nf, _pADJTC, ofile );
+  ofile.close();
+  _print_interm( _nVAR, _PMVAR, "PMVAR" );
+  std::cout << "sensitivity parameter #" << isen << ":" << std::endl;
+  _print_interm( _nq, _PMyq, "PMyq" );
+  _print_interm( _nf, PMfp, "PMfp" );
+#endif
   _pDAG->eval( _nf, _pADJTC, PMfp, _nVAR, _pVAR, _PMVAR, pos_fct?true:false );
+#ifdef MC__ODEBNDS_BASE_DEBUG
+  _print_interm( _nf, PMfp, "PMfp" );
+  int dum; std::cin >> dum;
+#endif
 
   return true;
 }

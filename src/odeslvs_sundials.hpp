@@ -784,7 +784,7 @@ ODESLVS_SUNDIALS::states_FSA
        || !ODESLV_BASE::_IC_D_STA( _t, NV_DATA_S(_Ny[_isen]) )
        || ( _Nyq && _Nyq[_isen] && !ODESLV_BASE::_IC_D_QUAD( NV_DATA_S(_Nyq[_isen]) ) ) ) 
         { _END_STA(); _END_SEN(); return FATAL; }
-      _GET_D_SEN( NV_DATA_S(_Ny[_isen]), _np, _nq && _Nyq? NV_DATA_S(_Nyq[_isen]): 0 );
+      _GET_D_SEN( NV_DATA_S(_Ny[_isen]), _nq, _nq && _Nyq? NV_DATA_S(_Nyq[_isen]): 0 );
       for( unsigned iy=0; xpk[0] && iy<_ny; iy++ ) xpk[0][_isen*_ny+iy] = _Dy[iy];
 #ifdef MC__ODESLVS_SUNDIALS_DEBUG
       std::cout << "qS[" << _isen << "]: " << _Nyq[_isen] << "(" << NV_LENGTH_S( _Nyq[_isen] ) << ")\n";
@@ -826,11 +826,11 @@ ODESLVS_SUNDIALS::states_FSA
         if( _pos_ic
          && ( !_CC_SET_FSA( _pos_ic, _isen )
            || !_CC_D_SEN( _t, NV_DATA_S( _Nx ), NV_DATA_S(_Ny[_isen]) )
-           || ( !_isen && !_CC_CVODES_FSA() ) ) )
+           || ( _isen==_np-1 && !_CC_CVODES_FSA() ) ) )
             { _END_STA(); _END_SEN(); return FATAL; }
         if( _istg
          && ( ( _Nyq && _Nyq[_isen] && !ODESLV_BASE::_IC_D_QUAD( NV_DATA_S(_Nyq[_isen]) ) ) //quadrature sensitivity reinitialization
-           || ( !_isen && !_CC_CVODES_QUAD() ) ) )
+           || ( _isen==_np-1 && !_CC_CVODES_QUAD() ) ) )
             { _END_STA(); _END_SEN(); return FATAL; }
 #ifdef MC__ODESLVS_SUNDIALS_DEBUG
         for( unsigned iy=0; iy<NV_LENGTH_S(_Ny[_isen]); iy++ )

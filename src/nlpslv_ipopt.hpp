@@ -1,4 +1,4 @@
-// Copyright (C) 2014 Benoit Chachuat, Imperial College London.
+// Copyright (C) 2014-2016 Benoit Chachuat, Imperial College London.
 // All Rights Reserved.
 // This code is published under the Eclipse Public License.
 
@@ -15,9 +15,9 @@ Consider a nonlinear optimization problem in the form:
 & {\rm s.t.}\ \ g_j(x_1,\ldots,x_n)\ \leq,=,\geq\ 0,\ \ j=1,\ldots,m\\
 & \qquad x_i^L\leq x_i\leq x_i^U,\ \ i=1,\ldots,n\,,
 \f}
-where \f$f, g_1, \ldots, g_m\f$ are factorable, potentially nonlinear, real-valued functions; and \f$x_1, \ldots, x_n\f$ are continuous decision variables. The class mc::NLPSLV_IPOPT solves such NLP problems using the software package <A href="https://projects.coin-or.org/Ipopt">IPOPT</A>, which implements a local solution method (interior point). IPOPT requires the first and second derivatives as well as the sparsity pattern of the objective and constraint functions in the NLP model. This information is generated using direct acyclic graphs (DAG) in MC++ <A href="https://projects.coin-or.org/MCpp">MC++</A>.
+where \f$f, g_1, \ldots, g_m\f$ are factorable, potentially nonlinear, real-valued functions; and \f$x_1, \ldots, x_n\f$ are continuous decision variables. The class mc::NLPSLV_IPOPT solves such NLP problems using the software package <A href="https://projects.coin-or.org/Ipopt">IPOPT</A>, which implements a local solution method (interior point). IPOPT requires the first and second derivatives as well as the sparsity pattern of the objective and constraint functions in the NLP model. This information is generated using direct acyclic graphs (DAG) in <A href="https://projects.coin-or.org/MCpp">MC++</A>.
 
-\section sec_MCIPOPT_solve How to Solve an NLP Model using mc::NLPSLV_IPOPT?
+\section sec_NLPSLV_solve How to Solve an NLP Model using mc::NLPSLV_IPOPT?
 
 Consider the following NLP:
 \f{align*}
@@ -30,14 +30,14 @@ Consider the following NLP:
 We start by defining an mc::NLPSLV_IPOPT class as below, whereby the class <A href="http://www.coin-or.org/Doxygen/Ipopt/class_ipopt_1_1_smart_ptr.html">Ipopt::SmartPtr</A> is used here to comply with the IPOPT C++ interface:
 
 \code
+  #include "nlpslv_ipopt.hpp"
+  
   Ipopt::SmartPtr<mc::NLPSLV_IPOPT> NLP = new mc::NLPSLV_IPOPT;
 \endcode
 
 Next, we set the variables and objective/constraint functions by creating a DAG of the problem: 
 
 \code
-  #include "nlpslv_ipopt.hpp"
-  
   mc::FFGraph DAG;
   const unsigned NP = 2; mc::FFVar P[NP];
   for( unsigned i=0; i<NP; i++ ) P[i].set( &DAG );
@@ -593,9 +593,9 @@ NLPSLV_IPOPT::get_starting_point
   //if( !_data.p0 ) return false;
   for( unsigned ip=0; ip<_nvar; ip++ ){   
     x[ip] = _data.p0? _data.p0[ip]: 0.;
-//#ifdef MC__NLPSLV_IPOPT_DEBUG
+#ifdef MC__NLPSLV_IPOPT_DEBUG
     std::cout << "  x_0[" << ip << "] = " << x[ip] << std::endl;
-//#endif
+#endif
   }
   return true;
 }
@@ -607,11 +607,11 @@ NLPSLV_IPOPT::eval_f
   Ipopt::Number& f )
 {
   assert( (unsigned)n == _nvar );
-//#ifdef MC__NLPSLV_IPOPT_TRACE
+#ifdef MC__NLPSLV_IPOPT_TRACE
   std::cout << "  NLPSLV_IPOPT::eval_f  " << new_x << std::endl;
-  for( unsigned ip=0; ip<n; ip++ )
+  for( Ipopt::Index ip=0; ip<n; ip++ )
     std::cout << "  x[" << ip << "] = " << x[ip] << std::endl;
-//#endif
+#endif
   // evaluate objective
   try{
     _dag->eval( _op_f, 1, std::get<1>(_obj).data(), &f, n, _var.data(), x );
@@ -619,9 +619,9 @@ NLPSLV_IPOPT::eval_f
   catch(...){
     return false;
   }
-//#ifdef MC__NLPSLV_IPOPT_DEBUG
+#ifdef MC__NLPSLV_IPOPT_DEBUG
   std::cout << "  f = " << f << std::endl;
-//#endif
+#endif
   return true;
 }
 
@@ -632,11 +632,11 @@ NLPSLV_IPOPT::eval_grad_f
   Ipopt::Number* df )
 {
   assert( (unsigned)n == _nvar );
-//#ifdef MC__NLPSLV_IPOPT_TRACE
+#ifdef MC__NLPSLV_IPOPT_TRACE
   std::cout << "  NLPSLV_IPOPT::eval_grad_f  " << new_x << std::endl;
-  for( unsigned ip=0; ip<n; ip++ )
+  for( Ipopt::Index ip=0; ip<n; ip++ )
     std::cout << "  x[" << ip << "] = " << x[ip] << std::endl;
-//#endif
+#endif
   // evaluate objective gradient
   try{
     _dag->eval( _op_df, n, _obj_grad, df, n, _var.data(), x );
@@ -664,10 +664,10 @@ NLPSLV_IPOPT::eval_g
   // evaluate constraints
   try{
     _dag->eval( _op_g, m, std::get<1>(_ctr).data(), g, n, _var.data(), x );
-//#ifdef MC__NLPSLV_IPOPT_DEBUG
+#ifdef MC__NLPSLV_IPOPT_DEBUG
     for( Ipopt::Index ic=0; ic<m; ic++ )
       std::cout << "  g[" << ic << "] = " << g[ic] << std::endl;
-//#endif
+#endif
   }
   catch(...){
     return false;

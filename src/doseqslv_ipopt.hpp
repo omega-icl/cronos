@@ -1,9 +1,9 @@
-// Copyright (C) 2012, 2014 Benoit Chachuat, Imperial College London.
+// Copyright (C) 2012-2016 Benoit Chachuat, Imperial College London.
 // All Rights Reserved.
 // This code is published under the Eclipse Public License.
 
 /*!
-\page page_DOSEQ Local Dynamic Optimization using IPOPT, CVODES and MC++ (Sequential Approach)
+\page page_DOSEQSLV Local Dynamic Optimization using IPOPT, CVODES and MC++ (Sequential Approach)
 \author Benoit C. Chachuat
 \version 0.1
 \date 2016
@@ -15,148 +15,137 @@ Consider a dynamic optimization (DO) problem of the form
   \text{s.t.} \ & \phi_k({\bf p}, {\bf x}(t_0),\ldots,{\bf x}(t_N)) + \int_{t_0}^{t_N} \psi_k({\bf p}, {\bf x}(t))\, dt \{\geq,=,\leq\} 0, \quad k=1,\ldots,n_c\\
   & \dot{{\bf x}}(t)={\bf f}({\bf p},{\bf x}(t)),\ t\in(t_0,t_{N}]; \quad {\bf x}(t_0)={\bf h}({\bf p})
 \f}
-where \f${\bf p}\in P\subset\mathbb{R}^{n_p}\f$, \f${\bf x}\in\mathbb{R}^{n_x}\f$, and the real-valued functions \f${\bf f}\f$, \f${\bf h}\f$, \f$\phi_k\f$ and \f$\psi_k\f$ are twice continuously differentiable in all their arguments and factorable. The class mc::DOSEQ in MC++ solves such DO problems to local optimality, based on the sequential approach. It relies on the software packages <A href="https://projects.coin-or.org/Ipopt">IPOPT</A> for local solution of NLP problems, <A href="https://computation.llnl.gov/casc/sundials/description/description.html">SUNDIALS/CVODES</A> for numerical integration and sensitivity analysis of IVPs in ODEs, and <A href="http://www.fadbad.com/fadbad.html">FADBAD++</A> for automatic differentiation (AD).
+where \f${\bf p}\in P\subset\mathbb{R}^{n_p}\f$, \f${\bf x}\in\mathbb{R}^{n_x}\f$, and the real-valued functions \f${\bf f}\f$, \f${\bf h}\f$, \f$\phi_k\f$ and \f$\psi_k\f$ are twice continuously differentiable in all their arguments and factorable. The class mc::DOSEQSLV_IPOPT solves such DO problems to local optimality, based on the sequential approach. It relies on the software packages <A href="https://projects.coin-or.org/Ipopt">IPOPT</A> for local solution of NLP problems, and <A href="https://computation.llnl.gov/casc/sundials/description/description.html">SUNDIALS/CVODES</A> for numerical integration and sensitivity analysis of IVPs in ODEs. The dynamic system, objective function and constraints are defined, manipulated, and analyzed using direct acyclic graphs (DAG) in <A href="https://projects.coin-or.org/MCpp">MC++</A>.
 
-mc::DOSEQ is templated in the DO problem to be solved, which has to be a class derived from mc::DOSTRUCT. For example, suppose we want to solve the following dynamic optimization problem:
+\section sec_DOSEQSLV_solve How to Solve a Dynamic Optimization Model using mc::DOSEQSLV_IPOPT?
+
+Consider the following dynamic optimization problem:
 \f{align*}
-  \max_{T,x_1^0,u_1,\ldots,u_N}\ & T \\
+  \max_{t_{\rm f},x_1^0,u_1,\ldots,u_{N_{\rm s}}}\ & t_{\rm f} \\
   \text{s.t.} \ & x_1(1) = 1\\
   & x_2(1) = 0\\
   & \left.\begin{array}{l}
-    \dot{x_1}(t) = x_2(t)\\
-    \dot{x_2}(t) = (u_k-x_1(t)-2*x_2(t))\theta(t)\\
-    \dot{\theta}(t) = T
-    \end{array}\right\},\ t\in({\textstyle\frac{k-1}{N},\frac{k}{N}}],\ k=1,\ldots,N\\
-  & x_1(0) = x_1^0,\ x_2(0) = 0,\ \theta(0) = 0
+    \dot{x_1}(\tau) = x_2(\tau)\\
+    \dot{x_2}(\tau) = (u_k-x_1(\tau)-2*x_2(\tau))
+    \end{array}\right\},\ \tau\in({\textstyle\frac{k-1}{N},\frac{k}{N}}],\ k=1,\ldots,N_{\rm s}\\
+  & x_1(0) = x_1^0,\ x_2(0) = 0
 \f}
-with \f$N=10\f$ stages. The following class is defined:
+with \f$N_{\rm s}=10\f$ stages.
+
+We start by defining an mc::DOSEQSLV_IPOPT class as below, whereby the class <A href="http://www.coin-or.org/Doxygen/Ipopt/class_ipopt_1_1_smart_ptr.html">Ipopt::SmartPtr</A> is used here to comply with the IPOPT C++ interface:
+
 \code
-      #include "doseq.h"
+  #include "doseqslv_ipopt.hpp"
 
-      // Number of time stages
-      const unsigned NS = 5;
-      // Number of decision variables
-      const unsigned NP = 2+NS;
-      // Number of state variables
-      const unsigned NX = 3;
-      // Number of constraints
-      const unsigned NC = 2;
-
-      class DO : public mc::DOSTRUCT
-      {
-      public:
-        DYNOPT()
-          : mc::DOSTRUCT( NP, NX, NC )
-          {}
-
-        // ODEs right-hand side
-	template <typename TX, typename TP>
-        TX RHS
-          ( const unsigned ix, const TP*p, const TX*x, const unsigned is )
-          {
-            assert( ix < nx() );
-            switch( ix ){
-              case 0: return p[0]*x[1];
-              case 1: return p[0]*(p[2+is]-x[0]-2*x[1])*x[2];
-              case 2: return p[0];
-              default: throw std::runtime_error("invalid size");
-            }
-          }
-      
-        // Initial conditions
-        template <typename T>
-        T IC
-          ( const unsigned ix, const T*p )
-          {
-            assert( ix < nx() );
-            switch( ix ){
-              case 0: return p[1];
-              case 1: return 0.;
-              case 2: return 0.;
-              default: throw std::runtime_error("invalid size");
-            }
-          }
-
-        // Objective functional
-        template <typename T>
-        std::pair<T,t_OBJ> OBJ
-          ( const T*p, T* const*x, const unsigned ns )
-          {
-            return std::make_pair( p[0], MIN );
-          }
-
-        // Constraint functionals
-        template <typename T>
-        std::pair<T,t_CTR> CTR
-          ( const unsigned ic, const T*p, T* const*x, const unsigned ns )
-          {
-            switch( ic ){
-              case 0: return std::make_pair( x[ns][0]-1., EQ );
-              case 1: return std::make_pair( x[ns][1]-0., EQ );
-              default: throw std::runtime_error("invalid size");
-            }
-          }
-      };
+  Ipopt::SmartPtr<mc::DOSEQSLV_IPOPT> OC = new mc::DOSEQSLV_IPOPT;
 \endcode
 
-\section sec_DOSEQ_solve How to Solve a DO Model using mc::DOSEQ?
-
-Start by defining the time stages \f$t_k\f$, parameter set \f$P\f$ and initial guess \f$p_0\f$:
+Next, we set the variables and objective/constraint functions by creating a DAG of the problem: 
 
 \code
-  double p0[NP], tk[NS+1];
-  std::pair<double,double> P[NP];
-  p0[0] = 1.;   P[0] = std::make_pair( 0.1, 2. );
-  p0[1] = 0.5;  P[1] = std::make_pair( -1., 1. );
-  tk[0] = 0.;
-  for( unsigned is=0; is<NS; is++ ){
-    P[2+is]  = std::make_pair( -0.5, 1.5 );
-    p0[2+is] = 0.;
-    tk[1+is] = tk[is]+1./(double)NS;
+  mc::FFGraph IVP;             // DAG of the IVP
+  OC->set_dag( &IVP );
+
+  const unsigned int NS = 10;  // Time stages
+  double tk[NS+1]; tk[0] = 0.;
+  for( unsigned k=0; k<NS; k++ ) tk[k+1] = tk[k] + 1./(double)NS;
+
+  const unsigned NP = 2+NS;    // Decision variables
+  mc::FFVar P[NP];
+  for( unsigned int i=0; i<NP; i++ ) P[i].set( &IVP );
+  mc::FFVar TF = P[0], X10 = P[1], *U = P+2;
+  OC->set_parameter( NP, P );
+
+  const unsigned NX = 2;       // State variables
+  mc::FFVar X[NX];
+  for( unsigned int i=0; i<NX; i++ ) X[i].set( &IVP );
+  OC->set_state( NX, X );
+
+  mc::FFVar RHS[NX*NS];        // Right-hand side function
+  for( unsigned k=0; k<NS; k++ ){
+    RHS[NX*k+0] = TF * X[1];
+    RHS[NX*k+1] = TF * ( U[k]*X[0] - 2.*X[1] );
   }
+  OC->set_differential( NS, NX, RHS );
+ 
+  mc::FFVar IC[NX];            // Initial value function
+  IC[0] = 0.;
+  IC[1] = X10;
+  OC->set_initial( NX, IC );
+
+  std::map<unsigned,mc::FFVar> OBJ; OBJ.insert( std::make_pair( 0, TF ) );
+  OC->set_obj( mc::DOSEQSLV_IPOPT::MIN, OBJ );         // objective
+  std::map<unsigned,mc::FFVar> CTR1; CTR1.insert( std::make_pair( NS-1, X[0]-1. ) );
+  OC->add_ctr( mc::DOSEQSLV_IPOPT::EQ,  CTR1 );        // constraint #1
+  std::map<unsigned,mc::FFVar> CTR2; CTR2.insert( std::make_pair( NS-1, X[1] ) );
+  OC->add_ctr( mc::DOSEQSLV_IPOPT::EQ,  CTR2 );        // constraint #2
 \endcode
 
-Then, define an mc::DOSEQ object:
+Options, such as the output level, maximum number of iterations, tolerance, maximum CPU time, etc can all be modified through the public member mc::DOSEQSLV_IPOPT::Options:
 
 \code
-  Ipopt::SmartPtr< mc::DOSEQ<DO> > pDO = new mc::DOSEQ<DO>;
+  OC->options.DISPLAY   = 5;
+  OC->options.MAXITER   = 100;
+  OC->options.TESTDER   = false;
+  OC->options.CVTOL     = 1e-7;
+  OC->options.GRADIENT  = mc::DOSEQSLV_IPOPT::Options::BACKWARD;
+  OC->options.INTMETH   = mc::DOSEQSLV_IPOPT::Options::MSBDF;
+  OC->options.JACAPPROX = mc::DOSEQSLV_IPOPT::Options::CV_DENSE;
+  OC->options.NMAX      = 20000;
+  OC->options.ATOL      = OC->options.ATOLB      = OC->options.ATOLS  = 1e-9;
+  OC->options.RTOL      = OC->options.RTOLB      = OC->options.RTOLS  = 1e-9;
 \endcode
 
-Note that the class <A href="http://www.coin-or.org/Doxygen/Ipopt/class_ipopt_1_1_smart_ptr.html">Ipopt::SmartPtr</A> is used here to comply with the IPOPT guidelines. 
-
-The DO model is optimized as follows:
+The dynamic optimization model is solved by passing bounds and an initial guess on the decision variables as follows:
 
 \code
-  Ipopt::ApplicationReturnStatus status = pDO->solve( NS, tk, P, p0 );
+  #include "interval.hpp"
+
+  typedef mc::Interval I;
+  I Ip[NP];
+  double p0[NP];
+  p0[0] = 6.;   Ip[0] = I( 0.1, 10. );
+  p0[1] = 0.5;  Ip[1] = I( -1., 1. );
+  for( unsigned int is=0; is<NS; is++ ){
+    p0[2+is] = 0.5;  Ip[2+is]  = I( -0.5, 1.5 );
+  }
+
+  OC->setup();
+  Ipopt::ApplicationReturnStatus status = OC->solve( NS, tk, Ip, p0 );
 \endcode
 
-where the first abd second arguments are the number and value of the time stages, the third one is the variable bounds, and the last one is the initial guess used by the optimizer (IPOPT). The return value is of the enumeration type <A href="http://www.coin-or.org/Doxygen/Ipopt/namespace_ipopt.html#efa0497854479cde8b0994cdf132c982">Ipopt::ApplicationReturnStatus</A>.
-
-Finally, the optimization results can be retrieved as follows:
+The return value is of the enumeration type <A href="http://www.coin-or.org/Doxygen/Ipopt/namespace_ipopt.html#efa0497854479cde8b0994cdf132c982">Ipopt::ApplicationReturnStatus</A>. Moreover, the optimization results can be retrieved as follows:
 
 \code
   #include <iostream>
   #include <iomanip>
 
   if( status == Ipopt::Solve_Succeeded ){
-    std::cout << "DO (LOCAL) Solution: " << std::endl;
-    std::cout << "  f* = " << pDO->solution().f << std::endl;
-    for( unsigned ip=0; ip<NP; ip++ )
-      std::cout << "  p*(" << ip << ") = " << pDO->solution().p[ip] << std::endl;
+    std::cout << "OC (LOCAL) SOLUTION: " << std::endl;
+    std::cout << "  f* = " << OC->solution().f << std::endl;
+    for( unsigned int ip=0; ip<NP; ip++ )
+      std::cout << "  p*(" << ip << ") = " << OC->solution().p[ip] << std::endl;
   }
 \endcode
 
-The following result is displayed:
+The following result is displayed here:
 
 \verbatim
 EXIT: Optimal Solution Found.
-DO (LOCAL) SOLUTION: 
-  f* = 1.53979
-  p*(0) = 1.53979
+OC (LOCAL) SOLUTION: 
+  f* = 2.35755
+  p*(0) = 2.35755
   p*(1) = 1
   p*(2) = 1.5
-  p*(3) = 1.47932
-  p*(4) = -0.5
+  p*(3) = 1.5
+  p*(4) = 1.5
+  p*(5) = 1.5
+  p*(6) = 1.5
+  p*(7) = 1.5
+  p*(8) = 1.5
+  p*(9) = 0.475093
+  p*(10) = -0.5
+  p*(11) = -0.5
 \endverbatim
 */
 
@@ -175,7 +164,7 @@ DO (LOCAL) SOLUTION:
 #undef  MC__DOSEQSLV_IPOPT_TRACE
 
 /* TO DO:
-- Documentation
+- Automate check-pointing for backward differentiation
 - Feasibility and optimality tests (both 1st-order and 2nd-order conditions)
 */
 
@@ -184,7 +173,7 @@ namespace mc
 
 //! @brief C++ class for local solution of dynamic optimization using a direct sequential approach with IPOPT, CVODES and MC++
 ////////////////////////////////////////////////////////////////////////
-//! mc::DOSEQSLV is a C++ class for solving dynamic optimization
+//! mc::DOSEQSLV_IPOPT is a C++ class for solving dynamic optimization
 //! problems to local optimality using a direct sequential approach
 //! with IPOPT, CVODES and MC++
 ////////////////////////////////////////////////////////////////////////

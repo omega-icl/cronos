@@ -19,38 +19,39 @@
 #include "nlgo.hpp"
 
 ////////////////////////////////////////////////////////////////////////
-// Parameter estimation problem (microalgae PI curve)
+// Parameter estimation problem (OSN permeability)
 
-template <class T>
-T Pmod
-( const T*k, double q, double Ir )
+const unsigned NT = 6;
+const double xR_C16[NT] = { 8.616e-3, 5.051e-2, 9.114e-2, 1.593e-1, 2.108e-1, 2.578e-1 }; // [kg/kg]
+const double xP_C16[NT] = { 3.678e-3, 2.170e-2, 4.051e-2, 7.577e-2, 1.084e-1, 1.703e-1 }; // [kg/kg]
+const double J[NT] = { 3.015e-1, 2.867e-1, 1.953e-1, 1.687e-1, 1.149e-1, 9.071e-2 }; // [kg/m2·s·bar]
+const double v_C7 = 1.475e-4, v_C16 = 2.928e-4; // [m3/mol]
+const double T  = 298e0; // [K]
+const double dP = 30e5;  // [Pa]
+const double R  = 8.314; // [J/K·mol]
+
+template <class U>
+U Jmod
+( const U&k, double xR, double xP, double nu, double act=1. )
 {
-  const double tau = 5.5e-3, K = 3.57e-2;
-  return k[0]*Ir/(1.+tau*k[1]*pow(q,k[2])*Ir+K*tau*sqr(k[1]*pow(q,k[2])*Ir));
+  return k * ( xR - act * xP * exp( -nu * dP / R / T ) );
 }
-
-const unsigned NT = 22;
-const double Im_50[NT] = { 10.9249, 18.16, 36.46, 73.12, 29.06, 69.3541, 40, 43.54, 102.196, 94.78, 112.995, 142.184, 207.9, 255.617, 310.528, 387.566, 416.857, 611.368, 640.827, 754.596, 971.193, 1059.39 }; // [µE/m2·s]
-const double Pm_50[NT] = { 0.197, 0.412, 0.51955, 0.609, 0.6448, 0.806, 0.788139, 1.074, 1.2006, 1.3617, 1.6483, 2.00669, 2.7235, 2.706, 2.99324, 3.0478, 3.19136, 3.15773, 2.94322, 2.92659, 2.74999, 2.4824 }; // [gchl/gC·h]
-const double Im_1200[NT] = { 21.98, 47.521, 36.41, 50.97, 98.6, 83.83, 160.676, 193.358, 167.544, 222.11, 313.827, 269.622, 419.289, 610.021, 602.581, 624.616, 668.694, 866.909, 998.867, 1186.03, 1310.83 ,1347.39 }; // [µE/m2·s]
-const double Pm_1200[NT] = { 0.0897199, 0.41226, 0.627, 0.878, 1.0394, 1.2183, 1.703, 2.4369, 2.705, 3.726, 3.781, 4.1386, 5.82, 6.0222, 6.23695, 6.201, 6.11237, 6.00717, 6.33, 6.315, 6.2628, 6.5496 }; // [gchl/gC·h]
-const double q_50 = 8.2e-2, q_1200 = 1.8e-2; // [gchl/gC]
 
 ////////////////////////////////////////////////////////////////////////
 int main()
 ////////////////////////////////////////////////////////////////////////
 {
   mc::FFGraph DAG;
-  const unsigned NK = 3; mc::FFVar k[NK];
-  for( unsigned i=0; i<NK; i++ ) k[i].set( &DAG );
+  enum Species { C7=0, C16 };
+  const unsigned NP = 2; mc::FFVar P[NP];
+  for( unsigned i=0; i<NP; i++ ) P[i].set( &DAG );
 
   mc::NLGO<I> NLP;
   NLP.options.POLIMG.SANDWICH_MAXCUT = 7;
   NLP.options.POLIMG.SANDWICH_ATOL   = NLP.options.POLIMG.SANDWICH_RTOL  = 1e-3;
-  //NLP.options.CVATOL = NLP.options.CVRTOL = 1e-5;
+  NLP.options.CVATOL = NLP.options.CVRTOL = 1e-7;
   //NLP.options.MIPABSGAP = NLP.options.MIPRELGAP = 1e-9;
   //NLP.options.MAXITER = 0;
-
 /*
   NLP.options.POLIMG.SANDWICH_MAXCUT = 10;
   NLP.options.POLIMG.SANDWICH_ATOL   = NLP.options.POLIMG.SANDWICH_RTOL  = 1e-5;
@@ -67,39 +68,40 @@ int main()
   NLP.options.CVATOL    = NLP.options.CVRTOL    = 1e-5;
 */
   NLP.set_dag( &DAG );  // DAG
-  NLP.set_var( NK, k ); // decision variables
+  NLP.set_var( NP, P ); // decision variables
 
 
   mc::FFVar LSQ=0.;
-  for( unsigned i=0; i<NT; i++ ){
-    LSQ += mc::sqr( Pmod( k, q_50,   Im_50[i]   ) - Pm_50[i] )
-         + mc::sqr( Pmod( k, q_1200, Im_1200[i] ) - Pm_1200[i] );
+  for( unsigned k=0; k<NT; k++ ){
+    LSQ += mc::sqr( Jmod( P[C16], xR_C16[k], xP_C16[k], v_C16 ) - J[k] * xP_C16[k] )
+         + (mc::sqr( Jmod( P[C7], 1.-xR_C16[k], 1.-xP_C16[k], v_C7 ) - J[k] * (1.-xP_C16[k]) ));
   }
   NLP.set_obj( mc::BASE_OPT::MIN, LSQ );
   // KKT cuts
-  const mc::FFVar* dLSQdk = DAG.BAD( 1, &LSQ, NK, k );
-  for( unsigned i=0; i<NK; i++ )
-    NLP.add_ctr( mc::BASE_OPT::EQ, dLSQdk[i] );
+  const mc::FFVar* dLSQdP = DAG.BAD( 1, &LSQ, NP, P );
+  //for( unsigned i=0; i<NK; i++ )
+  //  NLP.add_ctr( mc::BASE_NLP::EQ, dLSQdP[i] );
   NLP.setup();
   std::cout << NLP;
 
-  I Ik[NK];
-  Ik[0] = I(0.,0.02); Ik[1] = I(0.,1.); Ik[2] = I(0.,1.);
+  I Ip[NP];
+  Ip[C7] = I(0.,10.); Ip[C16] = I(0.,10.);
 
-  double k0[NK], dLSQdk0[NK];
-  k0[0] = 0.016441; k0[1] = 0.49354; k0[2] = 0.46884;
+  double p0[NP];
+  p0[C7] = 1.; p0[C16] = 1.;
 
   // Local optimization
   NLP.options.NLPSLV.DISPLAY = 5;
   NLP.options.NLPSLV.MAXITER = 100;
-  NLP.local( Ik, k0 );
+  NLP.local( Ip, p0 );
   std::cout << std::setprecision(5);
-  for( unsigned i=0; i<NK; i++ )
-    std::cout << "  k(" << i << ") = " << NLP.get_local_solution().p[i];
+  for( unsigned i=0; i<NP; i++ )
+    std::cout << "  p(" << i << ") = " << NLP.get_local_solution().p[i];
   std::cout << std::endl;
-  for( unsigned i=0; i<NK; i++ ){
-    DAG.eval( NK, dLSQdk, dLSQdk0, NK, k, NLP.get_local_solution().p );
-    std::cout << "  dLSQdk(" << i << ") = " << dLSQdk0[i];
+  double dLSQdp0[NP];
+  for( unsigned i=0; i<NP; i++ ){
+    DAG.eval( NP, dLSQdP, dLSQdp0, NP, P, NLP.get_local_solution().p );
+    std::cout << "  dLSQdP(" << i << ") = " << dLSQdp0[i];
   }
   std::cout << std::endl;
   { int dum; std::cin >> dum; }
@@ -113,7 +115,7 @@ int main()
   NLP.options.CMODPROP = 3;
   NLP.options.CMODSPAR = true;
 
-  NLP.solve( Ik, 0, k0 );
+  NLP.solve( Ip, 0, p0 );
   std::cout << std::fixed << std::setprecision(1);
   std::cout << "POLIMG: " << NLP.stats.tPOLIMG << " sec\n";
   std::cout << "LPSET:  " << NLP.stats.tLPSET << " sec\n";

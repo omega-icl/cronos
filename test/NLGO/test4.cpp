@@ -1,8 +1,9 @@
-#define USE_PROFIL
+//#define USE_PROFIL
+#define MC__USE_CPLEX
 
 #include <fstream>
 #include <iomanip>
-#include "nlgo_gurobi.hpp"
+
 #ifdef USE_PROFIL
   #include "mcprofil.hpp"
   typedef INTERVAL I;
@@ -15,6 +16,7 @@
     typedef mc::Interval I;
   #endif
 #endif
+#include "nlgo.hpp"
 
 // PROBLEM 71 IN THE HOCK-SCHITTKOWSKY TEST SUITE
 // (Lecture Notes in Economics and Mathematical Systems, 187, 1981
@@ -27,7 +29,7 @@ int main()
   const unsigned NP = 4; mc::FFVar p[NP];
   for( unsigned i=0; i<NP; i++ ) p[i].set( &DAG );
 
-  mc::NLGO_GUROBI<I> NLP;
+  mc::NLGO<I> NLP;
   //NLP.options.CVATOL = NLP.options.CVRTOL = 1e-5;
   //NLP.options.MIPABSGAP = NLP.options.MIPRELGAP = 1e-9;
   //NLP.options.MAXITER = 0;
@@ -67,26 +69,26 @@ int main()
   // double p0[NP] = { 1, 5, 5, 1 };
 
   // Global optimization using SBB
-  NLP.options.CSALGO  = mc::NLGO_GUROBI<I>::Options::SBB;
-  NLP.options.RELMETH = mc::NLGO_GUROBI<I>::Options::DRL;
+  NLP.options.CSALGO  = mc::NLGO<I>::Options::SBB;
+  NLP.options.RELMETH = mc::NLGO<I>::Options::DRL;
   NLP.solve( Ip );
   NLP.solve( Ip, Tp );
 
-  NLP.options.RELMETH = mc::NLGO_GUROBI<I>::Options::CHEB;
+  NLP.options.RELMETH = mc::NLGO<I>::Options::CHEB;
   NLP.options.CMODPROP = 3;
   NLP.options.CMODSPAR = true;
   NLP.solve( Ip );
   NLP.solve( Ip, Tp );
 
-  NLP.options.RELMETH = mc::NLGO_GUROBI<I>::Options::HYBRID;
+  NLP.options.RELMETH = mc::NLGO<I>::Options::HYBRID;
   //NLP.options.MIPFILE = "test4.lp";
   NLP.options.CMODPROP = 3;
   NLP.solve( Ip );
   NLP.solve( Ip, Tp );
 
   // Global optimization using PWL
-  //NLP.options.CSALGO = mc::NLGO_GUROBI<I>::Options::PWL;
-  //NLP.options.RELMETH = mc::NLGO_GUROBI<I>::Options::CHEB;
+  //NLP.options.CSALGO = mc::NLGO<I>::Options::PWL;
+  //NLP.options.RELMETH = mc::NLGO<I>::Options::CHEB;
   //NLP.options.POLIMG.BREAKPOINT_TYPE = mc::PolImg<I>::Options::BIN;//SOS2;//NONE;
   ////NLP.solve( Ip );
   //NLP.solve( Ip, Tp );

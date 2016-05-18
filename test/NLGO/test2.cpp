@@ -1,8 +1,11 @@
 #include <fstream>
 #include <iomanip>
-#include "nlgo_gurobi.hpp"
+
 #include "interval.hpp"
 typedef mc::Interval I;
+
+#define MC__USE_CPLEX
+#include "nlgo.hpp"
 
 // EXAMPLE 7 IN RYOO & SAHINIDIS, C&CE, 1995
 ////////////////////////////////////////////////////////////////////////
@@ -13,7 +16,7 @@ int main()
   const unsigned NP = 10; mc::FFVar p[NP];
   for( unsigned i=0; i<NP; i++ ) p[i].set( &DAG );
 
-  mc::NLGO_GUROBI<I> NLP;
+  mc::NLGO<I> NLP;
   //NLP.options.POLIMG.SANDWICH_MAXCUT = 10;
   //NLP.options.POLIMG.SANDWICH_ATOL   = NLP.options.POLIMG.SANDWICH_RTOL  = 1e-5;
   NLP.options.POLIMG.BREAKPOINT_TYPE = mc::PolImg<I>::Options::SOS2;//NONE;

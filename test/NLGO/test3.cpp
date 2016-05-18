@@ -1,7 +1,11 @@
 #include <fstream>
-#include "nlgo_gurobi.hpp"
+#include <iostream>
+
 #include "interval.hpp"
 typedef mc::Interval I;
+
+#define MC__USE_CPLEX
+#include "nlgo.hpp"
 
 // EXAMPLE 2 IN BEN-TAL ET AL., MATH PROG, 1994
 ////////////////////////////////////////////////////////////////////////
@@ -12,7 +16,7 @@ int main()
   const unsigned NP = 32; mc::FFVar p[NP];
   for( unsigned i=0; i<NP; i++ ) p[i].set( &DAG );
 
-  mc::NLGO_GUROBI<I> NLP;
+  mc::NLGO<I> NLP;
   NLP.options.POLIMG.SANDWICH_MAXCUT = 5;
   //NLP.options.POLIMG.SANDWICH_ATOL   = NLP.options.POLIMG.SANDWICH_RTOL  = 1e-5;
   NLP.options.POLIMG.BREAKPOINT_TYPE = mc::PolImg<I>::Options::NONE;//BIN;//SOS2;//NONE;
@@ -121,8 +125,8 @@ int main()
   NLP.setup();
   //int status = NLP.relax( Ip );
 
-  NLP.options.CSALGO  = mc::NLGO_GUROBI<I>::Options::SBB;
-  NLP.options.RELMETH = mc::NLGO_GUROBI<I>::Options::HYBRID;
+  NLP.options.CSALGO  = mc::NLGO<I>::Options::SBB;
+  NLP.options.RELMETH = mc::NLGO<I>::Options::DRL;//HYBRID;
   NLP.options.CMODSPAR = true;
   NLP.options.CMODPROP = 2;
   //NLP.options.MIPFILE = "test3.lp";

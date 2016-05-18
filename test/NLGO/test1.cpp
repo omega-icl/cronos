@@ -1,8 +1,11 @@
 #include <fstream>
-#include <iomanip>
-#include "nlgo_gurobi.hpp"
+#include <iostream>
+
 #include "interval.hpp"
 typedef mc::Interval I;
+
+#define MC__USE_CPLEX
+#include "nlgo.hpp"
 
 ////////////////////////////////////////////////////////////////////////
 int main()
@@ -12,7 +15,7 @@ int main()
   const unsigned NP = 2; mc::FFVar P[NP];
   for( unsigned i=0; i<NP; i++ ) P[i].set( &DAG );
 
-  mc::NLGO_GUROBI<I> NLP;
+  mc::NLGO<I> NLP;
   NLP.options.POLIMG.SANDWICH_MAXCUT = 4;
   NLP.options.POLIMG.BREAKPOINT_TYPE = mc::PolImg<I>::Options::SOS2;//NONE;
   NLP.options.POLIMG.DCDECOMP_SCALE  = false;

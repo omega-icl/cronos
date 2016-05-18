@@ -1,11 +1,25 @@
+#define USE_PROFIL
+#define MC__USE_CPLEX
+
 #include <fstream>
 #include <iomanip>
-#include "nlgo_gurobi.hpp"
-#include "interval.hpp"
-typedef mc::Interval I;
 
-// Parameter estimation problem (microalgae PI curve)
+#ifdef USE_PROFIL
+  #include "mcprofil.hpp"
+  typedef INTERVAL I;
+#else
+  #ifdef USE_FILIB
+    #include "mcfilib.hpp"
+    typedef filib::interval<double> I;
+  #else
+    #include "interval.hpp"
+    typedef mc::Interval I;
+  #endif
+#endif
+#include "nlgo.hpp"
+
 ////////////////////////////////////////////////////////////////////////
+// Parameter estimation problem (microalgae PI curve)
 
 template <class T>
 T Pmod
@@ -31,7 +45,7 @@ int main()
   const unsigned NK = 3, N = NK+NT; mc::FFVar k[N];
   for( unsigned i=0; i<N; i++ ) k[i].set( &DAG );
 
-  mc::NLGO_GUROBI<I> NLP;
+  mc::NLGO<I> NLP;
   NLP.options.POLIMG.SANDWICH_MAXCUT = 7;
   NLP.options.POLIMG.SANDWICH_ATOL   = NLP.options.POLIMG.SANDWICH_RTOL  = 1e-5;
   //NLP.options.CVATOL = NLP.options.CVRTOL = 1e-5;
@@ -58,11 +72,11 @@ int main()
 
   mc::FFVar OBJ=0.;
   for( unsigned i=0; i<NT; i++ ){
-    NLP.add_ctr( mc::BASE_NLP::GE, k[NK+i] - mc::sqr( Pmod( k, q_1200, Im_1200[i] ) - Pm_1200[i]*(1.+ePm) ) );
-    NLP.add_ctr( mc::BASE_NLP::GE, k[NK+i] - mc::sqr( Pmod( k, q_1200, Im_1200[i] ) - Pm_1200[i]*(1.-ePm) ) );
+    NLP.add_ctr( mc::BASE_OPT::GE, k[NK+i] - mc::sqr( Pmod( k, q_1200, Im_1200[i] ) - Pm_1200[i]*(1.+ePm) ) );
+    NLP.add_ctr( mc::BASE_OPT::GE, k[NK+i] - mc::sqr( Pmod( k, q_1200, Im_1200[i] ) - Pm_1200[i]*(1.-ePm) ) );
     OBJ += k[NK+i];
   }
-  NLP.set_obj( mc::NLGO_GUROBI<I>::MIN, OBJ );
+  NLP.set_obj( mc::BASE_OPT::MIN, OBJ );
 
   //const mc::FFVar* dLSQdk = DAG.BAD( 1, &LSQ, N, k );
   //for( unsigned i=0; i<N; i++ )
@@ -70,7 +84,6 @@ int main()
   NLP.setup();
   std::cout << NLP;
 
-  typedef mc::Interval I;
   I Ik[N];
   Ik[0] = I(0.,0.02); Ik[1] = I(0.,1.); Ik[2] = I(0.,1.);
   for( unsigned i=0; i<NT; i++ ) Ik[NK+i] = I(0.,1.e2);
@@ -92,8 +105,8 @@ int main()
   NLP.options.DISPLAY = 2;
   //NLP.options.MIPFILE = "test6.lp";
   NLP.options.NLPSLV.DISPLAY = 0;
-  NLP.options.CSALGO  = mc::NLGO_GUROBI<I>::Options::SBB;
-  NLP.options.RELMETH = mc::NLGO_GUROBI<I>::Options::HYBRID;//CHEB;
+  NLP.options.CSALGO  = mc::NLGO<I>::Options::SBB;
+  NLP.options.RELMETH = mc::NLGO<I>::Options::HYBRID;//CHEB;
   NLP.options.CMODPROP = 1;
   NLP.solve( Ik, 0, k0 );
 

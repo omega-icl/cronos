@@ -152,7 +152,7 @@ public:
     //! @brief Constructor
     Options( int iDISP=1 ):
       BOUNDER(AUTO), PRECOND(INVMD), BLKDEC(false), INTERBND(true),
-      MAXIT(10), RTOL(1e-7), ATOL(machprec()), DISPLAY(iDISP)
+      MAXIT(10), RTOL(1e-7), ATOL(machprec()), PMNOREM(false), DISPLAY(iDISP)
       {}
     //! @brief Enumeration of bounding methods (for polynomial models only)
     enum BOUNDING_METHOD{
@@ -184,6 +184,8 @@ public:
     double RTOL;
     //! @brief Absolute stopping tolerance (default: MACHPREC)
     double ATOL;
+    //! @brief Whether or not to cancel the remainder term in polynomial models in order to determine a polynomial approximant only (Default: false)
+    bool PMNOREM;
     //! @brief Display level (default: 1)
     int DISPLAY;
   } options;
@@ -284,6 +286,12 @@ private:
   //! @brief Test convergence for polynomial models
   bool _cvgtest
     ( const unsigned nx, const PVT*x, const PVT*x0 ) const;
+  //! @brief Cancel remainder term in polynomial models
+  T _cancelrem
+    ( T&x ) const;
+  //! @brief Cancel remainder term in polynomial models
+  PVT _cancelrem
+    ( PVT&x ) const;
   //! @brief Apply Gauss-Seidel method (linear system)
   template <typename U, typename V>
   STATUS _gs
@@ -735,6 +743,7 @@ inline bool
 AEBND<T,PMT,PVT>::_cvgtest
 ( const unsigned nx, const PVT*x, const PVT*x0 ) const
 {
+  if( options.PMNOREM ) return false;
   // Relative tolerance uses the largest improvement divided by interval width in any direction
   // Absolute tolerance uses the largest improvement in any direction
   double rtol = 0., atol = 0.;
@@ -751,6 +760,22 @@ AEBND<T,PMT,PVT>::_cvgtest
   std::cout << "RTOL =" << rtol  << "  ATOL =" << atol << std::endl;
 #endif
   return rtol <= options.RTOL || atol <= options.ATOL? true: false;
+}
+
+template <typename T, typename PMT, typename PVT>
+inline T
+AEBND<T,PMT,PVT>::_cancelrem
+( T&x ) const
+{
+  return x;
+}
+
+template <typename T, typename PMT, typename PVT>
+inline PVT
+AEBND<T,PMT,PVT>::_cancelrem
+( PVT&x ) const
+{
+  return x.C().P();//set( 0. );
 }
 
 template <typename T, typename PMT, typename PVT>
@@ -952,6 +977,14 @@ AEBND<T,PMT,PVT>::_gs
   for( unsigned iter=0; iter<options.MAXIT; iter++ ){
     if( _stats_ae.maxIter <= iter ) _stats_ae.maxIter = iter+1;
 
+    // Cancel remainder
+    for( unsigned i=0; options.PMNOREM && i<ndepblk; i++ ){
+       varblk[i] = _cancelrem( varblk[i] );
+#ifdef  MC__AEBND_DEBUG
+      std::cout << "X[" << i << "] = " << varblk[i];
+#endif
+    }
+
     // Update reference
     _reference( ndepblk, posblk, var, ref, jacvar );
 
@@ -963,46 +996,37 @@ AEBND<T,PMT,PVT>::_gs
     varblk0.assign( varblk, varblk+ndepblk );
 
     try{
-      // Apply componentwise Krawczyk step
-      if( usekraw ){
-        for( unsigned i=0; i<ndepblk; i++ ){
-          U Xk, temp(0.); 
+      for( unsigned i=0; i<ndepblk; i++ ){
+        U Xk, temp(0.); 
+        // Apply componentwise Gauss-Seidel step
+        if( !usekraw
+         && ( Op<U>::l(G[_ndx(i,i,ndepblk)]) > 0.
+           || Op<U>::u(G[_ndx(i,i,ndepblk)]) < 0. ) ){
+          for( unsigned j=0; j<ndepblk; j++ )
+            if( j != i ) temp += G[_ndx(i,j,ndepblk)] * ( varblk[j] - refblk[j] );
+          Xk = refblk[i] + ( b[i] - temp ) / G[_ndx(i,i,ndepblk)];
+        }
+        // Apply componentwise Krawczyk step
+        else{
           for( unsigned j=0; j<ndepblk; j++ ){
             if( j != i )  temp -= G[_ndx(i,j,ndepblk)] * ( varblk[j] - refblk[j] );
             else temp += ( 1. - G[_ndx(i,i,ndepblk)] ) * ( varblk[j] - refblk[j] );
           }
           Xk = refblk[i] + b[i] + temp;
-          if( options.INTERBND ) varblk[i] = Xk;
-          else if( !Op<U>::inter( varblk[i], Xk, varblk[i] ) ) return EMPTY;
-          //if( !Op<U>::inter( varblk[i], Xk, varblk[i] ) ) return EMPTY;
         }
+#ifdef  MC__AEBND_DEBUG
+        std::cout << "refblk[" << i << "] = " << refblk[i];
+        std::cout << "b[" << i << "] = " << b[i];
+        std::cout << "temp = " << temp;
+        std::cout << "X[" << i << "] = " << Xk;
+        { int dum; std::cout << "paused"; std::cin >> dum; }
+#endif
+        // Remainder operations
+        if( options.PMNOREM ) varblk[i] = _cancelrem( Xk );
+        else if( !options.INTERBND ) varblk[i] = Xk;
+        else if( !Op<U>::inter( varblk[i], Xk, varblk[i] ) ) return EMPTY;
       }
 
-      // Apply componentwise Gauss-Seidel step
-      else{
-        for( unsigned i=0; i<ndepblk; i++ ){
-          U Xk, temp(0.); 
-          if( Op<U>::l(G[_ndx(i,i,ndepblk)]) > 0.
-           || Op<U>::u(G[_ndx(i,i,ndepblk)]) < 0. ){
-            for( unsigned j=0; j<ndepblk; j++ )
-              if( j != i ) temp += G[_ndx(i,j,ndepblk)] * ( varblk[j] - refblk[j] );
-            Xk = refblk[i] + ( b[i] - temp ) / G[_ndx(i,i,ndepblk)];
-          }
-          else{
-            for( unsigned j=0; j<ndepblk; j++ ){
-              if( j != i )  temp -= G[_ndx(i,j,ndepblk)] * ( varblk[j] - refblk[j] );
-              else temp += ( 1. - G[_ndx(i,i,ndepblk)] ) * ( varblk[j] - refblk[j] );
-            }
-            Xk = refblk[i] + b[i] + temp;
-          }
-          if( options.INTERBND ) varblk[i] = Xk;
-          else if( !Op<U>::inter( varblk[i], Xk, varblk[i] ) ) return EMPTY;
-          //if( !Op<U>::inter( varblk[i], Xk, varblk[i] ) ) return EMPTY;
-          //else if( options.DISPLAY >= 2 )
-          //  os << " Skipped Iteration #" << iter+1
-          //     << " for Variable X" << _bVARrev[posblk+i] << std::endl;
-        }
-      }
 #ifdef MC__AEBND_DEBUG
       std::cout << "Iter #" << iter << " bounds:\n";
       for( unsigned i=0; i<ndepblk; i++ ) std::cout << varblk[i] << std::endl;

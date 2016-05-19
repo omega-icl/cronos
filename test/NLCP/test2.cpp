@@ -1,11 +1,12 @@
 #define SAVE_RESULTS    // whether or not to save results to file
-#undef USE_PROFIL	// specify to use PROFIL for interval arithmetic
-#undef USE_FILIB	// specify to use FILIB++ for interval arithmetic
-#undef DEBUG            // whether to output debug information
+#undef  USE_PROFIL	// specify to use PROFIL for interval arithmetic
+#undef  USE_FILIB	// specify to use FILIB++ for interval arithmetic
+#undef  DEBUG            // whether to output debug information
+#define MC__USE_CPLEX   // whether to use CPLEX or GUROBI
 ////////////////////////////////////////////////////////////////////////////////
 
 #include <fstream>
-#include "nlcp_gurobi.hpp"
+#include "nlcp.hpp"
 
 #ifdef USE_PROFIL
   #include "mcprofil.hpp"
@@ -38,7 +39,7 @@ int main()
   C[0] = 4*mc::pow(P[0],3)+4*P[0]*P[1]+2*mc::pow(P[1],2)-42*P[0]-14;
   C[1] = 4*mc::pow(P[1],3)+2*mc::pow(P[0],2)+4*P[0]*P[1]-26*P[1]-22;
 
-  mc::NLCP_GUROBI<I> CP;
+  mc::NLCP<I> CP;
   CP.set_dag( &DAG );
   CP.set_var( NP, P );
   CP.add_ctr( mc::BASE_OPT::EQ, C[0] );
@@ -57,7 +58,7 @@ int main()
   CP.options.DOMREDMAX   = 10;
   CP.options.DOMREDTHRES = 2e-2;
   CP.options.DOMREDBKOFF = 1e-8;
-  CP.options.RELMETH     = mc::NLCP_GUROBI<I>::Options::DRL;
+  CP.options.RELMETH     = mc::NLCP<I>::Options::DRL;
   CP.options.CMODPROP    = 1;
   std::cout << CP;
 

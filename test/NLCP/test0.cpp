@@ -5,7 +5,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #include <fstream>
-#include "nlcp_gurobi.hpp"
+#include "nlcp.hpp"
 
 #ifdef USE_PROFIL
   #include "mcprofil.hpp"
@@ -51,7 +51,7 @@ int main()
   mc::FFVar P[NP], Y[NY];
   for( unsigned i=0; i<NP; i++ ) P[i].set( &DAG );
 
-  mc::NLCP_GUROBI<I> CP;
+  mc::NLCP<I> CP;
   CP.set_dag( &DAG );
   CP.set_var( NP, P );
   for( unsigned k=0; k<NY; k++ ){
@@ -71,7 +71,7 @@ int main()
   CP.options.DOMREDMAX   = 20;
   CP.options.DOMREDTHRES = 1e-2;
   CP.options.DOMREDBKOFF = 1e-8;
-  CP.options.RELMETH     = mc::NLCP_GUROBI<I>::Options::HYBRID;
+  CP.options.RELMETH     = mc::NLCP<I>::Options::HYBRID;
   CP.options.CMODPROP    = 1;
   std::cout << CP;
 

@@ -3,10 +3,11 @@
 #undef  USE_FILIB	// specify to use FILIB++ for interval arithmetic
 #undef  DEBUG		// whether to output debug information
 #define USE_DEPS	// whether to use dependents
+#define MC__USE_CPLEX   // whether to use CPLEX or GUROBI
 ////////////////////////////////////////////////////////////////////////////////
 
 #include <fstream>
-#include "nlcp_gurobi.hpp"
+#include "nlcp.hpp"
 
 #ifdef USE_PROFIL
   #include "mcprofil.hpp"
@@ -21,7 +22,6 @@
   #endif
 #endif
 typedef mc::CVar<I> CVI;
-//typedef I CVI;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Find all solutions of the system of nonlinear equations:
@@ -41,7 +41,7 @@ int main()
   C[0] = (1.-R)*(D/10/(1+b1)-P[1])*mc::exp(10*P[1]/(1+10*P[1]/g))-P[1];
   C[1] = P[1]-(1+b2)*P[2]+(1.-R)*(D/10-b1*P[1]-(1+b2)*P[2])*mc::exp(10*P[2]/(1+10*P[2]/g));
 
-  mc::NLCP_GUROBI<I> CP;
+  mc::NLCP<I> CP;
   CP.set_dag( &DAG );
 #ifndef USE_DEPS
   CP.set_var( NP, P );
@@ -67,7 +67,7 @@ int main()
   CP.options.DOMREDTHRES = 2e-2;
   CP.options.DOMREDBKOFF = 1e-8;
   //CP.options.CTRBACKOFF  = 1e-7;
-  CP.options.RELMETH     = mc::NLCP_GUROBI<I>::Options::CHEB;
+  CP.options.RELMETH     = mc::NLCP<I>::Options::CHEB;
   CP.options.CMODPROP    = 1;
   CP.options.CMODCUTS    = 1;
   CP.options.CMREDORD    = 3;

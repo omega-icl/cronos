@@ -1,4 +1,4 @@
-// Copyright (C) 2012-2014 Benoit Chachuat, Imperial College London.
+// Copyright (C) 2012-2016 Benoit Chachuat, Imperial College London.
 // All Rights Reserved.
 // This code is published under the Eclipse Public License.
 
@@ -8,6 +8,7 @@
 #include <utility>
 #include <list>
 #include <set>
+#include <map>
 #include <string>
 #include <sstream>
 #include <iostream>
@@ -20,6 +21,7 @@
 #include "mclapack.hpp"
 
 #undef  DEBUG__SBB_STRONGBRANCHING
+#undef  DEBUG__SBB_SCOREBRANCHING
 
 namespace mc
 {
@@ -93,7 +95,7 @@ public:
       ABSOLUTE_TOLERANCE(1e-5), RELATIVE_TOLERANCE(1e-5),
       BRANCHING_VARIABLE_CRITERION(RGREL), BRANCHING_VARIABLE_SUBSET(0),
       STRONG_BRANCHING_MAXDEPTH(0), STRONG_BRANCHING_RELTOL(1e-3),
-      STRONG_BRANCHING_ABSTOL(1e-3), MEASURE(VOLUME),
+      STRONG_BRANCHING_ABSTOL(1e-3), MEASURE(MAXWIDTH),
       DISPLAY(2), OUTPUT_ROTATED(false), MAX_CPU_TIME(1e6), MAX_NODES(0)
       {}
     //! @brief Display
@@ -102,12 +104,14 @@ public:
     //! @brief Branching variable criterion
     enum CRITERION{
       RGREL=0,	//!< Relative variable range diameter
-      RGABS	//!< Absolute variable range diameter
+      RGABS,	//!< Absolute variable range diameter
+      SCORES    //!< User-defined scores in assess function
     };
     //! @brief Branching variable criterion
     enum METRIC{
-      VOLUME=0,	//!< Volume of partition
-      LENGTH	//!< Length of partition (corresponding to edge of equivalent cuve)
+      MAXWIDTH=0,	//!< Max width of partition elements
+      MEANWIDTH,	//!< Mean width of partition elements (corresponding to width of a cube of same volume)
+      VOLUME		//!< Volume of partition elements
     };
     //! @brief Branching selection user-function
     typedef std::set<unsigned> (*SELECTION)( const NODE* );
@@ -202,8 +206,9 @@ public:
   double measure
     ( const std::vector<T>&P ) const
     { switch( options.MEASURE ){
-        case Options::VOLUME: return volume(P);
-        case Options::LENGTH: default: return length(P);
+        case Options::MAXWIDTH: default: return maxwidth(P);
+        case Options::MEANWIDTH:         return meanwidth(P);
+        case Options::VOLUME:            return volume(P);
       } }
 
 protected:  
@@ -211,38 +216,32 @@ protected:
   std::set<unsigned> _exclude_vars;
   //! @brief Set of open nodes
   t_Nodes _open_nodes;
-  //! @brief Total measure of open nodes
+  //! @brief Curent measure of open nodes
   double _open_measure;
+  //! @brief Variable bounds at root node
+  std::vector<T> _P_root;
 
-  //! @brief Compute partition volume
+  //! @brief Compute element volume
   virtual double volume
     ( const std::vector<T>&P ) const
     { double V=1.;
       for( unsigned i=0; i<P.size(); i++ ) V *= Op<T>::diam(P[i]);
       return V; }
-  //! @brief Compute partition length
-  virtual double length
+  //! @brief Compute element mean width (equivalent cube edge)
+  virtual double meanwidth
     ( const std::vector<T>&P ) const
     { return std::pow( volume(P), 1./P.size() ); }
-  //! @brief Compute partition width
-  double width
+  //! @brief Compute element max width
+  virtual double maxwidth
     ( const std::vector<T>&P ) const
     { double W=0.;
       for( unsigned i=0; i<P.size(); i++ )
         if( W < Op<T>::diam(P[i]) ) W = Op<T>::diam(P[i]);
       return W; }
-  //! @brief Measure of overall partition
-  double partition_measure() const
-    { switch( options.MEASURE ){
-        case Options::VOLUME: return std::pow( _open_measure, 1./_np );
-        case Options::LENGTH: default: return( _open_measure / _open_nodes.size() );
-      } }
 
 private:  
   //! @brief Number of variables in optimization problem
   unsigned _np;
-  //! @brief Variable bounds at root node
-  std::vector<T> _P_root;
   //! @brief Partition measure at root node
   double _root_measure;
   //! @brief Default branching variable set
@@ -295,11 +294,10 @@ private:
     ( NODE*pNode, const unsigned ivar ) const;
   //! @brief Selects the branching variable for given node
   std::pair<unsigned, double> _select_branching_variable
-    ( NODE*pNode, const std::set<unsigned>&set_branch );
+    ( NODE*pNode );
   //! @brief Apply strong branching for branching variable selection
   std::pair<unsigned, double> _strong_branching
-    ( NODE*pNode, const std::set<unsigned>&set_branch, unsigned&var_branch,
-      unsigned&node_count );
+    ( NODE*pNode, unsigned&var_branch, unsigned&node_count );
 
   //! @brief Add information for display
   void _display_add
@@ -368,6 +366,12 @@ public:
   //! @brief Retreive node dependent variables
   const std::set<unsigned>& depend() const
     { return _depend; }
+  //! @brief Retreive/set node branching scores
+  std::map<unsigned,double>& scores()
+    { return _scores; }
+  //! @brief Retreive node branching scores
+  const std::map<unsigned,double>& scores() const
+    { return _scores; }
 
   //! @brief Retreive current variable bounds
   const T& P
@@ -451,6 +455,8 @@ private:
 
   //! @brief Subset of dependent variables in node
   std::set<unsigned> _depend;
+  //! @brief Map of variables with scores for branching variable selection
+  std::map<unsigned,double> _scores;
   //! @brief Parent branching variable and range
   std::pair<unsigned,T> _parent;
   //! @brief Strong branching status
@@ -668,24 +674,27 @@ SetInv<T,NODE,LT_NODE>::solve
   // Create and assess root node
   NODE* rootNode = new NODE( this, _P_root );
   _status = rootNode->assess();
-  _root_measure = rootNode->measure();
-  _open_measure += _root_measure;
+  for( unsigned i=0; i<_np; i++ ) _P_root[i] = rootNode->P()[i].B();
+  //_P_root = rootNode->P();
+  _root_measure = measure( _P_root );
+  _open_measure = measure( rootNode->P() );
   _open_nodes.insert( rootNode );
 
   // Run iterative set-inversion algorithm
-  for( ; !_open_nodes.empty() && !_terminate()
+  for( ; !_open_nodes.empty()
          && time()-_tstart < options.MAX_CPU_TIME
          && ( !options.MAX_NODES || _node_index <= options.MAX_NODES );
        _node_index++ ){
 
     // Select node and remove it for the set _open_nodes
     NODE* pNode = *_open_nodes.begin();
+    _open_measure = pNode->measure();
+    if( _terminate() ) break;
 
     // Display node
     _display_add( _node_index );
     _display_add( pNode->measure() );
     _display_add( (unsigned)_open_nodes.size() );
-    _display_add( partition_measure() );
     _display_add( pNode->iter() );
     switch( pNode->status() ){
      case OUTER:
@@ -712,7 +721,6 @@ SetInv<T,NODE,LT_NODE>::solve
      case UNDETERMINED:
      case FAILURE:
       _open_nodes.erase( _open_nodes.begin() );
-      _open_measure -= pNode->measure();
       break;
     }
 
@@ -725,7 +733,7 @@ SetInv<T,NODE,LT_NODE>::solve
       break; // terminate if branching unsuccessful
     }
     std::ostringstream obranch;
-    obranch << "BRANCH:" << _branch_var;
+    obranch << "BRANCH:" << std::setw(std::ceil(std::log10(_np))) << _branch_var;
     delete pNode;
 
     // Assess left child node
@@ -744,8 +752,7 @@ SetInv<T,NODE,LT_NODE>::solve
      case UNDETERMINED:
      case FAILURE:
       _open_nodes.insert( pNewNodes.first );
-      _open_measure += pNewNodes.first->measure();
-      obranch << " L:BND";
+      obranch << " L:" << (pNewNodes.first->converged()?"CVG":"BND");
       break;
 
      case ABORT: default:
@@ -779,8 +786,7 @@ SetInv<T,NODE,LT_NODE>::solve
      case UNDETERMINED:
      case FAILURE:
       _open_nodes.insert( pNewNodes.second );
-      _open_measure += pNewNodes.second->measure();
-      obranch << " R:BND";
+      obranch << " R:" << (pNewNodes.second->converged()?"CVG":"BND");
       break;
 
      case ABORT: default:
@@ -810,16 +816,9 @@ template <typename T, typename NODE, typename LT_NODE>
 inline bool
 SetInv<T,NODE,LT_NODE>::_terminate() const
 {
-  switch( options.MEASURE ){
-    case Options::VOLUME:
-      return( std::pow(_open_measure,1./_np) < options.ABSOLUTE_TOLERANCE
-           || std::pow(_open_measure,1./_np) < options.RELATIVE_TOLERANCE * std::pow(_root_measure,1./_np) ?
-           true : false );
-    case Options::LENGTH: default:
-      return( _open_measure/_open_nodes.size() < options.ABSOLUTE_TOLERANCE
-           || _open_measure/_open_nodes.size() < options.RELATIVE_TOLERANCE * _root_measure ?
-           true : false );
-  }
+  return( _open_measure < options.ABSOLUTE_TOLERANCE
+       || _open_measure < options.RELATIVE_TOLERANCE * _root_measure ?
+       true : false );
 }
 
 template <typename T, typename NODE, typename LT_NODE>
@@ -828,7 +827,8 @@ SetInv<T,NODE,LT_NODE>::_restart()
 {
   _clean_stacks(); 
   _open_measure = 0.;
-  _node_index = _node_count = _node_max = 0;
+  _node_index = 1;
+  _node_count = _node_max = 0;
   _tstart = time();  
 }
 
@@ -852,7 +852,7 @@ SetInv<T,NODE,LT_NODE>::_branch_node
   _branching_variable_set( pNode );
 
   // Branching variable selection
-  _branch_var = _select_branching_variable( pNode, _branch_set ).first;
+  _branch_var = _select_branching_variable( pNode ).first;
   if( _status == ABORT ) return std::make_pair( (NODE*)0, (NODE*)0 );
 
   // Subnode creation
@@ -927,21 +927,44 @@ SetInv<T,NODE,LT_NODE>::_branching_variable_set
 template <typename T, typename NODE, typename LT_NODE>
 inline std::pair<unsigned, double>
 SetInv<T,NODE,LT_NODE>::_select_branching_variable
-( NODE*pNode, const std::set<unsigned>&set_branch )
+( NODE*pNode )
 {
 
   // Strong branching strategy
   if( pNode->depth() < options.STRONG_BRANCHING_MAXDEPTH && !pNode->converged() )
-    return _strong_branching( pNode, _branch_set, _branch_var, _node_count );
+    return _strong_branching( pNode, _branch_var, _node_count );
   
-  // Other branching strategies
   std::pair<unsigned, double> branchsel( _np, -1. ); // <- Can be any negative number
-  std::set<unsigned>::iterator it;
   switch( options.BRANCHING_VARIABLE_CRITERION ){
+
+  // Branching based on scores
+   case Options::SCORES:
+    struct loc{
+      static bool lt_scores
+        ( const std::pair<unsigned,double>&el1, const std::pair<unsigned,double>el2 )
+        { return el1.second < el2.second; }
+    };
+    if( !pNode->scores().empty() ){
+      // Keep scores for variables in the current branching set only
+      auto scores = pNode->scores();
+      for( auto it = pNode->scores().begin(); it != pNode->scores().end(); ++it )
+        if( _branch_set.find( it->first ) == _branch_set.end() )
+          scores.erase( it->first );
+      // Find maximum element in remaining set of scores
+      auto it = std::max_element( scores.begin(), scores.end(), loc::lt_scores );
+      if( it != scores.end() ){
+#ifdef DEBUG__SBB_SCOREBRANCHING
+        std::cout << "Max score variable #" << it->first << "(" << it->second << ")\n";
+        { int dum; std::cout << "PAUSED"; std::cin >> dum; }
+#endif
+        branchsel = *it;
+        break;
+      }
+    }
 
    // Branching based on relative range diameter
    case Options::RGREL:
-    for( it = set_branch.begin(); it != set_branch.end(); ++it ){
+    for( auto it = _branch_set.begin(); it != _branch_set.end(); ++it ){
       // Compare w.r.t. rotated root node bounds
       double score = Op<T>::diam( pNode->P(*it) )
                    / Op<T>::diam( _rotate( *it, _P_root, pNode->A() ) );
@@ -951,7 +974,7 @@ SetInv<T,NODE,LT_NODE>::_select_branching_variable
 
    // Branching based on absolute range diameter
    case Options::RGABS:
-    for( it = set_branch.begin(); it != set_branch.end(); ++it ){
+    for( auto it = _branch_set.begin(); it != _branch_set.end(); ++it ){
       double score = Op<T>::diam( pNode->P(*it) );
       if( score > branchsel.second ) branchsel = std::make_pair( *it, score );
     }
@@ -968,8 +991,7 @@ SetInv<T,NODE,LT_NODE>::_select_branching_variable
 template <typename T, typename NODE, typename LT_NODE>
 inline std::pair<unsigned, double>
 SetInv<T,NODE,LT_NODE>::_strong_branching
-( NODE*pNode, const std::set<unsigned>&set_branch, unsigned&var_branch,
-  unsigned&node_count )
+( NODE*pNode, unsigned&var_branch, unsigned&node_count )
 {
   var_branch = _np;
   double min_branch = 0./0., max_branch = 0./0.; //NaN to initialize;
@@ -977,7 +999,7 @@ SetInv<T,NODE,LT_NODE>::_strong_branching
 #ifdef DEBUG__SETINV_STRONGBRANCHING
   std::cout << "*** SCORES";
 #endif
-  for( auto it = set_branch.begin(); it != set_branch.end(); ++it ){
+  for( auto it = _branch_set.begin(); it != _branch_set.end(); ++it ){
 
     // Branch node domain
     std::pair<NODE*,NODE*> pNewNodes = _branch_node( pNode, *it, node_count );
@@ -1120,7 +1142,6 @@ SetInv<T,NODE,LT_NODE>::_display_init()
   	 << std::setw(_IPREC) << "#   INDEX"
   	 << std::setw(_DPREC+8) << "MEASURE  "
   	 << std::setw(_IPREC) << "STACK"
-  	 << std::setw(_DPREC+8) << "OPEN    "
   	 << std::setw(_IPREC) << "PARENT"
   	 << std::setw(_DPREC+8) << "CPU TIME "
   	 << std::setw(_DPREC+8) << "STATUS"
@@ -1172,9 +1193,9 @@ SetInv<T,NODE,LT_NODE>::_display_final
          << std::endl;
 
   // Set-inversion results
-  _odisp << "#  SET BOUNDARY MEASURE:    "
+  _odisp << "#  PARTITION MEASURE:    "
   	 << std::scientific << std::setprecision(_DPREC)
-         << std::setw(_DPREC+6) << partition_measure()
+         << std::setw(_DPREC+6) << _open_measure
          << " (" << _open_nodes.size() << " NODES)"
   	 << std::endl;
   _odisp << "#  TOTAL NUMBER OF NODES:   " << _node_index-1 << std::endl
@@ -1187,9 +1208,7 @@ SetInv<T,NODE,LT_NODE>::_display
 ( std::ostream &os )
 {
   if( _odisp.str() == "" ) return;
-  //if( options.DISPLAY > 0 ){
   os << _odisp.str() << std::endl;
-  //}
   _odisp.str("");
   return;
 }
@@ -1209,13 +1228,15 @@ SetInv<T,NODE,LT_NODE>::Options::display
       << RELATIVE_TOLERANCE << std::endl;
   out << std::setw(60) << "  CONVERGENCE MEASURE";
   switch( MEASURE ){
-    case VOLUME:  out << "VOLUME\n";  break;
-    case LENGTH:  out << "LENGTH\n";  break;
+    case MAXWIDTH:   out << "MAXWIDTH\n";  break;
+    case MEANWIDTH:  out << "MEANWIDTH\n";  break;
+    case VOLUME:     out << "VOLUME\n";  break;
   }
   out << std::setw(60) << "  BRANCHING STRATEGY FOR VARIABLE SELECTION";
   switch( BRANCHING_VARIABLE_CRITERION ){
     case RGREL:  out << "RGREL\n";   break;
     case RGABS:  out << "RGABS\n";   break;
+    case SCORES: out << "SCORES\n";  break;
   }
   out << std::setw(60) << "  MAXIMUM DEPTH FOR STRONG BRANCHING";
   switch( STRONG_BRANCHING_MAXDEPTH ){
@@ -1265,9 +1286,10 @@ SetInvNode<T>::SetInvNode
   const unsigned iter, const std::set<unsigned>&depend,
   const typename SetInv< T,SetInvNode<T>,lt_SetInvNode<T> >::NODETYPE type,
   const std::pair<unsigned,T>&parent, const bool converged, U*data ):
-_pSetInv( pSetInv ), _depth( depth ), _index( index ),
-_iter( iter ), _type( type ), _depend( depend ), _parent( parent ),
-_strongbranch( false ), _converged( false ), _data( data ), _A( A ), _P( P )
+  _pSetInv( pSetInv ), _depth( depth ), _index( index ),
+  _iter( iter ), _type( type ), _depend( depend ), _scores(),
+  _parent( parent ), _strongbranch( false ), _converged( false ),
+  _data( data ), _A( A ), _P( P )
 {
   _measure = _pSetInv->measure( _P );
   _status = SetInv< T,SetInvNode<T>,lt_SetInvNode<T> >::UNDETERMINED;

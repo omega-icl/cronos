@@ -191,9 +191,13 @@ protected:
   //! @brief Solve LP model
   template <typename OPT, typename STAT> void _solve_LPmodel
     ( const OPT&options, STAT&stats, const std::vector<FFVar>&var );
-  //! @brief Set relaxed objective in LP model
+  //! @brief Set objective in LP relaxation
   void _set_LPrelax
     ( const PolVar<T>*pObj, const t_OBJ&tObj, const bool feastest=false );
+  //! @brief Set objective in LP relaxation
+  void _set_LPrelax
+    ( const unsigned nObj, const PolVar<T>*pObj, const double*cObj,
+      const t_OBJ&tObj, const bool feastest=false );
   //! @brief Set parameter bound contracting objective in LP model
   void _set_LPcontract
     ( const PolVar<T>*pVar, const bool uplo, const PolVar<T>*pObj,
@@ -354,6 +358,56 @@ LPRELAX_BASE<T>::_set_LPrelax
   _ILOmodel->add( _LPobj.second ); _LPobj.first = true;
 #else
   _GRBmodel->setObjective( GRBLinExpr( jtobj->second,  1. ) );
+  if( !feastest )
+    switch( tObj ){
+      case MIN: _GRBmodel->set( GRB_IntAttr_ModelSense,  1 ); break;
+      case MAX: _GRBmodel->set( GRB_IntAttr_ModelSense, -1 ); break;
+    }
+  else
+    _GRBmodel->set( GRB_IntAttr_ModelSense,  1 );
+#endif
+
+  // Remove incumbent constraint (if any)
+  if( _LPinc.first ){
+#ifdef MC__USE_CPLEX
+    _ILOmodel->remove( _LPinc.second );
+#else
+    _GRBmodel->remove( _LPinc.second );
+#endif
+    _LPinc.first = false;
+  }
+}
+
+template <typename T> inline void
+LPRELAX_BASE<T>::_set_LPrelax
+( const unsigned nObj, const PolVar<T>*pObj, const double*cObj,
+  const t_OBJ&tObj, const bool feastest )
+{
+  // Set objective
+#ifdef MC__USE_CPLEX
+  auto ObjExpr = IloNumExpr( *_ILOenv );
+  for( unsigned i=0; i<nObj; i++ ){
+    auto it = _LPvar.find( &pObj[i] );
+    assert( it != _LPvar.end() );
+    ObjExpr += it->second * cObj[i];
+  }
+  if( _LPobj.first ) _ILOmodel->remove( _LPobj.second );
+  if( !feastest )
+    switch( tObj ){
+      case MIN: _LPobj.second = IloMinimize( *_ILOenv, ObjExpr ); break;
+      case MAX: _LPobj.second = IloMaximize( *_ILOenv, ObjExpr ); break;
+    }
+  else
+    _LPobj.second = IloMinimize( *_ILOenv, ObjExpr );
+  _ILOmodel->add( _LPobj.second ); _LPobj.first = true;
+#else
+  auto ObjExpr = GRBLinExpr( 0. );
+  for( unsigned i=0; i<nObj; i++ ){
+    auto it = _LPvar.find( &pObj[i] );
+    assert( it != _LPvar.end() );
+    ObjExpr += it->second * cObj[i];
+  }
+  _GRBmodel->setObjective( ObjExpr );
   if( !feastest )
     switch( tObj ){
       case MIN: _GRBmodel->set( GRB_IntAttr_ModelSense,  1 ); break;

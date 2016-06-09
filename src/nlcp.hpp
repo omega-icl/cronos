@@ -1,4 +1,4 @@
-// Copyright (C) 2015 Benoit Chachuat, Imperial College London.
+// Copyright (C) 2015-2016 Benoit Chachuat, Imperial College London.
 // All Rights Reserved.
 // This code is published under the Eclipse Public License.
 
@@ -108,8 +108,10 @@ class NLCP:
   using NLGO<T>::_nctr;
   using NLGO<T>::_CMctr;
   using NLGO<T>::_CMexcl;
+  using NLGO<T>::_POLvar;
   using SetInv<CVar<T>>::_open_nodes;
   using SetInv<CVar<T>>::_exclude_vars;
+  using SetInv<CVar<T>>::_P_root;
 
  public:
 
@@ -136,10 +138,12 @@ class NLCP:
     Options():
       NLGO<T>::Options(), BRANCHVAR(SetInv<CVar<T>>::Options::RGREL),
       BRANCHSEL(0), STGBCHDEPTH(0), STGBCHDRMAX(1), STGBCHRTOL(1e-2), STGBCHATOL(0e0),
-      NODEMEAS(SetInv<CVar<T>>::Options::LENGTH), CTRBACKOFF(0e0), CMREDORD(0),
-      CMREDTHRES(1e-3), CMREDALL(true), CMREDOPT(0)
+      //NODEMEAS(SetInv<CVar<T>>::Options::LENGTH), CTRBACKOFF(0e0), CMREDORD(0),
+      NODEMEAS(SetInv<CVar<T>>::Options::MEANWIDTH), CTRBACKOFF(0e0), CMREDORD(0),
+      CMREDTHRES(1e-3), CMREDWARMS(false), CMREDALL(true),
+      CMREDOPT(typename AEBND<T,CModel<T>,CVar<T> >::Options())
       //, INNREDMAX(10), INNREDTHRES(0.2)
-      {}
+      { CMREDOPT.DISPLAY = 0; }
     //! @brief Assignment operator
     Options& operator= ( Options&options ){
         NLGO<T>::Options::operator=( options );
@@ -154,6 +158,8 @@ class NLCP:
         CMREDORD    = options.CMREDORD;
         CMREDOPT    = options.CMREDOPT;
         CMREDTHRES  = options.CMREDTHRES;
+        CMREDWARMS  = options.CMREDWARMS;
+        CMREDALL    = options.CMREDALL;
         //INNREDMAX   = options.INNREDMAX;
         //INNREDTHRES = options.INNREDTHRES;
         return *this;
@@ -181,7 +187,9 @@ class NLCP:
     unsigned CMREDORD;
     //! @brief Reduced-space Chebyhev model threshold
     double CMREDTHRES;
-    //! @brief Whether waiting for improvement in all dependent variables simultaneously before reduction
+    //! @brief Whether or not to warm start the reduction with linear estimators
+    bool CMREDWARMS;
+    //! @brief Whether or not to wait for all dependent variables to improve simultaneously before reduction
     bool CMREDALL;
     //! @brief Reduced-space Chebyhev model options (AEBND solver)
     typename AEBND<T,CModel<T>,CVar<T> >::Options CMREDOPT;
@@ -216,10 +224,10 @@ class NLCP:
     ( SetInvNode<CVar<T>>*node );
   //! @brief Subproblem for node assessment
   typename SetInv<CVar<T>>::STATUS _subproblem_assess
-    ( T*P );
+    ( T*P, std::map<unsigned,double>&scores );
   //! @brief Subproblem for node projection (reduced space)
   void _subproblem_project
-    ( CVar<T>*CVP, std::set<unsigned>&depend );
+    ( CVar<T>*CVP, std::set<unsigned>&depend, bool&converged );
 
   //! @brief Perform iterative bound contraction from relaxed model with inclusion test at each iteration
   typename SetInv<CVar<T>>::STATUS _assess
@@ -228,28 +236,36 @@ class NLCP:
   //! @brief Perform inclusion test based on constraint Chebysev models (if available)
   template <typename U> typename SetInv<CVar<T>>::STATUS _inclusion_test
     ( const std::vector<U>&C ) const;
+  //! @brief Compute scores for branching variable selection based on constraint Chebysev models (if available)
+  template <typename U> std::map<unsigned,double> _scores
+    ( const std::vector<U>&C ) const;
 
-  //! @brief Compute partition volume
+  //! @brief Compute element volume
   double volume
     ( const std::vector<CVar<T>>&CVP ) const
     { double V=1.;
-      for( unsigned i=0; i<CVP.size(); i++ )
-        if( _exclude_vars.find(i) == _exclude_vars.end() )
-          V *= Op<T>::diam(CVP[i].R());
-      //std::cout << "here!\n";
-      return V; }
-  //! @brief Compute partition length
-  double length
+      for( unsigned i=_nrdep?_nrvar:0; i<CVP.size(); i++ )
+        //V *= Op<T>::diam(CVP[i].R());
+        V *= Op<T>::diam(CVP[i].R()) / Op<T>::diam(_P_root[i].B());
+      return V; }      
+  //! @brief Compute element mean width
+  double meanwidth
     ( const std::vector<CVar<T>>&CVP ) const
-    { unsigned dim=0;
-      for( unsigned i=0; i<CVP.size(); i++ )
-        if( _exclude_vars.find(i) == _exclude_vars.end() ) ++dim;
-      return dim? std::pow( volume(CVP), 1./dim ): 0./0.; }
+    { return std::pow( volume(CVP), 1./(_nrdep?CVP.size()-_nrvar:CVP.size()) ); }
+  //! @brief Compute element max width
+  double maxwidth
+    ( const std::vector<CVar<T>>&CVP ) const
+    { double W=0.;
+      for( unsigned i=_nrdep?_nrvar:0; i<CVP.size(); i++ )
+        //if( W < Op<T>::diam(CVP[i].R()) ) W = Op<T>::diam(CVP[i].R());
+        if( W*Op<T>::diam(_P_root[i].B()) < Op<T>::diam(CVP[i].R()) )
+          W = Op<T>::diam(CVP[i].R()) / Op<T>::diam(_P_root[i].B());
+      return W; }
 
  private:
-  //! @brief number of reduced-scape variables in problem
+  //! @brief number of reduced-space variables in problem
   unsigned _nrvar;
-  //! @brief number of reduced-scape dependents in problem
+  //! @brief number of reduced-space dependents in problem
   unsigned _nrdep;
 
   //! @brief Chebyshev reduced-space [-1,1] scaled model environment
@@ -340,7 +356,7 @@ NLCP<T>::solve
   std::vector<CVar<T>> CVP( P0, P0+_nvar );
   SetInv<CVar<T>>::variables( _nvar, CVP.data(), _CMexcl );
 
-  // Set-up NLP relaxed solver
+  // Set-up constraitn relaxations
   _tvar.clear();
   std::vector<T> P( P0, P0+_nvar );
   NLGO<T>::_set_polrelax( P.data(), 0, true );
@@ -380,7 +396,7 @@ inline typename SetInv<CVar<T>>::STATUS
 NLCP<T>::assess
 ( SetInvNode<CVar<T>>*node )
 {
-#if defined (MC__NLCP_DEBUG)
+#if defined (MC__NLCP_SHOW_BOXES)
   std::cout << "\nInitial Box:\n";
   for( unsigned i=0; i<_nvar; i++ )
     if( _exclude_vars.find(i) == _exclude_vars.end() )
@@ -401,9 +417,9 @@ NLCP<T>::assess
   std::vector<T> IP;
   for( auto it=node->P().begin(); it!=node->P().end(); ++it )
     IP.push_back( (*it).B() );
-  auto status = _subproblem_assess( IP.data() );
+  auto status = _subproblem_assess( IP.data(), node->scores() );
   node->P().assign( IP.begin(), IP.end() ); // Could be buggy!!!
-#if defined (MC__NLCP_DEBUG)
+#if defined (MC__NLCP_SHOW_BOXES)
   std::cout << "\nReduced Box:\n";
   for( unsigned i=0; i<_nvar; i++ )
     if( _exclude_vars.find(i) == _exclude_vars.end() )
@@ -419,8 +435,8 @@ NLCP<T>::assess
   // Subspace reduction
   if( status != SetInv<CVar<T>>::UNDETERMINED || !_nrdep || !options.CMREDORD )
     return status;
-  _subproblem_project( node->P().data(), node->depend() );
-#if defined (MC__NLCP_DEBUG)
+  _subproblem_project( node->P().data(), node->depend(), node->converged() );
+#if defined (MC__NLCP_SHOW_BOXES)
   std::cout << "\nProjected Box:\n";
   for( unsigned i=0; i<_nvar; i++ )
     if( _exclude_vars.find(i) == _exclude_vars.end() )
@@ -433,7 +449,7 @@ NLCP<T>::assess
 template <typename T>
 inline typename SetInv<CVar<T>>::STATUS
 NLCP<T>::_subproblem_assess
-( T*P )
+( T*P, std::map<unsigned,double>&scores )
 {
   // Apply domain contraction
   // Do NOT test for infeasibility here, because contraction problem may
@@ -459,6 +475,16 @@ NLCP<T>::_subproblem_assess
    default:
      return SetInv<CVar<T>>::FAILURE;
   }
+
+  // Compute scores
+  scores = _scores( _CMctr );
+#ifdef MC__NLCP_DEBUG
+  std::cout << "Scores:\n";
+  for( auto it=scores.cbegin(); it!=scores.cend(); ++it )
+    std::cout << std::right << std::setw(4) << it->first << " " << it->second << std::endl; 
+  { int dum; std::cout << "PAUSED"; std::cin >> dum; }
+#endif
+
   return SetInv<CVar<T>>::UNDETERMINED;
 }
 
@@ -480,14 +506,35 @@ NLCP<T>::_assess
     // Perform domain reduction
     P0.assign( P, P+_nvar );
     NLGO<T>::_contract( P, tvar, inc, false, feastest );
-    if( NLGO<T>::get_status() != LPRELAX_BASE<T>::LP_OPTIMAL ) return status;
+    if( NLGO<T>::get_status() != LPRELAX_BASE<T>::LP_OPTIMAL ) break;
     double vred = NLGO<T>::_reducrel( _nvar, P, P0.data() );
     if( vred < options.DOMREDTHRES ) break;
-#ifdef MC__NLGO_DEBUG
+#ifdef MC__NLCP_DEBUG
     std::cout << "Reduction #" << nred << ": " << vred*1e2 << "%\n";
 #endif
   }
   return SetInv<CVar<T>>::UNDETERMINED;
+}
+
+template <typename T>
+template <typename U>
+inline std::map<unsigned,double>
+NLCP<T>::_scores
+( const std::vector<U>&C ) const
+{
+  std::map<unsigned,double> scores;
+  auto itc = std::get<1>(NLGO<T>::_ctr).begin();
+  for( unsigned j=0; itc != std::get<1>(NLGO<T>::_ctr).end(); ++itc, j++ ){
+    NLGO<T>::_get_chebscores( *itc, C[j], scores, true );
+#ifdef MC__NLCP_DEBUG
+    std::cout << "Scores constraint #" << j << ":\n";
+    std::cout << C[j] << std::endl; 
+    for( auto it=scores.cbegin(); it!=scores.cend(); ++it )
+      std::cout << std::right << std::setw(4) << it->first << " " << it->second << std::endl; 
+    { int dum; std::cout << "PAUSED"; std::cin >> dum; }
+#endif
+  }
+  return scores;
 }
 
 template <typename T>
@@ -502,21 +549,25 @@ NLCP<T>::_inclusion_test
   bool flag1 = true, flag2 = true;
   auto itc = std::get<0>(NLGO<T>::_ctr).begin();
   for( unsigned j=0; flag2 && itc!=std::get<0>(NLGO<T>::_ctr).end(); ++itc, j++ ){
+#if defined (MC__NLCP_SHOW_INCLUSIONS)
+    std::cout << "C" << j << " L:" << Op<U>::l(C[j]) << " U:" << Op<U>::u(C[j]) << std::endl;
+#endif
     switch( (*itc) ){
-      case EQ: if( Op<U>::u(C[j]) < 0. )
-                 flag2 = false;
-               else if( Op<U>::l(C[j]) < 0. )
-                 flag1 =false;
+      case EQ: flag1 = false;
+               //if( Op<U>::u(C[j]) < 0. )
+               //  flag2 = false;
+               //else if( Op<U>::l(C[j]) < 0. )
+               //  flag1 = false;
                // no break;
       case LE: if( Op<U>::l(C[j]) > 0. )
                  flag2 = false;
                else if( Op<U>::u(C[j]) > 0. )
-                 flag1 =false;
+                 flag1 = false;
                break;
       case GE: if( Op<U>::u(C[j]) < 0. )
                  flag2 = false;
                else if( Op<U>::l(C[j]) < 0. )
-                 flag1 =false;
+                 flag1 = false;
                break;
     }
   }
@@ -530,21 +581,76 @@ NLCP<T>::_inclusion_test
 template <typename T>
 inline void
 NLCP<T>::_subproblem_project
-( CVar<T>*CVP, std::set<unsigned>&depend )
+( CVar<T>*CVP, std::set<unsigned>&depend, bool&converged )
 {
   // Apply implicit algebraic (if applicable)
   for( unsigned i=0; i<_nrvar; i++ ){
     _CMrvar[i] = _CMrbas[i] * (Op<CVar<T>>::diam(CVP[i])/2.) + Op<CVar<T>>::mid(CVP[i]);
 #if defined (MC__NLCP_DEBUG)
-    std::cout << _CMrvar[i];
+    std::cout << "CMrvar[" << i << "] =" << _CMrvar[i];
 #endif
   }
   try{
-    auto status = AEBND<T,CModel<T>,CVar<T>>::solve( _CMrvar.data(), _CMrdep.data(), CVP+_nrvar );
-    if( status != AEBND<T,CModel<T>,CVar<T>>::NORMAL ) return;
+    if( !options.CMREDWARMS ){
+      // Compute polynomial model on the dependents
+      AEBND<T,CModel<T>,CVar<T> >::options.PMNOREM = false;
+      auto status = AEBND<T,CModel<T>,CVar<T>>::solve( _CMrvar.data(), _CMrdep.data(), CVP+_nrvar );
+      if( status != AEBND<T,CModel<T>,CVar<T>>::NORMAL ) return;
+    }
+    else{
+      // Compute polynomial approximant
+      AEBND<T,CModel<T>,CVar<T> >::options.PMNOREM = true;
+      auto status0 = AEBND<T,CModel<T>,CVar<T>>::solve( _CMrvar.data(), _CMrdep.data(), CVP+_nrvar );
+      if( status0 != AEBND<T,CModel<T>,CVar<T>>::NORMAL ) return;
+
+      // Compute remainder bounds for the dependents
+      std::vector<double> cobj( _nrvar+1 );
+      std::vector<PolVar<T>> vobj( _nrvar+1 );
+
+      for( unsigned i=0; i<_nrdep; i++ ){
+#if defined (MC__NLCP_DEBUG)
+        std::cout << "_CMrdep[" << i << "] =" << _CMrdep[i];
+#endif
+        // Set-up contaction objective function
+        for( unsigned j=0; j<_nrvar; j++ ){
+          cobj[j] = -_CMrdep[i].linear(j);
+          vobj[j] = _POLvar[j];
+        }
+        cobj[_nrvar] = 1.;
+        vobj[_nrvar] = _POLvar[_nrvar+i];
+
+        // Solve for lower bound
+        NLGO<T>::_set_LPrelax( _nrvar+1, vobj.data(), cobj.data(), MIN );
+        NLGO<T>::_solve_LPmodel( options, stats, _var );
+        double RxL = NLGO<T>::get_objective();
+#if defined (MC__NLCP_DEBUG)
+        std::cout << "  RxL = " << RxL << std::endl;
+#endif
+
+        // Solve for upper bound
+        NLGO<T>::_set_LPrelax( _nrvar+1, vobj.data(), cobj.data(), MAX );
+        NLGO<T>::_solve_LPmodel( options, stats, _var );
+        double RxU = NLGO<T>::get_objective();
+#if defined (MC__NLCP_DEBUG)
+        std::cout << "  RxU = " << RxU << std::endl;
+#endif
+
+        // Setup remainder bounds in first-order polynomial model
+#if defined (MC__NLCP_DEBUG)
+        std::cout << "  diam = " << Op<CVar<T>>::diam(CVP[_nrvar+i]) << std::endl;
+#endif
+        if( !( RxU - RxL < 2.*Op<CVar<T>>::diam(CVP[_nrvar+i]) ) ) return;
+        _CMrdep[i] = T( RxL, RxU );
+        for( unsigned j=0; j<_nrvar; j++ )
+          _CMrdep[i] += _CMrdep[i].linear(j) * _CMrvar[j];
+      }
+      AEBND<T,CModel<T>,CVar<T> >::options.PMNOREM = false;
+      auto status = AEBND<T,CModel<T>,CVar<T>>::solve( _CMrvar.data(), _CMrdep.data(), _CMrdep.data() );
+      if( status != AEBND<T,CModel<T>,CVar<T>>::NORMAL ) return;
+    }
   }
   catch(...){ return;}
-#if defined (MC__NLCP_DEBUG)
+#ifdef MC__NLCP_DEBUG
   for( unsigned i=0; i<_nrdep; i++ ) std::cout << _CMrdep[i];
   {int dum; std::cout << "PAUSED"; std::cin >> dum;}
 #endif
@@ -553,25 +659,23 @@ NLCP<T>::_subproblem_project
   depend.clear();
   if( options.CMREDALL ){
     bool allred = true;
-    //for( unsigned i=0; i<_nrdep; i++ ){
-    //  if( !Op<T>::lt( _CMrdep[i].R(), CVP[_nrvar+i].R() )
-    //   || Op<T>::diam( _CMrdep[i].R() ) > options.CMREDTHRES )
-    //    allred = false;
-    //  else if( Op<T>::lt( _CMrdep[i].R(), CVP[_nrvar+i].R() ) 
-    //   && Op<T>::diam( _CMrdep[i].R() ) < options.CMREDTHRES )
-    //    depend.insert( _nrvar+i );
-    //}
-    //if( !allred ) return;
-    //for( unsigned i=0; i<_nrdep; i++ )
-    //  CVP[_nrvar+i] = _CMrdep[i];
-    for( unsigned i=0; allred && i<_nrdep; i++ )
+    for( unsigned i=0; allred && i<_nrdep; i++ ){
+#if defined (MC__NLCP_DEBUG)
+      std::cout << "CMrdep[" << i << "] =" << _CMrdep[i];
+#endif
       if( !Op<T>::lt( _CMrdep[i].R(), CVP[_nrvar+i].R() )
        || Op<T>::diam( _CMrdep[i].R() ) > options.CMREDTHRES ) allred = false;
+    }
     if( !allred ) return;
+#ifdef MC__NLCP_DEBUG
+    std::cout << "converged node\n";
+    { int dum; std::cout << "PAUSED"; std::cin >> dum; }
+#endif
     for( unsigned i=0; i<_nrdep; i++ ){
       depend.insert( _nrvar+i );
       CVP[_nrvar+i] = _CMrdep[i];
     }
+    converged = true;
   }
   else{
     for( unsigned i=0; i<_nrdep; i++ )
@@ -579,6 +683,7 @@ NLCP<T>::_subproblem_project
        && Op<T>::diam( _CMrdep[i].R() ) < options.CMREDTHRES ){
         depend.insert( _nrvar+i );
         CVP[_nrvar+i] = _CMrdep[i];
+        converged = true;
       }
   }
 }

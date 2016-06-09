@@ -253,6 +253,18 @@ protected:
   using LPRELAX_BASE<T>::_POLenv;
   //! @brief Storage vector for function evaluation in polyhedral relaxation arithmetic
   std::vector< PolVar<T> > _op_POLfg;
+  //! @brief Polyhedral image decision variables
+  std::vector< PolVar<T> > _POLvar;
+  //! @brief Polyhedral image objective auxiliary
+  PolVar<T> _POLobjaux;
+  //! @brief Polyhedral image scaled decision variables
+  std::vector< PolVar<T> > _POLscalvar;
+  //! @brief Polyhedral image basis variables
+  std::vector< PolVar<T> > _POLbasis;
+  //! @brief Polyhedral image objective variable
+  PolVar<T> _POLobj;
+  //! @brief Polyhedral image constraint variables
+  std::vector< PolVar<T> > _POLctr;
 
   //! @brief Chebyshev model dimension
   unsigned _CMdim;
@@ -287,19 +299,6 @@ private:
 
   //! @brief IPOPT model for local search
   Ipopt::SmartPtr<mc::NLPSLV_IPOPT> _NLPSLV;
-
-  //! @brief Polyhedral image decision variables
-  std::vector< PolVar<T> > _POLvar;
-  //! @brief Polyhedral image objective auxiliary
-  PolVar<T> _POLobjaux;
-  //! @brief Polyhedral image scaled decision variables
-  std::vector< PolVar<T> > _POLscalvar;
-  //! @brief Polyhedral image basis variables
-  std::vector< PolVar<T> > _POLbasis;
-  //! @brief Polyhedral image objective variable
-  PolVar<T> _POLobj;
-  //! @brief Polyhedral image constraint variables
-  std::vector< PolVar<T> > _POLctr;
 
   //! @brief Current incumbent value
   double _f_inc;
@@ -547,6 +546,10 @@ protected:
   //! @brief Update model polyhedral relaxation (bounds and types)
   void _update_polrelax
     ( const T*P, const unsigned*tvar, const bool feastest=false );
+  //! @brief Get scores for Chebyshev-derived cuts
+  void _get_chebscores
+    ( const FFVar&FV, const CVar<T>&CM, std::map<unsigned,double>&scores,
+      const bool append=false ) const;
 
  //! @brief Tighten parameter bounds <a>P</a> for NLP model relaxation and incumbent value <a>inc</a> (or constraint backoff is <a>feastest</a> is true)
   LP_STATUS _contract
@@ -847,8 +850,9 @@ NLGO<T>::_contract
     for( ++itv; itv!=vardomred.end(); ++itv ){
       const unsigned ip = (*itv).second.first;
       const bool uplo = (*itv).second.second;
-      double dist = uplo? std::fabs( get_variable( _var[ip] ) - Op<T>::u( P[ip] ) ):
-                          std::fabs( get_variable( _var[ip] ) - Op<T>::l( P[ip] ) );
+      double dist = ( uplo? std::fabs( get_variable( _var[ip] ) - Op<T>::u( P[ip] ) ):
+                            std::fabs( get_variable( _var[ip] ) - Op<T>::l( P[ip] ) ) )
+                    / Op<T>::diam( P[ip] ); // consider relative distance to bound
       if( dist <= options.DOMREDTHRES ) continue;
       if( dist > (*itv).first ) dist = (*itv).first;
       vardomredupd.insert( std::pair<double,std::pair<unsigned,bool>>(dist,std::make_pair(ip,uplo)) );
@@ -1522,6 +1526,66 @@ NLGO<T>::_set_poacuts
 }
 
 template <typename T> inline void
+NLGO<T>::_get_chebscores
+( const FFVar&FV, const CVar<T>&CM, std::map<unsigned,double>&scores, const bool append )
+const
+{
+  if( !append ) scores.clear();
+
+  // Contribution of polynomial model remainder
+  double rem = Op<T>::diam(CM.remainder()), bnd = Op<T>::diam(CM.bound()), contrib = 1.;
+  //if( rem < SBB<T>::options.INF && rem < bnd ) contrib = rem / bnd;
+  if( rem < SBB<T>::options.INF ) contrib = 0.1 * rem / bnd;
+  //std::cout << FV.dep() << std::endl;
+  for( unsigned i=0; i<_nvar; i++ ){
+    auto ft = FV.dep().dep().find( _var[i].id().second );
+    if( ft == FV.dep().dep().end() || ft->second ) continue;
+    auto it = scores.find( i );
+    if( it == scores.end() )
+      scores.insert( std::make_pair( i, contrib ) );
+    else 
+      it->second += contrib;
+  }
+  //if( rem >= SBB<T>::options.INF ) return;
+
+  // Polynomial model nonlinear dependencies contribution
+  // - Dense polynomial relaxation
+  if( CM.ndxmon().empty() ){
+    for( unsigned k=1; k<CM.coefmon().first; k++ ){
+    //for( unsigned k=_nvar+1; k<CM.coefmon().first; k++ ){
+      contrib = std::fabs( CM.coefmon().second[k] ) / bnd;
+      const unsigned* iexp = CM.expmon( k );
+      for( unsigned i=0; i<_nvar; i++ ){
+        if( iexp[i] < 1 ) continue;
+        auto it = scores.find( i );
+        if( it == scores.end() )
+          scores.insert( std::make_pair( i, contrib ) );
+        else 
+          it->second += contrib;
+      }
+    }
+  }
+
+  // - Sparse polynomial relaxation
+  else{
+    auto kt = CM.ndxmon().lower_bound(_nvar+1);
+    //auto kt = CM.ndxmon().lower_bound(1);
+    for( ; kt != CM.ndxmon().cend(); ++kt ){
+      contrib = std::fabs( CM.coefmon().second[*kt] ) / bnd;
+      const unsigned* iexp = CM.expmon( *kt );
+      for( unsigned i=0; i<_nvar; i++ ){
+        if( iexp[i] < 1 ) continue;
+        auto it = scores.find( i );
+        if( it == scores.end() )
+          scores.insert( std::make_pair( i, contrib ) );
+        else 
+          it->second += contrib;
+      }
+    }
+  }
+}
+
+template <typename T> inline void
 NLGO<T>::_set_chebcuts
 ( const bool feastest )
 {
@@ -1686,8 +1750,17 @@ NLGO<T>::_set_chebcuts
 #endif
       _CMctr[j] = T(-SBB<T>::options.INF,SBB<T>::options.INF);
       // No cut added for constraint #j in case evaluation failed
-      continue;
+      // continue;
     }
+
+#ifdef MC__NLGO_DEBUG
+    std::map<unsigned,double> scores;
+    _get_chebscores( std::get<1>(_ctr)[j], _CMctr[j], scores );
+    std::cout << "Constraint #" << j << ":\n";
+    for( auto it=scores.cbegin(); it!=scores.cend(); ++it )
+      std::cout << std::right << std::setw(4) << it->first << " " << it->second << std::endl; 
+    { int dum; std::cout << "PAUSED"; std::cin >> dum; }
+#endif
   }
 #ifdef MC__NLGO_DEBUG
   { int dum; std::cin >> dum; }

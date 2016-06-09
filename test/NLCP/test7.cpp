@@ -7,7 +7,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #include <fstream>
-#include "nlcp_gurobi.hpp"//.backup"
+#include "nlcp.hpp"
 
 #ifdef USE_PROFIL
   #include "mcprofil.hpp"
@@ -32,7 +32,7 @@ const unsigned NF = ns*(nc*2+1), NP = NF+1;
 
 ////////////////////////////////////////////////////////////////////////////////
 std::set<unsigned> branching_strategy
-( const typename mc::NLCP_GUROBI<I>::NODE*pNode )
+( const typename mc::NLCP<I>::NODE*pNode )
 {
   // Variable selection rule based on Baharev et al [AIChE Journal 2011, Vol. 57, No. 6]
   // The widest interval corresponding to the bulk composition is bisected exclusively
@@ -300,6 +300,14 @@ int main()
 */
 /*
   // Bounding
+  CMI CMenv( NP, 2, true );
+  CVI CVF, CVp[NP];
+  //CMenv.options.MIXED_IA = true;
+  for( unsigned i=0; i<NP; i++ ) CVp[i].set( &CMenv, i, Ip[i] );
+  DAG.eval( 1, F+3, &CVF, NP, P, CVp );
+  std::cout << CVF;
+  { int dum; std::cout << "PAUSED";std::cin >> dum; }
+
   mc::FFVar FCT = K[0] - gamma[0]*p[0]/Patm; //K[0]-gamma[0]*p[0]/Patm; // F[0];
   CMI CMenv( NP, 1, true );
   CVI CVFCT, CVp[NP];
@@ -312,8 +320,8 @@ int main()
   DAG.eval( 1, &FCT, &CVFCT, NP, P, CVp );
   std::cout << CVFCT;
 
-  mc::NLGO_GUROBI<I> FLB;
-  FLB.options.RELMETH     = mc::NLCP_GUROBI<I>::Options::DRL;//CHEB;
+  mc::NLGO<I> FLB;
+  FLB.options.RELMETH     = mc::NLCP<I>::Options::DRL;//CHEB;
   FLB.options.LPPRESOLVE  = true;
   FLB.options.MIPFILE     = "";//"test7.lp";
   FLB.set_dag( &DAG );
@@ -341,13 +349,13 @@ int main()
 */
 /*
   // Relaxation
-  mc::NLGO_GUROBI<I> RELAX;
+  mc::NLGO<I> RELAX;
   RELAX.set_dag( &DAG );
   RELAX.set_var( NP, P );
   for( unsigned i=0; i<NF; i++ )
     RELAX.add_ctr( mc::BASE_OPT::EQ, F[i] );
   RELAX.set_obj( mc::BASE_NLP::MIN, gamma[0] );
-  RELAX.options.RELMETH     = mc::NLCP_GUROBI<I>::Options::DRL;//CHEB;
+  RELAX.options.RELMETH     = mc::NLCP<I>::Options::DRL;//CHEB;
   RELAX.options.LPPRESOLVE  = false;
   RELAX.options.MIPFILE     = "test7.lp";
   //std::cout << RELAX;
@@ -368,7 +376,7 @@ int main()
 */
 
   // Constraint Projection
-  mc::NLCP_GUROBI<I> CP;
+  mc::NLCP<I> CP;
   CP.set_dag( &DAG );
 #ifndef USE_DEPS
   CP.set_var( NP, P );
@@ -383,27 +391,29 @@ int main()
   CP.options.MIPDISPLAY  = 0;
   CP.options.DISPLAY     = 2;
   CP.options.MAXITER     = 0;
-  CP.options.CVATOL      = 1e-5; // 1e-5
-  CP.options.CVRTOL      = 1e-5; // 1e-5
-  CP.options.BRANCHVAR   = mc::SetInv<CVI>::Options::RGREL;//RGABS;
+  CP.options.CVATOL      = 1e-4; // 1e-5
+  CP.options.CVRTOL      = 1e-4; // 1e-5
+  CP.options.BRANCHVAR   = mc::SetInv<CVI>::Options::SCORES;//RGREL;
   //CP.options.BRANCHSEL   = branching_strategy;
   CP.options.STGBCHDEPTH = 0;
   CP.options.STGBCHDRMAX = 2;
   CP.options.STGBCHRTOL  = 1e-2;
-  CP.options.NODEMEAS    = mc::SetInv<CVI>::Options::LENGTH;
-  CP.options.DOMREDMAX   = 50;
-  CP.options.DOMREDTHRES = 1e-2; //2e-2
-  CP.options.DOMREDBKOFF = 1e-4; //2e-2
+  CP.options.NODEMEAS    = mc::SetInv<CVI>::Options::MEANWIDTH;
+  CP.options.DOMREDMAX   = 20;
+  CP.options.DOMREDTHRES = 1e-1; //2e-2
+  CP.options.DOMREDBKOFF = 1e-5; //2e-2
   //CP.options.CTRBACKOFF  = 1e-4; //1e-6
-  CP.options.LPALGO      = -1;
-  CP.options.LPPRESOLVE  = -1;
-  CP.options.RELMETH     = mc::NLCP_GUROBI<I>::Options::HYBRID;//DRL;//CHEB;
+  //CP.options.LPALGO      = -1;
+  //CP.options.LPPRESOLVE  = -1;
+  CP.options.RELMETH     = mc::NLCP<I>::Options::CHEB;//HYBRID;//DRL;//CHEB;
   CP.options.CMODDMAX    = 1e5; //2
   CP.options.CMODSPAR    = true;
-  CP.options.CMODPROP    = 3; //2
-  CP.options.CMODCUTS    = 3; //2
+  CP.options.CMODPROP    = 2; //2
+  CP.options.CMODCUTS    = 2; //2
   CP.options.CMREDORD    = 5; //3
-  CP.options.CMREDTHRES  = 1e-5;//1e-3
+  CP.options.CMREDTHRES  = 1e-4;//1e-3
+  CP.options.CMREDWARMS  = false;
+  CP.options.CMREDALL    = true;
   CP.options.MAXCPU      = 3e4 ;
   CP.options.CMODEL.MIXED_IA = true ;
   std::cout << CP;

@@ -6,7 +6,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #include <fstream>
-#include "nlcp_gurobi.hpp"//.backup"
+#include "nlcp.hpp"
 
 #ifdef USE_PROFIL
   #include "mcprofil.hpp"
@@ -80,8 +80,7 @@ int main()
 {
   mc::FFGraph DAG;
   const unsigned NP = 7, NF = 6;
-  mc::FFVar T, P[NP], F[NF];
-  T.set( &DAG );
+  mc::FFVar P[NP], F[NF];
   for( unsigned int i=0; i<NP; i++ ) P[i].set( &DAG );
 
   // Model Parameters
@@ -107,11 +106,11 @@ int main()
   F[1] = ( mu_2 - alpha*D )*X2;
   F[2] = D*( S1_in - S1 ) - k1*mu_1*X1;
   F[3] = D*( S2_in - S2 ) + k2*mu_1*X1 - k3*mu_2*X2;
-  F[4] = Z_in  - Z; //D*( Z_in  - Z  );
+  F[4] = D*( Z_in  - Z  ); //Z_in  - Z; //
   F[5] = D*( C_in  - C  ) - q_CO2 + k4*mu_1*X1 + k5*mu_2*X2; 
 
   // Constraint Projection
-  mc::NLCP_GUROBI<I> CP;
+  mc::NLCP<I> CP;
   CP.set_dag( &DAG );
 #ifndef USE_DEPS
   CP.set_var( NP, P );
@@ -124,24 +123,24 @@ int main()
 
   //CP.options.MIPFILE   = "test6.lp";
   CP.options.DISPLAY     = 2;
-  CP.options.MAXITER     = 10000;
-  CP.options.CVATOL      = 1e-5;
-  CP.options.CVRTOL      = 1e-5;
-  CP.options.BRANCHVAR   = mc::SetInv<CVI>::Options::RGREL;
-  CP.options.NODEMEAS    = mc::SetInv<CVI>::Options::LENGTH;
+  CP.options.MAXITER     = 1000;
+  CP.options.CVATOL      = 1e-6;
+  CP.options.CVRTOL      = 5e-3;
+  CP.options.BRANCHVAR   = mc::SetInv<CVI>::Options::SCORES;//RGREL;
+  CP.options.NODEMEAS    = mc::SetInv<CVI>::Options::MEANWIDTH;
   CP.options.STGBCHDEPTH = 0;
   CP.options.STGBCHDRMAX = 0;
   CP.options.STGBCHRTOL  = 1e-2;
   CP.options.DOMREDMAX   = 10;
-  CP.options.DOMREDTHRES = 2e-2;
-  CP.options.DOMREDBKOFF = 1e-8;
-  CP.options.CTRBACKOFF  = 1e-4;
-  CP.options.RELMETH     = mc::NLCP_GUROBI<I>::Options::HYBRID;//CHEB;
-  CP.options.CMODSPAR    = false;//true;
-  CP.options.CMODPROP    = 3;
+  CP.options.DOMREDTHRES = 1e-2;
+  CP.options.DOMREDBKOFF = 1e-7;
+  CP.options.CTRBACKOFF  = 1e-5;
+  CP.options.RELMETH     = mc::NLCP<I>::Options::CHEB;//HYBRID;//CHEB;
+  CP.options.CMODSPAR    = true;
+  CP.options.CMODPROP    = 2;
   CP.options.CMODCUTS    = 2;
-  CP.options.CMREDORD    = 3;
-  CP.options.CMREDTHRES  = 1e-5;
+  CP.options.CMREDORD    = 5;
+  CP.options.CMREDTHRES  = 1e-4;
   CP.options.CMREDALL    = true;
   CP.options.CMODEL.MIXED_IA = true ;
   std::cout << CP;
@@ -196,7 +195,7 @@ int main()
   CP.options.DOMREDTHRES = 2e-2;
   CP.options.DOMREDBKOFF = 1e-8;
   CP.options.CTRBACKOFF  = 1e-4;
-  CP.options.RELMETH     = mc::NLCP_GUROBI<I>::Options::HYBRID;//DRL;
+  CP.options.RELMETH     = mc::NLCP<I>::Options::HYBRID;//DRL;
   CP.options.CMODSPAR    = true;
   CP.options.CMODPROP    = 3;
   CP.options.CMODCUTS    = 2;

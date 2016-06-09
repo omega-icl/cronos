@@ -55,23 +55,24 @@ int main()
 
   //CP.options.MIPFILE   = "test3.lp";
   CP.options.DISPLAY     = 2;
-  CP.options.MAXITER     = 10000;
-  CP.options.CVATOL      = 1e-4;
-  CP.options.CVRTOL      = 1e-4;
-  CP.options.BRANCHVAR   = mc::SetInv<CVI>::Options::RGREL;
-  CP.options.NODEMEAS    = mc::SetInv<CVI>::Options::LENGTH;
+  CP.options.MAXITER     = 1000;
+  CP.options.CVATOL      = 1e-6;
+  CP.options.CVRTOL      = 1e-2;
+  CP.options.BRANCHVAR   = mc::SetInv<CVI>::Options::SCORES;//RGREL;
+  CP.options.NODEMEAS    = mc::SetInv<CVI>::Options::MAXWIDTH;
   CP.options.STGBCHDEPTH = 0;
   CP.options.STGBCHDRMAX = 0;
   CP.options.STGBCHRTOL  = 1e-2;
   CP.options.DOMREDMAX   = 10;
-  CP.options.DOMREDTHRES = 2e-2;
+  CP.options.DOMREDTHRES = 1e-2;
   CP.options.DOMREDBKOFF = 1e-8;
   //CP.options.CTRBACKOFF  = 1e-7;
   CP.options.RELMETH     = mc::NLCP<I>::Options::CHEB;
-  CP.options.CMODPROP    = 1;
-  CP.options.CMODCUTS    = 1;
-  CP.options.CMREDORD    = 3;
+  CP.options.CMODPROP    = 3;
+  CP.options.CMODSPAR    = true;
+  CP.options.CMREDORD    = 5;
   CP.options.CMREDTHRES  = 1e-4;
+  CP.options.CMREDWARMS  = false;//true;
   std::cout << CP;
 
   const I Ip[NP] = { I(0.93,0.99), I(0.,1.), I(0.,1.) };

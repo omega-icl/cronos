@@ -92,11 +92,13 @@ public:
   {
     //! @brief Constructor
     Options():
-      ABSOLUTE_TOLERANCE(1e-5), RELATIVE_TOLERANCE(1e-5),
-      BRANCHING_VARIABLE_CRITERION(RGREL), BRANCHING_VARIABLE_SUBSET(0),
+      MEASURE(MAXWIDTH), STOPPING_ABSTOL(1e-5), STOPPING_RELTOL(1e-5),
+      BRANCHING_VARIABLE_CRITERION(RGREL), BRANCHING_USERFUNCTION(0),
       STRONG_BRANCHING_MAXDEPTH(0), STRONG_BRANCHING_RELTOL(1e-3),
-      STRONG_BRANCHING_ABSTOL(1e-3), MEASURE(MAXWIDTH),
-      DISPLAY(2), OUTPUT_ROTATED(false), MAX_CPU_TIME(1e6), MAX_NODES(0)
+      STRONG_BRANCHING_ABSTOL(1e-3), SCORE_BRANCHING_USE(false),
+      SCORE_BRANCHING_RELTOL(1e-1), SCORE_BRANCHING_ABSTOL(1e-2),
+      SCORE_BRANCHING_MAXSIZE(0), DISPLAY(2), OUTPUT_ROTATED(false),
+      MAX_CPUTIME(1e6), MAX_NODES(0)
       {}
     //! @brief Display
     void display
@@ -104,8 +106,7 @@ public:
     //! @brief Branching variable criterion
     enum CRITERION{
       RGREL=0,	//!< Relative variable range diameter
-      RGABS,	//!< Absolute variable range diameter
-      SCORES    //!< User-defined scores in assess function
+      RGABS	//!< Absolute variable range diameter
     };
     //! @brief Branching variable criterion
     enum METRIC{
@@ -115,28 +116,36 @@ public:
     };
     //! @brief Branching selection user-function
     typedef std::set<unsigned> (*SELECTION)( const NODE* );
+    //! @brief Partition measure
+    int MEASURE;
     //! @brief Absolute stopping tolerance
-    double ABSOLUTE_TOLERANCE;
+    double STOPPING_ABSTOL;
     //! @brief Relative stopping tolerance
-    double RELATIVE_TOLERANCE;
+    double STOPPING_RELTOL;
     //! @brief Branching variable selection criterion
-    CRITERION BRANCHING_VARIABLE_CRITERION;
+    int BRANCHING_VARIABLE_CRITERION;
     //! @brief Branching variable selection user-function
-    SELECTION BRANCHING_VARIABLE_SUBSET;
+    SELECTION BRANCHING_USERFUNCTION;
     //! @brief Maximum depth for strong branching interruption
     unsigned STRONG_BRANCHING_MAXDEPTH;
     //! @brief Relative tolerance for strong branching interruption
     double STRONG_BRANCHING_RELTOL;
     //! @brief Absolute tolerance for strong branching interruption
     double STRONG_BRANCHING_ABSTOL;
-    //! @brief Partition measure
-    METRIC MEASURE;
+    //! @brief Whether to base branching variable selection on scores
+    bool SCORE_BRANCHING_USE;
+    //! @brief Relative tolerance for branching variable selection based on scores
+    double SCORE_BRANCHING_RELTOL;
+    //! @brief Absolute tolerance for branching variable selection based on scores
+    double SCORE_BRANCHING_ABSTOL;
+    //! @brief Maximal size of branching variable selection based on scores
+    unsigned SCORE_BRANCHING_MAXSIZE;
     //! @brief Display option
     int DISPLAY;
     //! @brief Whether to display rotated boxes
     bool OUTPUT_ROTATED;
     //! @brief Maximum CPU time limit
-    double MAX_CPU_TIME;
+    double MAX_CPUTIME;
     //! @brief Maximum number of nodes (0 for no limit)
     unsigned MAX_NODES;
   };
@@ -282,6 +291,9 @@ private:
 
   //! @brief Default set of branching variables
   void _branching_variable_set
+    ( const NODE*pNode );
+  //! @brief Subset of branching variables based on scores
+  void _branching_score_subset
     ( const NODE*pNode );
   //! @brief Branch node by selecting branching variable and creating subdomains
   std::pair<NODE*,NODE*> _branch_node
@@ -682,7 +694,7 @@ SetInv<T,NODE,LT_NODE>::solve
 
   // Run iterative set-inversion algorithm
   for( ; !_open_nodes.empty()
-         && time()-_tstart < options.MAX_CPU_TIME
+         && time()-_tstart < options.MAX_CPUTIME
          && ( !options.MAX_NODES || _node_index <= options.MAX_NODES );
        _node_index++ ){
 
@@ -816,8 +828,8 @@ template <typename T, typename NODE, typename LT_NODE>
 inline bool
 SetInv<T,NODE,LT_NODE>::_terminate() const
 {
-  return( _open_measure < options.ABSOLUTE_TOLERANCE
-       || _open_measure < options.RELATIVE_TOLERANCE * _root_measure ?
+  return( _open_measure < options.STOPPING_ABSTOL
+       || _open_measure < options.STOPPING_RELTOL * _root_measure ?
        true : false );
 }
 
@@ -906,7 +918,7 @@ SetInv<T,NODE,LT_NODE>::_branching_variable_set
 ( const NODE*pNode )
 {
   _branch_set.clear();
-  typename Options::SELECTION psel = options.BRANCHING_VARIABLE_SUBSET;
+  typename Options::SELECTION psel = options.BRANCHING_USERFUNCTION;
   std::set<unsigned> ssel;
   if( psel ) ssel = psel( pNode );
   for( unsigned ip=0; ip<_np; ip++ ){
@@ -920,8 +932,53 @@ SetInv<T,NODE,LT_NODE>::_branching_variable_set
     // Add variable index to branching set
     _branch_set.insert( ip );
   }
-  if( _branch_set.empty() )
-    throw Exceptions( Exceptions::BRANCH );
+
+  // Preselect variables based on scores
+  _branching_score_subset( pNode );
+
+  // Interrupt if branch set is empty - internal error...
+  if( _branch_set.empty() ) throw Exceptions( Exceptions::BRANCH );
+}
+
+template <typename T, typename NODE, typename LT_NODE>
+inline void
+SetInv<T,NODE,LT_NODE>::_branching_score_subset
+( const NODE*pNode )
+{
+  if( !options.SCORE_BRANCHING_USE || pNode->scores().empty() ) return;
+
+  // Create map of scores
+  struct lt_scores{
+    bool operator()
+      ( const std::pair<unsigned,double>&el1, const std::pair<unsigned,double>el2 )
+      { return el1.second < el2.second; }
+  };
+  std::multiset< std::pair<unsigned,double>, lt_scores > allscores;
+  for( auto it = _branch_set.begin(); it != _branch_set.end(); ++it ){
+    auto its = pNode->scores().find( *it );
+    if( its == pNode->scores().end() ) continue;
+    allscores.insert( *its );
+#ifdef DEBUG__SBB_SCOREBRANCHING
+    std::cout << "Score variable #" << its->first << ": " << its->second << std::endl;
+    //{ int dum; std::cout << "PAUSED"; std::cin >> dum; }
+#endif
+  }
+
+  // Keep best candidates based on map of scores
+  for( auto it=allscores.begin(); it!=allscores.end(); ++it ){
+    if( it->second >= allscores.rbegin()->second*(1.-options.SCORE_BRANCHING_RELTOL)
+                     -options.SCORE_BRANCHING_ABSTOL
+     && ( !options.SCORE_BRANCHING_MAXSIZE
+       || _branch_set.size() < options.SCORE_BRANCHING_MAXSIZE ) ) break;
+    _branch_set.erase( it->first );
+  }
+#ifdef MC__SBB_SHOW__SCOREBRANCHING
+  std::cout << "Branching variable score subset: {";
+  for( auto it = _branch_set.begin(); it != _branch_set.end(); ++it )
+    std::cout << " " << *it << " ";
+  std:: cout << "}\n";
+  { int dum; std::cout << "PAUSED"; std::cin >> dum; }
+#endif
 }
 
 template <typename T, typename NODE, typename LT_NODE>
@@ -929,38 +986,13 @@ inline std::pair<unsigned, double>
 SetInv<T,NODE,LT_NODE>::_select_branching_variable
 ( NODE*pNode )
 {
-
   // Strong branching strategy
-  if( pNode->depth() < options.STRONG_BRANCHING_MAXDEPTH && !pNode->converged() )
+  if( pNode->depth() < options.STRONG_BRANCHING_MAXDEPTH && !pNode->converged()
+      && _branch_set.size() > 1 )
     return _strong_branching( pNode, _branch_var, _node_count );
   
   std::pair<unsigned, double> branchsel( _np, -1. ); // <- Can be any negative number
   switch( options.BRANCHING_VARIABLE_CRITERION ){
-
-  // Branching based on scores
-   case Options::SCORES:
-    struct loc{
-      static bool lt_scores
-        ( const std::pair<unsigned,double>&el1, const std::pair<unsigned,double>el2 )
-        { return el1.second < el2.second; }
-    };
-    if( !pNode->scores().empty() ){
-      // Keep scores for variables in the current branching set only
-      auto scores = pNode->scores();
-      for( auto it = pNode->scores().begin(); it != pNode->scores().end(); ++it )
-        if( _branch_set.find( it->first ) == _branch_set.end() )
-          scores.erase( it->first );
-      // Find maximum element in remaining set of scores
-      auto it = std::max_element( scores.begin(), scores.end(), loc::lt_scores );
-      if( it != scores.end() ){
-#ifdef DEBUG__SBB_SCOREBRANCHING
-        std::cout << "Max score variable #" << it->first << "(" << it->second << ")\n";
-        { int dum; std::cout << "PAUSED"; std::cin >> dum; }
-#endif
-        branchsel = *it;
-        break;
-      }
-    }
 
    // Branching based on relative range diameter
    case Options::RGREL:
@@ -1184,7 +1216,7 @@ SetInv<T,NODE,LT_NODE>::_display_final
   if( options.DISPLAY <= 0 ) return;
 
   // Solution found within allowed time?
-  if( tcur-_tstart < options.MAX_CPU_TIME
+  if( tcur-_tstart < options.MAX_CPUTIME
     && ( !options.MAX_NODES || _node_index <= options.MAX_NODES ) )
     _odisp << std::endl << "#  NORMAL TERMINATION:      ";
   else
@@ -1220,13 +1252,13 @@ SetInv<T,NODE,LT_NODE>::Options::display
 {
   // Display SetInv Options
   out << std::left;
-  out << std::setw(60) << "  ABSOLUTE CONVERGENCE TOLERANCE"
+  out << std::setw(60) << "  ABSOLUTE STOPPING TOLERANCE"
       << std::scientific << std::setprecision(1)
-      << ABSOLUTE_TOLERANCE << std::endl;
-  out << std::setw(60) << "  RELATIVE CONVERGENCE TOLERANCE"
+      << STOPPING_ABSTOL << std::endl;
+  out << std::setw(60) << "  RELATIVE STOPPING TOLERANCE"
       << std::scientific << std::setprecision(1)
-      << RELATIVE_TOLERANCE << std::endl;
-  out << std::setw(60) << "  CONVERGENCE MEASURE";
+      << STOPPING_RELTOL << std::endl;
+  out << std::setw(60) << "  PARTITION MEASURE CRITERION";
   switch( MEASURE ){
     case MAXWIDTH:   out << "MAXWIDTH\n";  break;
     case MEANWIDTH:  out << "MEANWIDTH\n";  break;
@@ -1236,7 +1268,17 @@ SetInv<T,NODE,LT_NODE>::Options::display
   switch( BRANCHING_VARIABLE_CRITERION ){
     case RGREL:  out << "RGREL\n";   break;
     case RGABS:  out << "RGABS\n";   break;
-    case SCORES: out << "SCORES\n";  break;
+  }
+  out << std::setw(60) << "  USE SCORE BRANCHING";
+  switch( SCORE_BRANCHING_USE ){
+   case 0:  out << "N\n"; break;
+   default: out << "Y\n";
+            out << std::setw(60) << "  RELATIVE TOLERANCE FOR SCORE BRANCHING"
+                << std::scientific << std::setprecision(1)
+                << SCORE_BRANCHING_RELTOL << std::endl;
+            out << std::setw(60) << "  ABSOLUTE TOLERANCE FOR SCORE BRANCHING"
+                << std::scientific << std::setprecision(1)
+                << SCORE_BRANCHING_ABSTOL << std::endl; break;
   }
   out << std::setw(60) << "  MAXIMUM DEPTH FOR STRONG BRANCHING";
   switch( STRONG_BRANCHING_MAXDEPTH ){
@@ -1256,7 +1298,7 @@ SetInv<T,NODE,LT_NODE>::Options::display
   }
   out << std::setw(60) << "  MAXIMUM CPU TIME (SEC)"
       << std::scientific << std::setprecision(1)
-      << MAX_CPU_TIME << std::endl;
+      << MAX_CPUTIME << std::endl;
   out << std::setw(60) << "  DISPLAY LEVEL"
       << DISPLAY << std::endl;
 }

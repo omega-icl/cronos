@@ -30,7 +30,7 @@ public:
     {}
 
   //! @brief Get constraints
-  const std::tuple< std::vector<t_CTR>, std::vector<FFVar>, std::vector<FFVar> >& ctr() const
+  const std::tuple< std::vector<t_CTR>, std::vector<FFVar>, std::vector<FFVar>, std::vector<bool> >& ctr() const
     { return _ctr; }
 
   //! @brief Reset constraints
@@ -39,10 +39,11 @@ public:
 
   //! @brief Add constraint
   void add_ctr
-    ( const t_CTR type, const FFVar&ctr )
+    ( const t_CTR type, const FFVar&ctr, const bool is_redundant=false )
     { std::get<0>(_ctr).push_back( type );
       std::get<1>(_ctr).push_back( ctr );
-      std::get<2>(_ctr).push_back( FFVar( ctr.dag() ) ); }
+      std::get<2>(_ctr).push_back( FFVar( ctr.dag() ) );
+      std::get<3>(_ctr).push_back( is_redundant ); }
 
   //! @brief Get objective
   const std::tuple< std::vector<t_OBJ>, std::vector<FFVar>, std::vector<FFVar> >& obj() const
@@ -62,7 +63,7 @@ public:
 
 protected:
   //! @brief constraints (types, constraint variables, constraint multipliers)
-  std::tuple< std::vector<t_CTR>, std::vector<FFVar>, std::vector<FFVar> > _ctr;
+  std::tuple< std::vector<t_CTR>, std::vector<FFVar>, std::vector<FFVar>, std::vector<bool> > _ctr;
 
   //! @brief objective (type, cost variable, cost multiplier)
   std::tuple< std::vector<t_OBJ>, std::vector<FFVar>, std::vector<FFVar> > _obj;

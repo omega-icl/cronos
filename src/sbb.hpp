@@ -6,7 +6,9 @@
 #define MC__SBB_HPP
 
 #include <utility>
+#include <vector>
 #include <set>
+#include <map>
 #include <string>
 #include <sstream>
 #include <iostream>
@@ -15,6 +17,7 @@
 
 #include "mcop.hpp"
 #include "mcfunc.hpp"
+#include "base_opt.hpp"
 
 #undef DEBUG__SBB_PSEUDOCOST
 #undef DEBUG__SBB_STRONGBRANCHING
@@ -49,6 +52,7 @@ template <typename T> struct lt_SBBNode;
 ////////////////////////////////////////////////////////////////////////
 template <typename T>
 class SBB
+: public BASE_OPT
 ////////////////////////////////////////////////////////////////////////
 {
   template <typename U> friend class SBBNode;
@@ -75,47 +79,37 @@ public:
     UPPERBD,	//!< Solve upper bounding subproblem
     FEASTEST	//!< Test feasibility of upper bounding subproblem
   };
-  //! @brief Problem type
-  enum TYPE{
-    MINIMIZE=0,	//!< Minimize problem
-    MAXIMIZE	//!< Maximize problem
-  };
 
   //! @brief Prototype for user-supplied function
   virtual STATUS subproblems
     ( const TASK,		// task
-      const unsigned, 	// number of variables
-      T*,			// variable bounds
-      double*,			// optimal solution point - initial guess on entry
+      SBBNode<T>*,		// pointer to node
+      std::vector<double>&,	// optimal solution point - initial guess on entry
       double&, 			// optimal solution value
       const double		// current incumbent
     )=0;
 
   //! @brief Public constructor
   SBB()
-    : options(), _p_inc(0), _f_inc(options.INF), _np(0), _P_root(0),
-      _P_tmp(0), _node_inc(0)
+    : options(), _f_inc(INF), _np(0), _node_inc(0)
     {}
 
   //! @brief Class destructor
   virtual ~SBB()
-    {
-      _clean_stack();
-      delete[] _P_root;
-      delete[] _P_tmp;
-      delete[] _p_inc;
-    }
+    { _clean_stack(); }
 
   //! @brief SBB options
   struct Options
   {
     //! @brief Constructor
     Options():
-      ABSOLUTE_TOLERANCE(1e-3), RELATIVE_TOLERANCE(1e-3), TREE_REREDUCE(true),
-      BRANCHING_STRATEGY(OMEGA), BRANCHING_VARIABLE_CRITERION(RGREL),
-      BRANCHING_RELIABILITY_THRESHOLD(1), BRANCHING_SCORE_FACTOR(1./6.),
-      BRANCHING_BOUND_THRESHOLD(1e-3), DISPLAY(2), MAX_CPU_TIME(1e6),
-      MAX_NODES(0), INF(1e20)
+      STOPPING_ABSTOL(1e-3), STOPPING_RELTOL(1e-3), TREE_REREDUCE(true),
+      BRANCHING_STRATEGY(OMEGA), BRANCHING_BOUND_THRESHOLD(5e-2), 
+      BRANCHING_VARIABLE_CRITERION(RGREL), BRANCHING_USERFUNCTION(0),
+      STRONG_BRANCHING_MAXDEPTH(0), STRONG_BRANCHING_WEIGHT(1./6.),
+      SCORE_BRANCHING_USE(false), SCORE_BRANCHING_RELTOL(1e-1),
+      SCORE_BRANCHING_ABSTOL(1e-2), SCORE_BRANCHING_MAXSIZE(0),
+      DISPLAY(2), MAX_CPUTIME(1e6), MAX_NODES(0)
       {}
     //! @brief Display
     void display
@@ -128,33 +122,42 @@ public:
     //! @brief Branching variable criterion
     enum CRITERION{
       RGREL=0,	//!< Relative variable range diameter
-      RGABS,	//!< Absolute variable range diameter
-      RELIAB	//!< Reliability branching based on pseudocosts and strong branching
+      RGABS	//!< Absolute variable range diameter
     };
+    //! @brief Branching selection user-function
+    typedef std::set<unsigned> (*SELECTION)( const SBBNode<T>* );
     //! @brief Absolute stopping tolerance
-    double ABSOLUTE_TOLERANCE;
+    double STOPPING_ABSTOL;
     //! @brief Relative stopping tolerance
-    double RELATIVE_TOLERANCE;
+    double STOPPING_RELTOL;
     //! @brief Whether the entire B&B tree is to be updated after every incumbent update
     bool TREE_REREDUCE;
     //! @brief Branching strategy
-    STRATEGY BRANCHING_STRATEGY;
-    //! @brief Variable selection criterion
-    CRITERION BRANCHING_VARIABLE_CRITERION;
-    //! @brief Minimum number of pseudocost evaluations after which a pseudocost is considered reliable
-    unsigned BRANCHING_RELIABILITY_THRESHOLD;
-    //! @brief Score factor (between 0 and 1) used to account for the left and right nodes in setting the pseudocost
-    double BRANCHING_SCORE_FACTOR;
+    int BRANCHING_STRATEGY;
     //! @brief Relative tolerance within which a variable is considered to be at one of its bounds, i.e. excluded from branching variable selection
     double BRANCHING_BOUND_THRESHOLD;
+    //! @brief Variable selection criterion
+    int BRANCHING_VARIABLE_CRITERION;
+    //! @brief Branching variable selection user-function
+    SELECTION BRANCHING_USERFUNCTION;
+    //! @brief Maximum depth for strong branching interruption
+    unsigned STRONG_BRANCHING_MAXDEPTH;
+    //! @brief Weighting (between 0 and 1) used to account for the left and right nodes in strong branching
+    double STRONG_BRANCHING_WEIGHT;
+    //! @brief Whether to base branching variable selection on scores
+    bool SCORE_BRANCHING_USE;
+    //! @brief Relative tolerance for branching variable selection based on scores
+    double SCORE_BRANCHING_RELTOL;
+    //! @brief Absolute tolerance for branching variable selection based on scores
+    double SCORE_BRANCHING_ABSTOL;
+    //! @brief Maximal size of branching variable selection based on scores
+    unsigned SCORE_BRANCHING_MAXSIZE;
     //! @brief Display option
     int DISPLAY;
     //! @brief Maximum CPU time limit
-    double MAX_CPU_TIME;
+    double MAX_CPUTIME;
     //! @brief Maximum number of nodes (0 for no limit)
     unsigned MAX_NODES;
-    //! @brief Infinite
-    double INF;
   } options;
 
   //! @brief SBB exceptions
@@ -198,18 +201,18 @@ public:
 
   //! @brief Apply branch-and-bound search
   std::pair<double,const double*> solve
-    ( const TYPE pb, const double*p0=0, const double*f0=0,
+    ( const t_OBJ pb, const double*p0=0, const double*f0=0,
       std::ostream&os=std::cout );
 
 protected:  
   //! @brief Problem type 
-  TYPE _pb;
+  t_OBJ _pb;
   //! @brief Exclusion set for branching variables (e.g. linear variables)
   std::set<unsigned> _exclude_vars;
   //! @brief SBB status
   STATUS _status;
   //! @brief Variable values at current incumbent
-  double *_p_inc;
+  std::vector<double> _p_inc;
   //! @brief Current incumbent value
   double _f_inc;
 
@@ -231,12 +234,12 @@ private:
   //! @brief Number of variables in optimization problem
   unsigned _np;
   //! @brief Variable bounds at root node
-  T *_P_root;
+  std::vector<T> _P_root;
   //! @brief Default branching variable set
   std::set<unsigned> _branch_set;
 
   //! @brief Variable bounds (temporary)
-  T *_P_tmp;
+  std::vector<T> _P_tmp;
   //! @brief Current node index
   unsigned _node_index;
   //! @brief Index of node where current incumbent was found
@@ -272,12 +275,11 @@ private:
   std::ostringstream _odisp;
 
   //! @brief Erase stored nodes
-  void _clean_stack();
+  void _clean_stack
+    ();
   //! @brief Reinitialize variables, incumbent, counters, time, etc.
   void _restart
-    ( const double*p0, const double*f0 );
-  //! @brief Default set of branching variables
-  void _branching_variable_set();
+    ();
 
   //! @brief Lower bound given node
   NODESTAT _lower_bound
@@ -294,7 +296,7 @@ private:
     ( SBBNode<T>*pNode );
   //! @brief Try and update incumbent
   bool _update_incumbent
-    ( const double fINC, const double*pINC );
+    ( const double fINC, const std::vector<double>&pINC );
 
   //! @brief Apply preprocessing to given node
   NODESTAT _preprocess
@@ -305,9 +307,15 @@ private:
   //! @brief Branch current node and create subdomains
   NODESTAT _branch_node
     ( SBBNode<T>*pNode );
+  //! @brief Default set of branching variables
+  void _branching_variable_set
+    ( const SBBNode<T>*pNode );
+  //! @brief Subset of branching variables based on scores
+  void _branching_score_subset
+    ( const SBBNode<T>*pNode );
   //! @brief Selects the branching variable for given node
   std::pair<unsigned, double> _select_branching_variable
-    ( SBBNode<T>*pNode, const std::set<unsigned>&set_branch );
+    ( SBBNode<T>*pNode );
   //! @brief Apply strong branching for branching variable selection
   std::pair<unsigned, double> _strong_branching
     ( SBBNode<T>*pNode, const std::set<unsigned>&set_branch );
@@ -317,9 +325,6 @@ private:
   //! @brief Partition branching variable domain for given node
   std::pair<const T, const T> _partition_variable_domain
     ( SBBNode<T>*pNode, const unsigned ip ) const;
-  //! @brief Determine whether using pseudocost for branching is reliable
-  bool _reliable_pseudocost
-    ( SBBNode<T>*pNode, const std::set<unsigned>&set_branch );
 
   //! @brief Test entire SBB tree for fathoming by value dominance
   void _update_tree();
@@ -376,12 +381,28 @@ public:
   //! @brief Retreive node iteration
   unsigned iter() const
     { return _iter; }
+  //! @brief Retreive/set pointer to user data
+  void*& data()
+    { return _data; }
+  //! @brief Retreive/set node dependent variables
+  std::set<unsigned>& depend()
+    { return _depend; }
+  //! @brief Retreive node dependent variables
+  const std::set<unsigned>& depend() const
+    { return _depend; }
+  //! @brief Retreive/set node branching scores
+  std::map<unsigned,double>& scores()
+    { return _scores; }
+  //! @brief Retreive node branching scores
+  const std::map<unsigned,double>& scores() const
+    { return _scores; }
+
   //! @brief Retreive current lower bound point
   double pLB
     ( const unsigned ip ) const
     { assert( ip < _pSBB->_np ); return _LB_var[ip]; }
   //! @brief Retreive current upper bound point
-  const double* pLB() const
+  const std::vector<double>& pLB() const
     { return _LB_var; }
   //! @brief Retreive current lower bound value
   double& fLB()
@@ -393,7 +414,7 @@ public:
     ( const unsigned ip ) const
     { assert( ip < _pSBB->_np ); return _UB_var[ip]; }
   //! @brief Retreive current upper bound point
-  const double* pUB() const
+  const std::vector<double>& pUB() const
     { return _UB_var; }
   //! @brief Retreive current upper bound value
   double& fUB()
@@ -410,68 +431,60 @@ public:
     ( const unsigned ip )
     { assert( ip < _pSBB->_np ); return _P[ip]; }
   //! @brief Retreive pointer to variable bounds
-  const T* P() const
+  const std::vector<T>& P() const
     { return _P; }
-  //! @brief Retreive/set pseudocost for variable <a>ip</a>
-  std::pair<unsigned,double>& pc_var
-    ( const unsigned ip )
-    { assert( ip < 2*_pSBB->_np ); return _pc_var[ip]; }
-  //! @brief Retreive variable pseudocosts
-  const std::pair<unsigned,double>* pc_var() const
-    { return _pc_var; }
+  //! @brief Retreive/set pointer to variable bounds
+  std::vector<T>& P()
+    { return _P; }
+
   //! @brief Retreive/set node type (ROOT/LEFT/RIGHT)
   typename SBB<T>::NODETYPE& type()
     { return _type; }
   //! @brief Retreive/set parent branching variable and range
   std::pair<unsigned,T>& parent()
     { return _parent; }
-  //! @brief Set strong branch status to true
-  void strongbranch()
-    { _strongbranch = true; }
+  //! @brief Retreive/set strong branch status to true
+  bool& strongbranch()
+    { return _strongbranch; }
 
   //! @brief Public constructor (for root node)
   SBBNode
-    ( SBB<T>*pSBB, const T*P, const double*p0=0,
+    ( SBB<T>*pSBB, const std::vector<T>&P, const double*p0=0,
       const unsigned index=1, const unsigned iter=0 );
 
   //! @brief Public constructor (for regular node)
-  SBBNode
-    ( SBB<T>*pSBB, const T*P, const double strength,
-      const unsigned index, const unsigned depth,
-      const unsigned iter, const typename SBB<T>::NODETYPE type,
-      const std::pair<unsigned,T> parent,
-      const std::pair<unsigned,double>* pc_var );
+  template <typename U> SBBNode
+    ( SBB<T>*pSBB, const std::vector<T>&P, const double strength,
+      const unsigned index, const unsigned depth, const unsigned iter,
+      const typename SBB<T>::NODETYPE type, const std::pair<unsigned,T> parent,
+      const std::set<unsigned>&depend, U*data );
 
   //! @brief Destructor
   ~SBBNode();
 
   //! @brief Lower bounding
   typename SBB<T>::STATUS lower_bound
-    ( const double*var, const double inc );
+    ( const std::vector<double>&var, const double inc );
 
   //! @brief Preprocessing
   typename SBB<T>::STATUS preprocess
-    ( double*var, double&obj, const double inc );
+    ( std::vector<double>&var, double&obj, const double inc );
 
   //! @brief Postprocessing
   typename SBB<T>::STATUS postprocess
-    ( double*var, double&obj, const double inc );
+    ( std::vector<double>&var, double&obj, const double inc );
 
   //! @brief Upper bounding
   typename SBB<T>::STATUS upper_bound
-    ( const double*var, const double inc );
+    ( const std::vector<double>&var, const double inc );
 
   //! @brief Feasibility test at <a>var</a>
   typename SBB<T>::STATUS test_feasibility
-    ( double*var, double&obj, const double inc );
+    ( std::vector<double>&var, double&obj, const double inc );
 
   //! @brief Check if the point <a>val</a> is at a bound
   bool at_bound
     ( const double val, const unsigned ip, const double rtol ) const;
-
-  //! @brief Update the pseudocost of the current branching variable
-  void update_pseudocost
-    ( const typename SBB<T>::TYPE pb );
 
 private:
   //! @brief Private default constructor
@@ -490,27 +503,31 @@ private:
   //! @brief Node type (ROOT/LEFT/RIGHT)
   typename SBB<T>::NODETYPE _type;
 
+  //! @brief Subset of dependent variables in node
+  std::set<unsigned> _depend;
+  //! @brief Map of variables with scores for branching variable selection
+  std::map<unsigned,double> _scores;
   //! @brief Parent node branching variable and range
   std::pair<unsigned,T> _parent;
   //! @brief Whether or not strong branching has been applied
   bool _strongbranch;
-  //! @brief Variable pseudocosts
-  std::pair<unsigned,double> *_pc_var;
+  //! @brief Pointer to user data
+  void* _data;
 
   //! @brief Variable bounds
-  T *_P;
+  std::vector<T> _P;
   //! @brief Backup variable bounds (for domain reduction)
-  T *_P0;
+  std::vector<T> _P0;
 
   //! @brief Upper bound value
   double _UB_obj;
   //! @brief upper bound point
-  double *_UB_var;
+  std::vector<double> _UB_var;
 
   //! @brief Lower bound value
   double _LB_obj;
   //! @brief Lower bound point
-  double *_LB_var;
+  std::vector<double> _LB_var;
 };
 
 //! @brief C++ structure for comparing SBB Nodes
@@ -535,37 +552,26 @@ SBB<T>::variables
 {
   if( !np || !P ){
     _np = 0;
-    delete[] _P_root; _P_root = 0;
-    delete[] _P_tmp;  _P_tmp = 0;
-    delete[] _p_inc;  _p_inc = 0;
+    _P_root.clear();
     return;
   }
   
-  if( _np != np ){
-    delete[] _P_root;
-    delete[] _P_tmp;
-    delete[] _p_inc;
-    _np = np;
-    _P_root = new T[_np];
-    _P_tmp = new T[_np];
-    _p_inc = 0;
-  } 
-  for( unsigned i=0; i<_np; i++ ) _P_root[i] = P[i];
+  _np = np;
+  _P_root.assign( P, P+_np );
 
   if( &exclude == &_exclude_vars ) return;
   _exclude_vars = exclude;
-
   return;
 }
 
 template <typename T>
 inline std::pair< double, const double* >
 SBB<T>::solve
-( const TYPE pb, const double*p0, const double*f0, std::ostream&os )
+( const BASE_OPT::t_OBJ pb, const double*p0, const double*f0, std::ostream&os )
 {
   // Create and add root node to set _Nodes
   _pb = pb;
-  _restart( p0, f0 );
+  _restart();
   _display_init();
   _display( os );
   _Nodes.insert( new SBBNode<T>( this, _P_root, p0 ) );
@@ -575,7 +581,7 @@ SBB<T>::solve
 #endif
   
   // keep branch-and-bound going until set _Nodes is empty
-  for( _node_index = 1; !_Nodes.empty() && _tcur-_tstart < options.MAX_CPU_TIME
+  for( _node_index = 1; !_Nodes.empty() && _tcur-_tstart < options.MAX_CPUTIME
        && ( !options.MAX_NODES || _node_index <= options.MAX_NODES );
        _node_index++, _tcur=time() ){
 
@@ -584,9 +590,9 @@ SBB<T>::solve
     _display_add( (unsigned)_Nodes.size() );
     _display_add( time()-_tstart );
     switch( _pb ){
-    case MINIMIZE:
+    case MIN:
       _display_add( (*_Nodes.begin())->strength() ); break;
-    case MAXIMIZE:
+    case MAX:
       _display_add( -(*_Nodes.begin())->strength() ); break;
     }
     _display_add( _f_inc );
@@ -622,9 +628,9 @@ SBB<T>::solve
 
     // relaxation
     switch( _pb ){
-    case MINIMIZE:
+    case MIN:
       _REL_stat = _lower_bound( pNode, true ); break;
-    case MAXIMIZE:
+    case MAX:
       _REL_stat = _upper_bound( pNode, true ); break;
     }
     if( _REL_stat == FATHOM ){
@@ -644,9 +650,9 @@ SBB<T>::solve
 
     // tightening
     switch( _pb ){
-    case MINIMIZE:
+    case MIN:
       _ORI_stat = _upper_bound( pNode, false ); break;
-    case MAXIMIZE:
+    case MAX:
       _ORI_stat = _lower_bound( pNode, false ); break;
     }
     if( _ORI_stat == FATHOM ){
@@ -704,28 +710,18 @@ SBB<T>::solve
 
   _display_final();
   _display( os );
-  _status = (!_Nodes.empty()? FAILURE: (_p_inc? NORMAL: INFEASIBLE));
-  return std::make_pair( _f_inc, _p_inc );
+  _status = (!_Nodes.empty()? FAILURE: (_p_inc.empty()? INFEASIBLE: NORMAL));
+  return std::make_pair( _f_inc, _p_inc.empty()? 0: _p_inc.data() );
 }
 
 template <typename T>
 inline void
 SBB<T>::_restart
-( const double*p0, const double*f0 )
+()
 {
   _clean_stack();
-  _branching_variable_set();
-  
-  delete[] _p_inc; _p_inc = 0;
-  if( p0 && f0 ){
-    _p_inc = new double[_np];
-    for( unsigned ip=0; ip<_np; ip++ )
-      _p_inc[ip] = p0[ip]; 
-    _f_inc = *f0;
-  }
-  else
-    _f_inc = ( _pb==MINIMIZE? options.INF: -options.INF );
-
+  _p_inc.clear();
+  _f_inc = ( _pb==MIN? INF: -INF );
   _node_index = _node_inc = _node_cnt = _node_max = 0;
   _tstart = _tcur = time();
   _tUBD = _tLBD = 0;
@@ -741,18 +737,6 @@ SBB<T>::_clean_stack()
 }
 
 template <typename T>
-inline void
-SBB<T>::_branching_variable_set()
-{
-  _branch_set.clear();
-  for( unsigned ip=0; ip<_np; ip++ ){
-    if( _exclude_vars.empty() || _exclude_vars.find(ip)==_exclude_vars.end() )
-      _branch_set.insert( ip );
-  }
-  if( _branch_set.empty() ) throw Exceptions( Exceptions::BRANCH );
-}
-
-template <typename T>
 inline typename SBB<T>::NODESTAT
 SBB<T>::_lower_bound
 ( SBBNode<T>*pNode, const bool relaxed, const bool strongbranching )
@@ -763,17 +747,12 @@ SBB<T>::_lower_bound
 
     case INFEASIBLE:
       if( !strongbranching ) _display_add( "INFEASIBLE" );
-      if( relaxed ){
-        pNode->fLB() = options.INF;
-        pNode->update_pseudocost( _pb );
-      }
+      if( relaxed ) pNode->fLB() = INF;
       stat = FATHOM; break;
       
     case NORMAL:{
       if( !strongbranching ) _display_add( pNode->fLB() );
       if( relaxed ){
-        // update variable pseudo-cost
-        pNode->update_pseudocost( _pb );
         // fathom by value dominance?
         if( _fathom_by_dominance( pNode ) )
           { stat = FATHOM; break; }
@@ -793,7 +772,7 @@ SBB<T>::_lower_bound
     case FAILURE:
       if( !strongbranching ) _display_add( "FAILURE" );
       // retain node (to be sure...)
-      pNode->fLB() = -options.INF;
+      pNode->fLB() = -INF;
       stat = NOTUPDATED; break;
 
     case FATAL: default:
@@ -815,17 +794,12 @@ SBB<T>::_upper_bound
 
     case INFEASIBLE:
       if( !strongbranching ) _display_add( "INFEASIBLE" );
-      if( relaxed ){
-        pNode->fUB() = -options.INF;
-        pNode->update_pseudocost( _pb );
-      }
+      if( relaxed ) pNode->fUB() = -INF;
       stat = FATHOM; break;
       
     case NORMAL:{
       if( !strongbranching ) _display_add( pNode->fUB() );
       if( relaxed ){
-        // update variable pseudo-cost
-        pNode->update_pseudocost( _pb );
         // fathom by value dominance?
         if( _fathom_by_dominance( pNode ) )
           { stat = FATHOM; break; }
@@ -844,7 +818,7 @@ SBB<T>::_upper_bound
     case FAILURE:
       if( !strongbranching ) _display_add( "FAILURE" );
       // retain node (to be sure...)
-      pNode->fUB() = options.INF;
+      pNode->fUB() = INF;
       stat = NOTUPDATED; break;
 
     case FATAL: default:
@@ -861,9 +835,9 @@ SBB<T>::_feasible_relax
 ( SBBNode<T>*pNode )
 {
   switch( _pb ){
-  case MINIMIZE:
+  case MIN:
     return pNode->test_feasibility( pNode->_LB_var, pNode->_UB_obj, _f_inc );
-  case MAXIMIZE: default:
+  case MAX: default:
     return pNode->test_feasibility( pNode->_UB_var, pNode->_LB_obj, _f_inc );
   }
 }
@@ -876,15 +850,13 @@ SBB<T>::_fathom_by_dominance
   double f_eff = _f_inc;
   switch( _pb ){
 
-  case MINIMIZE:
-    f_eff -= std::max( options.ABSOLUTE_TOLERANCE,
-      std::fabs(_f_inc)*options.RELATIVE_TOLERANCE );
+  case MIN:
+    f_eff -= std::max( options.STOPPING_ABSTOL, std::fabs(_f_inc)*options.STOPPING_RELTOL );
     // try and fathom current node by value dominance
     return( pNode->fLB() > f_eff ? true: false );
     
-  case MAXIMIZE: default:
-    f_eff += std::max( options.ABSOLUTE_TOLERANCE,
-      std::fabs(_f_inc)*options.RELATIVE_TOLERANCE );
+  case MAX: default:
+    f_eff += std::max( options.STOPPING_ABSTOL, std::fabs(_f_inc)*options.STOPPING_RELTOL );
     // try and fathom current node by value dominance
     return( pNode->fUB() < f_eff ? true: false );
   }
@@ -893,103 +865,119 @@ SBB<T>::_fathom_by_dominance
 template <typename T>
 inline bool
 SBB<T>::_update_incumbent
-( const double fINC, const double*pINC )
+( const double fINC, const std::vector<double>&pINC )
 {
   // test incumbent w.r.t current solution point
   switch( _pb ){
-  case MINIMIZE: if( fINC >= _f_inc ) return false; break;
-  case MAXIMIZE: if( fINC <= _f_inc ) return false; break;
+   case MIN: if( fINC >= _f_inc ) return false; break;
+   case MAX: if( fINC <= _f_inc ) return false; break;
   }
 
   _f_inc = fINC;
-  if( !_p_inc ) _p_inc = new double[_np];
-  for( unsigned ip=0; ip<_np; ip++ ) _p_inc[ip] = pINC[ip];//Node->pLB(ip);
+  _p_inc = pINC;
   _node_inc = _node_index;
   return true;
 }
 
 template <typename T>
-inline std::pair<unsigned, double>
-SBB<T>::_select_branching_variable
-( SBBNode<T>*pNode, const std::set<unsigned>&set_branch )
+inline void
+SBB<T>::_branching_variable_set
+( const SBBNode<T>*pNode )
 {
-  std::pair<unsigned, double> branchsel( _np, -options.INF );
-  
-  switch( options.BRANCHING_VARIABLE_CRITERION ){
-  // Branching based on pseudocosts
-  case Options::RELIAB:
-    if( _reliable_pseudocost( pNode, set_branch ) ){
-      std::set<unsigned>::iterator it = set_branch.begin();
-#ifdef DEBUG__SBB_BRANCHINGVAR
-      std::cout << "*** SCORES";
-#endif
-      for( ; it != set_branch.end(); ++it ){
-        std::pair<const T, const T> partition
-          = _partition_variable_domain( pNode, *it );
-#ifdef USE__SBB_PSEUDOCOST_FILTER
-        double score = _score_branching( Op<T>::diam( partition.second )
-          * pNode->pc_var()[*it].second, Op<T>::diam( partition.first )
-          * pNode->pc_var()[*it+_np].second );
-#else
-        double score = _score_branching( Op<T>::diam( partition.second )
-          * pNode->pc_var()[*it].second / pNode->pc_var()[*it].first,
-                                         Op<T>::diam( partition.first )
-          * pNode->pc_var()[*it+_np].second / pNode->pc_var()[*it+_np].first );
-#endif
-#ifdef DEBUG__SBB_BRANCHINGVAR
-        std::cout << "   " << *it << ": " << score;
-#endif
-        if( score > branchsel.second ) branchsel = std::make_pair( *it, score );
-      }
-#ifdef DEBUG__SBB_BRANCHINGVAR
-      std::cout << std::endl;
-#endif
-      break;
-    }
-    // Unreliable pseudocosts - Use strong branching
-    branchsel = _strong_branching( pNode, set_branch );
-    if( _REL_stat == ABORT || branchsel.first < _np ) break;
-    // No break - use RGREL criterion in case strong branching failed
-
-  // Branching based on relative range diameter
-  case Options::RGREL:{
-    std::set<unsigned>::iterator it = set_branch.begin();
-    for( ; it != set_branch.end(); ++it ){
-      double score = Op<T>::diam( pNode->P(*it) )
-                   / Op<T>::diam( _P_root[*it] );
-      if( score > branchsel.second )
-        branchsel = std::make_pair( *it, score );
-    }
-    break;
-   }
-  // Branching based on absolute range diameter
-  case Options::RGABS:{
-    std::set<unsigned>::iterator it = set_branch.begin();
-    for( ; it != set_branch.end(); ++it ){
-      double score = Op<T>::diam( pNode->P(*it) );
-      if( score > branchsel.second )
-        branchsel = std::make_pair( *it, score );
-    }
-    break;
-   }
+  _branch_set.clear();
+  typename Options::SELECTION psel = options.BRANCHING_USERFUNCTION;
+  std::set<unsigned> ssel;
+  if( psel ) ssel = psel( pNode );
+  for( unsigned ip=0; ip<_np; ip++ ){
+    // Allow branching on var #ip if part of the user selection (if any)
+    if( psel && ssel.find(ip) == ssel.end() ) continue;
+    // Allow branching on var #ip if not excluded (_exclude_vars)
+    // or not a dependent in current node (_pNode->depend())
+    if( _exclude_vars.find(ip) != _exclude_vars.end()
+     || pNode->depend().find(ip) != pNode->depend().end() )
+      continue;
+    // Add variable index to branching set
+    _branch_set.insert( ip );
   }
 
-  return branchsel;
+  // Preselect variables based on scores
+  _branching_score_subset( pNode );
+
+  // Interrupt if branch set is empty - internal error...
+  if( _branch_set.empty() ) throw Exceptions( Exceptions::BRANCH );
 }
 
 template <typename T>
-inline bool
-SBB<T>::_reliable_pseudocost
-( SBBNode<T>*pNode, const std::set<unsigned>&set_branch )
+inline void
+SBB<T>::_branching_score_subset
+( const SBBNode<T>*pNode )
 {
-  std::set<unsigned>::iterator it = set_branch.begin();
-  for( ; it != set_branch.end(); ++it ){
-    if( !pNode->pc_var()[*it].first || pNode->pc_var()[*it].first
-      < options.BRANCHING_RELIABILITY_THRESHOLD ) return false;
-    if( !pNode->pc_var()[_np+*it].first || pNode->pc_var()[_np+*it].first
-      < options.BRANCHING_RELIABILITY_THRESHOLD ) return false;
+  if( !options.SCORE_BRANCHING_USE || pNode->scores().empty() ) return;
+
+  // Create map of scores
+  struct lt_scores{
+    bool operator()
+      ( const std::pair<unsigned,double>&el1, const std::pair<unsigned,double>el2 )
+      { return el1.second < el2.second; }
+  };
+  std::multiset< std::pair<unsigned,double>, lt_scores > allscores;
+  for( auto it = _branch_set.begin(); it != _branch_set.end(); ++it ){
+    auto its = pNode->scores().find( *it );
+    if( its == pNode->scores().end() ) continue;
+    allscores.insert( *its );
+#ifdef DEBUG__SBB_SCOREBRANCHING
+    std::cout << "Score variable #" << its->first << ": " << its->second << std::endl;
+    //{ int dum; std::cout << "PAUSED"; std::cin >> dum; }
+#endif
   }
-  return true;
+
+  // Keep best candidates based on map of scores
+  for( auto it=allscores.begin(); it!=allscores.end(); ++it ){
+    if( it->second >= allscores.rbegin()->second*(1.-options.SCORE_BRANCHING_RELTOL)
+                     -options.SCORE_BRANCHING_ABSTOL
+     && ( !options.SCORE_BRANCHING_MAXSIZE
+       || _branch_set.size() < options.SCORE_BRANCHING_MAXSIZE ) ) break;
+    _branch_set.erase( it->first );
+  }
+#ifdef MC__SBB_SHOW__SCOREBRANCHING
+  std::cout << "Branching variable score subset: {";
+  for( auto it = _branch_set.begin(); it != _branch_set.end(); ++it )
+    std::cout << " " << *it << " ";
+  std:: cout << "}\n";
+  { int dum; std::cout << "PAUSED"; std::cin >> dum; }
+#endif
+}
+
+template <typename T>
+inline std::pair<unsigned, double>
+SBB<T>::_select_branching_variable
+( SBBNode<T>*pNode )
+{
+  // Strong branching strategy
+  if( pNode->depth() < options.STRONG_BRANCHING_MAXDEPTH && _branch_set.size() > 1 )
+   return _strong_branching( pNode, _branch_set );
+
+  std::pair<unsigned, double> branchsel( _np, -1. ); // <- Can be any negative number
+  switch( options.BRANCHING_VARIABLE_CRITERION ){
+
+   // Branching based on relative range diameter
+   case Options::RGREL:
+    for( auto it = _branch_set.begin(); it != _branch_set.end(); ++it ){
+      double score = Op<T>::diam( pNode->P(*it) ) / Op<T>::diam( _P_root[*it] );
+      if( score > branchsel.second ) branchsel = std::make_pair( *it, score );
+    }
+    break;
+
+   // Branching based on absolute range diameter
+   case Options::RGABS:
+    for( auto it = _branch_set.begin(); it != _branch_set.end(); ++it ){
+      double score = Op<T>::diam( pNode->P(*it) );
+      if( score > branchsel.second ) branchsel = std::make_pair( *it, score );
+    }
+    break;
+  }
+
+  return branchsel;
 }
 
 template <typename T>
@@ -1003,8 +991,8 @@ const
   switch( options.BRANCHING_STRATEGY ){
   case Options::OMEGA:
     // Branch at incumbent if interior to current variable range
-    if( _p_inc && !pNode->at_bound(_p_inc[ip_branch], ip_branch,
-      options.BRANCHING_BOUND_THRESHOLD) ){
+    if( !_p_inc.empty()
+     && !pNode->at_bound(_p_inc[ip_branch], ip_branch, options.BRANCHING_BOUND_THRESHOLD) ){
       partition.first = mc::Op<T>::l(pNode->P(ip_branch)) + Op<T>::zeroone()
         *( _p_inc[ip_branch] - mc::Op<T>::l(pNode->P(ip_branch)) );
       partition.second = mc::Op<T>::u(pNode->P(ip_branch)) + Op<T>::zeroone()
@@ -1013,18 +1001,16 @@ const
     }
     // Otherwise branch at relaxation solution point if available +
     // interior to current variable range
-    if( _pb == MINIMIZE && pNode->fLB() > -options.INF
-     && !pNode->at_bound(pNode->pLB(ip_branch), ip_branch,
-     options.BRANCHING_BOUND_THRESHOLD) ){ 
+    if( _pb == MIN && pNode->fLB() > -INF
+     && !pNode->at_bound(pNode->pLB(ip_branch), ip_branch, options.BRANCHING_BOUND_THRESHOLD) ){ 
       partition.first = mc::Op<T>::l(pNode->P(ip_branch)) + Op<T>::zeroone()
         *( pNode->pLB(ip_branch) - mc::Op<T>::l(pNode->P(ip_branch)) );
       partition.second = mc::Op<T>::u(pNode->P(ip_branch)) + Op<T>::zeroone()
         *( pNode->pLB(ip_branch) - mc::Op<T>::u(pNode->P(ip_branch)) );
       break;
     }
-    else if( _pb == MAXIMIZE && pNode->fUB() < options.INF
-     && !pNode->at_bound(pNode->pUB(ip_branch), ip_branch,
-     options.BRANCHING_BOUND_THRESHOLD) ){ 
+    else if( _pb == MAX && pNode->fUB() < INF
+     && !pNode->at_bound(pNode->pUB(ip_branch), ip_branch, options.BRANCHING_BOUND_THRESHOLD) ){ 
       partition.first = mc::Op<T>::l(pNode->P(ip_branch)) + Op<T>::zeroone()
         *( pNode->pUB(ip_branch) - mc::Op<T>::l(pNode->P(ip_branch)) );
       partition.second = mc::Op<T>::u(pNode->P(ip_branch)) + Op<T>::zeroone()
@@ -1049,36 +1035,37 @@ inline typename SBB<T>::NODESTAT
 SBB<T>::_branch_node
 ( SBBNode<T>*pNode )
 {
+  // Branching set update
+  _branching_variable_set( pNode );
+
   // Branching variable selection
-  const unsigned ip_branch = _select_branching_variable( pNode,
-    _branch_set ).first;
+  const unsigned ip_branch = _select_branching_variable( pNode ).first;
   if( _REL_stat == ABORT ) return ABORT;
 
   // Partitionning
-  std::pair<const T, const T> partition = _partition_variable_domain(
-    pNode, ip_branch );
-  for( unsigned ip=0; ip<_np; ip++ ) _P_tmp[ip] = pNode->P(ip);
+  std::pair<const T, const T> partition = _partition_variable_domain( pNode, ip_branch );
+  _P_tmp = pNode->P();
   _P_tmp[ip_branch] = partition.first;
   switch( _pb ){
-  case MINIMIZE:
+  case MIN:
     _Nodes.insert( new SBBNode<T>( this, _P_tmp, pNode->fLB(), ++_node_cnt,
       pNode->depth()+1, _node_index, LEFT, std::make_pair(ip_branch,
-      pNode->P(ip_branch)), pNode->pc_var() ) ); break;
-  case MAXIMIZE:
+      pNode->P(ip_branch)), pNode->depend(), pNode->data() ) ); break;
+  case MAX:
     _Nodes.insert( new SBBNode<T>( this, _P_tmp, -pNode->fUB(), ++_node_cnt,
       pNode->depth()+1, _node_index, LEFT, std::make_pair(ip_branch,
-      pNode->P(ip_branch)), pNode->pc_var() ) ); break;
+      pNode->P(ip_branch)), pNode->depend(), pNode->data() ) ); break;
   }
   _P_tmp[ip_branch] = partition.second;
   switch( _pb ){
-  case MINIMIZE:
+  case MIN:
     _Nodes.insert( new SBBNode<T>( this, _P_tmp, pNode->fLB(), ++_node_cnt,
       pNode->depth()+1, _node_index, RIGHT, std::make_pair(ip_branch,
-      pNode->P(ip_branch)), pNode->pc_var() ) ); break;
-  case MAXIMIZE:
+      pNode->P(ip_branch)), pNode->depend(), pNode->data() ) ); break;
+  case MAX:
     _Nodes.insert( new SBBNode<T>( this, _P_tmp, -pNode->fUB(), ++_node_cnt,
       pNode->depth()+1, _node_index, RIGHT, std::make_pair(ip_branch,
-      pNode->P(ip_branch)), pNode->pc_var() ) ); break;
+      pNode->P(ip_branch)), pNode->depend(), pNode->data() ) ); break;
   }
 
   // Display
@@ -1094,8 +1081,8 @@ inline double
 SBB<T>::_score_branching
 ( const double fLEFT, const double fRIGHT ) const
 {
-  return (1-options.BRANCHING_SCORE_FACTOR) * fmin(fLEFT,fRIGHT)
-          + options.BRANCHING_SCORE_FACTOR  * fmax(fLEFT,fRIGHT);
+  return (1-options.STRONG_BRANCHING_WEIGHT) * fmin(fLEFT,fRIGHT)
+          + options.STRONG_BRANCHING_WEIGHT  * fmax(fLEFT,fRIGHT);
 }
 
 template <typename T>
@@ -1103,69 +1090,69 @@ inline std::pair<unsigned, double>
 SBB<T>::_strong_branching
 ( SBBNode<T>*pNode, const std::set<unsigned>&set_branch )
 {
-  std::pair<unsigned, double> branchsel( _np, -options.INF );
-  if( !options.BRANCHING_RELIABILITY_THRESHOLD ) return branchsel;
+  std::pair<unsigned, double> branchsel( _np, -INF );
 
   // Create child subnode
   //for( unsigned ip=0; ip<_np; ip++ ) _P_tmp[ip] = pNode->P(ip);
   SBBNode<T>* pSubnode = 0;
   switch( _pb ){
-  case MINIMIZE:
-    if( pNode->fLB() == -options.INF ) return branchsel;
+  case MIN:
+    //if( pNode->fLB() == -INF ) return branchsel; // WHY???
     pSubnode = new SBBNode<T>( this, pNode->P(), pNode->fLB(), pNode->index(),
-      pNode->depth()+1, _node_index, LEFT, std::make_pair(0,pNode->P(0)), pNode->pc_var() ); break;
-  case MAXIMIZE:
-    if( pNode->fUB() == options.INF ) return branchsel;
+      pNode->depth()+1, _node_index, LEFT, std::make_pair(0,pNode->P(0)),
+      pNode->depend(), pNode->data() ); break;
+  case MAX:
+    //if( pNode->fUB() == INF ) return branchsel;
     pSubnode = new SBBNode<T>( this, pNode->P(), -pNode->fUB(), pNode->index(),
-      pNode->depth()+1, _node_index, LEFT, std::make_pair(0,pNode->P(0)), pNode->pc_var() ); break;
+      pNode->depth()+1, _node_index, LEFT, std::make_pair(0,pNode->P(0)),
+      pNode->depend(), pNode->data() ); break;
   }
   
   // Repeat for all variables in branching set
-#ifdef DEBUG__SBB_STRONGBRANCHING
+#ifdef MC__SBB_STRONGBRANCHING_SHOW
   std::cout << "*** SCORES";
 #endif
   double fLEFT, fRIGHT, fSCORE;
-  std::set<unsigned>::iterator it = set_branch.begin();
-  for( ; it != set_branch.end(); ++it ){
+  for( auto it = set_branch.begin(); it != set_branch.end(); ++it ){
 
     // Simulate partitionning
+    pSubnode->strongbranch() = true;
     pSubnode->parent() = std::make_pair( *it, pNode->P(*it) );
-    const std::pair<const T, const T> partition
-      = _partition_variable_domain( pNode, *it );
+    const std::pair<const T, const T> partition = _partition_variable_domain( pNode, *it );
 
     // Relax left partition
     pSubnode->P(*it) = partition.first;
     pSubnode->type() = LEFT;
     switch( _pb ){
-    case MINIMIZE:
+    case MIN:
       _REL_stat = _lower_bound( pSubnode, true, true );
       fLEFT = pSubnode->fLB(); break;
-    case MAXIMIZE: default:
+    case MAX: default:
       _REL_stat = _upper_bound( pSubnode, true, true );
       fLEFT = -pSubnode->fUB(); break;
     }
     if( _REL_stat == ABORT ) break;
     // Left partition failed
-    //if( fLEFT == -options.INF ) continue;
+    //if( fLEFT == -INF ) continue;
  
     // Relax right partition
     pSubnode->P(*it) = partition.second;
     pSubnode->type() = RIGHT;
     switch( _pb ){
-    case MINIMIZE:
+    case MIN:
       _REL_stat = _lower_bound( pSubnode, true, true );
       fRIGHT = pSubnode->fLB(); break;
-    case MAXIMIZE: default:
+    case MAX: default:
       _REL_stat = _upper_bound( pSubnode, true, true );
       fRIGHT = -pSubnode->fUB(); break;
     }
     if( _REL_stat == ABORT ) break;
     // Right partition failed
-    //if( fRIGHT == -options.INF ) continue;
+    //if( fRIGHT == -INF ) continue;
 
     // Score current variable and compare
     fSCORE = _score_branching( fLEFT, fRIGHT );
-#ifdef DEBUG__SBB_STRONGBRANCHING
+#ifdef MC__SBB_STRONGBRANCHING_SHOW
     std::cout << "   " << *it << ": " << fSCORE
               << " (" << fLEFT << "," << fRIGHT << ")";
 #endif
@@ -1173,18 +1160,11 @@ SBB<T>::_strong_branching
       branchsel = std::make_pair( *it, fSCORE );
 
     // Reset variable bounds
-    for( unsigned ip=0; ip<_np; ip++ )
-      pSubnode->P(ip) = pNode->P(ip);
+    pSubnode->P() = pNode->P();
   }
-#ifdef DEBUG__SBB_STRONGBRANCHING
+#ifdef MC__SBB_STRONGBRANCHING_SHOW
   std::cout << std::endl;
 #endif
-
-  // Update variable pseudocosts
-  for( unsigned ip=0; ip<2*_np; ip++ )
-    pNode->pc_var(ip) = pSubnode->pc_var()[ip];
-  delete pSubnode;
-  pNode->strongbranch();
 
   return branchsel;
 }
@@ -1194,7 +1174,7 @@ inline typename SBB<T>::NODESTAT
 SBB<T>::_preprocess
 ( SBBNode<T>*pNode )
 {
-  switch( _pb==MINIMIZE?
+  switch( _pb==MIN?
           pNode->preprocess( pNode->_LB_var, pNode->_LB_obj, _f_inc ):
           pNode->preprocess( pNode->_UB_var, pNode->_UB_obj, _f_inc ) ){
   case INFEASIBLE:
@@ -1211,7 +1191,7 @@ SBB<T>::_postprocess
 {
   if( _fathom_by_dominance( pNode ) ) return FATHOM;
   
-  switch( _pb==MINIMIZE?
+  switch( _pb==MIN?
           pNode->postprocess( pNode->_LB_var, pNode->_LB_obj, _f_inc ):
           pNode->postprocess( pNode->_UB_var, pNode->_UB_obj, _f_inc ) ){
   case INFEASIBLE:
@@ -1285,8 +1265,8 @@ SBB<T>::_display_init()
   	 << std::setw(_DPREC+8) << "RELAX "
   	 << std::setw(_DPREC+8) << "INC   "
   	 << std::setw(_IPREC) << "PARENT"
-  	 << std::setw(_DPREC+8) << ( _pb==MINIMIZE? "LBD   ": "UBD   " )
-  	 << std::setw(_DPREC+8) << ( _pb==MINIMIZE? "UBD   ": "LBD   " )
+  	 << std::setw(_DPREC+8) << ( _pb==MIN? "LBD   ": "UBD   " )
+  	 << std::setw(_DPREC+8) << ( _pb==MIN? "UBD   ": "LBD   " )
   	 << std::setw(_DPREC+8) << "ACTION  "
   	 << std::endl;
   
@@ -1326,7 +1306,7 @@ SBB<T>::_display_final()
 {
   if( options.DISPLAY <= 0 ) return;
   // Solution found within allowed time?
-  if( _tcur-_tstart < options.MAX_CPU_TIME
+  if( _tcur-_tstart < options.MAX_CPUTIME
     && ( !options.MAX_NODES || _node_index <= options.MAX_NODES ) )
     _odisp << std::endl << "#  NORMAL TERMINATION: ";
   else
@@ -1338,9 +1318,8 @@ SBB<T>::_display_final()
          << std::endl;
 
   // No feasible solution found
-  if( !_p_inc ){
+  if( _p_inc.empty() )
     _odisp << "#  NO FEASIBLE SOLUTION FOUND" << std::endl;
-  }
 
   // Feasible solution found
   else{
@@ -1385,25 +1364,10 @@ SBB<T>::Options::display
   // Display SBB Options
   out << std::setw(60) << "  ABSOLUTE CONVERGENCE TOLERANCE"
       << std::scientific << std::setprecision(1)
-      << ABSOLUTE_TOLERANCE << std::endl;
+      << STOPPING_ABSTOL << std::endl;
   out << std::setw(60) << "  RELATIVE CONVERGENCE TOLERANCE"
       << std::scientific << std::setprecision(1)
-      << RELATIVE_TOLERANCE << std::endl;
-  out << std::setw(60) << "  MAXIMUM NUMBER OF ITERATIONS";
-  switch( MAX_NODES ){
-  case 0:  out << "NO LIMIT\n"; break;
-  default: out << MAX_NODES << std::endl; break;
-  }
-  out << std::setw(60) << "  MAXIMUM CPU TIME (SEC)"
-      << std::scientific << std::setprecision(1)
-      << MAX_CPU_TIME << std::endl;
-  out << std::setw(60) << "  DISPLAY LEVEL"
-      << DISPLAY << std::endl;
-  out << std::setw(60) << "  INTERNAL VALUE FOR INFINITY"
-      << std::scientific << std::setprecision(1)
-      << INF << std::endl;
-  out << std::setw(60) << "  UPDATE ENTIRE TREE AFTER AN INCUMBENT IMPROVEMENT?"
-      << (TREE_REREDUCE?"Y\n":"N\n");
+      << STOPPING_RELTOL << std::endl;
   out << std::setw(60) << "  BRANCHING STRATEGY FOR NODE PARTITIONING";
   switch( BRANCHING_STRATEGY ){
   case MIDPOINT: out << "MIDPOINT\n"; break;
@@ -1416,13 +1380,38 @@ SBB<T>::Options::display
   switch( BRANCHING_VARIABLE_CRITERION ){
   case RGREL:  out << "RGREL\n";  break;
   case RGABS:  out << "RGABS\n";  break;
-  case RELIAB: out << "RELIAB\n"; break;
   }
-  out << std::setw(60) << "  INITIALIZATION THRESHOLD IN RELIABILITY BRANCHING"
-      << BRANCHING_RELIABILITY_THRESHOLD << std::endl;
-  out << std::setw(60) << "  SCORE PARAMETER IN RELIABILITY BRANCHING"
-      << std::fixed << std::setprecision(2)
-      << BRANCHING_SCORE_FACTOR << std::endl;
+  out << std::setw(60) << "  USE SCORE BRANCHING";
+  switch( SCORE_BRANCHING_USE ){
+   case 0:  out << "N\n"; break;
+   default: out << "Y\n";
+            out << std::setw(60) << "  RELATIVE TOLERANCE FOR SCORE BRANCHING"
+                << std::scientific << std::setprecision(1)
+                << SCORE_BRANCHING_RELTOL << std::endl;
+            out << std::setw(60) << "  ABSOLUTE TOLERANCE FOR SCORE BRANCHING"
+                << std::scientific << std::setprecision(1)
+                << SCORE_BRANCHING_ABSTOL << std::endl; break;
+  }
+  out << std::setw(60) << "  MAXIMUM DEPTH FOR STRONG BRANCHING";
+  switch( STRONG_BRANCHING_MAXDEPTH ){
+   case 0:  out << "-\n"; break;
+   default: out << STRONG_BRANCHING_MAXDEPTH << std::endl;
+            out << std::setw(60) << "  CHILDREN NODE WEIGHT FOR STRONG BRANCHING"
+                << std::scientific << std::setprecision(1)
+                << STRONG_BRANCHING_WEIGHT << std::endl; break;
+  }
+  out << std::setw(60) << "  UPDATE ENTIRE TREE AFTER AN INCUMBENT IMPROVEMENT?"
+      << (TREE_REREDUCE?"Y\n":"N\n");
+  out << std::setw(60) << "  MAXIMUM ITERATION COUNT";
+  switch( MAX_NODES ){
+   case 0:  out << "NO LIMIT\n"; break;
+   default: out << MAX_NODES << std::endl; break;
+  }
+  out << std::setw(60) << "  MAXIMUM CPU TIME (SEC)"
+      << std::scientific << std::setprecision(1)
+      << MAX_CPUTIME << std::endl;
+  out << std::setw(60) << "  DISPLAY LEVEL"
+      << DISPLAY << std::endl;
 }
 
 template <typename T>
@@ -1521,122 +1510,85 @@ SBB<T>::_display_box
 template <typename T>
 inline
 SBBNode<T>::SBBNode
-( SBB<T>*pSBB, const T*P, const double*p0,
-  const unsigned index, const unsigned iter ):
-_pSBB( pSBB ), _strength( -_pSBB->options.INF ), _depth( 0 ),
-_index( index ), _iter( iter ), _type( SBB<T>::ROOT ),
-_parent( 0, T(0.) ), _strongbranch( false )
+( SBB<T>*pSBB, const std::vector<T>&P, const double*p0,
+  const unsigned index, const unsigned iter )
+: _pSBB( pSBB ), _strength( -_pSBB->INF ), _depth( 0 ),
+  _index( index ), _iter( iter ), _type( SBB<T>::ROOT ),
+  _parent( 0, T(0.) ), _strongbranch( false ), _data( 0 ),
+  _P( P ), _UB_obj( _pSBB->INF ), _UB_var( _pSBB->_np ),
+  _LB_obj( -_pSBB->INF ), _LB_var( _pSBB->_np ) 
 {
-  _P0 = new T[_pSBB->_np];
-  _P  = new T[_pSBB->_np];
-  for( unsigned i=0; i<_pSBB->_np; i++ ) _P[i] = P[i];
-  
-  _UB_obj = _pSBB->options.INF;
-  _UB_var = new double[_pSBB->_np];
-  _LB_obj = -_pSBB->options.INF;
-  _LB_var = new double[_pSBB->_np];
-  _pc_var = new std::pair<unsigned,double>[2*_pSBB->_np];
-  
-  // initial points and pseudocosts
-  for( unsigned i=0; i<_pSBB->_np; i++ ){
+  // Default initial points
+  for( unsigned i=0; i<_pSBB->_np; i++ )
     _LB_var[i] = _UB_var[i] = ( p0? p0[i]: mc::Op<T>::mid( P[i] ) );
-    _pc_var[i] = _pc_var[_pSBB->_np+i] = std::make_pair(0,0.);
-  }
 }
 
-template <typename T>
+template <typename T> template <typename U>
 inline
 SBBNode<T>::SBBNode
-( SBB<T>*pSBB, const T*P, const double strength,
-  const unsigned index, const unsigned depth,
-  const unsigned iter, const typename SBB<T>::NODETYPE type,
-  const std::pair<unsigned,T> parent,
-  const std::pair<unsigned,double>* pc_var ):
-_pSBB( pSBB ), _strength( strength ), _depth( depth ), _index( index ),
-_iter( iter ), _type( type ), _parent( parent ), _strongbranch( false )
+( SBB<T>*pSBB, const std::vector<T>&P, const double strength,
+  const unsigned index, const unsigned depth, const unsigned iter,
+  const typename SBB<T>::NODETYPE type, const std::pair<unsigned,T> parent,
+  const std::set<unsigned>&depend, U*data )
+: _pSBB( pSBB ), _strength( strength ), _depth( depth ), _index( index ),
+  _iter( iter ), _type( type ), _parent( parent ), _strongbranch( false ),
+  _data( data ), _P( P ), _UB_obj( _pSBB->INF ), _UB_var( _pSBB->_np ),
+  _LB_obj( -_pSBB->INF ), _LB_var( _pSBB->_np )
 {
-  _P0 = new T[_pSBB->_np];
-  _P  = new T[_pSBB->_np];
-  for( unsigned i=0; i<_pSBB->_np; i++ ) _P[i] = P[i];
-  
-  _UB_obj = _pSBB->options.INF;
-  _UB_var = new double[_pSBB->_np];
-  _LB_obj = -_pSBB->options.INF;
-  _LB_var = new double[_pSBB->_np];
-  _pc_var = new std::pair<unsigned,double>[2*_pSBB->_np];
-  
-  // initial points
-  for( unsigned i=0; i<_pSBB->_np; i++ ){
+  // Default initial points
+  for( unsigned i=0; i<_pSBB->_np; i++ )
     _LB_var[i] = _UB_var[i] = Op<T>::mid( P[i] );
-    _pc_var[i] = pc_var[i];
-    _pc_var[_pSBB->_np+i] = pc_var[_pSBB->_np+i];
-  }
 }
 
 template <typename T>
 inline
 SBBNode<T>::~SBBNode()
-{
-  delete[] _P0;
-  delete[] _P;
-  delete[] _UB_var;
-  delete[] _LB_var;
-  delete[] _pc_var;
-}
+{}
 
 template <typename T>
 inline typename SBB<T>::STATUS
 SBBNode<T>::lower_bound
-( const double*var, const double inc )
+( const std::vector<double>&var, const double inc )
 {
-  for( unsigned i=0; i<_pSBB->_np; i++ ){
-    _P0[i] = _P[i];
-    if( var ) _LB_var[i] = var[i]; // initial guess
-  }
-  return _pSBB->subproblems( SBB<T>::LOWERBD, _pSBB->_np, _P, _LB_var,
-    _LB_obj, inc );
+  _P0 = _P;
+  if( var.size() >= _pSBB->_np ) _LB_var = var; // initial guess
+  return _pSBB->subproblems( SBB<T>::LOWERBD, this, _LB_var, _LB_obj, inc );
 }
 
 template <typename T>
 inline typename SBB<T>::STATUS
 SBBNode<T>::preprocess
-( double*var, double&obj, const double inc )
+( std::vector<double>&var, double&obj, const double inc )
 {
-  for( unsigned i=0; i<_pSBB->_np; i++ ) _P0[i] = _P[i];
-  return _pSBB->subproblems( SBB<T>::PREPROC, _pSBB->_np, _P, var,
-    obj, inc );
+  _P0 = _P;
+  return _pSBB->subproblems( SBB<T>::PREPROC, this, var, obj, inc );
 }
 
 template <typename T>
 inline typename SBB<T>::STATUS
 SBBNode<T>::postprocess
-( double*var, double&obj, const double inc )
+( std::vector<double>&var, double&obj, const double inc )
 {
-  for( unsigned i=0; i<_pSBB->_np; i++ ) _P0[i] = _P[i];
-  return _pSBB->subproblems( SBB<T>::POSTPROC, _pSBB->_np, _P, var,
-    obj, inc );
+  _P0 = _P;
+  return _pSBB->subproblems( SBB<T>::POSTPROC, this, var, obj, inc );
 }
 
 template <typename T>
 inline typename SBB<T>::STATUS
 SBBNode<T>::upper_bound
-( const double*var, const double inc )
+( const std::vector<double>&var, const double inc )
 {
-  for( unsigned i=0; i<_pSBB->_np; i++ ){
-    _P0[i] = _P[i];
-    if( var ) _UB_var[i] = var[i]; // initial guess
-  }
-  return _pSBB->subproblems( SBB<T>::UPPERBD, _pSBB->_np, _P, _UB_var,
-    _UB_obj, inc );
+  _P0 = _P;
+  if( var.size() >= _pSBB->_np ) _UB_var = var; // initial guess
+  return _pSBB->subproblems( SBB<T>::UPPERBD, this, _UB_var, _UB_obj, inc );
 }
 
 template <typename T>
 inline typename SBB<T>::STATUS
 SBBNode<T>::test_feasibility
-( double*var, double&obj, const double inc )
+( std::vector<double>&var, double&obj, const double inc )
 {
-  return _pSBB->subproblems( SBB<T>::FEASTEST, _pSBB->_np, _P, var,
-    obj, inc );
+  return _pSBB->subproblems( SBB<T>::FEASTEST, this, var, obj, inc );
 }
 
 template <typename T>
@@ -1651,72 +1603,15 @@ const
        || val > Op<T>::u(_P[ip]) - margin );
 }
 
-template <typename T>
-inline void
-SBBNode<T>::update_pseudocost
-( const typename SBB<T>::TYPE pb )
-{
-  if( _type == SBB<T>::ROOT || _strongbranch
-   || _strength == -_pSBB->options.INF ) return;
-
-  unsigned ipc = _parent.first;
-  if( _type == SBB<T>::RIGHT ) ipc += _pSBB->_np;
-
-  _pc_var[ipc].first++;
-  switch( pb ){
-  case SBB<T>::MINIMIZE:
-    if( _LB_obj > -_pSBB->options.INF )
-#ifdef USE__SBB_PSEUDOCOST_FILTER
-#define PCFILTER 0.5
-      _pc_var[ipc].second = ( 1 - PCFILTER ) * _pc_var[ipc].second
-        + PCFILTER * ( _LB_obj - _strength )
-        / ( Op<T>::diam( _parent.second ) - Op<T>::diam( _P[_parent.first] ) );
-#else
-      _pc_var[ipc].second += ( _LB_obj - _strength )
-        / ( Op<T>::diam( _parent.second ) - Op<T>::diam( _P0[_parent.first] ) );
-#endif
-#ifdef DEBUG__SBB_PSEUDOCOST
-    std::cout << "*** LB0 " << _strength
-              << "  LB" << (ipc<_pSBB->_np?"-: ":"+: ") << _LB_obj
-              << "  w(P): " << Op<T>::diam( _parent.second )
-                             - Op<T>::diam( _P[_parent.first] ) << std::endl;
-#endif
-    break;
-  case SBB<T>::MAXIMIZE:
-    if( _UB_obj < _pSBB->options.INF )
-#ifdef USE__SBB_PSEUDOCOST_FILTER
-#define PCFILTER 0.5
-      _pc_var[ipc].second = ( 1 - PCFILTER ) * _pc_var[ipc].second
-        - PCFILTER * ( _UB_obj + _strength )
-        / ( Op<T>::diam( _parent.second ) - Op<T>::diam( _P[_parent.first] ) );
-#else
-      _pc_var[ipc].second -= ( _UB_obj + _strength )
-        / ( Op<T>::diam( _parent.second ) - Op<T>::diam( _P0[_parent.first] ) );
-//        / ( Op<T>::diam( _parent.second ) - Op<T>::diam( _P[_parent.first] ) );
-#endif
-#ifdef DEBUG__SBB_PSEUDOCOST
-    std::cout << "*** UB0 " << -_strength
-              << "  UB" << (ipc<_pSBB->_np?"-: ":"+: ") << _UB_obj
-              << "  w(P): " << Op<T>::diam( _parent.second )
-                             - Op<T>::diam( _P[_parent.first] ) << std::endl;
-#endif
-    break;
-  }
-#ifdef DEBUG__SBB_PSEUDOCOST
-  std::cout << "*** P " << _parent.first
-            << (ipc<_pSBB->_np?"-: ":"+: ")
-            << _pc_var[ipc].second/_pc_var[ipc].first
-            << "  #" << _pc_var[ipc].first << std::endl;
-#endif
-}
-
 template <typename T> inline std::ostream&
 operator <<
 ( std::ostream&out, const SBBNode<T>&CV )
 {
-  std::set<unsigned>::iterator ivar = CV._pSBB->_branch_set.begin();
-  for( unsigned i=0; ivar != CV._pSBB->_branch_set.end(); ++ivar, i++ )
-    out << "  " << CV._P[i];
+  //std::set<unsigned>::iterator ivar = CV._pSBB->_branch_set.begin();
+  //for( unsigned i=0; ivar != CV._pSBB->_branch_set.end(); ++ivar, i++ )
+  //  out << "  " << CV._P[i];
+  for( unsigned ip=0; ip < CV._pSBB->_np; ip++ )
+    out << "  " << CV._P[ip];
   out << std::endl;
   return out;
 }

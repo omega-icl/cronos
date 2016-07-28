@@ -426,7 +426,16 @@ NLPSLV_IPOPT::setup
   _nvar = _var.size();
 
   // full set of constraints (main & equation system)
-  _ctr = BASE_NLP::_ctr;
+  //_ctr = BASE_NLP::_ctr;
+  std::get<0>(_ctr).clear();
+  std::get<1>(_ctr).clear();
+  std::get<2>(_ctr).clear();
+  for( unsigned ic=0; ic<std::get<0>(BASE_NLP::_ctr).size(); ic++ ){
+    if( std::get<3>(BASE_NLP::_ctr)[ic] ) continue; // redundant constraint - ignore
+    std::get<0>(_ctr).push_back( std::get<0>(BASE_NLP::_ctr)[ic] );
+    std::get<1>(_ctr).push_back( std::get<1>(BASE_NLP::_ctr)[ic] );
+    std::get<2>(_ctr).push_back( std::get<2>(BASE_NLP::_ctr)[ic] );
+  }
   for( auto its=_sys.begin(); its!=_sys.end(); ++its ){
     std::get<0>(_ctr).push_back( EQ );
     std::get<1>(_ctr).push_back( (*its) );

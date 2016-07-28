@@ -106,9 +106,12 @@ class NLCP:
   using NLGO<T>::_nvar;
   using NLGO<T>::_tvar;
   using NLGO<T>::_nctr;
+  using NLGO<T>::_nrvar;
+  using NLGO<T>::_nrdep;
   using NLGO<T>::_CMctr;
-  using NLGO<T>::_CMexcl;
+  //using NLGO<T>::_CMexcl;
   using NLGO<T>::_POLvar;
+  using NLGO<T>::_set_chebscores;
   using SetInv<CVar<T>>::_open_nodes;
   using SetInv<CVar<T>>::_exclude_vars;
   using SetInv<CVar<T>>::_P_root;
@@ -136,9 +139,7 @@ class NLCP:
   {
     //! @brief Constructor
     Options():
-      NLGO<T>::Options(), BRANCHVAR(SetInv<CVar<T>>::Options::RGREL),
-      BRANCHSEL(0), STGBCHDEPTH(0), STGBCHDRMAX(1), STGBCHRTOL(1e-2), STGBCHATOL(0e0),
-      //NODEMEAS(SetInv<CVar<T>>::Options::LENGTH), CTRBACKOFF(0e0), CMREDORD(0),
+      NLGO<T>::Options(), BRANCHSEL(0), STGBCHRTOL(1e-2), STGBCHATOL(0e0),
       NODEMEAS(SetInv<CVar<T>>::Options::MEANWIDTH), CTRBACKOFF(0e0), CMREDORD(0),
       CMREDTHRES(1e-3), CMREDWARMS(false), CMREDALL(true),
       CMREDOPT(typename AEBND<T,CModel<T>,CVar<T> >::Options())
@@ -147,10 +148,7 @@ class NLCP:
     //! @brief Assignment operator
     Options& operator= ( Options&options ){
         NLGO<T>::Options::operator=( options );
-        BRANCHVAR   = options.BRANCHVAR;
         BRANCHSEL   = options.BRANCHSEL;
-        STGBCHDEPTH = options.STGBCHDEPTH;
-        STGBCHDRMAX = options.STGBCHDRMAX;
         STGBCHRTOL  = options.STGBCHRTOL;
         STGBCHATOL  = options.STGBCHATOL;
         NODEMEAS    = options.NODEMEAS;
@@ -167,20 +165,14 @@ class NLCP:
     //! @brief Display options
     void display
       ( std::ostream&out ) const;
-    //! @brief Branching-variable selection criterion
-    typename SetInv<CVar<T>>::Options::CRITERION BRANCHVAR;
     //! @brief Branching-variable selection user-function
     typename SetInv<CVar<T>>::Options::SELECTION BRANCHSEL;
-    //! @brief Maximum depth for strong branching interruption (0: no strong branching)
-    unsigned STGBCHDEPTH;
-    //! @brief Maximum domain reduction loops during strong branching (0: no restriction)
-    unsigned STGBCHDRMAX;
     //! @brief Relative tolerance for strong branching interruption
     double STGBCHRTOL;
     //! @brief Absolute tolerance for strong branching interruption
     double STGBCHATOL;
     //! @brief Partition measure
-    typename SetInv<CVar<T>>::Options::METRIC NODEMEAS;
+    int NODEMEAS;
     //! @brief Constraint back-off (avoids cutting-off part of the solution set after LP domain reduction)
     double CTRBACKOFF;
     //! @brief Reduced-space Chebyhev model order (0: no reduction)
@@ -236,9 +228,6 @@ class NLCP:
   //! @brief Perform inclusion test based on constraint Chebysev models (if available)
   template <typename U> typename SetInv<CVar<T>>::STATUS _inclusion_test
     ( const std::vector<U>&C ) const;
-  //! @brief Compute scores for branching variable selection based on constraint Chebysev models (if available)
-  template <typename U> std::map<unsigned,double> _scores
-    ( const std::vector<U>&C ) const;
 
   //! @brief Compute element volume
   double volume
@@ -263,11 +252,6 @@ class NLCP:
       return W; }
 
  private:
-  //! @brief number of reduced-space variables in problem
-  unsigned _nrvar;
-  //! @brief number of reduced-space dependents in problem
-  unsigned _nrdep;
-
   //! @brief Chebyshev reduced-space [-1,1] scaled model environment
   CModel<T>* _CMrenv;
   //! @brief Chebyshev reduced-space [-1,1] scaled variables
@@ -354,7 +338,7 @@ NLCP<T>::solve
   NLGO<T>::options = options;
   _set_SetInvoptions();
   std::vector<CVar<T>> CVP( P0, P0+_nvar );
-  SetInv<CVar<T>>::variables( _nvar, CVP.data(), _CMexcl );
+  SetInv<CVar<T>>::variables( _nvar, CVP.data() );//, _CMexcl );
 
   // Set-up constraitn relaxations
   _tvar.clear();
@@ -477,13 +461,7 @@ NLCP<T>::_subproblem_assess
   }
 
   // Compute scores
-  scores = _scores( _CMctr );
-#ifdef MC__NLCP_DEBUG
-  std::cout << "Scores:\n";
-  for( auto it=scores.cbegin(); it!=scores.cend(); ++it )
-    std::cout << std::right << std::setw(4) << it->first << " " << it->second << std::endl; 
-  { int dum; std::cout << "PAUSED"; std::cin >> dum; }
-#endif
+  _set_chebscores( scores, false );
 
   return SetInv<CVar<T>>::UNDETERMINED;
 }
@@ -514,27 +492,6 @@ NLCP<T>::_assess
 #endif
   }
   return SetInv<CVar<T>>::UNDETERMINED;
-}
-
-template <typename T>
-template <typename U>
-inline std::map<unsigned,double>
-NLCP<T>::_scores
-( const std::vector<U>&C ) const
-{
-  std::map<unsigned,double> scores;
-  auto itc = std::get<1>(NLGO<T>::_ctr).begin();
-  for( unsigned j=0; itc != std::get<1>(NLGO<T>::_ctr).end(); ++itc, j++ ){
-    NLGO<T>::_get_chebscores( *itc, C[j], scores, true );
-#ifdef MC__NLCP_DEBUG
-    std::cout << "Scores constraint #" << j << ":\n";
-    std::cout << C[j] << std::endl; 
-    for( auto it=scores.cbegin(); it!=scores.cend(); ++it )
-      std::cout << std::right << std::setw(4) << it->first << " " << it->second << std::endl; 
-    { int dum; std::cout << "PAUSED"; std::cin >> dum; }
-#endif
-  }
-  return scores;
 }
 
 template <typename T>
@@ -693,17 +650,21 @@ NLCP<T>::_set_SetInvoptions
 () const
 {
   // SetInv options
-  SetInv<CVar<T>>::options.ABSOLUTE_TOLERANCE           = options.CVATOL;
-  SetInv<CVar<T>>::options.RELATIVE_TOLERANCE           = options.CVRTOL;
-  SetInv<CVar<T>>::options.MAX_NODES                    = options.MAXITER;
-  SetInv<CVar<T>>::options.MAX_CPU_TIME                 = options.MAXCPU;
-  SetInv<CVar<T>>::options.DISPLAY                      = options.DISPLAY;
+  SetInv<CVar<T>>::options.MEASURE                      = options.NODEMEAS;
+  SetInv<CVar<T>>::options.STOPPING_ABSTOL              = options.CVATOL;
+  SetInv<CVar<T>>::options.STOPPING_RELTOL              = options.CVRTOL;
   SetInv<CVar<T>>::options.BRANCHING_VARIABLE_CRITERION = options.BRANCHVAR;
-  SetInv<CVar<T>>::options.BRANCHING_VARIABLE_SUBSET    = options.BRANCHSEL;
+  SetInv<CVar<T>>::options.BRANCHING_USERFUNCTION       = options.BRANCHSEL;
+  SetInv<CVar<T>>::options.SCORE_BRANCHING_USE          = options.SCOBCHUSE;
+  SetInv<CVar<T>>::options.SCORE_BRANCHING_MAXSIZE      = options.SCOBCHVMAX;
+  SetInv<CVar<T>>::options.SCORE_BRANCHING_RELTOL       = options.SCOBCHRTOL;
+  SetInv<CVar<T>>::options.SCORE_BRANCHING_ABSTOL       = options.SCOBCHATOL;
   SetInv<CVar<T>>::options.STRONG_BRANCHING_MAXDEPTH    = options.STGBCHDEPTH;
   SetInv<CVar<T>>::options.STRONG_BRANCHING_RELTOL      = options.STGBCHRTOL;
   SetInv<CVar<T>>::options.STRONG_BRANCHING_ABSTOL      = options.STGBCHATOL;
-  SetInv<CVar<T>>::options.MEASURE                      = options.NODEMEAS;
+  SetInv<CVar<T>>::options.MAX_NODES                    = options.MAXITER;
+  SetInv<CVar<T>>::options.MAX_CPUTIME                  = options.MAXCPU;
+  SetInv<CVar<T>>::options.DISPLAY                      = options.DISPLAY;
 }
 
 template <typename T>

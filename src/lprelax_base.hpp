@@ -256,6 +256,7 @@ LPRELAX_BASE<T>::_solve_LPmodel
   _set_LPoptions( options );
 #ifdef MC__USE_CPLEX
   if( options.MIPFILE != "" ) _ILOcplex->exportModel( options.MIPFILE.c_str() );
+  //{ int dum; std::cout << "PAUSED"; std::cin >> dum; }
   //_time = -_cplex->getCplexTime();
   _ILOcplex->solve();
   //_time += _cplex->getCplexTime();

@@ -1,5 +1,6 @@
 NX = 2
 NF = 2
+NP = 2
 unset key
 #set terminal png size 2000,1500 enhanced font "Helvetica,30"
 set term post eps enh color solid 15
@@ -18,20 +19,21 @@ do for [i = 1:NX]{
   lb = 2*i 
   ub = 2*i + 1
   plot SAMPLINGdata u 1:lb:ub w filledcu lt rgb "cyan", \
-       BOUNDINGdata u 1:lb w lines lt rgb "green", \
-       BOUNDINGdata u 1:ub w lines lt rgb "green", \
-       BOUNDINGdata2 u 1:lb w lines lt rgb "red", \
-       BOUNDINGdata2 u 1:ub w lines lt rgb "red"
+       BOUNDINGdata u 1:lb w lines lt rgb "green" lw .5, \
+       BOUNDINGdata u 1:ub w lines lt rgb "green" lw .5, \
+       BOUNDINGdata2 u 1:lb w lines lt rgb "red" lw .5, \
+       BOUNDINGdata2 u 1:ub w lines lt rgb "red" lw .5
   }
 unset multiplot
 !ps2eps -B -f -l test2_DINEQ_STA.eps
 !mv test2_DINEQ_STA.eps.eps test2_DINEQ_STA.eps 
+!gv test2_DINEQ_STA.eps &
 
-SAMPLINGdata  = 'test2_APPROX_ADJ.dat'
-BOUNDINGdata  = 'test2_DINEQI_ADJ.dat'
-BOUNDINGdata2 = 'test2_DINEQPM_ADJ.dat'
+SAMPLINGdata  = 'test2_APPROX_ASA.dat'
+BOUNDINGdata  = 'test2_DINEQI_ASA.dat'
+BOUNDINGdata2 = 'test2_DINEQPM_ASA.dat'
 
-set output "test2_DINEQ_ADJ.eps"
+set output "test2_DINEQ_ASA.eps"
 set multiplot layout NF,NX title "Adjoint Bounds"
 set style fill transparent solid 0.65 noborder
 do for [i = 0:NF-1]{
@@ -42,13 +44,40 @@ do for [i = 0:NF-1]{
     lb = 2*NX*i + 2*j 
     ub = 2*NX*i + 2*j + 1
     plot SAMPLINGdata u 1:lb:ub w filledcu lt rgb "cyan", \
-         BOUNDINGdata u 1:lb w lines lt rgb "green", \
-         BOUNDINGdata u 1:ub w lines lt rgb "green", \
-         BOUNDINGdata2 u 1:lb w lines lt rgb "red", \
-         BOUNDINGdata2 u 1:ub w lines lt rgb "red"
+         BOUNDINGdata u 1:lb w lines lt rgb "green" lw .5, \
+         BOUNDINGdata u 1:ub w lines lt rgb "green" lw .5, \
+         BOUNDINGdata2 u 1:lb w lines lt rgb "red" lw .5, \
+         BOUNDINGdata2 u 1:ub w lines lt rgb "red" lw .5
   }
 }
 unset multiplot
-!ps2eps -B -f -l test2_DINEQ_ADJ.eps
-!mv test2_DINEQ_ADJ.eps.eps test2_DINEQ_ADJ.eps 
+!ps2eps -B -f -l test2_DINEQ_ASA.eps
+!mv test2_DINEQ_ASA.eps.eps test2_DINEQ_ASA.eps 
+!gv test2_DINEQ_ASA.eps &
+
+SAMPLINGdata  = 'test2_APPROX_FSA.dat'
+BOUNDINGdata  = 'test2_DINEQI_FSA.dat'
+BOUNDINGdata2 = 'test2_DINEQPM_FSA.dat'
+
+set output "test2_DINEQ_FSA.eps"
+set multiplot layout 2,NX title "Sensitivity Bounds"
+set style fill transparent solid 0.65 noborder
+do for [i = 0:NP-1]{
+  do for [j = 1:NX]{
+    set title sprintf("p%d, x%d",i+1,j)
+    set xlabel "t"
+    set ylabel "xp"
+    lb = 2*NX*i + 2*j 
+    ub = 2*NX*i + 2*j + 1
+    plot SAMPLINGdata u 1:lb:ub w filledcu lt rgb "cyan", \
+         BOUNDINGdata u 1:lb w lines lt rgb "green" lw .5, \
+         BOUNDINGdata u 1:ub w lines lt rgb "green" lw .5, \
+         BOUNDINGdata2 u 1:lb w lines lt rgb "red" lw .5, \
+         BOUNDINGdata2 u 1:ub w lines lt rgb "red" lw .5
+  }
+}
+unset multiplot
+!ps2eps -B -f -l test2_DINEQ_FSA.eps
+!mv test2_DINEQ_FSA.eps.eps test2_DINEQ_FSA.eps 
+!gv test2_DINEQ_FSA.eps &
 

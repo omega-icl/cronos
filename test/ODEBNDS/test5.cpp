@@ -1,21 +1,12 @@
 // ESCAPE26 Case Study 1 - Exothermic Batch Reactor
 
-const unsigned int NPM   = 3;	// <- Order of poynomial expansion
-const unsigned int NSAMP = 20;	// <- Number of sampling points for inner approx.
-#define SAVE_RESULTS		// <- Whether to save bounds to file
-#define USE_CMODEL		// <- whether to use Chebyshev models or Taylor models
-#define USE_SUNDIALS		// <- whether to use SUNDIALS or GSL integrator
-
-#include "odeslvs_gsl.hpp"
-#ifndef USE_SUNDIALS
-  #include "odebnds_gsl.hpp"
-#else
-  #include "odebnds_sundials.hpp"
-#endif
+const unsigned int NPM   = 2;	// <- Order of poynomial expansion
+const unsigned int NSAMP = 2;	// <- Number of sampling points for inner approx.
+#define SAVE_RESULTS		    // <- Whether to save bounds to file
+#define USE_CMODEL		        // <- whether to use Chebyshev models or Taylor models
 
 #include "interval.hpp"
 typedef mc::Interval I;
-typedef mc::Ellipsoid E;
 
 #ifdef USE_CMODEL
   #include "cmodel.hpp"
@@ -27,16 +18,18 @@ typedef mc::Ellipsoid E;
   typedef mc::TVar<I> PV;
 #endif
 
+#include "odebnds_sundials.hpp"
+
 int main()
 {
   mc::FFGraph IVP;  // DAG describing the problem
 
   double t0 = 0., tf = 600.;  // Time span
-  const unsigned int NS = 100;  // Time stages
+  const unsigned int NS = 8;  // Time stages
   double tk[NS+1]; tk[0] = t0;
   for( unsigned k=0; k<NS; k++ ) tk[k+1] = tk[k] + (tf-t0)/(double)NS;
 
-  const unsigned NP = 2;  // Number of parameters
+  const unsigned NP = NS+1;  // Number of parameters
   const unsigned NX = 2;  // Number of states
   const unsigned NF = 1;  // Number of state functions
 
@@ -45,8 +38,8 @@ int main()
 
   mc::FFVar X[NX];  // States
   for( unsigned int i=0; i<NX; i++ ) X[i].set( &IVP );
-  mc::FFVar X1 = X[0];
-  mc::FFVar T =  X[1];
+  mc::FFVar CA = X[0];
+  mc::FFVar T  = X[1];
 
   //Constant Parameters
   const double k0 = 0.022;
@@ -58,124 +51,149 @@ int main()
   const double DHR = -140000.;
   const double UA = 3.;
 
-  mc::FFVar RHS[NX];  // Right-hand side function
-  RHS[0] = k0*exp(-Ea/(R*T))*(1. - X1);
-  RHS[1] = (P[1] - T)*UA/(CA0*V*Cp) - (1 - X1)*exp(-Ea/(R*T))*(DHR*k0)/Cp;
+  mc::FFVar RHS[NX*NS];  // Right-hand side functions
+  for( unsigned i=0; i<NS; i++ ){
+    RHS[i*NX+0] = k0*exp(-Ea/(R*T))*(1.-CA);
+    RHS[i*NX+1] = (P[1+i] - T)*UA/(CA0*V*Cp) - k0*exp(-Ea/(R*T))*(1.-CA)*DHR/Cp;
+  }
 
   mc::FFVar IC[NX];   // Initial value function
   IC[0] = 0.;
   IC[1] = P[0];
 
   mc::FFVar FCT[NF];  // State functions
-  FCT[0] = X1;
+  FCT[0] = CA;
 
-  I Ip[NP] = { I(350.,370.), I(290.,310.) };
-  I *Ixk[NS+1], *Iyk[NS+1];
+  I Ip[NP] = { I(350.,370.) };
+  for( unsigned i=0; i<NS; i++ ) Ip[1+i] = I(290.,310.);
+  I *Ixk[NS+1], *Iyk[NS+1], *Ixpk[NS+1];
   for( unsigned k=0; k<=NS; k++ ){
     Ixk[k] = new I[NX];
     Iyk[k] = new I[NF*NX];
+    Ixpk[k] = new I[NP*NX];
   }
-  I If[NF], Idf[NF*NP];
+  I If[NF], Ifp[NF*NP];
 
   PM PMEnv( NP, NPM );
-  PV PMp[NP] = { PV( &PMEnv, 0, Ip[0] ), PV( &PMEnv, 1, Ip[1] ) };
-  PV *PMxk[NS+1], *PMyk[NS+1];
+  PV PMp[NP];
+  for( unsigned i=0; i<NP; i++ ) PMp[i] = PV( &PMEnv, i, Ip[i] );
+  PV *PMxk[NS+1], *PMyk[NS+1], *PMxpk[NS+1];
   for( unsigned k=0; k<=NS; k++ ){
     PMxk[k] = new PV[NX];
     PMyk[k] = new PV[NF*NX];
+    PMxpk[k] = new PV[NP*NX];
   }
-  PV PMf[NF], PMdf[NF*NP];
-
-  /////////////////////////////////////////////////////////////////////////////
-  //// SAMPLING
-  mc::ODESLVS_GSL<I> LV0;
-
-  LV0.set_dag( &IVP );
-  LV0.set_state( NX, X );
-  LV0.set_parameter( NP, P );
-  LV0.set_differential( NX, RHS );
-  LV0.set_initial( NX, IC );
-  LV0.set_function( NF, FCT );
-
-  LV0.options.DISPLAY   = 1;
-#if defined( SAVE_RESULTS )
-  LV0.options.RESRECORD = true;
-#endif
-  LV0.options.ATOL      = LV0.options.RTOL = 1e-7;
-  LV0.options.INTMETH   = mc::ODESLV_GSL<I>::Options::MSBDF;
-
-  // Approximate adjoint bounds
-  std::cout << "\nNON_VALIDATED INTEGRATION - APPROXIMATE ENCLOSURE OF REACHABLE SET:\n\n";
-  //LV0.bounds( NS, tk, Ip, Ixk, 0, If, NSAMP );
-  LV0.bounds_ASA( NS, tk, Ip, Ixk, 0, If, Iyk, Idf, NSAMP );
-#if defined( SAVE_RESULTS )
-  std::ofstream apprecSTA("test5_APPROX_STA.dat", std::ios_base::out );
-  std::ofstream apprecADJ("test5_APPROX_ADJ.dat", std::ios_base::out );
-  LV0.record( apprecSTA, apprecADJ ); 
-#endif
+  PV PMf[NF], PMfp[NF*NP];
 
   /////////////////////////////////////////////////////////////////////////////
   //// DIFFERENTIAL INEQUALITIES
-#ifndef USE_SUNDIALS // GSL integrator
-  mc::ODEBNDS_GSL<I,PM,PV> LV;
+  mc::ODEBNDS_SUNDIALS<I,PM,PV> EBR;
 
-  LV.options.DISPLAY = 1;
+  EBR.options.DISPLAY   = 1;
 #if defined( SAVE_RESULTS )
-  LV.options.RESRECORD = true;
+  EBR.options.RESRECORD = true;
 #endif
-  LV.options.ATOL      = LV.options.RTOL = 1e-8;
-  LV.options.ORDMIT    = 1; //PMp->nord();
-  LV.options.WRAPMIT   = mc::ODEBND_GSL<I,PM,PV>::Options::ELLIPS;//DINEQ; //NONE;
-  //LV.options.HMAX      = 1e-2;
-  //LV.options.H0        = 1e-6;
+  EBR.options.ATOL      = EBR.options.ATOLB   = EBR.options.ATOLS   = 1e-12;
+  EBR.options.RTOL      = EBR.options.RTOLB   = EBR.options.RTOLS   = 1e-8;
+  EBR.options.INTMETH   = mc::ODEBNDS_SUNDIALS<I,PM,PV>::Options::MSADAMS;
+  EBR.options.JACAPPROX = mc::ODEBNDS_SUNDIALS<I,PM,PV>::Options::CV_DIAG;//CV_DENSE;
+  EBR.options.ORDMIT    = -2; //PMp->nord();
+  EBR.options.WRAPMIT   = mc::ODEBNDS_SUNDIALS<I,PM,PV>::Options::ELLIPS;//DINEQ;//NONE;
+  //EBR.options.QSCALE    = 1e0;
+  EBR.options.HMIN      = 1e-12;
+  EBR.options.NMAX      = 100000;
+  EBR.options.ASACHKPT  = 100000;
+  EBR.options.QERRB     = true;
+  EBR.options.FSAERR    = true;
+  EBR.options.QERRS     = true;
 
-#else // SUNDIALS integrator
-  mc::ODEBNDS_SUNDIALS<I,PM,PV> LV;
+  EBR.options.ODESLV.NMAX      = 100000;
+  EBR.options.ODESLV.ASACHKPT  = 100000;
+  EBR.options.ODESLV.INTMETH   = mc::ODESLVS_SUNDIALS::Options::MSBDF;//MSADAMS;//MSBDF;
+  EBR.options.ODESLV.JACAPPROX = mc::ODESLVS_SUNDIALS::Options::CV_DIAG;//CV_DENSE;//CV_DIAG;
 
-  LV.options.DISPLAY   = 1;
+  EBR.set_dag( &IVP );
+  EBR.set_state( NX, X );
+  EBR.set_parameter( NP, P );
+  EBR.set_differential( NS, NX, RHS );
+  EBR.set_initial( NX, IC );
+  EBR.set_function( NF, FCT );
+
+  std::ofstream ofSTA, ofSEN;
+
+  std::cout << "\nNON_VALIDATED INTEGRATION - INNER-APPROXIMATION OF REACHABLE SET AND ADJOINT SENSITIVITY:\n\n";
+  EBR.bounds_ASA( NS, tk, Ip, Ixk, If, Iyk, Ifp, NSAMP );
 #if defined( SAVE_RESULTS )
-  LV.options.RESRECORD = true;
+  ofSTA.open( "test5b_APPROX_STA.dat", std::ios_base::out );
+  ofSEN.open( "test5b_APPROX_ASA.dat", std::ios_base::out );
+  EBR.record( ofSTA, ofSEN );
+  ofSTA.close();
+  ofSEN.close();
 #endif
-  LV.options.ATOL      = LV.options.ATOLB = 1e-10;
-  LV.options.RTOL      = LV.options.RTOLB = 1e-8;
-  LV.options.INTMETH   = mc::ODEBNDS_SUNDIALS<I,PM,PV>::Options::MSADAMS;
-  LV.options.JACAPPROX = mc::ODEBNDS_SUNDIALS<I,PM,PV>::Options::CV_DIAG;//CV_DENSE;
-  LV.options.ORDMIT    = 1;//PMp->nord();
-  LV.options.WRAPMIT   = mc::ODEBNDS_SUNDIALS<I,PM,PV>::Options::ELLIPS;//DINEQ;//NONE;
-  //LV.options.QSCALE    = 1e0;
-  LV.options.HMIN      = 1e-12;
-#endif
-
-  LV.set_dag( &IVP );
-  LV.set_state( NX, X );
-  LV.set_parameter( NP, P );
-  LV.set_differential( NX, RHS );
-  LV.set_initial( NX, IC );
-  LV.set_function( NF, FCT );
-
-  std::cout << "\nCONTINUOUS SET-VALUED INTEGRATION - INTERVAL ENCLOSURE OF REACHABLE SET:\n\n";
-  LV.bounds_ASA( NS, tk, Ip, Ixk, 0, If, Iyk, Idf );
+  { int dum; std::cout << "PAUSED--"; std::cin >> dum; }
+/*
+  std::cout << "\nCONTINUOUS SET-VALUED INTEGRATION - INTERVAL ENCLOSURE OF REACHABLE SET AND ADJOINT SENSITIVITY:\n\n";
+  EBR.bounds_ASA( NS, tk, Ip, Ixk, If, Iyk, Ifp );
 #if defined( SAVE_RESULTS )
-  std::ofstream direcISTA( "test5_DINEQI_STA.dat", std::ios_base::out );
-  std::ofstream direcIADJ( "test5_DINEQI_ADJ.dat", std::ios_base::out );
-  LV.record( direcISTA, direcIADJ );
+  ofSTA.open( "test5b_DINEQI_STA.dat", std::ios_base::out );
+  ofSEN.open( "test5b_DINEQI_ASA.dat", std::ios_base::out );
+  EBR.record( ofSTA, ofSEN );
+  ofSTA.close();
+  ofSEN.close();
 #endif
-
-  std::cout << "\nCONTINUOUS SET-VALUED INTEGRATION - POLYNOMIAL MODEL ENCLOSURE OF REACHABLE SET:\n\n";
-  //LV.bounds( NS, tk, PMp, PMxk, 0, PMf );
-  LV.bounds_ASA( NS, tk, PMp, PMxk, 0, PMf, PMyk, PMdf );
+*/
+  std::cout << "\nCONTINUOUS SET-VALUED INTEGRATION - POLYNOMIAL MODEL ENCLOSURE OF REACHABLE SET AND ADJOINT SENSITIVITY:\n\n";
+  //EBR.bounds( NS, tk, PMp, PMxk, PMf );
+  EBR.bounds_ASA( NS, tk, PMp, PMxk, PMf, PMyk, PMfp );
 #if defined( SAVE_RESULTS )
-  std::ofstream direcPMSTA( "test5_DINEQPM_STA.dat", std::ios_base::out );
-  std::ofstream direcPMADJ( "test5_DINEQPM_ADJ.dat", std::ios_base::out );
-  LV.record( direcPMSTA, direcPMADJ );
+  ofSTA.open( "test5b_DINEQPM_STA.dat", std::ios_base::out );
+  ofSEN.open( "test5b_DINEQPM_ASA.dat", std::ios_base::out );
+  EBR.record( ofSTA, ofSEN );
+  ofSTA.close();
+  ofSEN.close();
+#endif
+  { int dum; std::cout << "--PAUSED "; std::cin >> dum; }
+
+  std::cout << "\nNON_VALIDATED INTEGRATION - INNER-APPROXIMATION OF REACHABLE SET AND FORWARD SENSITIVITY:\n\n";
+  EBR.bounds_FSA( NS, tk, Ip, Ixk, If, Ixpk, Ifp, NSAMP );
+#if defined( SAVE_RESULTS )
+  ofSTA.open( "test5b_APPROX_STA.dat", std::ios_base::out );
+  ofSEN.open( "test5b_APPROX_FSA.dat", std::ios_base::out );
+  EBR.record( ofSTA, ofSEN );
+  ofSTA.close();
+  ofSEN.close();
+#endif
+  { int dum; std::cout << "PAUSED--"; std::cin >> dum; }
+/*
+  std::cout << "\nCONTINUOUS SET-VALUED INTEGRATION - INTERVAL ENCLOSURE OF REACHABLE SET AND FORWARD SENSITIVITY:\n\n";
+  //EBR.bounds( NS, tk, Ip, Ixk, If );
+  EBR.bounds_FSA( NS, tk, Ip, Ixk, If, Ixpk, Ifp );
+#if defined( SAVE_RESULTS )
+  ofSTA.open( "test5b_DINEQI_STA.dat", std::ios_base::out );
+  ofSEN.open( "test5b_DINEQI_FSA.dat", std::ios_base::out );
+  EBR.record( ofSTA, ofSEN );
+  ofSTA.close();
+  ofSEN.close();
+#endif
+*/
+  std::cout << "\nCONTINUOUS SET-VALUED INTEGRATION - POLYNOMIAL MODEL ENCLOSURE OF REACHABLE SET AND FORWARD SENSITIVITY:\n\n";
+  EBR.bounds_FSA( NS, tk, PMp, PMxk, PMf, PMxpk, PMfp );
+#if defined( SAVE_RESULTS )
+  ofSTA.open( "test5b_DINEQPM_STA.dat", std::ios_base::out );
+  ofSEN.open( "test5b_DINEQPM_FSA.dat", std::ios_base::out );
+  EBR.record( ofSTA, ofSEN );
+  ofSTA.close();
+  ofSEN.close();
 #endif
 
   // Clean up
   for( unsigned k=0; k<=NS; k++ ){
     delete[] Ixk[k];
     delete[] Iyk[k];
+    delete[] Ixpk[k];
     delete[] PMxk[k];
     delete[] PMyk[k];
+    delete[] PMxpk[k];
   }
 
   return 0;

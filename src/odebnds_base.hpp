@@ -742,7 +742,7 @@ ODEBNDS_BASE<T,PMT,PVT>::_RHS_SET_FSA
   // Set sensitivity ODEs using directional derivatives
   for( unsigned iy=0; iy<_nx; iy++ ) _pADJCC[iy] = _pVAR[iy];
   for( unsigned ip=0; ip<_npar; ip++ ){
-    for( unsigned jp=0; jp<_npar; jp++ ) _pADJCC[_nx+ip] = (ip==jp? 1.: 0.);
+    for( unsigned jp=0; jp<_npar; jp++ ) _pADJCC[_nx+jp] = (ip==jp? 1.: 0.);
     delete[] _vADJRHS[ip];  _vADJRHS[ip]  = _pDAG->FAD( _nx, _pRHS, _nx+_npar, _pVAR+_nx, _pADJCC );
     if( !_nq ) continue;
     delete[] _vADJQUAD[ip]; _vADJQUAD[ip] = _pDAG->FAD( _nq, _pQUAD, _nx+_npar, _pVAR+_nx, _pADJCC );

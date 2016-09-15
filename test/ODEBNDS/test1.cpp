@@ -1,19 +1,10 @@
 const unsigned int NPM   = 3;	// <- Order of poynomial expansion
 const unsigned int NSAMP = 50;	// <- Number of sampling points for inner approx.
-#define SAVE_RESULTS		// <- Whether to save bounds to file
-#define USE_CMODEL		// <- whether to use Chebyshev models or Taylor models
-#define USE_SUNDIALS		// <- whether to use SUNDIALS or GSL integrator
-
-#ifndef USE_SUNDIALS
-  #include "odeslvs_gsl.hpp"
-  #include "odebnds_gsl.hpp"
-#else
-  #include "odebnds_sundials.hpp"
-#endif
+#define SAVE_RESULTS            // <- Whether to save bounds to file
+#define USE_CMODEL              // <- whether to use Chebyshev models or Taylor models
 
 #include "interval.hpp"
 typedef mc::Interval I;
-typedef mc::Ellipsoid E;
 
 #ifdef USE_CMODEL
   #include "cmodel.hpp"
@@ -24,6 +15,8 @@ typedef mc::Ellipsoid E;
   typedef mc::TModel<I> PM;
   typedef mc::TVar<I> PV;
 #endif
+
+#include "odebnds_sundials.hpp"
 
 int main()
 {
@@ -55,12 +48,6 @@ int main()
   mc::FFVar IC[NX];   // Initial value function
   IC[0] = 1.2;
   IC[1] = 1.1 + 0.01*(P[0]-3.);
-
-  //mc::FFVar IC[NX*NS];   // Initial value function
-  //IC[0] = 1.2;
-  //IC[1] = 1.1 + 0.01*P[0];
-  //for( unsigned k=2; k<NX*NS; k++ ) IC[k] = X[k%NX];
-  ////if( NS > 1 ) IC[(NS/2)*NX+1] = X[1] - 0.5;
 
   mc::FFVar QUAD[NQ];  // Quadrature function
   QUAD[0] = X[1];
@@ -94,57 +81,9 @@ int main()
     PMxpk[k] = new PV[NP*NX];
   }
   PV PMf[NF], PMfp[NF*NP];
-/*
-  /////////////////////////////////////////////////////////////////////////////
-  //// SAMPLING
-  mc::ODESLVS_GSL<I> LV0;
 
-  LV0.set_dag( &IVP );
-  LV0.set_state( NX, X );
-  LV0.set_parameter( NP, P );
-  LV0.set_differential( NX, RHS );
-  LV0.set_initial( NX, IC );
-  //LV0.set_initial( NS, NX, IC );
-  LV0.set_quadrature( NQ, QUAD, Q );
-  //LV0.set_function( NF, FCT );
-  LV0.set_function( NS, NF, FCT );
-
-  LV0.options.DISPLAY   = 1;
-#if defined( SAVE_RESULTS )
-  LV0.options.RESRECORD = true;
-#endif
-  LV0.options.ATOL      = LV0.options.RTOL = 1e-10;
-  LV0.options.INTMETH   = mc::ODESLV_GSL<I>::Options::MSBDF;
-  //LV0.options.HMAX      = 1e-3;
-
-  // Approximate adjoint bounds
-  std::cout << "\nNON_VALIDATED INTEGRATION - APPROXIMATE ENCLOSURE OF REACHABLE SET:\n\n";
-  //LV0.bounds( NS, tk, Ip, Ixk, Iq, If, NSAMP );
-  LV0.bounds_ASA( NS, tk, Ip, Ixk, 0, If, Iyk, Ifp, NSAMP );
-  //{ int dum; std::cin >> dum; }
-#if defined( SAVE_RESULTS )
-  std::ofstream apprecSTA("test1_APPROX_STA.dat", std::ios_base::out );
-  std::ofstream apprecADJ("test1_APPROX_ADJ.dat", std::ios_base::out );
-  LV0.record( apprecSTA, apprecADJ ); 
-#endif
-*/
   /////////////////////////////////////////////////////////////////////////////
   //// DIFFERENTIAL INEQUALITIES
-#ifndef USE_SUNDIALS // GSL integrator
-  mc::ODEBNDS_GSL<I,PM,PV> LV;
-
-  LV.options.DISPLAY = 1;
-#if defined( SAVE_RESULTS )
-  LV.options.RESRECORD = true;
-#endif
-  LV.options.ATOL      = LV.options.RTOL = 1e-10;
-  LV.options.ORDMIT    = 1; //PMp->nord();
-  LV.options.WRAPMIT   = mc::ODEBND_GSL<I,PM,PV>::Options::ELLIPS;//NONE;//DINEQ
-  LV.options.HMAX      = 1e-3;
-  //LV.options.H0      = 1e-6;
-  //LV.options.QSCALE    = 0e0;//1e-10;
-
-#else // SUNDIALS integrator
   mc::ODEBNDS_SUNDIALS<I,PM,PV> LV;
 
   LV.options.DISPLAY   = 1;
@@ -165,17 +104,16 @@ int main()
   LV.options.WRAPMIT   = mc::ODEBNDS_SUNDIALS<I,PM,PV>::Options::ELLIPS;//NONE;//DINEQ;
   LV.options.QERRB     = true;
   LV.options.QSCALE    = 1e-5;
+
   LV.options.ODESLV.NMAX = 20000;
   LV.options.ODESLV.INTMETH   = mc::ODESLVS_SUNDIALS::Options::MSBDF;//MSADAMS;//MSBDF;
   LV.options.ODESLV.JACAPPROX = mc::ODESLVS_SUNDIALS::Options::CV_DIAG;//CV_DENSE;//CV_DIAG;
-#endif
 
   LV.set_dag( &IVP );
   LV.set_state( NX, X );
   LV.set_parameter( NP, P );
   LV.set_differential( NX, RHS );
   LV.set_initial( NX, IC );
-  //LV.set_initial( NS, NX, IC );
   LV.set_quadrature( NQ, QUAD, Q );
   //LV.set_function( NF, FCT );
   LV.set_function( NS, NF, FCT );
@@ -215,7 +153,7 @@ int main()
 #endif
   { int dum; std::cout << "--PAUSED "; std::cin >> dum; }
 
-  std::cout << "\nNON_VALIDATED INTEGRATION - INNER-APPROXIMATION OF REACHABLE SET AND ADJOINT SENSITIVITY:\n\n";
+  std::cout << "\nNON_VALIDATED INTEGRATION - INNER-APPROXIMATION OF REACHABLE SET AND FORWARD SENSITIVITY:\n\n";
   LV.bounds_FSA( NS, tk, Ip, Ixk, If, Ixpk, Ifp, NSAMP );
 #if defined( SAVE_RESULTS )
   ofSTA.open( "test1_APPROX_STA.dat", std::ios_base::out );

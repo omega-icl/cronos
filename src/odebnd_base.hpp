@@ -309,6 +309,9 @@ class ODEBND_BASE:
   //! @brief pointer to time polynomial model for initial value **DO NOT FREE**
   PVT *_MVPt;
 
+  //! @brief absolute tolerance for shape matrix of ellipsoidal remainder
+  double _QTOLx;
+
   //! @brief Static function converting interval bounds to array
   template <typename REALTYPE> static void _I2vec
     ( const unsigned nx, const double*xL, const double*xU, REALTYPE*vec );
@@ -360,7 +363,7 @@ class ODEBND_BASE:
       
   //! @brief Function to initialize state interval bounding
   template <typename OPT> bool _INI_I_STA
-    ( const OPT&options, const unsigned np, const T*Ip );
+    ( const OPT&options, const unsigned np, const T*Ip, const double QTOL );
 
   //! @brief Function to retreive state bounds
   template <typename REALTYPE, typename OPT> void _GET_I_STA
@@ -488,7 +491,7 @@ class ODEBND_BASE:
 
   //! @brief Function to initialize GSL for state polynomial models
   template <typename OPT> bool _INI_PM_STA
-    ( const OPT&options, const unsigned np, const PVT*PMp );
+    ( const OPT&options, const unsigned np, const PVT*PMp, const double QTOL );
       
   //! @brief Function to retreive state polynomial models
   template <typename REALTYPE, typename OPT> void _GET_PM_STA
@@ -1089,7 +1092,7 @@ ODEBND_BASE<T,PMT,PVT>::_CC_I_STA
     _PMIC = new PVT[_opIC.size()];
     _pDAG->eval( _opIC, _PMIC, _nx, _pIC, _MVXPf, _nVAR0, _pVAR, _MVXPVAR );
     _CC_I_ELL( _nx, _MVXPf, _Ix, _Er, _A, _npar, _xrefdot, _Bdot, _Irdot, _Qdot,
-               options.QTOL, machprec() );
+               _QTOLx, machprec() );
     _E2vec( _nx, _npar, _xrefdot, _Qdot, _Bdot, vec );
     break;
    }
@@ -1278,7 +1281,7 @@ ODEBND_BASE<T,PMT,PVT>::_RHS_I_STA
     // Construct the ellipsoidal remainder derivatives
     _pDAG->eval( _opRHS, _PMRHS, _nx, _pRHS, _MVXPf, _nVAR0, _pVAR, _MVXPVAR );
     _RHS_I_ELL( _nx, _MVXPf, _Q, _A, _npar, _xrefdot, _Bdot, _Irdot,
-       _Qdot, options.QTOL, machprec(), options.QSCALE, _Ir );
+       _Qdot, _QTOLx, machprec(), options.QSCALE, _Ir );
     _E2vec( _nx, _npar, _xrefdot, _Qdot, _Bdot, xdot );
 #ifdef MC__ODEBND_BASE_DINEQI_DEBUG
     //E::options.PSDCHK = true;
@@ -1527,7 +1530,7 @@ ODEBND_BASE<T,PMT,PVT>::_FCT_I_STA
 template <typename T, typename PMT, typename PVT>
 template <typename OPT> inline bool
 ODEBND_BASE<T,PMT,PVT>::_INI_I_STA
-( const OPT&options, const unsigned np, const T*Ip )
+( const OPT&options, const unsigned np, const T*Ip, const double QTOL )
 {
   // Update effective number of parameters
   // (possibly larger than _np if lifting is used)
@@ -1619,6 +1622,7 @@ ODEBND_BASE<T,PMT,PVT>::_INI_I_STA
       _pref[ip] = Op<T>::mid( _Ip[ip] );
       _MVPp[ip].set( _MVPenv, ip, _Ip[ip] );
     }
+    _QTOLx = QTOL;
     break;
   }
 
@@ -1834,7 +1838,7 @@ ODEBND_BASE<T,PMT,PVT>::_PME2vec
 template <typename T, typename PMT, typename PVT>
 template <typename OPT> inline bool
 ODEBND_BASE<T,PMT,PVT>::_INI_PM_STA
-( const OPT&options, const unsigned np, const PVT* PMp )
+( const OPT&options, const unsigned np, const PVT* PMp, const double QTOL )
 {
   // Update effective number of parameters
   // (possibly larger than _np due to lifting)
@@ -1914,6 +1918,8 @@ ODEBND_BASE<T,PMT,PVT>::_INI_PM_STA
     _MVXPt = _MVXPp + _npar;
     for( unsigned ip=0; ip<_npar; ip++ )
       _MVXPp[ip].set( _MVXPenv, ip, _PMp[ip].B() );
+
+    _QTOLx = QTOL;
     break;
   }
 
@@ -1937,7 +1943,6 @@ ODEBND_BASE<T,PMT,PVT>::_GET_PM_STA
    case OPT::ELLIPS:
    default:
     _vec2PME( x, _PMenv, _nx, _PMx, _Q, _Er, _Ir );
-    //std::cout << _Er.eigQ().first;
     break;
   }
 
@@ -2152,7 +2157,7 @@ ODEBND_BASE<T,PMT,PVT>::_CC_PM_STA
 
     // Whether or not to ignore the remainder
     if( !options.PMNOREM ){
-      _CC_PM_ELL( _nx, _Er, _A, _Irdot, _PMxdot, _Qdot, options.QTOL, machprec() );
+      _CC_PM_ELL( _nx, _Er, _A, _Irdot, _PMxdot, _Qdot, _QTOLx, machprec() );
       _PME2vec( _PMenv, _nx, _PMxdot, _Qdot, x );
     }
     else
@@ -2326,7 +2331,7 @@ ODEBND_BASE<T,PMT,PVT>::_RHS_PM_STA
     }
 
     // Construct the ellipsoidal remainder derivatives
-    if( !_RHS_ELL( _nx, _Q, _A, _Irdot, _Qdot, options.QTOL, machprec(), options.QSCALE, _Ir ) )
+    if( !_RHS_ELL( _nx, _Q, _A, _Irdot, _Qdot, _QTOLx, machprec(), options.QSCALE, _Ir ) )
       return 1.;
 
     // Whether or not to ignore the remainder

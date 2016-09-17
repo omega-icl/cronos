@@ -1,3 +1,4 @@
+/// LOTKA-VOLTERRA SYSTEM ///
 const unsigned int NPM   = 3;	// <- Order of poynomial expansion
 const unsigned int NSAMP = 50;	// <- Number of sampling points for inner approx.
 #define SAVE_RESULTS            // <- Whether to save bounds to file
@@ -90,8 +91,9 @@ int main()
 #if defined( SAVE_RESULTS )
   LV.options.RESRECORD = true;
 #endif
-  LV.options.ATOL      = LV.options.ATOLB      = LV.options.ATOLS  = 1e-20;
+  LV.options.ATOL      = LV.options.ATOLB      = LV.options.ATOLS  = 1e-8;
   LV.options.RTOL      = LV.options.RTOLB      = LV.options.RTOLS  = 1e-8;
+  LV.options.ETOL      = LV.options.ETOLB      = LV.options.ETOLS  = 1e-20;
   LV.options.NMAX      = 20000;
   LV.options.MAXFAIL   = 10;
   LV.options.FSAERR    = true;

@@ -1,4 +1,4 @@
-/// CUBIC OSCILLATOR EXAMPLE ///
+/// CUBIC OSCILLATOR ///
 const unsigned int NPM   = 3;	// <- Order of poynomial expansion
 const unsigned int NSAMP = 2;	// <- Number of sampling points for inner approx.
 #define SAVE_RESULTS            // <- Whether to save bounds to file
@@ -87,8 +87,9 @@ int main()
 #if defined( SAVE_RESULTS )
   CO.options.RESRECORD = true;
 #endif
-  CO.options.ATOL      = CO.options.ATOLB      = CO.options.ATOLS  = 1e-20;
+  CO.options.ATOL      = CO.options.ATOLB      = CO.options.ATOLS  = 1e-10;
   CO.options.RTOL      = CO.options.RTOLB      = CO.options.RTOLS  = 1e-8;
+  CO.options.ETOL      = CO.options.ETOLB      = CO.options.ETOLS  = 1e-20;
   CO.options.NMAX      = CO.options.ASACHKPT   = 25000;
   CO.options.MAXFAIL   = 10;
   CO.options.FSAERR    = true;

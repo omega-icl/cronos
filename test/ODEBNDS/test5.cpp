@@ -1,5 +1,4 @@
-// ESCAPE26 Case Study 1 - Exothermic Batch Reactor
-
+/// EXOTHERMIC BATCH REACTOR ///
 const unsigned int NPM   = 2;	// <- Order of poynomial expansion
 const unsigned int NSAMP = 2;	// <- Number of sampling points for inner approx.
 #define SAVE_RESULTS		    // <- Whether to save bounds to file

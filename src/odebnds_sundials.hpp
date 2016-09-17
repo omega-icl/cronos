@@ -140,6 +140,9 @@ public:
   //! @brief N_Vector object holding current state function derivative parameterizations
   N_Vector *_Nfp;
 
+  //! @brief N_Vector object holding absolute tolerances
+  N_Vector _NTOLy;
+
   //! @brief pointer to array holding identifiers of the backward problems
   int* _indexB;
   
@@ -330,17 +333,18 @@ template <typename T, typename PMT, typename PVT> inline
 ODEBNDS_SUNDIALS<T,PMT,PVT>::ODEBNDS_SUNDIALS
 ()
 : BASE_SUNDIALS(), ODEBNDS_BASE<T,PMT,PVT>(), ODEBND_SUNDIALS<T,PMT,PVT>(),
-  _ifct(0), _isen(0), _nvec(0), _Ny(0), _Nyq(0), _Nfp(0), _indexB(0), _iusrB(0),
-  pODESLVS()
+  _ifct(0), _isen(0), _nvec(0), _Ny(0), _Nyq(0), _Nfp(0), _NTOLy(0),
+  _indexB(0), _iusrB(0), pODESLVS()
 {}
 
 template <typename T, typename PMT, typename PVT> inline
 ODEBNDS_SUNDIALS<T,PMT,PVT>::~ODEBNDS_SUNDIALS
 ()
 {
-  if( _Ny )   N_VDestroyVectorArray_Serial( _Ny,  _nvec );
-  if( _Nyq )  N_VDestroyVectorArray_Serial( _Nyq, _nvec );
-  if( _Nfp )  N_VDestroyVectorArray_Serial( _Nfp, _nvec );
+  if( _Ny )    N_VDestroyVectorArray_Serial( _Ny,  _nvec );
+  if( _Nyq )   N_VDestroyVectorArray_Serial( _Nyq, _nvec );
+  if( _Nfp )   N_VDestroyVectorArray_Serial( _Nfp, _nvec );
+  if( _NTOLy ) N_VDestroy_Serial( _NTOLy );
   delete[] _indexB;
   delete[] _iusrB;
 }
@@ -420,9 +424,18 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::_INI_CVODES
     }
   }
 
-  // Specify the relative and absolute tolerances for states
-  _cv_flag = CVodeSStolerancesB( _cv_mem, indexB, options.RTOLB, options.ATOLB );
-  if( _check_cv_flag(&_cv_flag, "CVodeSStolerancesB", 1) ) return false;
+  // Specify the relative and absolute tolerances for adjoints, with
+  // different tolerances for entries of ellipsoid shape matrix
+  if( (options.WRAPMIT == Options::ELLIPS) && (options.ETOLB < options.ATOLB) ){
+    for(unsigned i=0; i<NV_LENGTH_S(_NTOLy); i++ )
+      NV_Ith_S(_NTOLy,i) = i<NV_LENGTH_S(_NTOLy)-_nx*(_nx+1)/2? options.ATOLB: options.ETOLB;
+    _cv_flag = CVodeSVtolerancesB( _cv_mem, indexB, options.RTOL, _NTOLy );
+    if( _check_cv_flag(&_cv_flag, "CVodeSVtolerancesB", 1) ) return false;  
+  }
+  else{
+    _cv_flag = CVodeSStolerancesB( _cv_mem, indexB, options.RTOLB, options.ATOLB );
+    if( _check_cv_flag(&_cv_flag, "CVodeSStolerancesB", 1) ) return false;
+  }
 
   // Specify minimum stepsize
   _cv_flag = CVodeSetMinStepB( _cv_mem, indexB, options.HMIN>0.? options.HMIN:0. );
@@ -464,6 +477,15 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::_INI_CVODES
   if( options.AUTOTOLS ){
     _cv_flag = CVodeSensEEtolerances( _cv_mem );
     if( _check_cv_flag(&_cv_flag, "CVodeSensEEtolerances", 1)) return false;
+  }
+  else if( (options.WRAPMIT == Options::ELLIPS) && (options.ETOLS < options.ATOLS) ){
+    N_Vector* ATOLS = N_VCloneVectorArray_Serial( _nvec, _NTOLy );
+    for(unsigned jp=0; jp<_np; jp++)
+      for(unsigned iy=0; iy<NV_LENGTH_S(ATOLS[jp]); iy++ )
+        NV_Ith_S(ATOLS[jp],iy) = iy<NV_LENGTH_S(ATOLS[jp])-_nx*(_nx+1)/2? options.ATOLS: options.ETOLS;
+    _cv_flag = CVodeSensSVtolerances( _cv_mem, options.RTOLS, ATOLS );
+    N_VDestroyVectorArray_Serial( ATOLS, _nvec );
+    if( _check_cv_flag(&_cv_flag, "CVodeSensSVtolerances", 1)) return false;     
   }
   else{
     realtype ATOLS[_np];
@@ -548,7 +570,7 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::_INI_I_ASA
 ( const unsigned np, const T*Ip )
 {
   // Initialize bound propagation
-  if( !_INI_I_SEN( options, np, Ip, _nf, np ) )
+  if( !_INI_I_SEN( options, np, Ip, _nf, np, options.ETOLB ) )
     return false;
 
   // Set SUNDIALS adjoint/quadrature arrays
@@ -582,6 +604,9 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::_INI_I_ASA
       _Nyq[i] = N_VNew_Serial( cv_Nyq_size );
     }
   }
+  if( !_NTOLy || cv_Ny_size != NV_LENGTH_S( _NTOLy ) )
+    if( _NTOLy ) N_VDestroy_Serial( _NTOLy );
+      _NTOLy = N_VNew_Serial( cv_Ny_size );
 
   // Reset result record and statistics
   results_sen.clear();
@@ -789,7 +814,7 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::_INI_I_FSA
 ( const unsigned np, const T *Ip )
 {
   // Initialize bound propagation
-  if( !_INI_I_SEN( options, np, Ip, np, _nq ) )
+  if( !_INI_I_SEN( options, np, Ip, np, _nq, options.ETOLS ) )
     return false;
 
   // Set SUNDIALS sensitivity/quadrature arrays
@@ -809,11 +834,11 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::_INI_I_FSA
     break;
   }
   if( _nvec != np ){
-    if( _Ny )   N_VDestroyVectorArray_Serial( _Ny,  _nvec ); _Ny = 0;
-    if( _Nyq )  N_VDestroyVectorArray_Serial( _Nyq, _nvec ); _Nyq = 0;
-    if( _Nfp )  N_VDestroyVectorArray_Serial( _Nfp, _nvec ); _Nfp = 0;
+    if( _Ny )    N_VDestroyVectorArray_Serial( _Ny,  _nvec ); _Ny = 0;
+    if( _Nyq )   N_VDestroyVectorArray_Serial( _Nyq, _nvec ); _Nyq = 0;
+    if( _Nfp )   N_VDestroyVectorArray_Serial( _Nfp, _nvec ); _Nfp = 0;
     _nvec = np;
-    _Ny  = N_VCloneVectorArray_Serial( np, _Nx );
+    _Ny    = N_VCloneVectorArray_Serial( np, _Nx );
     if( _nq ) _Nyq = N_VCloneVectorArray_Serial( np, _Nx );
     if( _nf ) _Nfp = N_VCloneVectorArray_Serial( np, _Nx );
   }
@@ -831,6 +856,9 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::_INI_I_FSA
       _Nfp[i] = cv_Nfp_size? N_VNew_Serial( cv_Nfp_size ): 0;
     }
   }
+  if( !_NTOLy || cv_Ny_size != NV_LENGTH_S( _NTOLy ) )
+    if( _NTOLy ) N_VDestroy_Serial( _NTOLy );
+      _NTOLy = N_VNew_Serial( cv_Ny_size );
 
   // Reset result record and statistics
   results_sen.clear();
@@ -1101,7 +1129,7 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::_INI_PM_ASA
 ( const unsigned np, const PVT *PMp )
 {
   // Initialize bound propagation
-  if( !_INI_PM_SEN( options, np, PMp, _nf, np ) )
+  if( !_INI_PM_SEN( options, np, PMp, _nf, np, options.ETOLB ) )
     return false;
 
   // Set SUNDIALS adjoint/quadrature arrays
@@ -1136,6 +1164,9 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::_INI_PM_ASA
       _Nyq[i] = N_VNew_Serial( cv_Nyq_size );
     }
   }
+  if( !_NTOLy || cv_Ny_size != NV_LENGTH_S( _NTOLy ) )
+    if( _NTOLy ) N_VDestroy_Serial( _NTOLy );
+      _NTOLy = N_VNew_Serial( cv_Ny_size );
 
   // Reset result record and statistics
   results_sen.clear();
@@ -1336,7 +1367,7 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::_INI_PM_FSA
 ( const unsigned np, const PVT *PMp )
 {
   // Initialize bound propagation
-  if( !_INI_PM_SEN( options, np, PMp, np, _nq ) )
+  if( !_INI_PM_SEN( options, np, PMp, np, _nq, options.ETOLS ) )
     return false;
 
   // Set SUNDIALS adjoint/quadrature arrays
@@ -1356,11 +1387,11 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::_INI_PM_FSA
   unsigned cv_Nyq_size = (_PMenv->nmon()+1)*_nq,
            cv_Nfp_size = (_PMenv->nmon()+1)*_nf;
   if( _nvec != np ){
-    if( _Ny )   N_VDestroyVectorArray_Serial( _Ny,  _nvec ); _Ny = 0;
-    if( _Nyq )  N_VDestroyVectorArray_Serial( _Nyq, _nvec ); _Nyq = 0;
-    if( _Nfp )  N_VDestroyVectorArray_Serial( _Nfp, _nvec ); _Nfp = 0;
+    if( _Ny )    N_VDestroyVectorArray_Serial( _Ny,  _nvec ); _Ny = 0;
+    if( _Nyq )   N_VDestroyVectorArray_Serial( _Nyq, _nvec ); _Nyq = 0;
+    if( _Nfp )   N_VDestroyVectorArray_Serial( _Nfp, _nvec ); _Nfp = 0;
     _nvec = np;
-    _Ny  = N_VCloneVectorArray_Serial( np, _Nx );
+    _Ny    = N_VCloneVectorArray_Serial( np, _Nx );
     if( _nq ) _Nyq = N_VCloneVectorArray_Serial( np, _Nx );
     if( _nf ) _Nfp = N_VCloneVectorArray_Serial( np, _Nx );
   }
@@ -1378,6 +1409,9 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::_INI_PM_FSA
       _Nfp[i] = cv_Nfp_size? N_VNew_Serial( cv_Nfp_size ): 0;
     }
   }
+  if( !_NTOLy || cv_Ny_size != NV_LENGTH_S( _NTOLy ) )
+    if( _NTOLy ) N_VDestroy_Serial( _NTOLy );
+      _NTOLy = N_VNew_Serial( cv_Ny_size );
 
   // Reset result record and statistics
   results_sen.clear();
@@ -1539,9 +1573,10 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_FSA
            || ( _isen==_np-1 && !_CC_CVODES_QUAD() ) ) )
             { _END_STA(); _END_SEN(); return FATAL; }
 #ifdef MC__ODEBNDS_SUNDIALS_DEBUG
+        std::cout << "Entering Stage #" << _istg << std::endl;
         for( unsigned iy=0; iy<NV_LENGTH_S(_Ny[_isen]); iy++ )
           std::cout << "_Ny" << _isen << "[iy] = " << NV_Ith_S(_Ny[_isen],iy) << std::endl;
-        for( unsigned iy=0; iy<NV_LENGTH_S(_Nyq[_isen]); iy++ )
+        for( unsigned iy=0; _nq && iy<NV_LENGTH_S(_Nyq[_isen]); iy++ )
           std::cout << "_Nyq" << _isen << "[iy] = " << NV_Ith_S(_Nyq[_isen],iy) << std::endl;
 #endif
       }

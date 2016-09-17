@@ -87,6 +87,9 @@ class ODEBND_SUNDIALS:
 
   //! @brief N_Vector object holding current state function parameterization
   N_Vector _Nf;
+  
+  //! @brief N_Vector object holding absolute tolerances
+  N_Vector _NTOLx;
 
   //! @brief stepsize
   double _h;
@@ -135,7 +138,7 @@ public:
     //! @brief Constructor
     Options():
       BASE_SUNDIALS::Options(), WRAPMIT(ELLIPS), ORDMIT(2), PMOPT(typename PMT::Options()),
-      QTOL(machprec()), QSCALE(1e-5), PMNOREM(false), USEINV(true), DMAX(1e20), DISPLAY(1), 
+      QSCALE(1e-5), PMNOREM(false), USEINV(true), DMAX(1e20), DISPLAY(1), 
       RESRECORD(false), ODESLV(typename ODESLV_SUNDIALS::Options())
       {}
     //! @brief Assignment operator
@@ -145,7 +148,6 @@ public:
         WRAPMIT   = options.WRAPMIT;
         ORDMIT    = options.ORDMIT;
         PMOPT     = options.PMOPT;
-        QTOL      = options.QTOL;
         QSCALE    = options.QSCALE;
         PMNOREM   = options.PMNOREM;
         USEINV    = options.USEINV;
@@ -167,8 +169,6 @@ public:
     int ORDMIT;
     //! @brief Options of internal polynomial model arithmetic for wrapping mitigation
     typename PMT::Options PMOPT;
-    //! @brief Tolerance when dividing by trace of shape matrix in ellipsoidal bounds (Default: machprec())
-    double QTOL;
     //! @brief Tolerance for applying ellipsoidal remainder scaling (Default: machprec())
     double QSCALE;
     //! @brief Whether or not to cancel the remainder term in polynomial models (non-validated integration; Default: false)
@@ -317,16 +317,17 @@ template <typename T, typename PMT, typename PVT> inline
 ODEBND_SUNDIALS<T,PMT,PVT>::ODEBND_SUNDIALS
 ()
 : BASE_DE(), BASE_SUNDIALS(), ODEBND_BASE<T,PMT,PVT>(), _cv_mem(0), _cv_flag(0),
-  _Nx(0), _Nq(0), _Nf(0), pODESLV()
+  _Nx(0), _Nq(0), _Nf(0), _NTOLx(0), pODESLV()
 {}
 
 template <typename T, typename PMT, typename PVT> inline
 ODEBND_SUNDIALS<T,PMT,PVT>::~ODEBND_SUNDIALS
 ()
 {
-  if( _Nx ) N_VDestroy_Serial( _Nx );
-  if( _Nq ) N_VDestroy_Serial( _Nq );
-  if( _Nf ) N_VDestroy_Serial( _Nf );
+  if( _Nx )    N_VDestroy_Serial( _Nx );
+  if( _Nq )    N_VDestroy_Serial( _Nq );
+  if( _Nf )    N_VDestroy_Serial( _Nf );
+  if( _NTOLx ) N_VDestroy_Serial( _NTOLx );
   if( _cv_mem ) CVodeFree( &_cv_mem );
 }
 
@@ -380,10 +381,19 @@ ODEBND_SUNDIALS<T,PMT,PVT>::_INI_CVODE
        break;
     }
   }
-
-  // Specify the relative and absolute tolerances for states
-  _cv_flag = CVodeSStolerances( _cv_mem, options.RTOL, options.ATOL );
-  if( _check_cv_flag(&_cv_flag, "CVodeSStolerances", 1) ) return false;
+  
+  // Specify the relative and absolute tolerances for states, with
+  // different tolerances for entries of ellipsoid shape matrix ODEs
+  if( (options.WRAPMIT == Options::ELLIPS) && (options.ETOL < options.ATOL) ){
+    for(unsigned i=0; i<NV_LENGTH_S(_NTOLx); i++ )
+      NV_Ith_S(_NTOLx,i) = i<NV_LENGTH_S(_NTOLx)-_nx*(_nx+1)/2? options.ATOL: options.ETOL;
+    _cv_flag = CVodeSVtolerances( _cv_mem, options.RTOL, _NTOLx );
+    if( _check_cv_flag(&_cv_flag, "CVodeSVtolerances", 1) ) return false;   
+  }
+  else{
+    _cv_flag = CVodeSStolerances( _cv_mem, options.RTOL, options.ATOL );
+    if( _check_cv_flag(&_cv_flag, "CVodeSStolerances", 1) ) return false;
+  }
 
   // Set maximum number of error test failures
   _cv_flag = CVodeSetMaxErrTestFails( _cv_mem, options.MAXFAIL );
@@ -460,7 +470,7 @@ ODEBND_SUNDIALS<T,PMT,PVT>::_INI_I_STA
 ( const unsigned np, const T*Ip )
 {
   // Initialize bound propagation
-  if( !ODEBND_BASE<T,PMT,PVT>::_INI_I_STA( options, np, Ip )
+  if( !ODEBND_BASE<T,PMT,PVT>::_INI_I_STA( options, np, Ip, options.ETOL )
    || !ODEBND_SUNDIALS<T,PMT,PVT>::_INI_I_STA( np ) )
     return false;
   return true;
@@ -498,7 +508,10 @@ ODEBND_SUNDIALS<T,PMT,PVT>::_INI_I_STA
     if( _Nf ) N_VDestroy_Serial( _Nf );
     _Nf = cv_Nf_size? N_VNew_Serial( cv_Nf_size ): 0;
   }
-
+  if( !_NTOLx || cv_Nx_size != NV_LENGTH_S( _NTOLx ) ){
+    if( _NTOLx ) N_VDestroy_Serial( _NTOLx );
+      _NTOLx = N_VNew_Serial( cv_Nx_size );
+  }
   // Initialize state parameterization at time stages
   _vec_sta.clear();
 
@@ -722,7 +735,7 @@ ODEBND_SUNDIALS<T,PMT,PVT>::_INI_PM_STA
 ( const unsigned np, const PVT* PMp )
 {
   // Initialize bound propagation
-  if( !ODEBND_BASE<T,PMT,PVT>::_INI_PM_STA( options, np, PMp )
+  if( !ODEBND_BASE<T,PMT,PVT>::_INI_PM_STA( options, np, PMp, options.ETOL )
    || !ODEBND_SUNDIALS<T,PMT,PVT>::_INI_PM_STA( np ) )
     return false;
   return true;
@@ -754,7 +767,10 @@ ODEBND_SUNDIALS<T,PMT,PVT>::_INI_PM_STA
     if( _Nq ) N_VDestroy_Serial( _Nq );
     _Nq  = cv_Nq_size? N_VNew_Serial( cv_Nq_size ): 0;
   }
-
+  if( !_NTOLx || cv_Nx_size != NV_LENGTH_S( _NTOLx ) ){
+    if( _NTOLx ) N_VDestroy_Serial( _NTOLx );
+      _NTOLx = N_VNew_Serial( cv_Nx_size );
+  }
   // Initialize state parameterization at time stages
   _vec_sta.clear();
 

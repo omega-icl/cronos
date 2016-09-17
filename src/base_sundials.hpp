@@ -45,10 +45,10 @@ public:
     //! @brief Constructor
     Options():
       INTMETH(MSADAMS), H0(0e0), HMIN(0e0), HMAX(0e0), NMAX(0),
-      RTOL(1e-8), ATOL(1e-8), QERR(true), MAXFAIL(10), JACAPPROX(CV_DIAG),
-      AUTOTOLS(false), RTOLS(1e-8), ATOLS(1e-8), FSACORR(STAGGERED),
-      FSAERR(true), QERRS(true), RTOLB(1e-8), ATOLB(1e-8), QERRB(true),
-      ASAINTERP(POLYNOMIAL), ASACHKPT(1000), RTOLFD(1e-3), ATOLFD(1e-3), CENFD(true)
+      RTOL(1e-8), ATOL(1e-8), ETOL(1e-16), QERR(true), MAXFAIL(10), JACAPPROX(CV_DIAG),
+      AUTOTOLS(false), RTOLS(1e-8), ATOLS(1e-8), ETOLS(1e-16), FSACORR(STAGGERED),
+      FSAERR(true), QERRS(true), RTOLB(1e-8), ATOLB(1e-8), ETOLB(1e-16), QERRB(true),
+      ASAINTERP(HERMITE), ASACHKPT(1000), RTOLFD(1e-3), ATOLFD(1e-3), CENFD(true)
       {}
     //! @brief Assignment operator
     template <typename U> Options& operator=
@@ -60,17 +60,20 @@ public:
         NMAX      = options.NMAX;
         RTOL      = options.RTOL;
         ATOL      = options.ATOL;
+        ETOL      = options.ETOL;
         QERR      = options.QERR;
         MAXFAIL   = options.MAXFAIL;
         JACAPPROX = options.JACAPPROX;
         AUTOTOLS  = options.AUTOTOLS;
         RTOLS     = options.RTOLS;
         ATOLS     = options.ATOLS;
+        ETOLS     = options.ETOLS;
         FSACORR   = options.FSACORR;
         FSAERR    = options.FSAERR;
         QERRS     = options.QERRS;
         RTOLB     = options.RTOLB;
         ATOLB     = options.ATOLB;
+        ETOLB     = options.ETOLB;
         QERRB     = options.QERRB;
         ASAINTERP = options.ASAINTERP;
         ASACHKPT  = options.ASACHKPT;
@@ -115,6 +118,8 @@ public:
     realtype RTOL;
     //! @brief Absolute (scalar) integration tolerance
     realtype ATOL;
+    //! @brief Absolute (scalar) integration tolerance for ellipsoid shape matrix
+    realtype ETOL;    
     //! @brief Whether or not (state) quadrature error control is performed?
     bool QERR;
     //! @brief Maximum number of error test failures
@@ -123,25 +128,29 @@ public:
     JAC_STRATEGY JACAPPROX;
     //! @brief Whether integration tolerances for FS are to be set automatically?
     bool AUTOTOLS;
-    //! @brief Relative (scalar) integration tolerance for FS
+    //! @brief Relative (scalar) integration tolerance for FSA
     realtype RTOLS;
-    //! @brief Absolute (scalar) integration tolerance for FS
+    //! @brief Absolute (scalar) integration tolerance for FSA
     realtype ATOLS;
+    //! @brief Absolute (scalar) integration tolerance for ellipsoid shape matrix in FSA
+    realtype ETOLS;      
     //! @brief FSA correction strategy
     FSA_STRATEGY FSACORR;
     //! @brief Whether or not FSA error control is performed?
     bool FSAERR;
     //! @brief Whether or not FSA quadrature error control is performed?
     bool QERRS;
-    //! @brief Relative (scalar) integration tolerance for AS
+    //! @brief Relative (scalar) integration tolerance for ASA
     realtype RTOLB;
-    //! @brief Absolute (scalar) integration tolerance for AS
+    //! @brief Absolute (scalar) integration tolerance for ASA
     realtype ATOLB;
+    //! @brief Absolute (scalar) integration tolerance for ellipsoid shape matrix in ASA
+    realtype ETOLB;    
     //! @brief Whether or not ASA quadrature error control is performed?
     bool QERRB;
     //! @brief ASA interpolation strategy
     ASA_STRATEGY ASAINTERP;
-    //! @brief Number of steps between each check point for AS
+    //! @brief Number of steps between each check point for ASA
     int ASACHKPT;
     //! @brief Relative tolerance for finite differences
     double RTOLFD;

@@ -344,6 +344,9 @@ protected:
   //! @brief pointer to parameter polynomial models (adjoint system) **DO NOT FREE**
   PVT *_MVYXPp;
 
+  //! @brief absolute tolerance for shape matrix of ellipsoidal remainder
+  double _QTOLy;
+
   //! @brief Function to initialize sensitivity for parameter <a>isen</a>
   bool _IC_SET_FSA
     ( const unsigned isen );
@@ -368,7 +371,7 @@ protected:
   //! @brief Function to initialize sensitivity/adjoint interval bounding
   template <typename OPT> bool _INI_I_SEN
     ( const OPT &options, const unsigned np, const T *Ip,
-      const unsigned nf, const unsigned nyq );
+      const unsigned nf, const unsigned nyq, const double QTOL );
 
   //! @brief Function to retreive sensitivity/adjoint interval bounds
   template <typename REALTYPE, typename OPT> void _GET_I_SEN
@@ -457,7 +460,7 @@ protected:
   //! @brief Function to initialize sensitivity/adjoint polynomial models
   template <typename OPT> bool _INI_PM_SEN
     ( const OPT &options, const unsigned np, const PVT *PMp,
-      const unsigned nf, const unsigned nyq );
+      const unsigned nf, const unsigned nyq, const double QTOL );
 
   //! @brief Function to retreive sensitivity/adjoint polynomial model
   template <typename REALTYPE, typename OPT> void _GET_PM_SEN
@@ -799,7 +802,7 @@ template <typename T, typename PMT, typename PVT>
 template <typename OPT> inline bool
 ODEBNDS_BASE<T,PMT,PVT>::_INI_I_SEN
 ( const OPT& options, const unsigned np, const T* Ip,
-  const unsigned nf, const unsigned nyq )
+  const unsigned nf, const unsigned nyq, const double QTOL )
 {
   // Update effective number of parameters
   // (possibly larger than _np if lifting is used)
@@ -900,7 +903,7 @@ ODEBNDS_BASE<T,PMT,PVT>::_INI_I_SEN
 
     delete[] _MVXPy;    _MVXPy    = new PVT[_nx];
     delete[] _MVXPyq;   _MVXPyq   = nyq? new PVT[nyq]: 0;
-
+    _QTOLy = QTOL;
     break;
   }
 
@@ -1031,7 +1034,7 @@ ODEBNDS_BASE<T,PMT,PVT>::_TC_I_SEN
       std::cout << "MVXPy[" << ix << "] = " << _MVXPy[ix] << std::endl;
 #endif
     ODEBND_BASE<T,PMT,PVT>::_CC_I_ELL( _nx, _MVXPy, _Iy, _Er, _Ay, _npar, _yref, _By,
-      _Idy, _Qy, options.QTOL, machprec() );
+      _Idy, _Qy, _QTOLy, machprec() );
 #ifdef MC__ODEBNDS_BASE_DINEQI_DEBUG
     for( unsigned ix=0; ix<_nx; ix++ )
       std::cout << "yref[" << ix << "] = " << _yref[ix] << std::endl;
@@ -1310,7 +1313,7 @@ ODEBNDS_BASE<T,PMT,PVT>::_CC_I_SEN
 #endif
     _pDAG->eval( _opADJTC, _PMADJTC, _nx, _pADJCC, _MVYXPg, _nVAR0, _pVAR, _MVYXPVAR );
     _CC_I_ELL( _nx, _MVYXPg, _Iy, _Edy, _Ay, _Er, _Ax, _npar, _yrefdot, _Bydot, _Idydot,
-      _Qydot, options.QTOL, machprec() );
+      _Qydot, _QTOLy, machprec() );
     _E2vec( _nx, _npar, _yrefdot, _Qydot, _Bydot, y );
 #ifdef MC__ODEBNDS_BASE_DINEQI_DEBUG
     for( unsigned i=0; i<_nx*(1+_npar)+_nx*(_nx+1)/2+2*_npar; i++ )
@@ -1603,7 +1606,7 @@ ODEBNDS_BASE<T,PMT,PVT>::_RHS_I_SEN
     _pDAG->eval( _opADJRHS[ifct], _PMADJRHS, _nx, _vADJRHS[ifct], _MVYXPg,
                  _nVAR0, _pVAR, _MVYXPVAR );
     _RHS_I_ELL( _nx, _MVYXPg, _Qy, _Ay, _Ax, _npar, _yrefdot, _Bydot, _Idydot, _Qydot, 
-      options.QTOL, machprec(), options.QSCALE, neg, _Idy );
+      _QTOLy, machprec(), options.QSCALE, neg, _Idy );
     _E2vec( _nx, _npar, _yrefdot, _Qydot, _Bydot, ydot );
     break;
   }
@@ -1856,7 +1859,7 @@ template <typename T, typename PMT, typename PVT>
 template <typename OPT> inline bool
 ODEBNDS_BASE<T,PMT,PVT>::_INI_PM_SEN
 ( const OPT& options, const unsigned np, const PVT* PMp,
-  const unsigned nf, const unsigned nyq )
+  const unsigned nf, const unsigned nyq, const double QTOL )
 {
   // Update effective number of parameters
   // (possibly larger than _np if lifting is used)
@@ -1956,8 +1959,8 @@ ODEBNDS_BASE<T,PMT,PVT>::_INI_PM_SEN
     _MVYXPt = _MVYXPp + _npar;
     for( unsigned ip=0; ip<_npar; ip++ )
       _MVYXPp[ip].set( _MVYXPenv, ip, _PMp[ip].B() );
-
     _Ew.unitball(_nx);
+    _QTOLy = QTOL;
     break;
   }
 
@@ -2171,7 +2174,7 @@ ODEBNDS_BASE<T,PMT,PVT>::_TC_PM_SEN
 
     // Whether or not to ignore the remainder
     if( !options.PMNOREM ){
-      ODEBND_BASE<T,PMT,PVT>::_CC_PM_ELL( _nx, _Er, _Ay, _Idy, _PMy, _Qy, options.QTOL, machprec() );
+      ODEBND_BASE<T,PMT,PVT>::_CC_PM_ELL( _nx, _Er, _Ay, _Idy, _PMy, _Qy, _QTOLy, machprec() );
 #ifdef MC__ODEBND_BASE_DINEQPM_DEBUG
       std::cout << "Edy" << E(_nx, _Qy) << std::endl;
       { int dum; std::cin >> dum; }
@@ -2392,8 +2395,7 @@ ODEBNDS_BASE<T,PMT,PVT>::_CC_PM_SEN
 
     // Whether or not to ignore the remainder
     if( !options.PMNOREM ){
-      _CC_PM_ELL( _nx, _Edy, _Ay, _Ew, _Ax, _Idydot, _PMydot, _Qydot,
-        options.QTOL, machprec() );
+      _CC_PM_ELL( _nx, _Edy, _Ay, _Ew, _Ax, _Idydot, _PMydot, _Qydot, _QTOLy, machprec() );
       _PME2vec( _PMenv, _nx, _PMydot, _Qydot, y );
     }
     else
@@ -2796,7 +2798,7 @@ ODEBNDS_BASE<T,PMT,PVT>::_RHS_PM_SEN
     }
 
     // Construct the ellipsoidal remainder derivatives
-    _RHS_PM_ELL( _nx, _Qy, _Ay, _Ax, _Idydot, _Qydot, options.QTOL, machprec(),
+    _RHS_PM_ELL( _nx, _Qy, _Ay, _Ax, _Idydot, _Qydot, _QTOLy, machprec(),
       options.QSCALE, neg, _Idy );
 
     // Whether or not to ignore the adjoint remainder

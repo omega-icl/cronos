@@ -1,4 +1,4 @@
-// Copyright (C) 2015 Benoit Chachuat, Imperial College London.
+// Copyright (C) 2015-2016 Benoit Chachuat, Imperial College London.
 // All Rights Reserved.
 // This code is published under the Eclipse Public License.
 
@@ -190,7 +190,6 @@ Other options can be modified to tailor the search, including output level, maxi
 #define MC__NLGO_HPP
 
 #include <stdexcept>
-#include <assert.h>
 
 #include "sbb.hpp"
 #include "nlpslv_ipopt.hpp"
@@ -537,7 +536,7 @@ public:
 
   //! @brief Structure holding current statistics
   struct Stats{
-    void reset(){ tPOLIMG = tLPSOL = tLPSET = tNLPSOL = 0.; nLPSOL = 0; tstart = time(); }
+    void reset(){ tPOLIMG = tLPSOL = tLPSET = tNLPSOL = 0.; nLPSOL = 0; tstart = cpuclock(); }
     double tstart;
     double tPOLIMG;
     double tLPSOL;
@@ -807,7 +806,7 @@ template <typename T> inline Ipopt::ApplicationReturnStatus
 NLGO<T>::local
 ( const T*P, const double*p0, const bool reset )
 {
-  stats.tNLPSOL -= time();
+  stats.tNLPSOL -= cpuclock();
 
   // Set-up local NLP solver
   if( reset ){
@@ -822,7 +821,7 @@ NLGO<T>::local
     p[ip] = ( p0? p0[ip]: Op<T>::mid(P[ip]) );
   Ipopt::ApplicationReturnStatus status = _NLPSLV->solve( P, p.data() );
 
-  stats.tNLPSOL += time();
+  stats.tNLPSOL += cpuclock();
   return status;
 }
 
@@ -1296,7 +1295,7 @@ NLGO<T>::_solve_pwl
      case LPRELAX_BASE<T>::LP_INFEASIBLE:
       _display_add( "-" );
       _display_add( "-" );
-      _display_add( time()-stats.tstart );
+      _display_add( cpuclock()-stats.tstart );
       _display_add( "INFEASIBLE" );
       _display_flush( os );
       _display_final( iter );
@@ -1305,7 +1304,7 @@ NLGO<T>::_solve_pwl
      default:
       _display_add( "-" );
       _display_add( "-" );
-      _display_add( time()-stats.tstart );
+      _display_add( cpuclock()-stats.tstart );
       _display_add( "FAILURE" );
       _display_flush( os );
       _display_final( iter );
@@ -1338,7 +1337,7 @@ NLGO<T>::_solve_pwl
     // Test termination criteria
     if( !_p_inc.empty() ){
       _display_add( _f_inc );
-      _display_add( time()-stats.tstart );
+      _display_add( cpuclock()-stats.tstart );
       if( std::fabs( _f_inc - get_objective() ) <= options.CVATOL 
        || std::fabs( _f_inc - get_objective() ) <= 0.5 * options.CVRTOL
           * std::fabs( _NLPSLV->solution().f + get_objective() ) ){
@@ -1349,7 +1348,7 @@ NLGO<T>::_solve_pwl
     }
     else{
       _display_add( "-" );
-      _display_add( time()-stats.tstart );
+      _display_add( cpuclock()-stats.tstart );
     }
     _display_add( "REFINE" );
     _display_flush( os );
@@ -1384,7 +1383,7 @@ NLGO<T>::_refine_polrelax
 {
 
   // Update polyhedral main variables
-  stats.tPOLIMG -= time();
+  stats.tPOLIMG -= cpuclock();
   for( auto itv = _POLenv.Vars().begin(); itv!=_POLenv.Vars().end(); ++itv ){
     double Xval = _get_variable( *itv->second );
     itv->second->add_breakpt( Xval );
@@ -1410,11 +1409,11 @@ NLGO<T>::_refine_polrelax
     _set_poacuts( feastest );
   if( options.RELMETH==Options::CHEB || options.RELMETH==Options::HYBRID )
     _set_chebcuts( feastest );
-  stats.tPOLIMG += time();
+  stats.tPOLIMG += cpuclock();
 
-  stats.tLPSET -= time();
+  stats.tLPSET -= cpuclock();
   _set_LPcuts();
-  stats.tLPSET += time();
+  stats.tLPSET += cpuclock();
 }
 
 template <typename T> inline void
@@ -1422,7 +1421,7 @@ NLGO<T>::_set_polrelax
 ( const T*P, const unsigned*tvar, const bool feastest )
 {
   // Reset polynomial image
-  stats.tPOLIMG -= time();
+  stats.tPOLIMG -= cpuclock();
   _POLenv.reset();
   _POLvar.clear();
   _POLenv.options = options.POLIMG;
@@ -1498,12 +1497,12 @@ NLGO<T>::_set_polrelax
     // Add polyhedral cuts
     _set_chebcuts( feastest );
   }
-  stats.tPOLIMG += time();
+  stats.tPOLIMG += cpuclock();
 
   // Update cuts in relaxed model
-  stats.tLPSET -= time();
+  stats.tLPSET -= cpuclock();
   _set_LPcuts();
-  stats.tLPSET += time();
+  stats.tLPSET += cpuclock();
 }
 
 template <typename T> inline void
@@ -1511,7 +1510,7 @@ NLGO<T>::_update_polrelax
 ( const T*P, const unsigned*tvar, const bool feastest )
 {
   // Reset polyhedral cuts
-  stats.tPOLIMG -= time();
+  stats.tPOLIMG -= cpuclock();
   _POLenv.reset_cuts();
 
   // Update variable bounds
@@ -1539,12 +1538,12 @@ NLGO<T>::_update_polrelax
     // Add Chebyshev-derived polyhedral cuts
     _set_chebcuts( feastest );
   }
-  stats.tPOLIMG += time();
+  stats.tPOLIMG += cpuclock();
 
   // Update cuts in relaxed model
-  stats.tLPSET -= time();
+  stats.tLPSET -= cpuclock();
   _set_LPcuts();
-  stats.tLPSET += time();
+  stats.tLPSET += cpuclock();
 }
 
 template <typename T> inline void
@@ -2123,7 +2122,7 @@ NLGO<T>::_display_final
 {
   if( options.DISPLAY <= 0 ) return;
   _odisp << std::endl << "#  TERMINATION: ";
-  _odisp << std::fixed << std::setprecision(6) << time()-stats.tstart << " CPU SEC"
+  _odisp << std::fixed << std::setprecision(6) << cpuclock()-stats.tstart << " CPU SEC"
          //<< "  (LBD:" << std::fixed << std::setprecision(1)
          //<< _tLBD/(_tcur-stats.tstart)*1e2 << "%  UBD:" << std::fixed
          //<< std::setprecision(1) << _tUBD/(_tcur-stats.tstart)*1e2 << "%)"

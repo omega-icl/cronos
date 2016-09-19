@@ -9,11 +9,12 @@
 #define MC__LPRELAX_BASE_HPP
 
 #include <stdexcept>
-#include <assert.h>
+#include <cassert>
 
 #include "base_opt.hpp"
 #include "polimage.hpp"
 #include "cmodel.hpp"
+#include "mctime.hpp"
 #ifdef MC__USE_CPLEX
   #include "ilcplex/ilocplex.h"
 #else
@@ -252,7 +253,7 @@ template <typename T> template <typename OPT, typename STAT> inline void
 LPRELAX_BASE<T>::_solve_LPmodel
 ( const OPT&options, STAT&stats, const std::vector<FFVar>&var )
 {
-  stats.tLPSOL -= time();
+  stats.tLPSOL -= cpuclock();
   _set_LPoptions( options );
 #ifdef MC__USE_CPLEX
   if( options.MIPFILE != "" ) _ILOcplex->exportModel( options.MIPFILE.c_str() );
@@ -266,7 +267,7 @@ LPRELAX_BASE<T>::_solve_LPmodel
   fedisableexcept(FE_ALL_EXCEPT);
   _GRBmodel->optimize();
 #endif
-  stats.tLPSOL += time();
+  stats.tLPSOL += cpuclock();
   stats.nLPSOL++;
 #ifdef MC__LPRELAX_BASE_DEBUG
   std::cout << "LP solution complete\n";

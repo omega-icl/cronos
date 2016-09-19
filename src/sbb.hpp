@@ -14,9 +14,10 @@
 #include <iostream>
 #include <iomanip>
 #include <cmath>
+#include <cassert>
 
 #include "mcop.hpp"
-#include "mcfunc.hpp"
+#include "mctime.hpp"
 #include "base_opt.hpp"
 
 #undef DEBUG__SBB_PSEUDOCOST
@@ -583,12 +584,12 @@ SBB<T>::solve
   // keep branch-and-bound going until set _Nodes is empty
   for( _node_index = 1; !_Nodes.empty() && _tcur-_tstart < options.MAX_CPUTIME
        && ( !options.MAX_NODES || _node_index <= options.MAX_NODES );
-       _node_index++, _tcur=time() ){
+       _node_index++, _tcur=cpuclock() ){
 
     // intermediate display
     _display_add( _node_index );
     _display_add( (unsigned)_Nodes.size() );
-    _display_add( time()-_tstart );
+    _display_add( cpuclock()-_tstart );
     switch( _pb ){
     case MIN:
       _display_add( (*_Nodes.begin())->strength() ); break;
@@ -723,7 +724,7 @@ SBB<T>::_restart
   _p_inc.clear();
   _f_inc = ( _pb==MIN? INF: -INF );
   _node_index = _node_inc = _node_cnt = _node_max = 0;
-  _tstart = _tcur = time();
+  _tstart = _tcur = cpuclock();
   _tUBD = _tLBD = 0;
 }
 
@@ -741,7 +742,7 @@ inline typename SBB<T>::NODESTAT
 SBB<T>::_lower_bound
 ( SBBNode<T>*pNode, const bool relaxed, const bool strongbranching )
 {
-  _tLBD -= time();
+  _tLBD -= cpuclock();
   NODESTAT stat;
   switch( pNode->lower_bound( pNode->pUB(), _f_inc ) ){
 
@@ -779,7 +780,7 @@ SBB<T>::_lower_bound
       if( !strongbranching ) _display_add( "FATAL" );
       stat = ABORT; break;
   }
-  _tLBD += time();
+  _tLBD += cpuclock();
   return stat;
 }
 
@@ -788,7 +789,7 @@ inline typename SBB<T>::NODESTAT
 SBB<T>::_upper_bound
 ( SBBNode<T>*pNode, const bool relaxed, const bool strongbranching )
 {
-  _tUBD -= time();
+  _tUBD -= cpuclock();
   NODESTAT stat;
   switch( pNode->upper_bound( pNode->pLB(), _f_inc ) ){
 
@@ -825,7 +826,7 @@ SBB<T>::_upper_bound
       if( !strongbranching ) _display_add( "FATAL" );
       stat = ABORT; break;
   }
-  _tUBD += time();
+  _tUBD += cpuclock();
   return stat;
 }
 

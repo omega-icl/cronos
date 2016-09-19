@@ -17,7 +17,7 @@
 #include <cassert>
 
 #include "mcop.hpp"
-#include "mcfunc.hpp"
+#include "mctime.hpp"
 #include "mclapack.hpp"
 
 #undef  DEBUG__SBB_STRONGBRANCHING
@@ -694,7 +694,7 @@ SetInv<T,NODE,LT_NODE>::solve
 
   // Run iterative set-inversion algorithm
   for( ; !_open_nodes.empty()
-         && time()-_tstart < options.MAX_CPUTIME
+         && cpuclock()-_tstart < options.MAX_CPUTIME
          && ( !options.MAX_NODES || _node_index <= options.MAX_NODES );
        _node_index++ ){
 
@@ -712,21 +712,21 @@ SetInv<T,NODE,LT_NODE>::solve
      case OUTER:
       _open_nodes.erase( _open_nodes.begin() );
       delete pNode;
-      _display_add( time()-_tstart );
+      _display_add( cpuclock()-_tstart );
       _display_add( "OUTER" );
       _display( os );
       continue;
      case INNER:
       _open_nodes.erase( _open_nodes.begin() );
       delete pNode;
-      _display_add( time()-_tstart );
+      _display_add( cpuclock()-_tstart );
       _display_add( "INNER" );
       _display( os );
       continue;
      case ABORT: default:
       _open_nodes.erase( _open_nodes.begin() );
       delete pNode;
-      _display_add( time()-_tstart );
+      _display_add( cpuclock()-_tstart );
       _display_add( "ABORT" );
       _display( os );
       continue;
@@ -739,7 +739,7 @@ SetInv<T,NODE,LT_NODE>::solve
     // Branch node domain
     std::pair<NODE*,NODE*> pNewNodes = _branch_node( pNode );
     if( !pNewNodes.first || !pNewNodes.second || _status == ABORT ){
-      _display_add( time()-_tstart );
+      _display_add( cpuclock()-_tstart );
       _display_add( "ABORT" );
       _display( os );
       break; // terminate if branching unsuccessful
@@ -776,7 +776,7 @@ SetInv<T,NODE,LT_NODE>::solve
 
     // Check whether to continue
     if( _status == ABORT ){
-      _display_add( time()-_tstart );
+      _display_add( cpuclock()-_tstart );
       _display_add( obranch.str() );
       _display( os );
       break;
@@ -807,7 +807,7 @@ SetInv<T,NODE,LT_NODE>::solve
       obranch << " R:ABORT";
       break;
     }
-    _display_add( time()-_tstart );
+    _display_add( cpuclock()-_tstart );
     _display_add( obranch.str() );
     _display( os );
 
@@ -818,7 +818,7 @@ SetInv<T,NODE,LT_NODE>::solve
     if( _open_nodes.size() > _node_max ) _node_max = _open_nodes.size();
   }
 
-  _display_final( time() );
+  _display_final( cpuclock() );
   _display( os );
   
   return _open_measure;
@@ -841,7 +841,7 @@ SetInv<T,NODE,LT_NODE>::_restart()
   _open_measure = 0.;
   _node_index = 1;
   _node_count = _node_max = 0;
-  _tstart = time();  
+  _tstart = cpuclock();  
 }
 
 template <typename T, typename NODE, typename LT_NODE>

@@ -15,7 +15,7 @@
 #include <vector>
 
 #include "base_ae.hpp"
-#include "mcfunc.hpp"
+#include "mctime.hpp"
 #include "ffunc.hpp"
 
 #include "ellipsoid.hpp"
@@ -381,9 +381,7 @@ AEBND<T,PMT,PVT>::_init_stats
 {
   // Initialize statistics
   stats.reset();
-  timeval time;
-  gettimeofday(&time, 0) ;
-  stats.cputime = - time.tv_sec - time.tv_usec*1e-6;
+  stats.cputime = -cpuclock();
 }
 
 template <typename T, typename PMT, typename PVT>
@@ -392,9 +390,7 @@ AEBND<T,PMT,PVT>::_final_stats
 ( Stats&stats )
 {
   // Get final CPU time
-  timeval time;
-  gettimeofday(&time, 0);
-  stats.cputime += time.tv_sec + time.tv_usec*1e-6;
+  stats.cputime += cpuclock();
 }
 
 template <typename T, typename PMT, typename PVT>
@@ -463,7 +459,7 @@ AEBND<T,PMT,PVT>::setup
   for( unsigned iblk=0; iblk<_bAE.size(); iblk++ ){
     // Initialize block operations and Jacobian
 #ifdef MC__AEBND_DEBUG
-    double blkoper_cpu = -time();
+    double blkoper_cpu = -cpuclock();
 #endif
     const unsigned ndepblk = ( iblk==_bAE.size()-1? _ndep: _bAE[iblk+1] ) - _bAE[iblk]; 
     const unsigned posblk = _ndep - _bAE[iblk] - ndepblk;   
@@ -478,12 +474,12 @@ AEBND<T,PMT,PVT>::setup
     if( _maxopAE < _opAE[iblk].size() ) _maxopAE = _opAE[iblk].size();
     if( _maxopAE < opJACi.size() ) _maxopAE = opJACi.size();
 #ifdef MC__AEBND_DEBUG
-    blkoper_cpu += time();
+    blkoper_cpu += cpuclock();
 #endif
 
     // Detect block linearity
 #ifdef MC__AEBND_DEBUG
-    double blkprop_cpu = -time();
+    double blkprop_cpu = -cpuclock();
 #endif
     std::vector<FFDep> depblk(ndepblk), varblk(_pVAR.size()-posblk);
     for( unsigned i(0); i<ndepblk; i++ ) varblk[i].indep(i);
@@ -502,7 +498,7 @@ AEBND<T,PMT,PVT>::setup
       }
     }
 #ifdef MC__AEBND_DEBUG
-    blkprop_cpu += time();
+    blkprop_cpu += cpuclock();
     std::cout << "Block #" << iblk << ": "
               << (_islinblk[iblk]?"linear":"nonlinear") << ", bandwidth "
               << _bandblk[iblk].first << "," << _bandblk[iblk].second << std::endl

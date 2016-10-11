@@ -6,7 +6,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #include <fstream>
-#include "nlcp_gurobi.hpp"
+#include "nlcp.hpp"
 
 #ifdef USE_PROFIL
   #include "mcprofil.hpp"
@@ -49,7 +49,7 @@ int main()
   const unsigned NK = 3, N = NK+2*NT; mc::FFVar k[N];
   for( unsigned i=0; i<N; i++ ) k[i].set( &DAG );
 
-  mc::NLGO_GUROBI<I> NLP;
+  mc::NLGO<I> NLP;
   NLP.options.POLIMG.SANDWICH_MAXCUT = 7;
   NLP.options.POLIMG.SANDWICH_ATOL   = NLP.options.POLIMG.SANDWICH_RTOL  = 1e-5;
   //NLP.options.CVATOL = NLP.options.CVRTOL = 1e-5;
@@ -82,7 +82,7 @@ int main()
     NLP.add_ctr( mc::BASE_NLP::GE, k[NK+NT+i] - mc::sqr( Pmod( k, q_1200, Im_1200[i] ) - Pm_1200[i]*(1.-ePm) ) );
     OBJ += k[NK+i] + k[NK+NT+i];
   }
-  NLP.set_obj( mc::NLGO_GUROBI<I>::MIN, OBJ );
+  NLP.set_obj( mc::NLGO<I>::MIN, OBJ );
 
   //const mc::FFVar* dLSQdk = DAG.BAD( 1, &LSQ, N, k );
   //for( unsigned i=0; i<N; i++ )
@@ -113,14 +113,14 @@ int main()
   NLP.options.DISPLAY = 2;
   //NLP.options.MIPFILE = "test6.lp";
   NLP.options.NLPSLV.DISPLAY = 0;
-  NLP.options.CSALGO  = mc::NLGO_GUROBI<I>::Options::SBB;
-  NLP.options.RELMETH = mc::NLGO_GUROBI<I>::Options::HYBRID;//CHEB;
+  NLP.options.CSALGO  = mc::NLGO<I>::Options::SBB;
+  NLP.options.RELMETH = mc::NLGO<I>::Options::HYBRID;//CHEB;
   NLP.options.CMODPROP = 1;
   NLP.solve( Ik, 0, k0 );
 */
   //////////////////////
 
-  mc::NLCP_GUROBI<I> CP;
+  mc::NLCP<I> CP;
   CP.set_dag( &DAG );
 #ifndef USE_NCOCUTS
   CP.set_var( NK, k );
@@ -151,12 +151,12 @@ int main()
   CP.options.CVATOL      = 1e-6;
   CP.options.CVRTOL      = 1e-6;
   CP.options.BRANCHVAR   = mc::SetInv<CVI>::Options::RGREL;
-  CP.options.NODEMEAS    = mc::SetInv<CVI>::Options::LENGTH;
+  CP.options.NODEMEAS    = mc::SetInv<CVI>::Options::MEANWIDTH;
   CP.options.DOMREDMAX   = 10;
   CP.options.DOMREDTHRES = 2e-2;
   CP.options.CTRBACKOFF  = 1e-6;
-  CP.options.RELMETH     = mc::NLCP_GUROBI<I>::Options::CHEB;//DRL;//HYBRID;//
-  CP.options.CMODSPAR    = true;
+  CP.options.RELMETH     = mc::NLCP<I>::Options::CHEB;//DRL;//HYBRID;//
+//  CP.options.CMODSPAR    = true;
   CP.options.CMODPROP    = 2;
   CP.options.CMODCUTS    = 2;
   std::cout << CP;

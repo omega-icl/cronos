@@ -126,7 +126,7 @@ int main()
   CP.options.MAXITER     = 1000;
   CP.options.CVATOL      = 1e-6;
   CP.options.CVRTOL      = 5e-3;
-  CP.options.BRANCHVAR   = mc::SetInv<CVI>::Options::SCORES;//RGREL;
+  CP.options.BRANCHVAR   = mc::SetInv<CVI>::Options::RGREL;
   CP.options.NODEMEAS    = mc::SetInv<CVI>::Options::MEANWIDTH;
   CP.options.STGBCHDEPTH = 0;
   CP.options.STGBCHDRMAX = 0;
@@ -136,7 +136,7 @@ int main()
   CP.options.DOMREDBKOFF = 1e-7;
   CP.options.CTRBACKOFF  = 1e-5;
   CP.options.RELMETH     = mc::NLCP<I>::Options::CHEB;//HYBRID;//CHEB;
-  CP.options.CMODSPAR    = true;
+//  CP.options.CMODSPAR    = true;
   CP.options.CMODPROP    = 2;
   CP.options.CMODCUTS    = 2;
   CP.options.CMREDORD    = 5;

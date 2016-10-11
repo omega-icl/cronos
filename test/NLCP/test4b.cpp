@@ -10,8 +10,8 @@
 #include <iostream>
 #include <fstream>
 #include <iomanip>
-#include "nlgo_gurobi.hpp"
-#include "nlcp_gurobi.hpp"
+#include "nlgo.hpp"
+#include "nlcp.hpp"
 #include "interval.hpp"
 typedef mc::Interval I;
 typedef mc::CVar<I> CVI;
@@ -49,7 +49,7 @@ int main(){
   const unsigned  NT=NP+NK; mc::FFVar k[NT];
   for( unsigned i=0; i<NT; i++ ) k[i].set( &DAG );
 
-  mc::NLGO_GUROBI<I> NLP; //defining nlp optimizer class 
+  mc::NLGO<I> NLP; //defining nlp optimizer class 
   NLP.set_dag( &DAG );  // DAG
   NLP.set_var( NT, k ); // decision variables
 
@@ -59,7 +59,7 @@ int main(){
     NLP.add_ctr( mc::BASE_NLP::GE, k[NP+i] - mc::sqr( Ym[i] - dYm - Ymod(Tm[i],k) ) ); //constraints
     SUM += k[NP+i];
   }
-  NLP.set_obj( mc::NLGO_GUROBI<I>::MIN, SUM ); //objective
+  NLP.set_obj( mc::NLGO<I>::MIN, SUM ); //objective
   NLP.setup();
 
   I Ip[NT];
@@ -85,8 +85,8 @@ int main(){
   NLP.options.DISPLAY = 2;
   //NLP.options.MIPFILE = "test4b.lp";
   NLP.options.NLPSLV.DISPLAY = 0;
-  NLP.options.CSALGO  = mc::NLGO_GUROBI<I>::Options::SBB;
-  NLP.options.RELMETH = mc::NLGO_GUROBI<I>::Options::DRL;//HYBRID;//CHEB;
+  NLP.options.CSALGO  = mc::NLGO<I>::Options::SBB;
+  NLP.options.RELMETH = mc::NLGO<I>::Options::DRL;//HYBRID;//CHEB;
   NLP.options.CMODPROP = 1;
   NLP.solve( Ip, 0, NLP.get_local_solution().p );
   //NLP.solve( Ip, 0, k0 );
@@ -95,7 +95,7 @@ int main(){
   //Constraint projection problem to find all partitions of the parameter set Pe such that for any p in Pe 
   //sum((y(k)-e(k)-g(k))^2)<U for  k = 1 - size(data)
 
-  mc::NLCP_GUROBI<I> CP; // defining constraint projection class
+  mc::NLCP<I> CP; // defining constraint projection class
   CP.set_dag( &DAG ); //DAG
   CP.set_var( NP, k ); //decision variables
 
@@ -111,11 +111,11 @@ int main(){
   CP.options.CVATOL      = 1e-6;
   CP.options.CVRTOL      = 1e-6;
   CP.options.BRANCHVAR   = mc::SetInv<CVI>::Options::RGREL;
-  CP.options.NODEMEAS    = mc::SetInv<CVI>::Options::LENGTH;
+  CP.options.NODEMEAS    = mc::SetInv<CVI>::Options::MEANWIDTH;
   CP.options.DOMREDMAX   = 10;
   CP.options.DOMREDTHRES = 2e-2;
   CP.options.DOMREDBKOFF = 1e-8;
-  CP.options.RELMETH     = mc::NLCP_GUROBI<I>::Options::DRL;
+  CP.options.RELMETH     = mc::NLCP<I>::Options::DRL;
   CP.options.CMODPROP    = 1;
   std::cout << CP;
 

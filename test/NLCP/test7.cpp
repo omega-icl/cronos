@@ -3,7 +3,7 @@
 #undef  USE_FILIB	// specify to use FILIB++ for interval arithmetic
 #undef  DEBUG		// whether to output debug information
 #define USE_DEPS	// whether to use dependents
-#define MC__USE_CPLEX
+#undef MC__USE_CPLEX
 ////////////////////////////////////////////////////////////////////////////////
 
 #include <fstream>
@@ -393,7 +393,7 @@ int main()
   CP.options.MAXITER     = 0;
   CP.options.CVATOL      = 1e-4; // 1e-5
   CP.options.CVRTOL      = 1e-4; // 1e-5
-  CP.options.BRANCHVAR   = mc::SetInv<CVI>::Options::SCORES;//RGREL;
+  CP.options.BRANCHVAR   = mc::SetInv<CVI>::Options::RGREL;
   //CP.options.BRANCHSEL   = branching_strategy;
   CP.options.STGBCHDEPTH = 0;
   CP.options.STGBCHDRMAX = 2;
@@ -407,7 +407,7 @@ int main()
   //CP.options.LPPRESOLVE  = -1;
   CP.options.RELMETH     = mc::NLCP<I>::Options::CHEB;//HYBRID;//DRL;//CHEB;
   CP.options.CMODDMAX    = 1e5; //2
-  CP.options.CMODSPAR    = true;
+//  CP.options.CMODSPAR    = true;
   CP.options.CMODPROP    = 2; //2
   CP.options.CMODCUTS    = 2; //2
   CP.options.CMREDORD    = 5; //3

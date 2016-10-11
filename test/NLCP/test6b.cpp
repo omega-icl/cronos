@@ -6,7 +6,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #include <fstream>
-#include "nlcp_gurobi.hpp"//.backup"
+#include "nlcp.hpp"//.backup"
 
 #ifdef USE_PROFIL
   #include "mcprofil.hpp"
@@ -111,7 +111,7 @@ int main()
   F[5] = D*( C_in  - C  ) - q_CO2 + k4*mu_1*X1 + k5*mu_2*X2; 
 
   // Constraint Projection
-  mc::NLCP_GUROBI<I> CP;
+  mc::NLCP<I> CP;
   CP.set_dag( &DAG );
 #ifndef USE_DEPS
   CP.set_var( NP, P );
@@ -128,7 +128,7 @@ int main()
   CP.options.CVATOL      = 1e-5;
   CP.options.CVRTOL      = 1e-5;
   CP.options.BRANCHVAR   = mc::SetInv<CVI>::Options::RGREL;
-  CP.options.NODEMEAS    = mc::SetInv<CVI>::Options::LENGTH;
+  CP.options.NODEMEAS    = mc::SetInv<CVI>::Options::MEANWIDTH;
   CP.options.STGBCHDEPTH = 0;
   CP.options.STGBCHDRMAX = 2;
   CP.options.STGBCHRTOL  = 1e-2;
@@ -136,8 +136,8 @@ int main()
   CP.options.DOMREDTHRES = 2e-2;
   CP.options.DOMREDBKOFF = 1e-8;
   CP.options.CTRBACKOFF  = 1e-4;
-  CP.options.RELMETH     = mc::NLCP_GUROBI<I>::Options::HYBRID;//DRL;//
-  CP.options.CMODSPAR    = true;//false;//
+  CP.options.RELMETH     = mc::NLCP<I>::Options::HYBRID;//DRL;//
+//  CP.options.CMODSPAR    = true;//false;//
   CP.options.CMODPROP    = 3;
   CP.options.CMODCUTS    = 2;
   CP.options.CMREDORD    = 4;

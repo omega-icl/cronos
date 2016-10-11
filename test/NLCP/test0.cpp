@@ -67,7 +67,7 @@ int main()
   CP.options.CVATOL      = 1e-6;
   CP.options.CVRTOL      = 1e-6;
   CP.options.BRANCHVAR   = mc::SetInv<CVI>::Options::RGREL;
-  CP.options.NODEMEAS    = mc::SetInv<CVI>::Options::LENGTH;
+  CP.options.NODEMEAS    = mc::SetInv<CVI>::Options::MEANWIDTH;
   CP.options.DOMREDMAX   = 20;
   CP.options.DOMREDTHRES = 1e-2;
   CP.options.DOMREDBKOFF = 1e-8;

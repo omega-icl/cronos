@@ -5,7 +5,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #include <fstream>
-#include "nlcp_gurobi.hpp"
+#include "nlcp.hpp"
 
 #ifdef USE_PROFIL
   #include "mcprofil.hpp"
@@ -56,7 +56,7 @@ int main()
   mc::FFVar P[NP], Y[NY];
   for( unsigned i=0; i<NP; i++ ) P[i].set( &DAG );
 
-  mc::NLCP_GUROBI<I> CP;
+  mc::NLCP<I> CP;
   CP.set_dag( &DAG );
   CP.set_var( NP, P );
   for( unsigned k=0; k<NT; k++ ){
@@ -75,11 +75,11 @@ int main()
   CP.options.CVATOL      = 1e-6;
   CP.options.CVRTOL      = 1e-6;
   CP.options.BRANCHVAR   = mc::SetInv<CVI>::Options::RGREL;
-  CP.options.NODEMEAS    = mc::SetInv<CVI>::Options::LENGTH;
+  CP.options.NODEMEAS    = mc::SetInv<CVI>::Options::MEANWIDTH;
   CP.options.DOMREDMAX   = 10;
   CP.options.DOMREDTHRES = 2e-2;
   CP.options.DOMREDBKOFF = 1e-8;
-  CP.options.RELMETH     = mc::NLCP_GUROBI<I>::Options::CHEB;
+  CP.options.RELMETH     = mc::NLCP<I>::Options::CHEB;
   CP.options.CMODPROP    = 2;
   CP.options.CMODCUTS    = 1;
   std::cout << CP;

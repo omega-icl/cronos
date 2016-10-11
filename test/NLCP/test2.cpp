@@ -2,7 +2,7 @@
 #undef  USE_PROFIL	// specify to use PROFIL for interval arithmetic
 #undef  USE_FILIB	// specify to use FILIB++ for interval arithmetic
 #undef  DEBUG            // whether to output debug information
-#define MC__USE_CPLEX   // whether to use CPLEX or GUROBI
+#undef MC__USE_CPLEX   // whether to use CPLEX or GUROBI
 ////////////////////////////////////////////////////////////////////////////////
 
 #include <fstream>
@@ -52,7 +52,7 @@ int main()
   CP.options.CVATOL      = 1e-6;
   CP.options.CVRTOL      = 1e-6;
   CP.options.BRANCHVAR   = mc::SetInv<CVI>::Options::RGREL;
-  CP.options.NODEMEAS    = mc::SetInv<CVI>::Options::LENGTH;
+  CP.options.NODEMEAS    = mc::SetInv<CVI>::Options::MEANWIDTH;
   CP.options.STGBCHDEPTH = 100;
   CP.options.STGBCHRTOL  = 1e-2;
   CP.options.DOMREDMAX   = 10;

@@ -59,8 +59,10 @@ class ODEBNDS_SUNDIALS:
   using ODEBND_BASE<T,PMT,PVT>::_PMx;
 
   using ODEBNDS_BASE<T,PMT,PVT>::_Ir;
+  using ODEBNDS_BASE<T,PMT,PVT>::_Er;
   using ODEBNDS_BASE<T,PMT,PVT>::_Iy;
   using ODEBNDS_BASE<T,PMT,PVT>::_Iyq;
+  using ODEBNDS_BASE<T,PMT,PVT>::_Edy;
   using ODEBNDS_BASE<T,PMT,PVT>::_PMy;
   using ODEBNDS_BASE<T,PMT,PVT>::_PMyq;
   using ODEBNDS_BASE<T,PMT,PVT>::_IC_SET_FSA;
@@ -196,6 +198,12 @@ public:
       PVT*PMf, std::ostream&os=std::cout )
       { return ODEBND_SUNDIALS<T,PMT,PVT>::bounds( ns, tk, PMp, PMxk, PMf, os); }
 
+  //! @brief Propagate state/quadrature polynomial models forward in time through every time stages
+  STATUS bounds
+    ( const unsigned ns, const double*tk, const PVT*PMp, PVT**PMxk,
+      E*ERxk, PVT*PMf, std::ostream&os=std::cout )
+      { return ODEBND_SUNDIALS<T,PMT,PVT>::bounds( ns, tk, PMp, PMxk, ERxk, PMf, os); }
+
  //! @brief Propagate state and sensitivity interval bounds forward in time through every time stages
   STATUS bounds_FSA
     ( const unsigned ns, const double*tk, const T*Ip, T**Ixk, T*If, T**Ixpk,
@@ -205,6 +213,11 @@ public:
   STATUS bounds_FSA
     ( const unsigned ns, const double*tk, const PVT*PMp, PVT**PMxk, PVT*PMf,
       PVT**PMxpk, PVT*PMfp, std::ostream&os=std::cout );
+
+ //! @brief Propagate state and sensitivity polynomial models forward in time through every time stages
+  STATUS bounds_FSA
+    ( const unsigned ns, const double*tk, const PVT*PMp, PVT**PMxk, E*ERxk,
+      PVT*PMf, PVT**PMxpk, E**ERxpk, PVT*PMfp, std::ostream&os=std::cout );
 
  //! @brief Compute approximate state and sensitivity interval bounds forward in time using sampling through every time stages
   STATUS bounds_FSA
@@ -220,6 +233,11 @@ public:
   STATUS bounds_ASA
     ( const unsigned ns, const double*tk, const PVT*PMp, PVT**PMxk, PVT*PMf,
       PVT**PMlk, PVT*PMfp, std::ostream&os=std::cout );
+
+  //! @brief Propagate state and adjoint polynomial models forward and backward in time through every time stages
+  STATUS bounds_ASA
+    ( const unsigned ns, const double*tk, const PVT*PMp, PVT**PMxk, E*ERxk,
+      PVT*PMf, PVT**PMlk, E**ERlk, PVT*PMfp, std::ostream&os=std::cout );
 
  //! @brief Compute approximate state and adjoint interval bounds forward and backward in time using sampling through every time stages
   STATUS bounds_ASA
@@ -1206,7 +1224,7 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::MC_CVASAQUADPM__
 //!
 //! This function computes an enclosure of the reachable set of the parametric ODEs
 //! using continuous-time propagation of polynomial models with convex remainders
-//! (intervals, ellipsoids), together with adjoint sensitivity bounds:
+//! (intervals, ellipsoids), together with forward sensitivity bounds:
 //!  - <a>ns</a>    [input]  number of time stages
 //!  - <a>tk</a>    [input]  stage times, including the initial time
 //!  - <a>PMp</a>   [input]  polynomial model of parameter set
@@ -1223,9 +1241,37 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
 ( const unsigned ns, const double*tk, const PVT*PMp, PVT**PMxk, PVT*PMf,
   PVT**PMlk, PVT*PMfp, std::ostream&os )
 {
+  return bounds_ASA( ns, tk, PMp, PMxk, 0, PMf, PMlk, 0, PMfp, os );
+}
+
+//! @fn template <typename T, typename PMT, typename PVT> inline typename ODEBNDS_SUNDIALS<T,PMT,PVT>::STATUS ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA(
+//! const unsigned ns, const double*tk, const PVT*PMp, PVT**PMxk, E*ERxk, 
+//! PVT*PMf, PVT**PMlk, E**ERlk, PVT*PMfp, std::ostream&os=std::cout )
+//!
+//! This function computes an enclosure of the reachable set of the parametric ODEs
+//! using continuous-time propagation of polynomial models with convex remainders
+//! (intervals, ellipsoids), together with adjoint sensitivity bounds:
+//!  - <a>ns</a>    [input]  number of time stages
+//!  - <a>tk</a>    [input]  stage times, including the initial time
+//!  - <a>PMp</a>   [input]  polynomial model of parameter set
+//!  - <a>PMxk</a>  [output] polynomial model of state variables at stage times
+//!  - <a>ERxk</a>  [output] ellipsoidal remainder of state variables at stage times (only if ellipsoidal bounder is selected)
+//!  - <a>PMf</a>   [output] polynomial model of state functions
+//!  - <a>PMlk</a>  [output] polynomial model of adjoint variables at stage times
+//!  - <a>ERxpk</a> [output] ellipsoidal remainder of adjoint variables at stage times (only if ellipsoidal bounder is selected)
+//!  - <a>PMfp</a>  [output] polynomial model of state function derivatives
+//!  - <a>os</a>    [input]  output stream [default: std::cout]
+//! .
+//! The return value is the status.
+template <typename T, typename PMT, typename PVT>
+inline typename ODEBNDS_SUNDIALS<T,PMT,PVT>::STATUS
+ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
+( const unsigned ns, const double*tk, const PVT*PMp, PVT**PMxk, E*ERxk,
+  PVT*PMf, PVT**PMlk, E**ERlk, PVT*PMfp, std::ostream&os )
+{
   // Compute state bounds and store intermediate results
   STATUS flag = NORMAL;
-  flag = ODEBND_SUNDIALS<T,PMT,PVT>::_bounds( ns, tk, PMp, PMxk, PMf, true, os);
+  flag = ODEBND_SUNDIALS<T,PMT,PVT>::_bounds( ns, tk, PMp, PMxk, ERxk, PMf, true, os);
   if( flag != NORMAL ) return flag;
 
   // Nothing to do if no functions are defined
@@ -1249,6 +1295,7 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
         { _END_SEN(); return FATAL; }
       for( unsigned iy=0; PMlk[ns] && iy<_nx; iy++ )
         PMlk[ns][_ifct*_nx+iy] = _PMy[iy];
+      if( options.WRAPMIT == Options::ELLIPS && ERlk && ERlk[0] ) ERlk[0][_ifct] = _Edy;
       for( unsigned iq=0; iq<_np; iq++ )
         PMfp[iq*_nf+_ifct] = _PMyq[iq];
     }
@@ -1335,6 +1382,7 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_ASA
         if( PMlk && !PMlk[_istg-1] ) PMlk[_istg-1] = new PVT[_nx*_nf];
         for( unsigned iy=0; PMlk[_istg-1] && iy<_nx; iy++)
           PMlk[_istg-1][_ifct*_nx+iy] =_PMy[iy];
+        if( options.WRAPMIT == Options::ELLIPS && ERlk && ERlk[_istg-1] ) ERlk[_istg-1][_ifct] = _Edy;
         for( unsigned iq=0; iq<_np; iq++ )
           PMfp[iq*_nf+_ifct] = _PMyq[iq];
       }
@@ -1497,6 +1545,34 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_FSA
 ( const unsigned ns, const double*tk, const PVT*PMp, PVT**PMxk, PVT*PMf,
   PVT**PMxpk, PVT*PMfp, std::ostream&os )
 {
+  return bounds_FSA( ns, tk, PMp, PMxk, 0, PMf, PMxpk, 0, PMfp, os );
+}
+
+//! @fn template <typename T, typename PMT, typename PVT> inline typename ODEBNDS_SUNDIALS<T,PMT,PVT>::STATUS ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_FSA(
+//! const unsigned ns, const double*tk, const PVT*PMp, PVT**PMxk, 
+//! PVT*PMf, PVT**PMxpk, PVT*PMfp, std::ostream&os=std::cout )
+//!
+//! This function computes an enclosure of the reachable set of the parametric ODEs
+//! using continuous-time propagation of polynomial models with convex remainders
+//! (intervals, ellipsoids), together with forward sensitivity bounds:
+//!  - <a>ns</a>    [input]  number of time stages
+//!  - <a>tk</a>    [input]  stage times, including the initial time
+//!  - <a>PMp</a>   [input]  polynomial model of parameter set
+//!  - <a>PMxk</a>  [output] polynomial model of state variables at stage times
+//!  - <a>ERxk</a>  [output] ellipsoidal remainder of state variables at stage times (only if ellipsoidal bounder is selected)
+//!  - <a>PMf</a>   [output] polynomial model of state functions
+//!  - <a>PMxpk</a> [output] polynomial model of state sensitivity variables at stage times
+//!  - <a>ERxpk</a> [output] ellipsoidal remainder of state sensitivity variables at stage times (only if ellipsoidal bounder is selected)
+//!  - <a>PMfp</a>  [output] polynomial model of state function derivatives
+//!  - <a>os</a>    [input]  output stream [default: std::cout]
+//! .
+//! The return value is the status.
+template <typename T, typename PMT, typename PVT>
+inline typename ODEBNDS_SUNDIALS<T,PMT,PVT>::STATUS
+ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_FSA
+( const unsigned ns, const double*tk, const PVT*PMp, PVT**PMxk, E*ERxk,
+  PVT*PMf, PVT**PMxpk, E**ERxpk, PVT*PMfp, std::ostream&os )
+{
   // Check arguments
   if( !tk || !PMp || !PMxk || !PMxpk || ( _nf && (!PMf || !PMfp) ) ) return FATAL;
 
@@ -1513,6 +1589,7 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_FSA
       { _END_STA(); _END_SEN(); return FATAL; }
     if( PMxk && !PMxk[0] ) PMxk[0] = new PVT[_nx];
     for( unsigned ix=0; PMxk[0] && ix<_nx; ix++ ) PMxk[0][ix] = _PMx[ix];
+    if( options.WRAPMIT == Options::ELLIPS && ERxk ) ERxk[0] = _Er;
 
     // Bounds on initial state/quadrature sensitivities
     if( PMxpk && !PMxpk[0] ) PMxpk[0] = new PVT[_nx*_np];
@@ -1528,6 +1605,7 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_FSA
       for( unsigned i=0; i<NV_LENGTH_S( _Nyq[_isen] ); i++ ) std::cout << NV_Ith_S( _Nyq[_isen], i ) << std::endl;
       { int dum; std::cin >> dum; }
 #endif
+      if( options.WRAPMIT == Options::ELLIPS && ERxpk && ERxpk[0] ) ERxpk[0][_isen] = _Er;
     }
 
     // Display & record initial results
@@ -1633,6 +1711,7 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_FSA
         { _END_STA(); _END_SEN(); return FATAL; }
       if( PMxk && !PMxk[_istg+1] ) PMxk[_istg+1] = new PVT[_nx];
       for( unsigned ix=0; ix<_nx; ix++ ) PMxk[_istg+1][ix] = _PMx[ix];
+      if( options.WRAPMIT == Options::ELLIPS && ERxk ) ERxk[_istg+1] = _Er;
       for( _isen=0; _isen<_np; _isen++ ){
         _GET_PM_SEN( options, NV_DATA_S(_Nx), NV_DATA_S(_Ny[_isen]), _nq && _Nq? NV_DATA_S(_Nq): 0,
                      _nq, _nq && _Nyq[_isen]? NV_DATA_S(_Nyq[_isen]): 0 );
@@ -1641,6 +1720,7 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_FSA
           { _END_STA(); _END_SEN(); return FATAL; }
         if( PMxpk && !PMxpk[_istg+1] ) PMxpk[_istg+1] = new PVT[_nx*_np];
         for( unsigned iy=0; iy<_nx; iy++ ) PMxpk[_istg+1][_isen*_nx+iy] = _PMy[iy];
+        if( options.WRAPMIT == Options::ELLIPS && ERxpk && ERxpk[_istg+1] ) ERxpk[_istg+1][_isen] = _Edy;
       }
 
       // Display & record stage results

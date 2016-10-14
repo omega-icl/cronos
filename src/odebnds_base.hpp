@@ -263,7 +263,7 @@ protected:
   //! @brief adjoint RHS Jacobian interval bounds (scaled states)
   T *_Idgdw;
 
-  //! @brief linear transformed adjoint ellipsoidal bounds
+  //! @brief linear transformed sensitivity/adjoint ellipsoidal bounds
   E _Edy;
 
   //! @brief scaled state ellipsoidal bounds (unit ball)
@@ -2175,14 +2175,17 @@ ODEBNDS_BASE<T,PMT,PVT>::_TC_PM_SEN
     // Whether or not to ignore the remainder
     if( !options.PMNOREM ){
       ODEBND_BASE<T,PMT,PVT>::_CC_PM_ELL( _nx, _Er, _Ay, _Idy, _PMy, _Qy, _QTOLy, machprec() );
-#ifdef MC__ODEBND_BASE_DINEQPM_DEBUG
-      std::cout << "Edy" << E(_nx, _Qy) << std::endl;
+      _Edy.set( _nx, _Qy ); 
+#ifdef MC__ODEBNDS_BASE_DINEQPM_DEBUG
+      std::cout << "Edy" << _Edy << std::endl;
       { int dum; std::cin >> dum; }
 #endif
       _PME2vec( _PMenv, _nx, _PMy, _Qy, y );
     }
-    else
+    else{
+      _Edy.reset(); 
       _PME2vec( _PMenv, _nx, _PMy, 0, y );
+    }
     break;
    }
   }
@@ -2396,10 +2399,17 @@ ODEBNDS_BASE<T,PMT,PVT>::_CC_PM_SEN
     // Whether or not to ignore the remainder
     if( !options.PMNOREM ){
       _CC_PM_ELL( _nx, _Edy, _Ay, _Ew, _Ax, _Idydot, _PMydot, _Qydot, _QTOLy, machprec() );
+      _Edy.set( _nx, _Qydot ); 
+#ifdef MC__ODEBNDS_BASE_DINEQPM_DEBUG
+      std::cout << "Edy" << _Edy << std::endl;
+      { int dum; std::cin >> dum; }
+#endif
       _PME2vec( _PMenv, _nx, _PMydot, _Qydot, y );
     }
-    else
+    else{
+      _Edy.reset(); 
       _PME2vec( _PMenv, _nx, _PMydot, 0, y );
+    }
     break;
   }
 

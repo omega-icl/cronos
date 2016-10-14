@@ -48,6 +48,7 @@ class ODEBND_SUNDIALS:
 
   using ODEBND_BASE<T,PMT,PVT>::_Ix;
   using ODEBND_BASE<T,PMT,PVT>::_Ir;
+  using ODEBND_BASE<T,PMT,PVT>::_Er;
   using ODEBND_BASE<T,PMT,PVT>::_PMx;
   using ODEBND_BASE<T,PMT,PVT>::_GET_I_STA;
   using ODEBND_BASE<T,PMT,PVT>::_IC_I_SET;
@@ -229,6 +230,11 @@ public:
     ( const unsigned ns, const double*tk, const PVT*PMp, PVT**PMxk,
       PVT*PMf, std::ostream&os=std::cout );
 
+  //! @brief Computes polynomial model enclosure of reachable set of parametric ODEs
+  STATUS bounds
+    ( const unsigned ns, const double*tk, const PVT*PMp, PVT**PMxk,
+      E*ERxk, PVT*PMf, std::ostream&os=std::cout );
+
   //! @brief Computes Hausdorff distance between polynomial model remainder enclosure and actual remainder function range, using parameter sampling
   STATUS hausdorff
     ( const unsigned ns, const double*tk, const PVT*PMp, double**Hxk,
@@ -303,7 +309,7 @@ protected:
   //! @brief Propagate state/quadrature polynomial models forward in time through every time stages
   virtual STATUS _bounds
     ( const unsigned ns, const double*tk, const PVT*PMp, PVT**PMxk,
-      PVT*PMf, const bool store, std::ostream&os );
+      E*ERxk, PVT*PMf, const bool store, std::ostream&os );
  
   //! @brief Private methods to block default compiler methods
   ODEBND_SUNDIALS(const ODEBND_SUNDIALS&);
@@ -823,7 +829,7 @@ template <typename T, typename PMT, typename PVT>
 inline typename ODEBND_SUNDIALS<T,PMT,PVT>::STATUS
 ODEBND_SUNDIALS<T,PMT,PVT>::_bounds
 ( const unsigned ns, const double*tk, const PVT*PMp, PVT**PMxk,
-  PVT*PMf, const bool store, std::ostream&os )
+  E*ERxk, PVT*PMf, const bool store, std::ostream&os )
 {
   // Check arguments
   if( !tk || !PMxk || !PMp || (_nf && !PMf) ) return FATAL;
@@ -840,6 +846,7 @@ ODEBND_SUNDIALS<T,PMT,PVT>::_bounds
       { _END_STA(); return FATAL; }
     if( PMxk && !PMxk[0] ) PMxk[0] = new PVT[_nx];
     for( unsigned ix=0; PMxk[0] && ix<_nx; ix++ ) PMxk[0][ix] = _PMx[ix];
+    if( options.WRAPMIT == Options::ELLIPS && ERxk ) ERxk[0] = _Er;
 
     // Store full state at initial time
     if( store ){
@@ -915,6 +922,7 @@ ODEBND_SUNDIALS<T,PMT,PVT>::_bounds
       // Keep track/display/record stage results
       if( PMxk && !PMxk[_istg+1] ) PMxk[_istg+1] = new PVT[_nx];
       for( unsigned ix=0; PMxk[_istg+1] && ix<_nx; ix++ ) PMxk[_istg+1][ix] = _PMx[ix];
+      if( options.WRAPMIT == Options::ELLIPS && ERxk ) ERxk[_istg+1] = _Er;
       if( options.DISPLAY >= 1 )
         _print_interm( _t, _nx, PMxk[_istg+1], "x", os );
       if( options.RESRECORD )
@@ -955,8 +963,8 @@ ODEBND_SUNDIALS<T,PMT,PVT>::_bounds
 //!   - <a>ns</a>   [input]  number of time stages
 //!   - <a>tk</a>   [input]  stage times, including the initial time
 //!   - <a>PMp</a>  [input]  polynomial model of parameter set
-//!   - <a>PMxk</a> [output] polynomial model of state enclosures at stage times
-//!   - <a>PMf</a>  [output] polynomial model of state/quadrature functionals
+//!   - <a>PMxk</a> [output] polynomial model of state varibles at stage times
+//!   - <a>PMf</a>  [output] polynomial model of state-dependent functions
 //!   - <a>os</a>   [input]  output stream [default: std::cout]
 //! .
 //! The return value is the status.
@@ -966,7 +974,31 @@ ODEBND_SUNDIALS<T,PMT,PVT>::bounds
 ( const unsigned ns, const double*tk, const PVT*PMp, PVT**PMxk,
   PVT*PMf, std::ostream&os )
 {
-  return _bounds( ns, tk, PMp, PMxk, PMf, false, os );
+  return _bounds( ns, tk, PMp, PMxk, 0, PMf, false, os );
+}
+
+//! @fn template <typename T, typename PMT, typename PVT> inline typename ODEBND_SUNDIALS<T,PMT,PVT>::STATUS ODEBND_SUNDIALS<T,PMT,PVT>::bounds(
+//! const unsigned ns, const double*tk, const PVT*PMp, PVT**PMxk, 
+//! PVT*PMf, std::ostream&os=std::cout )
+//!
+//! This function computes an enclosure of the reachable set of the parametric ODEs
+//! using propagation of polynomial models with convex remainders (intervals, ellipsoids):
+//!   - <a>ns</a>   [input]  number of time stages
+//!   - <a>tk</a>   [input]  stage times, including the initial time
+//!   - <a>PMp</a>  [input]  polynomial model of parameter set
+//!   - <a>PMxk</a> [output] polynomial model of state variables at stage times
+//!   - <a>ERxk</a> [output] ellipsoidal remainder of state variables at stage times (only if ellipsoidal bounder is selected)
+//!   - <a>PMf</a>  [output] polynomial model of state-dependent functions
+//!   - <a>os</a>   [input]  output stream [default: std::cout]
+//! .
+//! The return value is the status.
+template <typename T, typename PMT, typename PVT>
+inline typename ODEBND_SUNDIALS<T,PMT,PVT>::STATUS
+ODEBND_SUNDIALS<T,PMT,PVT>::bounds
+( const unsigned ns, const double*tk, const PVT*PMp, PVT**PMxk,
+  E*ERxk, PVT*PMf, std::ostream&os )
+{
+  return _bounds( ns, tk, PMp, PMxk, ERxk, PMf, false, os );
 }
 
 //! @fn template <typename T, typename PMT, typename PVT> inline typename ODEBND_SUNDIALS<T,PMT,PVT>::STATUS ODEBND_SUNDIALS<T,PMT,PVT>::hausdorff(

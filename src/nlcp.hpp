@@ -507,6 +507,7 @@ NLCP<T>::_inclusion_test
   auto itc = std::get<0>(NLGO<T>::_ctr).begin();
   for( unsigned j=0; flag2 && itc!=std::get<0>(NLGO<T>::_ctr).end(); ++itc, j++ ){
 #if defined (MC__NLCP_SHOW_INCLUSIONS)
+    std::cout << "C" << j << ":" << C[j];
     std::cout << "C" << j << " L:" << Op<U>::l(C[j]) << " U:" << Op<U>::u(C[j]) << std::endl;
 #endif
     switch( (*itc) ){

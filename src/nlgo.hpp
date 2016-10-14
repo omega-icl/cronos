@@ -760,7 +760,7 @@ NLGO<T>::setup
     if( islin ) _fct_lin.insert( &std::get<1>(_ctr)[j] );
   }
   std::cout << "LINEAR OBJECTIVE/CONSTRAINT FUNCTIONS:    " << _fct_lin.size() << std::endl
-            << "NONLINEAR OBJECTIVE/CONSTRAINT FUNCTIONS: " << _nctr-_fct_lin.size()+1 << std::endl;
+            << "NONLINEAR OBJECTIVE/CONSTRAINT FUNCTIONS: " << _nctr-_fct_lin.size()+std::get<0>(_obj).size() << std::endl;
 
   // identify linear variables in NLP and exclude from branching
   FFDep fgdep = std::get<0>(_obj).size()? std::get<1>(_obj)[0].dep(): 0.;

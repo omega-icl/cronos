@@ -401,11 +401,15 @@ ODEBND_SUNDIALS<T,PMT,PVT>::_INI_CVODE
     if( _check_cv_flag(&_cv_flag, "CVodeSStolerances", 1) ) return false;
   }
 
+  // Set maximum number of nonlinear solver iterations
+  _cv_flag = CVodeSetMaxNonlinIters( _cv_mem, options.MAXCORR );
+  if ( _check_cv_flag(&_cv_flag, "CVodeSetMaxNonlinIters", 1) ) return false;
+
   // Set maximum number of error test failures
   _cv_flag = CVodeSetMaxErrTestFails( _cv_mem, options.MAXFAIL );
   if ( _check_cv_flag(&_cv_flag, "CVodeSetMaxErrTestFails", 1) ) return false;
 
-  // Set maximum number of error test failures
+  // Set maximum number of convergence test failures
   _cv_flag = CVodeSetMaxConvFails( _cv_mem, options.MAXFAIL );
   if ( _check_cv_flag(&_cv_flag, "CVodeSetMaxConvFails", 1) ) return false;
 
@@ -796,8 +800,7 @@ ODEBND_SUNDIALS<T,PMT,PVT>::MC_CVRHSPM__
   std::cout << "@t=" << t << "\nx:\n";
   for( unsigned i=0; i<NV_LENGTH_S( y ); i++ ) std::cout << NV_Ith_S( y, i ) << std::endl;
 #endif
-  int flag = pODEBND->_RHS_PM_STA( pODEBND->options, t, NV_DATA_S( y ),
-    NV_DATA_S( ydot ) );
+  int flag = pODEBND->_RHS_PM_STA( pODEBND->options, t, NV_DATA_S( y ), NV_DATA_S( ydot ) );
 #ifdef MC__ODEBNDS_SUNDIALS_DEBUG
   std::cout << "xdot:\n";
   for( unsigned i=0; i<NV_LENGTH_S( ydot ); i++ ) std::cout << NV_Ith_S( ydot, i ) << std::endl;
@@ -805,6 +808,7 @@ ODEBND_SUNDIALS<T,PMT,PVT>::MC_CVRHSPM__
 #endif
   ODEBND_SUNDIALS<T,PMT,PVT>::pODEBND = pODEBND;
   pODEBND->stats_sta.numRHS++;
+  if( _diam( pODEBND->_nx, pODEBND->_PMx ) > pODEBND->options.DMAX ) return -1;
   return flag;
 }
 

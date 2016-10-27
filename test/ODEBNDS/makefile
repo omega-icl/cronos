@@ -23,13 +23,13 @@ INC_FILIB  = -I$(PATH_FILIB)/include/ -I$(PATH_FILIB)/include/interval
 FLAG_FILIB = -frounding-math -ffloat-store
 
 #FLAG_ALL = -g -Wall -std=c++11 $(FLAG_FILIB)
-FLAG_ALL = -g -O3 -Wall -std=c++11 $(FLAG_FILIB)
+FLAG_ALL = -O3 -Wall -std=c++11 $(FLAG_FILIB)
 LIB_ALL  = $(LIB_MC) $(LIB_PROFIL) $(LIB_FILIB) $(LIB_GSL) $(LIB_SUNDIALS) $(LIB_LAPACK)
 INC_ALL  = $(INC_MC) $(INC_PROFIL) $(INC_FILIB) $(INC_GSL) $(INC_SUNDIALS) $(INC_LAPACK)
 
 #####
 
-all: test1 test2 test3 test4 test5
+all: test?
 
 test% : test%.o
 	g++ -o $@ $< $(LIB_ALL)
@@ -53,5 +53,5 @@ gensvg :
 #####
 
 clean :
-	rm -f test? test?b *.o *.out *.dat *.eps *.dot *.svg *~
+	rm -f test? test?? *.o *.out *.dat *.eps *.dot *.svg *~
 

@@ -455,6 +455,14 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::_INI_CVODES
     if( _check_cv_flag(&_cv_flag, "CVodeSStolerancesB", 1) ) return false;
   }
 
+  // Set maximum number of error test failures
+  //_cv_flag = CVodeSetMaxErrTestFailsB( _cv_mem, indexB, options.MAXFAIL );
+  //if ( _check_cv_flag(&_cv_flag, "CVodeSetMaxErrTestFailsB", 1) ) return false;
+
+  // Set maximum number of error test failures
+  //_cv_flag = CVodeSetMaxConvFailsB( _cv_mem, indexB, options.MAXFAIL );
+  //if ( _check_cv_flag(&_cv_flag, "CVodeSetMaxConvFailsB", 1) ) return false;
+
   // Specify minimum stepsize
   _cv_flag = CVodeSetMinStepB( _cv_mem, indexB, options.HMIN>0.? options.HMIN:0. );
   if( _check_cv_flag(&_cv_flag, "CVodeSetMinStepB", 1) ) return false;
@@ -1199,11 +1207,12 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::MC_CVASARHSPM__
 {
   ODEBNDS_SUNDIALS<T,PMT,PVT> *pODEBNDS = ODEBNDS_SUNDIALS<T,PMT,PVT>::pODEBNDS;
   pODEBNDS->_ifct = *static_cast<unsigned*>( user_data );
-  bool flag = pODEBNDS->_RHS_PM_SEN( pODEBNDS->options, t, NV_DATA_S( x ), NV_DATA_S( y ),
+  int flag = pODEBNDS->_RHS_PM_SEN( pODEBNDS->options, t, NV_DATA_S( x ), NV_DATA_S( y ),
     NV_DATA_S( ydot ), pODEBNDS->_ifct, true );
   ODEBNDS_SUNDIALS<T,PMT,PVT>::pODEBNDS = pODEBNDS;
   pODEBNDS->stats_sen.numRHS++;
-  return( (flag && _diam( pODEBNDS->_nx, pODEBNDS->_PMy ) < pODEBNDS->options.DMAX)? 0: -1 );
+  if( _diam( pODEBNDS->_nx, pODEBNDS->_PMy ) > pODEBNDS->options.DMAX ) return -1;
+  return flag;
 }
 
 template <typename T, typename PMT, typename PVT> inline int
@@ -1480,7 +1489,7 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::MC_CVFSARHSPM__
   std::cout << "y:\n";
   for( unsigned i=0; i<NV_LENGTH_S( y ); i++ ) std::cout << NV_Ith_S( y, i ) << std::endl;
 #endif
-  bool flag = pODEBNDS->_RHS_PM_SEN( pODEBNDS->options, t, NV_DATA_S( x ), NV_DATA_S( y ),
+  int flag = pODEBNDS->_RHS_PM_SEN( pODEBNDS->options, t, NV_DATA_S( x ), NV_DATA_S( y ),
     NV_DATA_S( ydot ), is );
 #ifdef MC__ODEBNDS_SUNDIALS_DEBUG
   std::cout << "ydot:\n";
@@ -1489,7 +1498,8 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::MC_CVFSARHSPM__
 #endif
   ODEBNDS_SUNDIALS<T,PMT,PVT>::pODEBNDS = pODEBNDS;
   pODEBNDS->stats_sen.numRHS++;
-  return( (flag && _diam( pODEBNDS->_nx, pODEBNDS->_PMy ) < pODEBNDS->options.DMAX)? 0: -1 );
+  if( _diam( pODEBNDS->_nx, pODEBNDS->_PMy ) > pODEBNDS->options.DMAX ) return -1;
+  return flag;
 }
 
 template <typename T, typename PMT, typename PVT> inline int

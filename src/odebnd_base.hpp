@@ -468,7 +468,7 @@ class ODEBND_BASE:
       const bool centered=false );
 
   //! @brief Function converting GSL array to polynomial model with ellipsoidal remainder
-  template <typename REALTYPE> static void _vec2PME
+  template <typename REALTYPE> static bool _vec2PME
     ( const REALTYPE*vec, PMT*PMenv, const unsigned nx, PVT*PMx, double*Qr,
       E&Er, T*Ir, const bool regPSD=false );
 
@@ -486,7 +486,7 @@ class ODEBND_BASE:
       const bool reinit=true );
 
   //! @brief Function converting ellipsoidal remainder bound into interval remainder bound
-  static void _e2x
+  static bool _e2x
     ( const unsigned nx, double*Qr, E&Er, T*Ir, const bool regPSD );
 
   //! @brief Function to initialize GSL for state polynomial models
@@ -511,7 +511,7 @@ class ODEBND_BASE:
 
   //! @brief Function to initialize state polynomial model w/ ellipsoidal remainder
   static void _IC_PM_ELL
-    ( const unsigned nx, PVT*PMx, double*Qr, E&Er, T*Ir );
+    ( const unsigned nx, PVT*PMx, double*Qr, E&Er, T*Ir, double Qtol );
 
   //! @brief Function to reset state polynomial models at intermediate time
   template <typename OPT> bool _CC_PM_SET
@@ -1655,7 +1655,7 @@ ODEBND_BASE<T,PMT,PVT>::_vec2PMI
 
 template <typename T, typename PMT, typename PVT>
 template <typename REALTYPE>
-inline void
+inline bool
 ODEBND_BASE<T,PMT,PVT>::_vec2PME
 ( const REALTYPE*vec, PMT*PMenv, const unsigned nx, PVT*PMx, double*Qr,
   E&Er, T*Ir, const bool regPSD )
@@ -1668,10 +1668,10 @@ ODEBND_BASE<T,PMT,PVT>::_vec2PME
   }
   for( unsigned iQ=0; iQ<(nx*(nx+1))/2; iQ++ )
     Qr[iQ] = vec[ivec++];
-  _e2x( nx, Qr, Er, Ir, regPSD );
+  if( !_e2x( nx, Qr, Er, Ir, regPSD ) ) return false;
   for( unsigned ix=0; ix<nx; ix++  )
     PMx[ix].set( Ir[ix] );
-  return;
+  return true;
 }
 
 template <typename T, typename PMT, typename PVT>
@@ -1713,7 +1713,7 @@ ODEBND_BASE<T,PMT,PVT>::_e2x
 }
 
 template <typename T, typename PMT, typename PVT>
-inline void
+inline bool
 ODEBND_BASE<T,PMT,PVT>::_e2x
 ( const unsigned nx, double*Qr, E&Er, T*Ir, const bool regPSD )
 {
@@ -1722,10 +1722,17 @@ ODEBND_BASE<T,PMT,PVT>::_e2x
   std::cout << "Er =" << Er << std::endl;
 #endif
   if( regPSD && !Er.psdQ() ){
+//#ifdef MC__ODEBND_BASE_DINEQPM_DEBUG
+    std::cout << "Er not a p.s.d. matrix; lmin =" << Er.eigQ().first(0) << std::endl;
+//#endif
+    return false;
+  }
+/*
+  if( regPSD && !Er.psdQ() ){
     double lmin = Er.eigQ().first(0);
-#ifdef MC__ODEBND_BASE_DINEQPM_DEBUG
+//#ifdef MC__ODEBND_BASE_DINEQPM_DEBUG
     std::cout << "lmin =" << lmin << std::endl;
-#endif
+//#endif
     for( unsigned ix=0; ix<nx; ix++ )
       Qr[_ndxLT(ix,ix,nx)] = Er.Q(ix,ix) -= lmin;
 #ifdef MC__ODEBND_BASE_DINEQPM_DEBUG
@@ -1733,7 +1740,7 @@ ODEBND_BASE<T,PMT,PVT>::_e2x
     int dum; std::cin >> dum;
 #endif
   }
-
+*/
   for( unsigned ix=0; ix<nx; ix++ )
     Ir[ix] = T( Er.l(ix), Er.u(ix) );
 
@@ -1742,7 +1749,7 @@ ODEBND_BASE<T,PMT,PVT>::_e2x
     std::cout << "Ir[" << ix << "] = " << Ir[ix] << std::endl;
   { int dum; std::cin >> dum; }
 #endif
-  return;
+  return true;
 }
 
 template <typename T, typename PMT, typename PVT>
@@ -1988,7 +1995,7 @@ ODEBND_BASE<T,PMT,PVT>::_IC_PM_STA
 
   case OPT::ELLIPS:
   default:
-    _IC_PM_ELL( _nx, _PMx, _Q, _Er, _Ir );
+    _IC_PM_ELL( _nx, _PMx, _Q, _Er, _Ir, _QTOLx );
     // Whether or not to ignore the remainder
     if( !options.PMNOREM )
       _PME2vec( _PMenv, _nx, _PMx, _Q, vec );
@@ -2003,13 +2010,13 @@ ODEBND_BASE<T,PMT,PVT>::_IC_PM_STA
 template <typename T, typename PMT, typename PVT>
 inline void
 ODEBND_BASE<T,PMT,PVT>::_IC_PM_ELL
-( const unsigned nx, PVT*PMx, double*Qr, E&Er, T*Ir )
+( const unsigned nx, PVT*PMx, double*Qr, E&Er, T*Ir, double QTOL )
 {
   double norm1R = 0.;
   for( unsigned ix=0; ix<nx; ix++ )
     norm1R += Op<T>::diam( PMx[ix].remainder() ) / 2.;
   for( unsigned ix=0, iQ=0; ix<nx; ix++ ){
-    Qr[iQ++] = norm1R * Op<T>::diam( PMx[ix].remainder() ) / 2.;
+    Qr[iQ++] = norm1R * Op<T>::diam( PMx[ix].remainder() ) / 2. + 1e2*QTOL;
     for( unsigned jx=ix+1; jx<nx; jx++ ) Qr[iQ++] = 0.;
     Ir[ix] = PMx[ix].remainder();
   }
@@ -2100,7 +2107,7 @@ ODEBND_BASE<T,PMT,PVT>::_CC_PM_STA
   case OPT::ELLIPS:
   default:{
     *_PMt = t; // current time   
-    _vec2PME( x, _PMenv, _nx, _PMx, _Q, _Er, _Ir ); // current state/quadrature polynomial model
+    _vec2PME( x, _PMenv, _nx, _PMx, _Q, _Er, _Ir, true ); // current state/quadrature polynomial model
 
     // In this variant a bound on the Jacobian matrix is computed and the
     // linear part is taken as the mid-point of this matrix
@@ -2187,7 +2194,8 @@ ODEBND_BASE<T,PMT,PVT>::_CC_PM_ELL
   else
     Efr = minksum_ea( Exr, Ifr, QTOL, EPS );    
   for( unsigned jx=0; jx<nx; jx++ ){
-    for( unsigned ix=jx; ix<nx; ix++ )
+    Qfr[_ndxLT(jx,jx,nx)] = Efr.Q(jx,jx) + 1e2*QTOL;
+    for( unsigned ix=jx+1; ix<nx; ix++ )
       Qfr[_ndxLT(ix,jx,nx)] = Efr.Q(ix,jx);
     PMf[jx].set( T(Efr.l(jx),Efr.u(jx)) );
   }
@@ -2262,7 +2270,7 @@ ODEBND_BASE<T,PMT,PVT>::_RHS_PM_STA
    
   case OPT::ELLIPS:
   default:{
-    _vec2PME( x, _PMenv, _nx, _PMx, _Q, _Er, _Ir, true ); // set current state polynomial model
+    if( !_vec2PME( x, _PMenv, _nx, _PMx, _Q, _Er, _Ir, true ) ) return 1; // set current state polynomial model
     *_PMt = t; // set current time   
 #ifdef MC__ODEBND_BASE_DINEQPM_DEBUG
     _print_interm( t, _nx, _PMx, _Er, "PMx Intermediate", std::cerr );

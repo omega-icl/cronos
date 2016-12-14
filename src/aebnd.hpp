@@ -830,13 +830,16 @@ AEBND<T,PMT,PVT>::_precondlin
   try{
     if( jacf ){
       // Get Jacobian and preconditioning matrix
-      _dag->eval( _opAEJAC[iblk], opjacf, ndepblk*ndepblk, _pAEJAC[iblk], jacf,
+      std::vector<V> wkAEJAC( _opAEJAC[iblk].size() );
+      _dag->eval( _opAEJAC[iblk], wkAEJAC.data(), ndepblk*ndepblk, _pAEJAC[iblk], jacf,
                    _pVAR.size()-posblk, _pVAR.data()+posblk, jacvar+posblk );
+      //_dag->eval( _opAEJAC[iblk], opjacf, ndepblk*ndepblk, _pAEJAC[iblk], jacf,
+      //             _pVAR.size()-posblk, _pVAR.data()+posblk, jacvar+posblk );
 #ifdef MC__AEBND_DEBUG
       std::cout << "Non-Preconditioned LHS Block #" << iblk+1 << ":\n";
       for( unsigned i=0; i<ndepblk; i++ ){
         for( unsigned j=0; j<ndepblk; j++ )
-          std::cout << jacf[_ndx(i,j,ndepblk)] << "  ";
+          std::cout << _pAEJAC[iblk][_ndx(i,j,ndepblk)] << "=" << jacf[_ndx(i,j,ndepblk)] << "  ";
         std::cout << std::endl;
       }
       std::cout << std::endl;

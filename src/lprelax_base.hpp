@@ -439,7 +439,7 @@ LPRELAX_BASE<T>::_set_LPcontract
   auto jtobj = _LPvar.find( pVar );
 #ifdef MC__USE_CPLEX
   if( _LPobj.first ) _ILOmodel->remove( _LPobj.second );
-  switch( uplo ){
+  switch( (int)uplo ){
     case false: _LPobj.second = IloMinimize( *_ILOenv, jtobj->second ); break;
     case true:  _LPobj.second = IloMaximize( *_ILOenv, jtobj->second ); break;
   }

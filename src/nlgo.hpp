@@ -198,7 +198,7 @@ Other options can be modified to tailor the search, including output level, maxi
 #include "aebnd.hpp"
 
 #undef MC__NLGO_DEBUG
-#undef MC__NLGO_TRACE
+//#undef MC__NLGO_TRACE
 #undef MC__NLGO_SHOW_BREAKPTS
 
 namespace mc
@@ -741,7 +741,7 @@ NLGO<T>::setup
   _op_CMfg.resize(nfgop);
   _op_POLfg.resize(nfgop);
 
-  // identify linear objective/constraint functions in NLP
+  // identify linear objective/constraint functions in problem
   _fct_lin.clear();
   if( std::get<0>(_obj).size() ){
     FFDep fdep = std::get<1>(_obj)[0].dep();
@@ -762,7 +762,7 @@ NLGO<T>::setup
   std::cout << "LINEAR OBJECTIVE/CONSTRAINT FUNCTIONS:    " << _fct_lin.size() << std::endl
             << "NONLINEAR OBJECTIVE/CONSTRAINT FUNCTIONS: " << _nctr-_fct_lin.size()+std::get<0>(_obj).size() << std::endl;
 
-  // identify linear variables in NLP and exclude from branching
+  // identify linear variables in problem
   FFDep fgdep = std::get<0>(_obj).size()? std::get<1>(_obj)[0].dep(): 0.;
   for( unsigned j=0; j<_nctr; j++ )
     fgdep += std::get<1>(_ctr)[j].dep();
@@ -1420,6 +1420,9 @@ template <typename T> inline void
 NLGO<T>::_set_polrelax
 ( const T*P, const unsigned*tvar, const bool feastest )
 {
+#ifdef MC__NLGO_TRACE
+   std::cerr << "ENTERING: _set_porelax\n";
+#endif
   // Reset polynomial image
   stats.tPOLIMG -= cpuclock();
   _POLenv.reset();
@@ -1503,12 +1506,19 @@ NLGO<T>::_set_polrelax
   stats.tLPSET -= cpuclock();
   _set_LPcuts();
   stats.tLPSET += cpuclock();
+#ifdef MC__NLGO_TRACE
+   std::cerr << "EXITING: _set_porelax\n";
+#endif
 }
 
 template <typename T> inline void
 NLGO<T>::_update_polrelax
 ( const T*P, const unsigned*tvar, const bool feastest )
 {
+#ifdef MC__NLGO_TRACE
+   std::cerr << "ENTERING: _update_porelax\n";
+#endif
+
   // Reset polyhedral cuts
   stats.tPOLIMG -= cpuclock();
   _POLenv.reset_cuts();
@@ -1544,6 +1554,9 @@ NLGO<T>::_update_polrelax
   stats.tLPSET -= cpuclock();
   _set_LPcuts();
   stats.tLPSET += cpuclock();
+#ifdef MC__NLGO_TRACE
+   std::cerr << "EXITING: _update_porelax\n";
+#endif
 }
 
 template <typename T> inline void

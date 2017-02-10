@@ -848,7 +848,6 @@ AEBND<T,PMT,PVT>::_precondlin
       CPPL::dgbmatrix mB;
       switch( options.PRECOND ){
       case Options::INVMD:
-        if( ndepblk==1 ){ _Y.resize(ndepblk,ndepblk); _Y.identity(); break; }
         mA.resize(ndepblk,ndepblk);
         for( unsigned i=0; i<ndepblk; i++ )
           for( unsigned j=0; j<ndepblk; j++ )
@@ -856,10 +855,10 @@ AEBND<T,PMT,PVT>::_precondlin
 #ifdef MC__AEBND_DEBUG
         std::cout << "Preconditioning matrix Block #" << iblk+1 << ":\n" << mA << std::endl;
 #endif
+        if( ndepblk==1 ){ _Y.resize(1,1); _Y(0,0) = 1./mA(0,0); break; }
         if( dgesv( mA, _Y ) ) throw Exceptions( Exceptions::PRECOND );
         break;
       case Options::INVMB:
-        if( ndepblk==1 ){ _Y.resize(ndepblk,ndepblk); _Y.identity(); break; }
         mB.resize(ndepblk,ndepblk,_bandblk[iblk].first,_bandblk[iblk].second);
         for( unsigned i=0; i<ndepblk; i++ )
           for( unsigned j=0; j<ndepblk; j++ ){
@@ -870,10 +869,10 @@ AEBND<T,PMT,PVT>::_precondlin
 #ifdef MC__AEBND_DEBUG
         std::cout << "Preconditioning matrix Block #" << iblk+1 << ":\n" << mA << std::endl;
 #endif
+        if( ndepblk==1 ){ _Y.resize(1,1); _Y(0,0) = 1./mB(0,0); break; }
         if( dgbsv( mB, _Y ) ) throw Exceptions( Exceptions::PRECOND );
         break;
       case Options::QRM:
-        if( ndepblk==1 ){ _Y.resize(ndepblk,ndepblk); _Y.identity(); break; }
         mA.resize(ndepblk,ndepblk);  
         for( unsigned i=0; i<ndepblk; i++ )
           for( unsigned j=0; j<ndepblk; j++ )
@@ -881,6 +880,7 @@ AEBND<T,PMT,PVT>::_precondlin
 #ifdef MC__AEBND_DEBUG
         std::cout << "Preconditioning matrix Block #" << iblk+1 << ":\n" << mA << std::endl;
 #endif
+        if( ndepblk==1 ){ _Y.resize(1,1); _Y(0,0) = 1./mA(0,0); break; }
         if( dgeqrf( mA, Q, R ) ) throw Exceptions( Exceptions::PRECOND );
         _Y = Q;
         break;
@@ -963,6 +963,8 @@ AEBND<T,PMT,PVT>::_gs
 ( const unsigned iblk, const unsigned ndepblk, U*var, U*opf, U*f, U*ref,
   V*opjacf, V*jacf, V*jacvar, bool usekraw, std::ostream&os )
 {
+  const T EPS = options.ATOL * T(-1,1);
+
   const unsigned posblk = _ndep - _bAE[iblk] - ndepblk;
   U*varblk  = var + posblk;
   U*refblk = ref + posblk;
@@ -996,6 +998,9 @@ AEBND<T,PMT,PVT>::_gs
 
     try{
       for( unsigned i=0; i<ndepblk; i++ ){
+#ifdef  MC__AEBND_DEBUG
+        std::cout << "X0[" << i << "] = " << varblk[i];
+#endif
         U Xk, temp(0.); 
         // Apply componentwise Gauss-Seidel step
         if( !usekraw
@@ -1023,7 +1028,7 @@ AEBND<T,PMT,PVT>::_gs
         // Remainder operations
         if( options.PMNOREM ) varblk[i] = _cancelrem( Xk );
         else if( !options.INTERBND ) varblk[i] = Xk;
-        else if( !Op<U>::inter( varblk[i], Xk, varblk[i] ) ) return EMPTY;
+        else if( !Op<U>::inter( varblk[i], Xk, varblk[i]+EPS ) ) return EMPTY;
       }
 
 #ifdef MC__AEBND_DEBUG
@@ -1149,7 +1154,7 @@ AEBND<T,PMT,PVT>::solve
     case Options::AUTO:
       // No a priori box supplied
       if( !Ix0 ){
-        if( !_islindep ) throw Exceptions( Exceptions::APRIORI );
+        if( !_islinblk[iblk] ) throw Exceptions( Exceptions::APRIORI );
         flag = _ge( iblk, ndepblk, _IVAR.data(), _Iop.data(), _If.data(), _Idfdx.data(), os );
       }
   
@@ -1184,7 +1189,7 @@ AEBND<T,PMT,PVT>::solve
     // Gauss Elimination method
     case Options::GE:
       // Check system is linear in dependents
-      if( !_islindep ) throw Exceptions( Exceptions::GAUSSEL );
+      if( !_islinblk[iblk] ) throw Exceptions( Exceptions::GAUSSEL );
       flag = _ge( iblk, ndepblk, _IVAR.data(), _Iop.data(), _If.data(), _Idfdx.data(), os );
       break;
 
@@ -1282,7 +1287,7 @@ AEBND<T,PMT,PVT>::solve
     case Options::AUTO:
       // No a priori box supplied
       if( !PMx0 ){
-        if( !_islindep ) throw Exceptions( Exceptions::APRIORI );
+        if( !_islinblk[iblk] ) throw Exceptions( Exceptions::APRIORI );
         flag = _ge( iblk, ndepblk, _PMVAR.data(), _PMop.data(), _PMf.data(), _PMdfdx.data(), os );
       }
   
@@ -1317,7 +1322,7 @@ AEBND<T,PMT,PVT>::solve
     // Gauss Elimination method
     case Options::GE:
       // Check system is linear in dependents
-      if( !_islindep ) throw Exceptions( Exceptions::GAUSSEL );
+      if( !_islinblk[iblk] ) throw Exceptions( Exceptions::GAUSSEL );
       flag = _ge( iblk, ndepblk, _PMVAR.data(), _PMop.data(), _PMf.data(), _PMdfdx.data(), os );
       break;
 

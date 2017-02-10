@@ -312,6 +312,14 @@ class ODEBND_BASE:
   //! @brief absolute tolerance for shape matrix of ellipsoidal remainder
   double _QTOLx;
 
+  //! @brief Function to set IC pointer
+  bool _IC_SET
+    ( const unsigned iIC );
+
+  //! @brief Function to set RHS and QUAD pointers
+  bool _RHS_SET
+    ( const unsigned iRHS, const unsigned iQUAD );
+
   //! @brief Static function converting interval bounds to array
   template <typename REALTYPE> static void _I2vec
     ( const unsigned nx, const double*xL, const double*xU, REALTYPE*vec );
@@ -369,7 +377,7 @@ class ODEBND_BASE:
   template <typename REALTYPE, typename OPT> void _GET_I_STA
     ( const OPT &options, const REALTYPE*x, const REALTYPE*q );
 
-  //! @brief Function to set state bounds at initial time
+  //! @brief Function to set IC pointer
   template <typename OPT> bool _IC_I_SET
     ( const OPT &options );
 
@@ -386,7 +394,7 @@ class ODEBND_BASE:
     ( const unsigned nx, PVT*MVPx, double*xref, double*Q,
       const unsigned np, double*B, T*Ix, T*Ir, E&Er );
 
-  //! @brief Function to reset state bounds at intermediate time
+  //! @brief Function to set CC pointer
   template <typename OPT> bool _CC_I_SET
     ( const OPT &options, const unsigned iIC );
 
@@ -403,10 +411,6 @@ class ODEBND_BASE:
   //! @brief Function to set RHS and QUAD pointers
   template <typename OPT> bool _RHS_I_SET
     ( const OPT&options, const unsigned iRHS, const unsigned iQUAD );
-
-  //! @brief Function to set RHS and QUAD pointers
-  template <typename OPT> bool _RHS_I_SET
-    ( const OPT&options );
 
   //! @brief Function to calculate the RHS of auxiliary ODEs in interval arithmetic
   template <typename REALTYPE, typename OPT> bool _RHS_I_STA
@@ -489,7 +493,11 @@ class ODEBND_BASE:
   static bool _e2x
     ( const unsigned nx, double*Qr, E&Er, T*Ir, const bool regPSD );
 
-  //! @brief Function to initialize GSL for state polynomial models
+  //! @brief Function to set-valued integration for state polynomial models
+  bool _INI_PM_STA
+    ( const unsigned np, const PVT*PMp );
+
+  //! @brief Function to set-valued integration for state polynomial models
   template <typename OPT> bool _INI_PM_STA
     ( const OPT&options, const unsigned np, const PVT*PMp, const double QTOL );
       
@@ -502,8 +510,16 @@ class ODEBND_BASE:
     ( const OPT &options );
 
   //! @brief Function to initialize quarature polynomial models
+  void _IC_PM_QUAD
+    ();
+
+  //! @brief Function to initialize quarature polynomial models
   template <typename REALTYPE, typename OPT> bool _IC_PM_QUAD
     ( const OPT&options, REALTYPE*vec );
+
+  //! @brief Function to initialize state polynomial models
+  void _IC_PM_STA
+    ( const double t );
 
   //! @brief Function to initialize state polynomial models
   template <typename REALTYPE, typename OPT> bool _IC_PM_STA
@@ -518,6 +534,10 @@ class ODEBND_BASE:
     ( const OPT &options, const unsigned iIC );
 
   //! @brief Function to reinitialize state polynomial models at intermediate time
+  void _CC_PM_STA
+    ( const double t );
+
+  //! @brief Function to reinitialize state polynomial models at intermediate time
   template <typename REALTYPE, typename OPT> bool _CC_PM_STA
     ( const OPT&options, const double t, REALTYPE*vec );
 
@@ -529,10 +549,6 @@ class ODEBND_BASE:
   //! @brief Function to set RHS and QUAD pointers
   template <typename OPT> bool _RHS_PM_SET
     ( const OPT&options, const unsigned iRHS, const unsigned iQUAD );
-
-  //! @brief Function to set RHS and QUAD pointers
-  template <typename OPT> bool _RHS_PM_SET
-    ( const OPT&options );
 
   //! @brief Function to calculate the RHS of auxiliary ODEs in polynomial mode arithmetic
   template <typename REALTYPE, typename OPT> int _RHS_PM_STA
@@ -727,6 +743,37 @@ ODEBND_BASE<T,PMT,PVT>::~ODEBND_BASE
   delete[] _MVPp;
   delete[] _MVPx;
   delete   _MVPenv;
+}
+
+template <typename T, typename PMT, typename PVT>
+inline bool
+ODEBND_BASE<T,PMT,PVT>::_IC_SET
+( const unsigned iIC )
+{
+  if( _vIC.size() <= iIC || _nx0 != _nx ) return false;
+  _pIC = _vIC.at( iIC );
+  _opIC.clear();
+  if( _pIC ) _opIC = _pDAG->subgraph( _nx, _pIC );
+
+  return true;
+}
+
+template <typename T, typename PMT, typename PVT>
+inline bool
+ODEBND_BASE<T,PMT,PVT>::_RHS_SET
+( const unsigned iRHS, const unsigned iQUAD )
+{
+  if( _vRHS.size() <= iRHS ) return false;
+  _pRHS = _vRHS.at( iRHS );
+  _opRHS.clear();
+  if( _pRHS ) _opRHS  = _pDAG->subgraph( _nx, _pRHS );
+
+  if( _nq && _vQUAD.size() <= iQUAD ) return false;
+  _pQUAD = _nq? _vQUAD.at( iQUAD ): 0;
+  _opQUAD.clear();
+  if( _pQUAD ) _opQUAD = _pDAG->subgraph( _nq, _pQUAD );
+
+  return true;
 }
 
 template <typename T, typename PMT, typename PVT>
@@ -961,11 +1008,7 @@ template <typename OPT> inline bool
 ODEBND_BASE<T,PMT,PVT>::_IC_I_SET
 ( const OPT &options )
 {
-  if( !_vIC.size() || _nx0 != _nx ) return false;
-  _pIC = _vIC.at(0);
-  _opIC = _pDAG->subgraph( _nx, _pIC );
-
-  return true;
+  return _IC_SET( 0 );
 }
 
 template <typename T, typename PMT, typename PVT>
@@ -1057,9 +1100,7 @@ template <typename OPT> inline bool
 ODEBND_BASE<T,PMT,PVT>::_CC_I_SET
 ( const OPT &options, const unsigned iIC )
 {
-  if( _vIC.size() <= iIC || _nx0 != _nx ) return false;
-  _pIC = _vIC.at( iIC );
-  _opIC = _pDAG->subgraph( _nx, _pIC );
+  if( !_IC_SET( iIC ) ) return false;
   delete[] _IIC;   _IIC = 0;
   delete[] _PMIC;  _PMIC = 0;
 
@@ -1168,24 +1209,7 @@ template <typename OPT> inline bool
 ODEBND_BASE<T,PMT,PVT>::_RHS_I_SET
 ( const OPT&options, const unsigned iRHS, const unsigned iQUAD )
 {
-  if( _vRHS.size() <= iRHS ) return false;
-  _pRHS = _vRHS.at( iRHS );
-
-  if( _nq && _vQUAD.size() <= iQUAD ) return false;
-  _pQUAD = _nq? _vQUAD.at( iQUAD ): 0;
-
-  return _RHS_I_SET( options );
-}
-
-template <typename T, typename PMT, typename PVT>
-template <typename OPT> inline bool
-ODEBND_BASE<T,PMT,PVT>::_RHS_I_SET
-( const OPT&options )
-{
-  _opRHS.clear();
-  if( _pRHS )  _opRHS  = _pDAG->subgraph( _nx, _pRHS );
-  _opQUAD.clear();
-  if( _pQUAD ) _opQUAD = _pDAG->subgraph( _nq, _pQUAD );
+  if( !_RHS_SET( iRHS, iQUAD ) ) return false;
   const unsigned opmax = _opRHS.size()>_opQUAD.size()?_opRHS.size():_opQUAD.size();
 
   delete[] _IRHS;   _IRHS = 0;
@@ -1843,9 +1867,9 @@ ODEBND_BASE<T,PMT,PVT>::_PME2vec
 }
 
 template <typename T, typename PMT, typename PVT>
-template <typename OPT> inline bool
+inline bool
 ODEBND_BASE<T,PMT,PVT>::_INI_PM_STA
-( const OPT&options, const unsigned np, const PVT* PMp, const double QTOL )
+( const unsigned np, const PVT* PMp )
 {
   // Update effective number of parameters
   // (possibly larger than _np due to lifting)
@@ -1878,6 +1902,16 @@ ODEBND_BASE<T,PMT,PVT>::_INI_PM_STA
   _PMp = _PMx + _nx;
   _PMt = _PMp + _npar;
   _PMq = _PMt + 1;
+
+  return true;
+}
+
+template <typename T, typename PMT, typename PVT>
+template <typename OPT> inline bool
+ODEBND_BASE<T,PMT,PVT>::_INI_PM_STA
+( const OPT&options, const unsigned np, const PVT* PMp, const double QTOL )
+{
+  if( !_INI_PM_STA( np, PMp ) ) return false;
 
   // Reset _MVXPVenv and related variables
   unsigned ordmit = options.ORDMIT<0? -options.ORDMIT: options.ORDMIT;
@@ -1961,11 +1995,18 @@ template <typename OPT> inline bool
 ODEBND_BASE<T,PMT,PVT>::_IC_PM_SET
 ( const OPT &options )
 {
-  if( !_vIC.size() || _nx0 != _nx ) return false;
-  _pIC = _vIC.at(0);
-  _opIC = _pDAG->subgraph( _nx, _pIC );
+  return _IC_SET( 0 );
+}
 
-  return true;
+template <typename T, typename PMT, typename PVT>
+inline void
+ODEBND_BASE<T,PMT,PVT>::_IC_PM_STA
+( const double t )
+{
+  *_PMt = t; // current time
+  static std::vector<PVT> wkIC;
+  wkIC.resize( _opIC.size() );
+  _pDAG->eval( _opIC, wkIC.data(), _nx, _pIC, _PMx, _npar+1, _pVAR+_nx, _PMp );
 }
 
 template <typename T, typename PMT, typename PVT>
@@ -1973,8 +2014,7 @@ template <typename REALTYPE, typename OPT> inline bool
 ODEBND_BASE<T,PMT,PVT>::_IC_PM_STA
 ( const OPT&options, const double t, REALTYPE*vec )
 {
-  *_PMt = t; // current time
-  _pDAG->eval( _opIC, _nx, _pIC, _PMx, _npar+1, _pVAR+_nx, _PMp );
+  _IC_PM_STA( t );
 
   switch( options.WRAPMIT){
   case OPT::NONE:
@@ -2027,12 +2067,20 @@ ODEBND_BASE<T,PMT,PVT>::_IC_PM_ELL
 }
 
 template <typename T, typename PMT, typename PVT>
+inline void
+ODEBND_BASE<T,PMT,PVT>::_IC_PM_QUAD
+()
+{
+  for( unsigned iq=0; iq<_nq; iq++ ) _PMq[iq] = 0.;
+}
+
+template <typename T, typename PMT, typename PVT>
 template <typename REALTYPE, typename OPT> inline bool
 ODEBND_BASE<T,PMT,PVT>::_IC_PM_QUAD
 ( const OPT&options, REALTYPE*vec )
 {
   if( !_vQUAD.size() || !_nq ) return true;
-  for( unsigned iq=0; iq<_nq; iq++ ) _PMq[iq] = 0.;
+  _IC_PM_QUAD();
   _PMI2vec( _PMenv, _nq, _PMq, vec, true );
   return true;
 }
@@ -2042,9 +2090,7 @@ template <typename OPT> inline bool
 ODEBND_BASE<T,PMT,PVT>::_CC_PM_SET
 ( const OPT &options, const unsigned iIC )
 {
-  if( _vIC.size() <= iIC || _nx0 != _nx ) return false;
-  _pIC = _vIC.at( iIC );
-  _opIC = _pDAG->subgraph( _nx, _pIC );
+  if( !_IC_SET( iIC ) ) return false;
   delete[] _IIC;   _IIC = 0;
   delete[] _PMIC;  _PMIC = new PVT[_opIC.size()];;
   delete[] _IDIC;  _IDIC = 0;
@@ -2074,6 +2120,18 @@ ODEBND_BASE<T,PMT,PVT>::_CC_PM_SET
   }
 
   return true;
+}
+
+template <typename T, typename PMT, typename PVT>
+inline void
+ODEBND_BASE<T,PMT,PVT>::_CC_PM_STA
+( const double t )
+{
+  *_PMt = t; // current time
+  static std::vector<PVT> wkIC;
+  wkIC.resize( _opIC.size() );
+  _pDAG->eval( _opIC, wkIC.data(), _nx, _pIC, _PMxdot, _nVAR0, _pVAR, _PMVAR );
+  for( unsigned ix=0; ix<_nx; ix++ ) _PMx[ix] = _PMxdot[ix];
 }
 
 template <typename T, typename PMT, typename PVT>
@@ -2535,24 +2593,7 @@ template <typename OPT> inline bool
 ODEBND_BASE<T,PMT,PVT>::_RHS_PM_SET
 ( const OPT&options, const unsigned iRHS, const unsigned iQUAD )
 {
-  if( _vRHS.size() <= iRHS ) return false;
-  _pRHS   = _vRHS.at( iRHS );
-
-  if( _nq && _vQUAD.size() <= iQUAD ) return false;
-  _pQUAD  = _nq? _vQUAD.at( iQUAD ): 0;
-
-  return _RHS_PM_SET( options );
-}
-
-template <typename T, typename PMT, typename PVT>
-template <typename OPT> inline bool
-ODEBND_BASE<T,PMT,PVT>::_RHS_PM_SET
-( const OPT&options )
-{
-  _opRHS.clear();
-  if( _pRHS )  _opRHS  = _pDAG->subgraph( _nx, _pRHS );
-  _opQUAD.clear();
-  if( _pQUAD ) _opQUAD = _pDAG->subgraph( _nq, _pQUAD );
+  if( !_RHS_SET( iRHS, iQUAD ) ) return false;
   const unsigned opmax = _opRHS.size()>_opQUAD.size()?_opRHS.size():_opQUAD.size();
 
   delete[] _IRHS;   _IRHS = 0;

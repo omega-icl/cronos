@@ -45,7 +45,7 @@ int main()
   for( unsigned i=0; i<NK; i++ ) k[i].set( &DAG );
 
   mc::NLGO<I> NLP;
-  NLP.options.POLIMG.SANDWICH_MAXCUT = 7;
+  NLP.options.POLIMG.SANDWICH_MAXCUT = 5;
   NLP.options.POLIMG.SANDWICH_ATOL   = NLP.options.POLIMG.SANDWICH_RTOL  = 1e-3;
   //NLP.options.CVATOL = NLP.options.CVRTOL = 1e-5;
   //NLP.options.MIPABSGAP = NLP.options.MIPRELGAP = 1e-9;
@@ -108,16 +108,12 @@ int main()
   NLP.options.DISPLAY = 2;
   //NLP.options.MIPFILE = "test5.lp";
   NLP.options.NLPSLV.DISPLAY = 0;
-  NLP.options.CSALGO  = mc::NLGO<I>::Options::SBB;
-  NLP.options.RELMETH = mc::NLGO<I>::Options::HYBRID;//CHEB;//
-  NLP.options.CMODPROP = 3;
-  NLP.options.CMODSPAR = true;
+  NLP.options.CSALGO  = mc::NLGO<I>::Options::BB;
+  NLP.options.RELMETH = mc::NLGO<I>::Options::CHEB;
+  //NLP.options.CMODPROP = 3;
 
   NLP.solve( Ik, 0, k0 );
-  std::cout << std::fixed << std::setprecision(1);
-  std::cout << "POLIMG: " << NLP.stats.tPOLIMG << " sec\n";
-  std::cout << "LPSET:  " << NLP.stats.tLPSET << " sec\n";
-  std::cout << "LPSOL:  " << NLP.stats.tLPSOL << " sec, " << NLP.stats.nLPSOL << " problems\n";
+  NLP.stats.display();
 
   return 0;
 }

@@ -1,7 +1,10 @@
 #define SAVE_RESULTS    // whether or not to save results to file
-#undef USE_PROFIL	// specify to use PROFIL for interval arithmetic
-#undef USE_FILIB	// specify to use FILIB++ for interval arithmetic
+#define USE_PROFIL	    // specify to use PROFIL for interval arithmetic
+#undef USE_FILIB	    // specify to use FILIB++ for interval arithmetic
 #undef DEBUG            // whether to output debug information
+#define MC__USE_CPLEX   // whether to use CPLEX or GUROBI
+#undef MC__CSEARCH_SHOW_BOXES
+#undef MC__CSEARCH_SHOW_REDUC
 ////////////////////////////////////////////////////////////////////////////////
 
 #include <fstream>
@@ -19,7 +22,6 @@
     typedef mc::Interval I;
   #endif
 #endif
-typedef mc::CVar<I> CVI;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Find all solutions of the system of nonlinear equations:
@@ -38,8 +40,7 @@ int main()
 {
   mc::FFGraph DAG;
   const unsigned NP = 8, NC = 8;
-  mc::FFVar T, P[NP], C[NC];
-  T.set( &DAG );
+  mc::FFVar P[NP], C[NC];
   for( unsigned int i=0; i<NP; i++ ) P[i].set( &DAG );
   C[0] = 4.731e-3*P[0]*P[2]-0.3578*P[1]*P[2]-0.1238*P[0]+P[6]-1.637e-3*P[1]-0.9338*P[3]-0.3571;
   C[1] = 0.2238*P[0]*P[2]+0.7623*P[1]*P[2]+0.2638*P[0]-P[6]-0.07745*P[1]-0.6734*P[3]-0.6022;
@@ -55,39 +56,29 @@ int main()
   CP.set_var( NP, P );
   for( unsigned ic=0; ic<NC; ic++ )
     CP.add_ctr( mc::BASE_OPT::EQ, C[ic] );
-  CP.setup();
 
-  CP.options.MIPFILE     = "";//"test1.lp";
+  //CP.options.MIPFILE     = "test1.lp";
   CP.options.DISPLAY     = 2;
-  CP.options.MAXITER     = 1000;
-  CP.options.CVATOL      = 1e-4;
-  CP.options.CVRTOL      = 1e-5;
-  CP.options.BRANCHVAR   = mc::SetInv<CVI>::Options::RGREL;
-  CP.options.STGBCHDEPTH = 100;
-  CP.options.STGBCHRTOL  = 1e-2;
-  CP.options.NODEMEAS    = mc::SetInv<CVI>::Options::MEANWIDTH;
+  CP.options.MAXITER     = 100;
+  CP.options.CVTOL       = 1e-6;
+  CP.options.BRANCHVAR   = mc::SBP<I>::Options::RGREL;
+  CP.options.NODEMEAS    = mc::SBP<I>::Options::RELMEANLEN;
   CP.options.DOMREDMAX   = 10;
-  CP.options.DOMREDTHRES = 2e-2;
-  CP.options.DOMREDBKOFF = 1e-5;
-  CP.options.RELMETH     = mc::NLCP<I>::Options::CHEB;//DRL;
-//  CP.options.CMODSPAR    = true;
+  CP.options.DOMREDTHRES = 1e-1;
+  CP.options.DOMREDBKOFF = 1e-7;
+  CP.options.RELMETH     = mc::NLCP<I>::Options::CHEB;
   CP.options.CMODPROP    = 2;
-  CP.options.CMODCUTS    = 2;
+  CP.options.STGBCHDEPTH = 0;
+  CP.options.STGBCHRTOL  = 1e-2;
+  CP.options.BLKDECUSE   = true;
   std::cout << CP;
 
   const I Ip[NP] = { I(-1.,1.), I(-1.,1.), I(-1.,1.), I(-1.,1.),
                      I(-1.,1.), I(-1.,1.), I(-1.,1.), I(-1.,1.) };
 
-  try{  
-    CP.solve( Ip );
-  }
-  catch(GRBException e){
-    std::cout << "Error code = " << e.getErrorCode() << std::endl;
-    std::cout << e.getMessage() << std::endl;
-  }
-  catch(...){
-    std::cout << "Exception during optimization" << std::endl;
-  }
+  CP.setup();
+  CP.solve( Ip );
+  CP.stats.display();
 
   auto L_clus = CP.clusters();
   std::cout << "No clusters: " << L_clus.size() << std::endl;

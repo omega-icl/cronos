@@ -1,5 +1,5 @@
-const unsigned int NPM   = 2;	// <- Order of Taylor/Chebyshev model
-//#define USE_CMODEL		// <- Use Chebyshev models?
+const unsigned int NPM   = 5;	// <- Order of Taylor/Chebyshev model
+#define USE_CMODEL		// <- Use Chebyshev models?
 
 #include "aebnd.hpp"
 
@@ -41,38 +41,43 @@ int main()
     Ix[NX];
 
   PM PMEnv( NP, NPM );
-  PMEnv.options.CENTER_REMAINDER = true;
-  PMEnv.options.REF_MIDPOINT = true;
+  //PMEnv.options.CENTER_REMAINDER = true;
+  //PMEnv.options.REF_MIDPOINT = true;
   PV PMp[NP], PMx[NX], PMx0[NX];
   for( unsigned i=0; i<NP; i++ ) PMp[i].set( &PMEnv, i, Ip[i] );
   for( unsigned i=0; i<NX; i++ ) PMx0[i] = Ix0[i];
 
   /////////////////////////////////////////////////////////////////////////
   // Bound AE solution set
-  mc::AEBND<I,PM,PV> EX1;
+  mc::AEBND<I,PM,PV> BND;
 
-  EX1.set_dag( &NLE );
-  EX1.set_var( NP, P );
-  EX1.set_dep( NX, X, F );
+  BND.set_dag( &NLE );
+  BND.set_var( NP, P );
+  BND.set_dep( NX, X, F );
 
-  EX1.options.DISPLAY  = 2;
-  EX1.options.BLKDEC   = true;//false;
-  EX1.options.INTERBND = true; //false;
-  EX1.options.MAXIT    = 20;
-  EX1.options.RTOL     =
-  EX1.options.ATOL     = 0e0;
-  EX1.options.BOUNDER  = mc::AEBND<I,PM,PV>::Options::GS;//GE;//KRAW;//GS;
-  EX1.options.PRECOND  = mc::AEBND<I,PM,PV>::Options::INVMD;//QRM;//NONE;
+  BND.options.DISPLAY  = 1;
+  BND.options.INTERBND = true; //false;
+  BND.options.MAXIT    = 20;
+  BND.options.RTOL     =
+  BND.options.ATOL     = 1e-8;
+  BND.options.BOUNDER  = mc::AEBND<I,PM,PV>::Options::ALGORITHM::GS;//GE;//KRAW;//GS;
+  BND.options.PRECOND  = mc::AEBND<I,PM,PV>::Options::PRECONDITIONING::INVMD;//QRM;//NONE;
+  BND.options.BLKDEC   = mc::AEBND<I,PM,PV>::Options::DECOMPOSITION::RECUR;//NONE;//DIAG;
 
-  EX1.setup();
-  std::cout << "\nSuccessful? " << (EX1.solve( Ip, Ix, Ix0 )==mc::AEBND<I,PM,PV>::NORMAL?"Y\n":"N\n");
-  std::cout << "\nSuccessful? " << (EX1.solve( PMp, PMx, Ix )==mc::AEBND<I,PM,PV>::NORMAL?"Y\n":"N\n");
+  BND.setup();
+  std::cout << "\nSuccessful? " << (BND.solve( PMp, PMx, Ix0 )==mc::AEBND<I,PM,PV>::NORMAL?"Y\n":"N\n");
   std::cout << "\nPMx2: " << (3+PMp[0])*PMx[1];
-
 
   return 0;
 
-  std::cout << "\nSuccessful? " << (EX1.solve( SOL )==mc::AEBND<I,PM,PV>::NORMAL?"Y\n":"N\n");
+  BND.setup();
+  std::cout << "\nSuccessful? " << (BND.solve( Ip, Ix, Ix0 )==mc::AEBND<I,PM,PV>::NORMAL?"Y\n":"N\n");
+  std::cout << "\nSuccessful? " << (BND.solve( PMp, PMx, Ix )==mc::AEBND<I,PM,PV>::NORMAL?"Y\n":"N\n");
+  std::cout << "\nPMx2: " << (3+PMp[0])*PMx[1];
+
+  return 0;
+
+  std::cout << "\nSuccessful? " << (BND.solve( SOL )==mc::AEBND<I,PM,PV>::NORMAL?"Y\n":"N\n");
   std::ofstream o_sol( "test1_DAG.dot", std::ios_base::out );
   NLE.dot_script( NX, SOL, o_sol );
   o_sol.close();

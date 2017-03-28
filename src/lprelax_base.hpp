@@ -81,6 +81,9 @@ private:
   std::pair<bool,GRBConstr> _LPinc;
 #endif
 
+  //! @brief whether the LP solver has sent an exception
+  bool _LPexcpt;
+
 protected:
   //! @brief Integrator status
   enum LP_STATUS{
@@ -161,6 +164,7 @@ public:
   //! @brief Status after last LP optimization
   LP_STATUS get_status() const
     {
+      if( _LPexcpt ) return LP_OTHER;
 #ifdef MC__USE_CPLEX
       switch( _ILOcplex->getStatus() ){
        case IloAlgorithm::Optimal:               return LP_OPTIMAL;
@@ -210,9 +214,12 @@ protected:
   //! @brief Function computing Hausdorff distance between intervals
   template <typename U> static double _dH
     ( const U&X, const U&Y );
-  //! @brief Function computing Hausdorff distance between interval vectors
+  //! @brief Function computing relative reduction between interval vectors
   template <typename U> static double _reducrel
     ( const unsigned n, const U*Xred, const U*X );
+  //! @brief Function computing relative reduction between interval vectors
+  template <typename U> static double _reducrel
+    ( const unsigned n, const U*Xred, const U*X, const U*X0 );
 
   //! @brief Value of PolImg variable <a>X</a> after last LP optimization
   double _get_variable
@@ -255,27 +262,50 @@ LPRELAX_BASE<T>::_solve_LPmodel
 {
   stats.tLPSOL -= cpuclock();
   _set_LPoptions( options );
+  _LPexcpt = false;
 #ifdef MC__USE_CPLEX
-  if( options.MIPFILE != "" ) _ILOcplex->exportModel( options.MIPFILE.c_str() );
+  if( options.MIPFILE != "" )
+    _ILOcplex->exportModel( options.MIPFILE.c_str() );
   //{ int dum; std::cout << "PAUSED"; std::cin >> dum; }
   //_time = -_cplex->getCplexTime();
-  _ILOcplex->solve();
+  try{
+    _ILOcplex->solve();
+  }
+  catch(IloException& e){
+    if( options.MIPDISPLAY )
+      std::cout << "Error code = " << e.getMessage() << std::endl;
+    _LPexcpt = true;
+  }
   //_time += _cplex->getCplexTime();
 #else
   _GRBmodel->update();
-  if( options.MIPFILE != "" ) _GRBmodel->write( options.MIPFILE );
+  if( options.MIPFILE != "" )
+    _GRBmodel->write( options.MIPFILE );
   fedisableexcept(FE_ALL_EXCEPT);
-  _GRBmodel->optimize();
+  try{
+    _GRBmodel->optimize();
+  }
+  catch(GRBException& e){
+    if( options.MIPDISPLAY )
+      std::cout << "Error code = " << e.getErrorCode() << std::endl
+                << e.getMessage() << std::endl;
+    _LPexcpt = true;
+  }
 #endif
   stats.tLPSOL += cpuclock();
   stats.nLPSOL++;
 #ifdef MC__LPRELAX_BASE_DEBUG
-  std::cout << "LP solution complete\n";
-  std::cout << std::scientific << std::setprecision(4);
-  std::cout << "  fopt = " << get_objective() << std::endl;
-  unsigned ivar = 0;
-  for( auto itv=_var.begin(); itv!=_var.end(); ++itv, ivar++ )
-    std::cout << "popt" << ivar << " = " << get_variable( *itv ) << std::endl;
+  if( !_LPexcpt ){
+    std::cout << "LP solution complete\n";
+    std::cout << std::scientific << std::setprecision(4);
+    std::cout << "  fopt = " << get_objective() << std::endl;
+    unsigned ivar = 0;
+    for( auto itv=_var.begin(); itv!=_var.end(); ++itv, ivar++ )
+      std::cout << "popt" << ivar << " = " << get_variable( *itv ) << std::endl;
+  }
+  else{
+    std::cout << "LP exception occurred\n";
+  }
   { int dum; std::cin >> dum; }
 #endif
 }
@@ -652,6 +682,16 @@ LPRELAX_BASE<T>::_reducrel
   double drel = 0.;
   for( unsigned ip=0; ip<n; ip++ )
     drel = std::max( drel, _dH( Xred[ip], X[ip] ) / Op<T>::diam( X[ip] ) );
+  return drel;
+}
+
+template <typename T> template <typename U> inline double
+LPRELAX_BASE<T>::_reducrel
+( const unsigned n, const U*Xred, const U*X, const U*X0 )
+{
+  double drel = 0.;
+  for( unsigned ip=0; ip<n; ip++ )
+    drel = std::max( drel, _dH( Xred[ip], X[ip] ) / Op<T>::diam( X0[ip] ) );
   return drel;
 }
 

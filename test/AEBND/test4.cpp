@@ -52,23 +52,23 @@ int main()
 
   /////////////////////////////////////////////////////////////////////////
   // Bound AE solution set
-  mc::AEBND<I,PM,PV> EX1;
+  mc::AEBND<I,PM,PV> BND;
 
-  EX1.set_dag( &NLE );
-  EX1.set_var( NP, P );
-  EX1.set_dep( NX, X, F );
+  BND.set_dag( &NLE );
+  BND.set_var( NP, P );
+  BND.set_dep( NX, X, F );
 
-  EX1.options.DISPLAY = 2;
-  EX1.options.BLKDEC  = true;
-  EX1.options.MAXIT   = 20;
-  EX1.options.RTOL    =
-  EX1.options.ATOL    = 0e0;
-  EX1.options.BOUNDER = mc::AEBND<I,PM,PV>::Options::AUTO;
-  EX1.options.PRECOND = mc::AEBND<I,PM,PV>::Options::INVMD;//QRM;//NONE;
+  BND.options.DISPLAY = 2;
+  BND.options.MAXIT   = 20;
+  BND.options.RTOL     =
+  BND.options.ATOL     = 1e-10;
+  BND.options.BOUNDER  = mc::AEBND<I,PM,PV>::Options::ALGORITHM::AUTO;//GE;//KRAW;//GS;
+  BND.options.PRECOND  = mc::AEBND<I,PM,PV>::Options::PRECONDITIONING::INVMD;//QRM;//NONE;
+  BND.options.BLKDEC   = mc::AEBND<I,PM,PV>::Options::DECOMPOSITION::RECUR;//NONE;//DIAG;
 
-  EX1.setup();
-  //std::cout << "\nSuccessful? " << (EX1.solve( Ip, Ix, Ix0 )==mc::AEBND<I,PM,PV>::NORMAL?"Y\n":"N\n");
-  std::cout << "\nSuccessful? " << (EX1.solve( PMp, PMx, Ix0 )==mc::AEBND<I,PM,PV>::NORMAL?"Y\n":"N\n");
+  BND.setup();
+  //std::cout << "\nSuccessful? " << (BND.solve( Ip, Ix, Ix0 )==mc::AEBND<I,PM,PV>::NORMAL?"Y\n":"N\n");
+  std::cout << "\nSuccessful? " << (BND.solve( PMp, PMx, Ix0 )==mc::AEBND<I,PM,PV>::NORMAL?"Y\n":"N\n");
 
   return 0;
 }

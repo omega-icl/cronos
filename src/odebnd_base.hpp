@@ -443,6 +443,10 @@ class ODEBND_BASE:
     ( const OPT&options, double t, const REALTYPE*x, REALTYPE*jac, REALTYPE*xdot );
 
   //! @brief Function to calculate the functions at intermediate/end point
+  bool _FCT_I_STA
+    ( const unsigned pos_fct, const double t, T*If );
+
+  //! @brief Function to calculate the functions at intermediate/end point
   template <typename REALTYPE, typename OPT> bool _FCT_I_STA
     ( const OPT&options, const unsigned pos_fct, const double t, REALTYPE*fct, T*If );
 
@@ -1502,6 +1506,22 @@ ODEBND_BASE<T,PMT,PVT>::_JAC_I_STA
 {
   // Jacobian not (yet) implemented
   return false;
+}
+
+template <typename T, typename PMT, typename PVT> inline bool
+ODEBND_BASE<T,PMT,PVT>::_FCT_I_STA
+( const unsigned pos_fct, const double t, T*If )
+{
+  if( !_nf || !If ) return true;
+
+  *_It = t; // set current time
+  const FFVar* pFCT = _vFCT.at( pos_fct );
+#ifdef MC__ODEBNDS_BASE_DINEQI_DEBUG
+    for( unsigned j=0; j<_nq; j++ )
+      std::cout << "Iq[" << j << "] = " << _Iq[j] << std::endl;
+#endif
+  _pDAG->eval( _nf, pFCT, If, _nVAR, _pVAR, _IVAR, pos_fct?true:false );
+  return true;
 }
 
 template <typename T, typename PMT, typename PVT>

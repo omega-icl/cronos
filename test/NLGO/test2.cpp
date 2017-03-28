@@ -19,17 +19,19 @@ int main()
   mc::NLGO<I> NLP;
   //NLP.options.POLIMG.SANDWICH_MAXCUT = 10;
   //NLP.options.POLIMG.SANDWICH_ATOL   = NLP.options.POLIMG.SANDWICH_RTOL  = 1e-5;
-  NLP.options.POLIMG.BREAKPOINT_TYPE = mc::PolImg<I>::Options::SOS2;//NONE;
+  //NLP.options.POLIMG.BREAKPOINT_TYPE = mc::PolImg<I>::Options::SOS2;//NONE;
   //NLP.options.POLIMG.DCDECOMP_SCALE  = true;
-  NLP.options.MIPFILE = "test2.lp";
+  //NLP.options.MIPFILE = "test2.lp";
   NLP.options.MIPDISPLAY = 0;
-  NLP.options.NLPSLV.DISPLAY = 0;
-  //NLP.options.DISPLAY = 2;
-  NLP.options.MAXITER = 100;
+  NLP.options.NLPSLV.DISPLAY = 5;
+  NLP.options.DISPLAY   = 2;
+  NLP.options.MAXITER   = 10;
   NLP.options.CVATOL    = NLP.options.CVRTOL    = 1e-4;
   NLP.options.MIPABSGAP = NLP.options.MIPRELGAP = 0.;//1e-7;
-  NLP.options.PREPROC = true;
   NLP.options.DOMREDMAX = 10;
+  NLP.options.RELMETH   = mc::NLGO<I>::Options::CHEB;//DRL;//HYBRID;
+  NLP.options.BLKDECUSE = true; //false;
+  NLP.options.CMODDEPS  = 0;
 
   NLP.set_dag( &DAG );  // DAG
   NLP.set_var( NP, p ); // decision variables
@@ -43,7 +45,6 @@ int main()
   NLP.add_ctr( mc::BASE_NLP::LE, 3*p[0]+p[1]-p[9]*p[2]-p[9]*p[3] );
   //NLP.add_ctr( mc::BASE_NLP::LE, 3*p[0]+p[1]-p[9]*(p[2]+p[3]) );
 
-  typedef mc::Interval I;
   I Ip[NP] = { I(0,300), I(0,300), I(0,100), I(0,200), I(0,100), I(0,300),
                I(0,100), I(0,200), I(0,200), I(1,3) };
   //I Ip[NP] = { I(0,66.67), I(75,133.34), I(0,72.73), I(75,166.67), I(0,100), I(66.66,175),
@@ -53,6 +54,7 @@ int main()
   NLP.setup();
   //int status = NLP.relax( Ip );
   int status = NLP.solve( Ip );
+  NLP.stats.display();
 
   //if( status == Ipopt::Solve_Succeeded ){
   //  std::cout << "RELAXED NLP SOLUTION: " << std::endl;
@@ -62,5 +64,5 @@ int main()
   //              << std::endl;
   //}
 
-  return 0;
+  return status;
 }

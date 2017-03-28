@@ -46,7 +46,7 @@ int main()
   for( unsigned i=0; i<N; i++ ) k[i].set( &DAG );
 
   mc::NLGO<I> NLP;
-  NLP.options.POLIMG.SANDWICH_MAXCUT = 7;
+  NLP.options.POLIMG.SANDWICH_MAXCUT = 5;
   NLP.options.POLIMG.SANDWICH_ATOL   = NLP.options.POLIMG.SANDWICH_RTOL  = 1e-5;
   //NLP.options.CVATOL = NLP.options.CVRTOL = 1e-5;
   //NLP.options.MIPABSGAP = NLP.options.MIPRELGAP = 1e-9;
@@ -105,9 +105,9 @@ int main()
   NLP.options.DISPLAY = 2;
   //NLP.options.MIPFILE = "test6.lp";
   NLP.options.NLPSLV.DISPLAY = 0;
-  NLP.options.CSALGO  = mc::NLGO<I>::Options::SBB;
-  NLP.options.RELMETH = mc::NLGO<I>::Options::HYBRID;//CHEB;
-  NLP.options.CMODPROP = 1;
+  NLP.options.CSALGO  = mc::NLGO<I>::Options::BB;
+  NLP.options.RELMETH = mc::NLGO<I>::Options::CHEB;
+  //NLP.options.CMODPROP = 1;
   NLP.solve( Ik, 0, k0 );
 
   return 0;

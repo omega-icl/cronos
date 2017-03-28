@@ -1,9 +1,9 @@
 # Third-Party Libraries -->> CHANGE ACCORDINGLY <<--
-PATH_MC = /home/bchachua/Programs/Devel/MC++/MC++_2.0
+PATH_MC = $(HOME)/Programs/Devel/MC++/MC++_2.0
 LIB_MC = -llapack -lblas
 INC_MC = -I$(PATH_MC)/include -I$(PATH_MC)/src/3rdparty/fadbad++ -I$(PATH_MC)/src/3rdparty/cpplapack/include
 
-LIB_HSL = -lmc13 -lmc21
+LIB_HSL = -lmc13 -lmc21 -lmc33 -lgfortran
 INC_HSL = 
 
 PATH_PROFIL = /home/bchachua/Programs/ThirdParty/Profil-2.0.8
@@ -15,21 +15,25 @@ LIB_FILIB   = -L$(PATH_FILIB)/lib -lprim
 INC_FILIB   = -I$(PATH_FILIB)/include/ -I$(PATH_FILIB)/include/interval
 FLAGS_FILIB = -frounding-math -ffloat-store
 
-PATH_IPOPT  = /opt/Ipopt-3.10.2
-LIB_IPOPT   = -L$(PATH_IPOPT)/lib -lipopt -lcoinhsl -llapack -lblas -ldl
-INC_IPOPT   = -I$(PATH_IPOPT)/include
+PATH_IPOPT   = /opt/CoinIpopt
+PATH_COINHSL = /opt/coinhsl
+LIB_IPOPT = -L$(PATH_IPOPT)/lib -L$(PATH_COINHSL)/lib -lipopt -lcoinhsl -llapack -lblas -lgfortran -lm -lquadmath -lblas -lgfortran -lm -lquadmath -lm -ldl -lcoinmumps -lblas -lgfortran -lm -lquadmath -lgfortran -lm -lquadmath -lcoinmetis
+INC_IPOPT = -I$(PATH_IPOPT)/include
+#PATH_IPOPT = /opt/Ipopt-3.10.2
+#LIB_IPOPT = -L$(PATH_IPOPT)/lib -lipopt -lcoinhsl -llapack -lblas -ldl
+#INC_IPOPT = -I$(PATH_IPOPT)/include
 
-PATH_CPLEX   = /opt/ibm/ILOG/CPLEX_Studio1251/cplex
-PATH_CONCERT = /opt/ibm/ILOG/CPLEX_Studio1251/concert
-LIB_CPLEX    = -L$(PATH_CPLEX)/lib/x86-64_sles10_4.1/static_pic -lilocplex -lcplex \
-               -L$(PATH_CONCERT)/lib/x86-64_sles10_4.1/static_pic -lconcert \
+PATH_CPLEX   = /opt/ibm/ILOG/CPLEX_Studio1263/cplex
+PATH_CONCERT = /opt/ibm/ILOG/CPLEX_Studio1263/concert
+LIB_CPLEX    = -L$(PATH_CPLEX)/lib/x86-64_linux/static_pic -lilocplex -lcplex \
+               -L$(PATH_CONCERT)/lib/x86-64_linux/static_pic -lconcert \
 	       -lm -pthread
 INC_CPLEX    = -I$(PATH_CPLEX)/include -I$(PATH_CONCERT)/include
 FLAGS_CPLEX  = -m64 -fPIC -fexceptions -DIL_STD
 #FLAGS_CPLEX  = -m64 -fPIC -fexceptions -DNDEBUG -DIL_STD
 
 PATH_GUROBI = $(GUROBI_HOME)
-LIB_GUROBI  = -L$(PATH_GUROBI)/lib -lgurobi_c++ -lgurobi56 -pthread
+LIB_GUROBI  = -L$(PATH_GUROBI)/lib -lgurobi_c++ -lgurobi65 -pthread
 INC_GUROBI  = -I$(PATH_GUROBI)/include
 
 #LIB_SDPA   = -lsdpa -ldmumps_seq
@@ -37,7 +41,8 @@ INC_GUROBI  = -I$(PATH_GUROBI)/include
 
 #PROF = -pg
 
-FLAG_ALL = $(PROF) -g -O2 -Wall -std=c++11 $(FLAGS_FILIB) $(FLAGS_CPLEX)
+FLAG_ALL = $(PROF) -g -Ofast -Wall -std=c++11 $(FLAG_FILIB) $(FLAGS_CPLEX)
+#FLAG_ALL = $(PROF) -g -Wall -std=c++11 $(FLAG_FILIB) $(FLAGS_CPLEX)
 LIB_ALL  = $(LIB_MC) $(LIB_PROFIL) $(LIB_FILIB) $(LIB_HSL) $(LIB_LAPACK) $(LIB_GUROBI) $(LIB_CPLEX) $(LIB_IPOPT)
 INC_ALL  = $(INC_MC) $(INC_PROFIL) $(INC_FILIB) $(INC_HSL) $(INC_LAPACK) $(INC_GUROBI) $(INC_CPLEX) $(INC_IPOPT)
 

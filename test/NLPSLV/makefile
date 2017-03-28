@@ -3,9 +3,13 @@ PATH_MC = /home/bchachua/Programs/Devel/MC++/MC++_2.0
 LIB_MC = -llapack -lblas
 INC_MC = -I$(PATH_MC)/include -I$(PATH_MC)/src/3rdparty/fadbad++ -I$(PATH_MC)/src/3rdparty/cpplapack/include
 
-PATH_IPOPT = /opt/Ipopt-3.10.2
-LIB_IPOPT = -L$(PATH_IPOPT)/lib -lipopt -lcoinhsl -llapack -lblas -ldl
+PATH_IPOPT   = /opt/CoinIpopt
+PATH_COINHSL = /opt/coinhsl
+LIB_IPOPT = -L$(PATH_IPOPT)/lib -L$(PATH_COINHSL)/lib -lipopt -lcoinhsl -llapack -lblas -lgfortran -lm -lquadmath -lblas -lgfortran -lm -lquadmath -lm -ldl -lcoinmumps -lblas -lgfortran -lm -lquadmath -lgfortran -lm -lquadmath -lcoinmetis
 INC_IPOPT = -I$(PATH_IPOPT)/include
+#PATH_IPOPT = /opt/Ipopt-3.10.2
+#LIB_IPOPT = -L$(PATH_IPOPT)/lib -lipopt -lcoinhsl -llapack -lblas -ldl
+#INC_IPOPT = -I$(PATH_IPOPT)/include
 
 #####
 

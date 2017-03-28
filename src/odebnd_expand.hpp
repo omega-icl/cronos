@@ -13,9 +13,6 @@
 #include "aebnd.hpp"
 #include "odeslv_sundials.hpp"
 
-//#include "tmodel.hpp"
-//#include "cmodel.hpp"
-
 namespace mc
 {
 //! @brief C++ class computing enclosures of the reachable set of parametric ODEs using discretization and algebraic equation bounding in AEBND.
@@ -54,6 +51,7 @@ class ODEBND_EXPAND:
   //using ODEBND_BASE<T,PMT,PVT>::_IC_PM_STA;
   //using ODEBND_BASE<T,PMT,PVT>::_CC_PM_STA;
   using ODEBND_BASE<T,PMT,PVT>::_RHS_SET;
+  using ODEBND_BASE<T,PMT,PVT>::_FCT_I_STA;
   using ODEBND_BASE<T,PMT,PVT>::_FCT_PM_STA;
 
  protected:
@@ -240,7 +238,11 @@ protected:
   void _AE_SET
     ( const bool init );
 
-  //! @brief Function to solve nonlinear equation system from ODE residuals
+  //! @brief Function to bound ODE residual solutions using interval arithmetic
+  typename t_AEBND::STATUS _AE_SOLVE
+    ( const bool init, const T*Ip, const T*Ix0, const T*Ixap );
+
+  //! @brief Function to bound ODE residual solutions using polynomial model arithmetic
   typename t_AEBND::STATUS _AE_SOLVE
     ( const bool init, const PVT*PMp, const PVT*PMx0, const PVT*PMxap );
 
@@ -429,6 +431,144 @@ ODEBND_EXPAND<T,PMT,PVT>::_AE_SET
 template <typename T, typename PMT, typename PVT>
 inline typename AEBND<T,PMT,PVT>::STATUS
 ODEBND_EXPAND<T,PMT,PVT>::_AE_SOLVE
+( const bool init, const T*Ip, const T*Ix0, const T*Ixap )
+{
+  const unsigned LBLK = options.LBLK;
+  assert( _nq == 0 ); // Quadrature enclosures not implemented
+
+  for( unsigned i=0; i<_np; i++)
+    _IVAR[i] = Ip[i];                     // parameters
+  for( unsigned i=0; i<_nx; i++)
+    _IVAR[_np+i] = Ix0[i];                // initial state
+  if( _pT ) _IVAR[_np+_nx+_nq] = _t;       // initial time
+  _IVAR[_np+_nx+_nq+1] = _h;               // time step
+  for( unsigned k=0; _pT && k<LBLK+1; k++)
+    _IVAR[_np+_nx+_nq+2+k] = _t+k*_h;      // stage times
+
+  for( unsigned k=0, ik=0; k<LBLK+1; k++, ik+=_nx+_nq)
+    for( unsigned i=0; i<_nx; i++ )
+      _IDEP[ik+i] = Ixap[i];              // state enclosure
+
+  return init? _AEBND.solve( _IVAR.data(), _IDEP.data(), _IDEP.data() ):
+#ifdef MC__ODEBND_EXPAND_NO_TRIVIAL_RESIDUAL
+               _AEBND.solve( _IVAR.data(), _IDEP.data()+_nx+_nq, _IDEP.data()+_nx+_nq );
+#else
+               _AEBND.solve( _IVAR.data(), _IDEP.data(), _IDEP.data() );
+#endif
+}
+
+//! @fn template <typename T, typename PMT, typename PVT> inline typename ODEBND_EXPAND<T,PMT,PVT>::STATUS ODEBND_EXPAND<T,PMT,PVT>::bounds(
+//! const unsigned ns, const double*tk, const T*Ip, T**Ixk, 
+//! T*If, std::ostream&os=std::cout )
+//!
+//! This function computes an enclosure of the reachable set of the parametric ODEs
+//! using propagation of polynomial models with convex remainders (intervals, ellipsoids):
+//!   - <a>ns</a>   [input]  number of time stages
+//!   - <a>tk</a>   [input]  stage times, including the initial time
+//!   - <a>Ip</a>   [input]  interval bound on parameter set
+//!   - <a>Ixk</a>  [output] interval bound on state varibles at stage times
+//!   - <a>If</a>   [output] interval bound on state-dependent functions
+//!   - <a>os</a>   [input]  output stream [default: std::cout]
+//! .
+//! The return value is the status.
+template <typename T, typename PMT, typename PVT>
+inline typename ODEBND_EXPAND<T,PMT,PVT>::STATUS
+ODEBND_EXPAND<T,PMT,PVT>::bounds
+( const unsigned ns, const double*tk, const T*Ip, T**Ixk,
+  T*If, std::ostream&os )
+{
+  // Check arguments
+  if( !tk || !Ixk || !Ip || (_nf && !If) ) return FATAL;
+
+  const unsigned LBLK = options.LBLK;
+  const unsigned DBLK = options.DBLK;
+  const double H0 = options.H0, TOL = 1e-8;
+  _INI_STA();
+
+  try{
+    // Integrate ODEs through each stage
+    for( _istg=0; _istg<ns; _istg++ ){
+      _t = tk[_istg];
+      _h = ( _t + LBLK*options.H0 > tk[_istg+1]-TOL? (tk[_istg+1]-_t)/LBLK: H0 ); 
+
+      // First step of stage w/ initial conditions
+      _AE_SET( true );
+      auto flag = _AE_SOLVE( true, Ip, Ixk[_istg], Ixk[_istg+1] );
+      if( flag != t_AEBND::NORMAL ){ _END_STA(); return FAILURE; }
+
+      // Initial state bounds
+      if( !_istg ){
+        for( unsigned ix=0; ix<_nx; ix++ )
+          Ixk[_istg][ix] = _IDEP[ix];
+        if( options.DISPLAY >= 1 )
+          _print_interm( _t, _nx, Ixk[0], "x", os );
+        for( unsigned k=0; options.RESRECORD && k<=DBLK; k++ )
+          results_sta.push_back( Results( _t+k*_h, _nx, _IDEP.data()+(_nx+_nq)*k ) );
+      }
+
+      // Next steps w/o initial conditions
+      bool reinit = true;
+      while( _t+LBLK*_h < tk[_istg+1]-TOL ){
+        _t += DBLK*_h;
+        _h = ( _t + LBLK*options.H0 > tk[_istg+1]-TOL? (tk[_istg+1]-_t)/LBLK: H0 ); 
+
+        if( reinit ){ _AE_SET( false ); reinit = false; }
+        auto flag = _AE_SOLVE( false, Ip, _IDEP.data()+(_nx+_nq)*DBLK, Ixk[_istg+1] );
+        if( flag != t_AEBND::NORMAL ){ _END_STA(); return FAILURE; }
+
+        for( unsigned k=1; options.RESRECORD && k<=DBLK; k++ )
+          results_sta.push_back( Results( _t+k*_h, _nx, _IDEP.data()+(_nx+_nq)*k ) );
+      }
+      _t += LBLK*_h;
+
+      // End-stage state bounds
+      for( unsigned ix=0; ix<_nx; ix++ )
+        Ixk[_istg+1][ix] = _IDEP[(_nx+_nq)*LBLK+ix];
+      if( options.DISPLAY >= 1 )
+        _print_interm( _t, _nx, Ixk[_istg+1], "x", os );
+
+      // Add intermediate function terms
+      _pos_fct = ( _vFCT.size()>=ns? _istg:0 );
+      if( _nf
+       && (_vFCT.size()>=ns || _istg==ns-1)
+       && !_FCT_I_STA( _pos_fct, _t, If ) )
+        { _END_STA(); return FATAL; }
+    }
+
+    // Bounds on final quadratures and functions
+    if( options.DISPLAY >= 1 ) _print_interm( _nf, If, "f", os );
+  }
+
+
+  catch( typename t_AEBND::Exceptions &expt ){
+    if( options.DISPLAY >= 1 ){
+      os << expt.what() << std::endl;
+      _END_STA();
+      os << " ABORT TIME  " << std::scientific << std::left
+                            << std::setprecision(5) << _t << std::endl;
+      _print_stats( stats_sta, os );
+    }
+    return FAILURE;
+  }
+
+  catch(...){
+    _END_STA();
+    if( options.DISPLAY >= 1 ){
+      os << " ABORT TIME  " << std::scientific << std::left
+                            << std::setprecision(5) << _t << std::endl;
+      _print_stats( stats_sta, os );
+    }
+    return FAILURE;
+  }
+
+  _END_STA();
+  if( options.DISPLAY >= 1 ) _print_stats( stats_sta, os );
+  return NORMAL;
+}
+
+template <typename T, typename PMT, typename PVT>
+inline typename AEBND<T,PMT,PVT>::STATUS
+ODEBND_EXPAND<T,PMT,PVT>::_AE_SOLVE
 ( const bool init, const PVT*PMp, const PVT*PMx0, const PVT*PMxap )
 {
   const unsigned LBLK = options.LBLK;
@@ -531,13 +671,23 @@ ODEBND_EXPAND<T,PMT,PVT>::bounds
        && (_vFCT.size()>=ns || _istg==ns-1)
        && !_FCT_PM_STA( _pos_fct, _t, PMf ) )
         { _END_STA(); return FATAL; }
-
     }
 
     // Bounds on final quadratures and functions
     if( options.DISPLAY >= 1 ) _print_interm( _nf, PMf, "f", os );
-
   }
+
+  catch( typename t_AEBND::Exceptions &expt ){
+    if( options.DISPLAY >= 1 ){
+      os << expt.what() << std::endl;
+      _END_STA();
+      os << " ABORT TIME  " << std::scientific << std::left
+                            << std::setprecision(5) << _t << std::endl;
+      _print_stats( stats_sta, os );
+    }
+    return FAILURE;
+  }
+
   catch(...){
     _END_STA();
     if( options.DISPLAY >= 1 ){

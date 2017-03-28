@@ -35,7 +35,7 @@ public:
 
   //! @brief Reset constraints
   void reset_ctr()
-    { std::get<0>(_ctr).clear(); std::get<1>(_ctr).clear(); std::get<2>(_ctr).clear(); }
+    { std::get<0>(_ctr).clear(); std::get<1>(_ctr).clear(); std::get<2>(_ctr).clear(); std::get<3>(_ctr).clear(); }
 
   //! @brief Add constraint
   void add_ctr

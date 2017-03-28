@@ -3,7 +3,10 @@ PATH_MC = $(HOME)/Programs/Devel/MC++/MC++_2.0
 LIB_MC = -llapack -lblas
 INC_MC = -I$(PATH_MC)/include -I$(PATH_MC)/src/3rdparty/fadbad++ -I$(PATH_MC)/src/3rdparty/cpplapack/include
 
-LIB_HSL = -lmc13 -lmc21
+LIB_GSL = -lgsl -lgslcblas -lm
+INC_GSL = 
+
+LIB_HSL = -lmc13 -lmc21 -lmc33 -lgfortran
 INC_HSL = 
 
 PATH_PROFIL = /home/bchachua/Programs/ThirdParty/Profil-2.0.8
@@ -15,9 +18,13 @@ LIB_FILIB   = -L$(PATH_FILIB)/lib -lprim
 INC_FILIB   = -I$(PATH_FILIB)/include/ -I$(PATH_FILIB)/include/interval
 FLAGS_FILIB = -frounding-math -ffloat-store
 
-PATH_IPOPT  = /opt/Ipopt-3.10.2
-LIB_IPOPT   = -L$(PATH_IPOPT)/lib -lipopt -lcoinhsl -llapack -lblas -ldl
-INC_IPOPT   = -I$(PATH_IPOPT)/include
+PATH_IPOPT   = /opt/CoinIpopt
+PATH_COINHSL = /opt/coinhsl
+LIB_IPOPT = -L$(PATH_IPOPT)/lib -L$(PATH_COINHSL)/lib -lipopt -lcoinhsl -llapack -lblas -lgfortran -lm -lquadmath -lblas -lgfortran -lm -lquadmath -lm -ldl -lcoinmumps -lblas -lgfortran -lm -lquadmath -lgfortran -lm -lquadmath -lcoinmetis
+INC_IPOPT = -I$(PATH_IPOPT)/include
+#PATH_IPOPT = /opt/Ipopt-3.10.2
+#LIB_IPOPT = -L$(PATH_IPOPT)/lib -lipopt -lcoinhsl -llapack -lblas -ldl
+#INC_IPOPT = -I$(PATH_IPOPT)/include
 
 PATH_CPLEX   = /opt/ibm/ILOG/CPLEX_Studio1263/cplex
 PATH_CONCERT = /opt/ibm/ILOG/CPLEX_Studio1263/concert
@@ -36,21 +43,22 @@ INC_GUROBI  = -I$(PATH_GUROBI)/include
 #INC_SDPA   = 
 
 #PROF = -pg
+OPTI = -Ofast
+#OPTI = -O2
 
-FLAG_ALL = $(PROF) -g -O2 -Wall -std=c++11 $(FLAG_FILIB) $(FLAGS_CPLEX)
-#FLAG_ALL = $(PROF) -g -Wall -std=c++11 $(FLAG_FILIB) $(FLAGS_CPLEX)
-LIB_ALL  = $(LIB_MC) $(LIB_PROFIL) $(LIB_FILIB) $(LIB_HSL) $(LIB_LAPACK) $(LIB_GUROBI) $(LIB_CPLEX) $(LIB_IPOPT)
-INC_ALL  = $(INC_MC) $(INC_PROFIL) $(INC_FILIB) $(INC_HSL) $(INC_LAPACK) $(INC_GUROBI) $(INC_CPLEX) $(INC_IPOPT)
+FLAG_ALL = -g $(OPTI) -Wall -std=c++11 $(FLAG_FILIB) $(FLAGS_CPLEX)
+LIB_ALL  = $(LIB_MC) $(LIB_PROFIL) $(LIB_FILIB) $(LIB_HSL) $(LIB_GSL) $(LIB_LAPACK) $(LIB_GUROBI) $(LIB_CPLEX) $(LIB_IPOPT)
+INC_ALL  = $(INC_MC) $(INC_PROFIL) $(INC_FILIB) $(INC_HSL) $(INC_GSL) $(INC_LAPACK) $(INC_GUROBI) $(INC_CPLEX) $(INC_IPOPT)
 
 #####
 
-all: test0 test1 test2 test3 test4 test4b test5 test5b test6 test7 test8 test9
+all: test0 test1 test2 test3 test4 test5 test6 test7 test8
 
 test% : test%.o
-	g++ -o $@ $< $(LIB_ALL)
+	g++ $(PROF) -o $@ $< $(LIB_ALL)
 
 test%.o: test%.cpp
-	g++ -c $(FLAG_ALL) -I../../src $(INC_ALL) -o $@ $<
+	g++ $(PROF) -c $(FLAG_ALL) -I../../src $(INC_ALL) -o $@ $<
 
 #####
 
@@ -68,4 +76,4 @@ gensvg :
 #####
 
 clean :
-	rm -f test? test?b *.o *~ *.eps *.lp *.out
+	rm -f test? test?b test?c *.o *~ *.eps *.lp *.out

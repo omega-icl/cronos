@@ -30,20 +30,22 @@ int main()
       IC[0] = 1.2;// + 0.1*P[0];
       IC[1] = 1.1;// + P[0];
 
-      mc::ODEBND_EXPAND<I,PMI,PVI> LV;
-      LV.options.H0 = 0.1;
-      LV.options.LBLK = 20;
-      LV.options.DBLK = 20;
-      LV.options.RESRECORD = true;
-      LV.options.DISPLAY = 2;
+      double tk[2] = {0., 20. };
 
-      LV.options.AEBND.MAXIT = 100;
+      mc::ODEBND_EXPAND<I,PMI,PVI> LV;
+      LV.options.H0            = 0.1;
+      LV.options.LBLK          =
+      LV.options.DBLK          = 50;
+      LV.options.RESRECORD     = true;
+      LV.options.DISPLAY       = 1;
+
+      LV.options.AEBND.MAXIT   = 100;
       LV.options.AEBND.DISPLAY = 1;
-      LV.options.AEBND.BLKDEC  = false;
       LV.options.AEBND.RTOL    =
       LV.options.AEBND.ATOL    = 1e-10;
-      LV.options.AEBND.BOUNDER = mc::AEBND<I,PMI,PVI>::Options::GS;//KRAW;//AUTO;
-      LV.options.AEBND.PRECOND = mc::AEBND<I,PMI,PVI>::Options::INVMB;//INVMB;//INVBD;//NONE;
+      LV.options.AEBND.BOUNDER = mc::AEBND<I,PMI,PVI>::Options::ALGORITHM::GS;//KRAW;//AUTO;
+      LV.options.AEBND.PRECOND = mc::AEBND<I,PMI,PVI>::Options::PRECONDITIONING::INVMB;//INVMB;//INVBD;//NONE;
+      LV.options.AEBND.BLKDEC  = mc::AEBND<I,PMI,PVI>::Options::DECOMPOSITION::RECUR;//DIAG;//NONE;
 
       LV.set_dag( &IVP );
       LV.set_state( NX, X );
@@ -55,11 +57,10 @@ int main()
       // Compute Interval Bounds
       I Ip[NP];
       Ip[0] = 0.05 * I(-1.,1);
-      I Ix0[NX], Ixf[NX];
+      I Ix0[NX] = { I(0.,5.), I(0.,5.) }, Ixf[NX] = { I(0.,5.), I(0.,5.) };
       I* Ixk[2] = {Ix0, Ixf};
-      double tk[2] = {0., 25. };
 
-      //LV.bounds( 1, tk, Ip, Ixk, 0 );
+      LV.bounds( 1, tk, Ip, Ixk, 0 );
       std::ofstream ofileI( "test0_EXPANDI_STA.dat", std::ios_base::out );
       LV.record( ofileI );
 

@@ -23,7 +23,7 @@ int main()
   mc::FFGraph NLE;  // DAG describing the problem
 
   const unsigned NP = 1;  // Parameter dimension
-  const unsigned NT = 101;  // State dimension
+  const unsigned NT = 21;  // State dimension
 
   mc::FFVar P[NP];  // Parameters p
   for( unsigned i=0; i<NP; i++ ) P[i].set( &NLE );
@@ -51,23 +51,23 @@ int main()
 
   /////////////////////////////////////////////////////////////////////////
   // Bound AE solution set
-  mc::AEBND<I,PM,PV> EX1;
+  mc::AEBND<I,PM,PV> BND;
 
-  EX1.set_dag( &NLE );
-  EX1.set_var( NP, P );
-  EX1.set_dep( NT, T, F );
+  BND.set_dag( &NLE );
+  BND.set_var( NP, P );
+  BND.set_dep( NT, T, F );
 
-  EX1.options.DISPLAY = 1;
-  EX1.options.BLKDEC  = false;//true;
-  EX1.options.MAXIT   = 20;
-  EX1.options.RTOL    =
-  EX1.options.ATOL    = 1e-10;
-  EX1.options.BOUNDER = mc::AEBND<I,PM,PV>::Options::GS;//AUTO;
-  EX1.options.PRECOND = mc::AEBND<I,PM,PV>::Options::INVMB;//INVMB;//INVBD;//NONE;
+  BND.options.DISPLAY = 1;
+  BND.options.MAXIT   = 20;
+  BND.options.RTOL    =
+  BND.options.ATOL    = 1e-10;
+  BND.options.BOUNDER  = mc::AEBND<I,PM,PV>::Options::ALGORITHM::GS;//GE;//KRAW;//GS;
+  BND.options.PRECOND  = mc::AEBND<I,PM,PV>::Options::PRECONDITIONING::INVMD;//QRM;//NONE;
+  BND.options.BLKDEC   = mc::AEBND<I,PM,PV>::Options::DECOMPOSITION::RECUR;//NONE;//DIAG;
 
-  EX1.setup();
-  std::cout << "\nSuccessful? " << (EX1.solve( Ip, It, It0 )==mc::AEBND<I,PM,PV>::NORMAL?"Y\n":"N\n");
-  std::cout << "\nSuccessful? " << (EX1.solve( PMp, PMt, It )==mc::AEBND<I,PM,PV>::NORMAL?"Y\n":"N\n");
+  BND.setup();
+  std::cout << "\nSuccessful? " << (BND.solve( Ip, It, It0 )==mc::AEBND<I,PM,PV>::NORMAL?"Y\n":"N\n");
+  std::cout << "\nSuccessful? " << (BND.solve( PMp, PMt, It )==mc::AEBND<I,PM,PV>::NORMAL?"Y\n":"N\n");
 
   return 0;
 }

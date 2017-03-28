@@ -1,61 +1,28 @@
-file1 = 'test5b.out'
-file = 'test5b_NCO.out'
+file  = 'test5.out'
+NP = 3
 
-set size ratio 1
+set term post eps enh color 8
+set out 'test5.eps'
+
+#set size ratio 1
+set style fill transparent solid 0.5 noborder
 unset key
 
-set xlabel 'alpha'
-set ylabel 'beta'
-plot file u (($1+$2)/2.):(($3+$4)/2.):1:2:3:4 w boxxy lt 1 lc 1, \
-     file1 u (($1+$2)/2.):(($3+$4)/2.):1:2:3:4 w boxxy lt 1 lc 3
-#plot file0 u (($1+$2)/2.):(($3+$4)/2.):1:2:3:4 w boxxy lt 1 lc 1, \
-#     '' u (($1+$2)/2.):(($3+$4)/2.) w p ps .5, \
-#     file u (($1+$2)/2.):(($3+$4)/2.):1:2:3:4 w boxxy lt 1 lc 3, \
-#     '' u (($1+$2)/2.):(($3+$4)/2.) w p ps .5
+set multiplot layout NP-1,NP-1 columnsfirst margins 0.1,0.9,0.1,0.9 spacing 0.1
+do for [i = 1:NP-1]{
+  do for [j = 2:i]{
+    set multiplot next
+  }
+  do for [j = i+1:NP]{
+    set xlabel sprintf("p%d",i)
+    set ylabel sprintf("p%d",j)
+    plot file u ((column(2*i-1)+column(2*i))/2.):((column(2*j-1)+column(2*j))/2.):(column(2*i-1)):(column(2*i)):(column(2*j-1)):(column(2*j)) w boxxy lt 1 lc 2
+  }
+}
+unset multiplot
 
-set term post eps enh color 18
-set out 'undetermined.eps'
-rep
-set term x11
-!ps2eps -B -f -l undetermined.eps
-!mv undetermined.eps.eps undetermined.eps
-
-pause -1
-
-set xlabel 'alpha'
-set ylabel 'kappa'
-plot file u (($1+$2)/2.):(($5+$6)/2.):1:2:5:6 w boxxy lt 1 lc 1, \
-     file1 u (($1+$2)/2.):(($5+$6)/2.):1:2:5:6 w boxxy lt 1 lc 3#,\
-     #'' u (($1+$2)/2.):(($5+$6)/2.) w p ps .5
-
-pause -1
-
-set xlabel 'beta'
-set ylabel 'kappa'
-plot file u (($3+$4)/2.):(($5+$6)/2.):3:4:5:6 w boxxy lt 1 lc 1, \
-     file1 u (($3+$4)/2.):(($5+$6)/2.):3:4:5:6 w boxxy lt 1 lc 3#, \
-     #'' u (($3+$4)/2.):(($5+$6)/2.) w p ps .5
-
-pause -1
-
-set xlabel 'alpha'
-set ylabel 'K'
-plot file u (($1+$2)/2.):(($7+$8)/2.):1:2:7:8 w boxxy lt 1 lc 1, \
-     '' u (($1+$2)/2.):(($7+$8)/2.) w p ps .5
-
-pause -1
-
-set xlabel 'beta'
-set ylabel 'K'
-plot file u (($3+$4)/2.):(($7+$8)/2.):3:4:7:8 w boxxy lt 1 lc 1, \
-     '' u (($3+$4)/2.):(($7+$8)/2.) w p ps .5
-
-pause -1
-
-set xlabel 'kappa'
-set ylabel 'K'
-plot file u (($5+$6)/2.):(($7+$8)/2.):5:6:7:8 w boxxy lt 1 lc 1, \
-     '' u (($5+$6)/2.):(($7+$8)/2.) w p ps .5
-
-pause -1
+set term wxt
+!ps2eps -B -f -l test5.eps
+!mv test5.eps.eps test5.eps
+!gv test5.eps
 

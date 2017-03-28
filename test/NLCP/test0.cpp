@@ -1,7 +1,9 @@
 #define SAVE_RESULTS    // whether or not to save results to file
-#undef USE_PROFIL	// specify to use PROFIL for interval arithmetic
-#undef USE_FILIB	// specify to use FILIB++ for interval arithmetic
-#undef DEBUG            // whether to output debug information
+#define USE_PROFIL	// specify to use PROFIL for interval arithmetic
+#undef  USE_FILIB	// specify to use FILIB++ for interval arithmetic
+#undef  DEBUG            // whether to output debug information
+#define MC__USE_CPLEX   // whether to use CPLEX or GUROBI
+#undef  MC__CSEARCH_SHOW_BOXES
 ////////////////////////////////////////////////////////////////////////////////
 
 #include <fstream>
@@ -19,72 +21,69 @@
     typedef mc::Interval I;
   #endif
 #endif
-typedef mc::CVar<I> CVI;
-
-const unsigned NK = 2;
-const unsigned NT = 10;
-const double Tm[NT] = { 0.75, 1.5,  2.25, 3.,     6.,    9.,   13.,   17.,   21.,   25. };
-const double Ym[NT] = { 7.39, 4.09, 1.74, 0.097, -2.57, -2.71, -2.07, -1.44, -0.98, -0.66 };
-const double dYm = 0.5;
-
-//predictive model g(t) := 20*exp(-p1*t) - 8*exp(-p2*t)
-template <class T>
-T g
-( double t, const T*k )
-{
-  return  20.*exp(-k[0]*t) - 8.*exp(-k[1]*t);
-}
 
 ////////////////////////////////////////////////////////////////////////////////
-// Find all solutions of the system of nonlinear inequalities:
-//   yk - 0.5 <= 20*exp(-p1*tk) - 8*exp(-p2*tk) <= yk + 0.5
-//   for 10 measurement pairs (t1,y1),...,(t10,y10) as follows:
-//      tk := [ 0.75, 1.5,  2.25, 3.,     6.,    9.,   13.,   17.,   21.,   25. ]
-//      yk := [ 7.39, 4.09, 1.74, 0.097, -2.57, -2.71, -2.07, -1.44, -0.98, -0.66 ]
-//   and (p1,p2) in [0,1]^2
+// Find all solutions of the nonlinear equation:
+//   x^2 + y^2 = 1
+// for (x,y) in [-5,5] x [-5x5]
 ////////////////////////////////////////////////////////////////////////////////
 
-int main() 
+int main()
 {
   mc::FFGraph DAG;
-  const unsigned NP = NK, NY = NT;
-  mc::FFVar P[NP], Y[NY];
-  for( unsigned i=0; i<NP; i++ ) P[i].set( &DAG );
+  const unsigned NP = 2, NC = 1;
+  mc::FFVar P[NP], C[NC];
+  for( unsigned int i=0; i<NP; i++ ) P[i].set( &DAG );
+  C[0] = mc::sqr(P[0])+mc::sqr(P[1])-1;
 
   mc::NLCP<I> CP;
   CP.set_dag( &DAG );
   CP.set_var( NP, P );
-  for( unsigned k=0; k<NY; k++ ){
-    Y[k] = (20.*exp(-P[0]*Tm[k]) - 8.*exp(-P[1]*Tm[k]));
-    CP.add_ctr( mc::BASE_OPT::LE, Y[k]-Ym[k]-dYm );
-    CP.add_ctr( mc::BASE_OPT::GE, Y[k]-Ym[k]+dYm );
-  }
-  CP.setup();
+  CP.add_ctr( mc::BASE_OPT::EQ, C[0] );
 
-  //CP.options.MIPFILE     = "test1.lp";
-  CP.options.DISPLAY     = 1;
-  CP.options.MAXITER     = 5000;
-  CP.options.CVATOL      = 1e-6;
-  CP.options.CVRTOL      = 1e-6;
-  CP.options.BRANCHVAR   = mc::SetInv<CVI>::Options::RGREL;
-  CP.options.NODEMEAS    = mc::SetInv<CVI>::Options::MEANWIDTH;
-  CP.options.DOMREDMAX   = 20;
-  CP.options.DOMREDTHRES = 1e-2;
-  CP.options.DOMREDBKOFF = 1e-8;
-  CP.options.RELMETH     = mc::NLCP<I>::Options::HYBRID;
-  CP.options.CMODPROP    = 1;
+  CP.options.MIPFILE     = "test0.lp";
+  CP.options.DISPLAY     = 2;
+  CP.options.MAXITER     = 96;
+  CP.options.NODEMEAS    = mc::SBP<I>::Options::RELMAXLEN;
+  CP.options.CVTOL       = 1e-2;
+  CP.options.FEASTOL     = 1e-7;
+  CP.options.BRANCHVAR   = mc::SBP<I>::Options::RGREL;
+  CP.options.STGBCHDEPTH = 0;
+  CP.options.STGBCHRTOL  = 1e-2;
+  CP.options.DOMREDMAX   = 10;
+  CP.options.DOMREDTHRES = 1e-1;
+  CP.options.DOMREDBKOFF = 1e-7;
+  CP.options.RELMETH     = mc::NLCP<I>::Options::CHEB;
+  CP.options.CMODPROP    = 2;
+  CP.options.CMODDEPS    = 3;
+  CP.options.CMODATOL    = 1e-5;
+  CP.options.CMODRTOL    = 2e-2;
+  CP.options.CMODWARMS   = false;
+  CP.options.CMODRED     = mc::NLCP<I>::Options::APPEND;
+  CP.options.AEBND.ATOL    = 
+  CP.options.AEBND.RTOL    = 1e-10;
+  CP.options.AEBND.DISPLAY = 0;
   std::cout << CP;
 
-  const I Ip[NP] = { I(0.,1.), I(0.,1.) };
+  const I Ip[NP] = { I(-5.,5.), I(-5.,5.) };
 
+  CP.setup();
   CP.solve( Ip );
+  CP.stats.display();
+
+  auto L_clus = CP.clusters();
+  std::cout << "No clusters: " << L_clus.size() << std::endl;
+  for( auto it=L_clus.begin(); it!=L_clus.end(); ++it ) delete[] *it;
 
 #if defined(SAVE_RESULTS )
   std::ofstream K_un( "test0.out", std::ios_base::out );
-  CP.output_nodes( K_un );
+  CP.output_nodes( K_un ); //, true );
   K_un.close();
+
+  std::ofstream K_cl( "test0b.out", std::ios_base::out );
+  CP.output_clusters( K_cl ); //, true );
+  K_cl.close();
 #endif
 
   return 0;
 }
-

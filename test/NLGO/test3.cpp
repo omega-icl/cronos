@@ -7,7 +7,7 @@ typedef mc::Interval I;
 #define MC__USE_CPLEX
 #include "nlgo.hpp"
 
-// EXAMPLE 2 IN BEN-TAL ET AL., MATH PROG, 1994
+// PROBLEM 5 IN BEN-TAL ET AL., MATH PROG, 1994
 ////////////////////////////////////////////////////////////////////////
 int main()
 ////////////////////////////////////////////////////////////////////////
@@ -17,18 +17,23 @@ int main()
   for( unsigned i=0; i<NP; i++ ) p[i].set( &DAG );
 
   mc::NLGO<I> NLP;
-  NLP.options.POLIMG.SANDWICH_MAXCUT = 5;
+  //NLP.options.POLIMG.SANDWICH_MAXCUT = 5;
   //NLP.options.POLIMG.SANDWICH_ATOL   = NLP.options.POLIMG.SANDWICH_RTOL  = 1e-5;
-  NLP.options.POLIMG.BREAKPOINT_TYPE = mc::PolImg<I>::Options::NONE;//BIN;//SOS2;//NONE;
+  //NLP.options.POLIMG.BREAKPOINT_TYPE = mc::PolImg<I>::Options::NONE;//BIN;//SOS2;//NONE;
   NLP.options.NLPSLV.MAXITER = 100;//NONE;
   NLP.options.NLPSLV.DISPLAY = 0;
   NLP.options.MIPFILE = "";//"test3.lp";
   NLP.options.MIPDISPLAY = 0;
-  NLP.options.CMODPROP = 0;
+  NLP.options.CMODPROP = 2;
   NLP.options.DISPLAY = 2;
   NLP.options.MAXITER = 0;
   NLP.options.CVATOL = NLP.options.CVRTOL = 1e-3;
-  //NLP.options.MIPABSGAP = NLP.options.MIPRELGAP = 1e-7;
+  NLP.options.RELMETH = mc::NLGO<I>::Options::CHEB;
+  NLP.options.DOMREDMAX = 10;
+  NLP.options.DOMREDTHRES = 0.1;
+  NLP.options.BRANCHVAR   = mc::SBB<I>::Options::RGREL;
+  NLP.options.STGBCHDEPTH = 0;//5;
+  NLP.options.STGBCHDRMAX = 2;
 
   NLP.set_dag( &DAG );  // DAG
   NLP.set_var( NP, p ); // decision variables
@@ -110,6 +115,14 @@ int main()
                 q[4]+q[5]+q[6]+q[7]-1 );
   NLP.add_ctr( mc::NLPSLV_IPOPT::EQ,
                 q[8]+q[9]+q[10]+q[11]-1 );
+  for( unsigned i=0; i<5; i++ ){
+    NLP.add_ctr( mc::NLPSLV_IPOPT::EQ,
+                  (q[0]+q[1]+q[2]+q[3]-1)*y[3*i] );
+    NLP.add_ctr( mc::NLPSLV_IPOPT::EQ,
+                  (q[4]+q[5]+q[6]+q[7]-1)*y[3*i+1] );
+    NLP.add_ctr( mc::NLPSLV_IPOPT::EQ,
+                  (q[8]+q[9]+q[10]+q[11]-1)*y[3*i+2] );
+  }
 
   typedef mc::Interval I;
   I Ip[NP] = { I(0,1), I(0,1), I(0,1), I(0,1), I(0,1), I(0,1),
@@ -118,21 +131,14 @@ int main()
               I(0,100), I(0,100), I(0,100), I(0,100), I(0,100), I(0,100),
               I(0,100), I(0,100), I(0,100), I(0,100), I(0,200), I(0,100),
               I(0,100), I(0,100) };
-  //double p0[NP] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  //                  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  //                  0, 0, 0, 0, 0 };
+  double p0[NP] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0 };
 
   NLP.setup();
+  std::cout << NLP;
+
   //int status = NLP.relax( Ip );
-
-  NLP.options.CSALGO  = mc::NLGO<I>::Options::SBB;
-  NLP.options.RELMETH = mc::NLGO<I>::Options::DRL;//HYBRID;
-  NLP.options.CMODSPAR = true;
-  NLP.options.CMODPROP = 2;
-  //NLP.options.MIPFILE = "test3.lp";
-
-  int status = NLP.solve( Ip );
-
   //if( status == Ipopt::Solve_Succeeded ){
   //  std::cout << "RELAXED NLP SOLUTION: " << std::endl;
   //  std::cout << "  f* = " << NLP.get_objective() << std::endl;
@@ -141,5 +147,8 @@ int main()
   //              << std::endl;
   //}
 
-  return 0;
+  int status = NLP.solve( Ip, 0, p0 );
+  NLP.stats.display();
+
+  return status;
 }

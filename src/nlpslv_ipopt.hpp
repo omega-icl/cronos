@@ -216,9 +216,9 @@ public:
   {
     //! @brief Constructor
     Options():
-      CVTOL(1e-8), PRIMALTOL(1e-8), DUALTOL(1e-4), COMPLTOL(1e-7),
+      CVTOL(1e-7), PRIMALTOL(1e-8), DUALTOL(1e-4), COMPLTOL(1e-7),
       MAXITER(100), MAXCPU(1e6), GRADIENT(FORWARD), HESSIAN(LBFGS),
-      TESTDER(false), DISPLAY(0)
+      LINSLV(MA57), TESTDER(false), DISPLAY(0)
       {} 
     //! @brief Assignment operator
     Options& operator= ( Options&options ){
@@ -244,6 +244,17 @@ public:
       FORWARD=0,	//!< Forward AD
       BACKWARD		//!< Backward AD
     };
+    //! @brief Enumeration type for gradient strategy
+    enum LINEAR_SOLVER{
+      MA27=0,       //!< use the Harwell routine MA27
+      MA57,         //!< use the Harwell routine MA57
+      MA77,         //!< use the Harwell routine HSL_MA77
+      MA86,         //!< use the Harwell routine HSL_MA86
+      MA97,         //!< use the Harwell routine HSL_MA97
+      PARDISO,      //!< use the Pardiso package
+      WSMP,         //!< use WSMP package
+      MUMPS         //!< use MUMPS package
+    };
     //! @brief Convergence tolerance
     double CVTOL;
     //! @brief Tolerance on primal feasibility
@@ -260,6 +271,8 @@ public:
     GRADIENT_STRATEGY GRADIENT;
     //! @brief Strategy for Hessian computation during linesearch
     HESSIAN_STRATEGY HESSIAN;
+    //! @brief Linear solver used for step computations
+    LINEAR_SOLVER LINSLV;
     //! @brief Whether to test first- and second-derivatives
     bool TESTDER;
     //! @brief Display level in IPOPT
@@ -404,11 +417,37 @@ NLPSLV_IPOPT::set_options
   IpoptApp->Options()->SetNumericValue( "max_cpu_time", options.MAXCPU);
   IpoptApp->Options()->SetNumericValue( "obj_scaling_factor", get_scaling() );
   switch( options.HESSIAN ){
-  case Options::EXACT:
+   case Options::EXACT:
     IpoptApp->Options()->SetStringValue( "hessian_approximation", "exact" );
     break;
-  case Options::LBFGS:
+   case Options::LBFGS:
     IpoptApp->Options()->SetStringValue( "hessian_approximation", "limited-memory" );
+    break;
+  }
+  switch( options.LINSLV ){
+   case Options::MA27:
+    IpoptApp->Options()->SetStringValue( "linear_solver", "ma27" );
+    break;
+   case Options::MA57:
+    IpoptApp->Options()->SetStringValue( "linear_solver", "ma57" );
+    break;
+   case Options::MA77:
+    IpoptApp->Options()->SetStringValue( "linear_solver", "ma77" );
+    break;
+   case Options::MA86:
+    IpoptApp->Options()->SetStringValue( "linear_solver", "ma86" );
+    break;
+   case Options::MA97:
+    IpoptApp->Options()->SetStringValue( "linear_solver", "ma97" );
+    break;
+   case Options::PARDISO:
+    IpoptApp->Options()->SetStringValue( "linear_solver", "pardiso" );
+    break;
+   case Options::WSMP:
+    IpoptApp->Options()->SetStringValue( "linear_solver", "wsmp" );
+    break;
+   case Options::MUMPS:
+    IpoptApp->Options()->SetStringValue( "linear_solver", "mumps" );
     break;
   }
   IpoptApp->Options()->SetStringValue( "derivative_test", options.TESTDER? "second-order": "none" );
@@ -558,8 +597,8 @@ NLPSLV_IPOPT::get_bounds_info
   // set variable bounds
   unsigned ip = 0;
   for( ; ip<_nvar; ip++ ){   
-    x_l[ip] = ( _data.P? _data.P[ip].first: -INF );
-    x_u[ip] = ( _data.P? _data.P[ip].second: INF );
+    x_l[ip] = ( _data.P? _data.P[ip].first: -BASE_OPT::INF );
+    x_u[ip] = ( _data.P? _data.P[ip].second: BASE_OPT::INF );
 #ifdef MC__NLPSLV_IPOPT_DEBUG
     std::cout << "  x_l[" << ip << "] = " << x_l[ip]
               << "  x_u[" << ip << "] = " << x_u[ip] << std::endl;
@@ -571,8 +610,8 @@ NLPSLV_IPOPT::get_bounds_info
   for( unsigned ic=0; itc!=std::get<0>(_ctr).end(); ++itc, ic++ ){
     switch( (*itc) ){
       case EQ: g_l[ic] = g_u[ic] = 0.; break;
-      case LE: g_l[ic] = -INF; g_u[ic] = 0.; break;
-      case GE: g_l[ic] = 0.; g_u[ic] = INF; break;
+      case LE: g_l[ic] = -BASE_OPT::INF; g_u[ic] = 0.; break;
+      case GE: g_l[ic] = 0.; g_u[ic] = BASE_OPT::INF; break;
     }
 #ifdef MC__NLPSLV_IPOPT_DEBUG
     std::cout << "  g_l[" << ic << "] = " << g_l[ic]
@@ -817,9 +856,17 @@ NLPSLV_IPOPT::finalize_solution
     _solution.f = f;
     for( Ipopt::Index i=0; i<n; i++ ){
       _solution.p[i] = p[i]; _solution.upL[i] = upL[i]; _solution.upU[i] = upU[i];
+#ifdef MC__NLPSLV_IPOPT_DEBUG
+      std::cout << std::scientific << std::setprecision(14)
+                << "  p[" << i << "] = " << p[i] << std::endl;
+#endif
     }
     for( Ipopt::Index j=0; j<m; j++ ){
       _solution.g[j] = g[j]; _solution.ug[j] = ug[j];
+#ifdef MC__NLPSLV_IPOPT_DEBUG
+      std::cout << std::scientific << std::setprecision(14)
+                << "  g[" << j << "] = " << g[j] << std::endl;
+#endif
     }
   //}
 

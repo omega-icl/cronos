@@ -37,7 +37,7 @@ namespace mc
 {
 
 template <typename T> class SBBNode;
-template <typename T> struct lt_SBBNode;
+template <typename T> struct lt_SBB;
 
 //! @brief Pure virtual base class for spatial branch-and-bound search
 ////////////////////////////////////////////////////////////////////////
@@ -53,13 +53,13 @@ template <typename T> struct lt_SBBNode;
 ////////////////////////////////////////////////////////////////////////
 template <typename T>
 class SBB
-: public BASE_OPT
+: public virtual BASE_OPT
 ////////////////////////////////////////////////////////////////////////
 {
   template <typename U> friend class SBBNode;
 
 public:  
-  typedef std::multiset< SBBNode<T>*, lt_SBBNode<T> > t_Nodes;
+  typedef std::multiset< SBBNode<T>*, lt_SBB<T> > t_Nodes;
   typedef typename t_Nodes::iterator it_Nodes;
   template <typename U> friend std::ostream& operator<<
     ( std::ostream&, const SBBNode<U>& );
@@ -69,7 +69,7 @@ public:
     NORMAL=0,	//!< Normal termination
     INFEASIBLE,	//!< Termination w/ indication of infeasibility
     FAILURE,	//!< Termination after failure
-    FATAL	//!< Termination after fatal error
+    FATAL	    //!< Termination after fatal error
   };
 
   //! @brief Task for subproblems
@@ -280,7 +280,7 @@ private:
     ();
   //! @brief Reinitialize variables, incumbent, counters, time, etc.
   void _restart
-    ();
+    ( const double*p0, const double*f0 );
 
   //! @brief Lower bound given node
   NODESTAT _lower_bound
@@ -365,7 +365,7 @@ class SBBNode
 ////////////////////////////////////////////////////////////////////////
 {
   template <typename U> friend class SBB;
-  template <typename U> friend struct lt_SBBNode;
+  template <typename U> friend struct lt_SBB;
   template <typename U> friend std::ostream& operator<<
     ( std::ostream&, const SBBNode<U>& );
 
@@ -533,11 +533,11 @@ private:
 
 //! @brief C++ structure for comparing SBB Nodes
 ////////////////////////////////////////////////////////////////////////
-//! mc::lt_SBBNode is a C++ structure for comparing nodes in branch-and-
+//! mc::lt_SBB is a C++ structure for comparing nodes in branch-and-
 //! bound tree based on their lower bound values.
 ////////////////////////////////////////////////////////////////////////
 template <typename T>
-struct lt_SBBNode
+struct lt_SBB
 {
   bool operator()
     ( const SBBNode<T>*Node1, const SBBNode<T>*Node2 ) const
@@ -572,7 +572,7 @@ SBB<T>::solve
 {
   // Create and add root node to set _Nodes
   _pb = pb;
-  _restart();
+  _restart( p0, f0 );
   _display_init();
   _display( os );
   _Nodes.insert( new SBBNode<T>( this, _P_root, p0 ) );
@@ -718,11 +718,17 @@ SBB<T>::solve
 template <typename T>
 inline void
 SBB<T>::_restart
-()
+( const double*p0, const double*f0 )
 {
   _clean_stack();
   _p_inc.clear();
-  _f_inc = ( _pb==MIN? INF: -INF );
+  if( p0 && f0 ){
+    _f_inc = *f0;
+    _p_inc.assign( p0, p0+_np );
+  }
+  else{
+    _f_inc = ( _pb==MIN? INF: -INF );
+  }
   _node_index = _node_inc = _node_cnt = _node_max = 0;
   _tstart = _tcur = cpuclock();
   _tUBD = _tLBD = 0;
@@ -730,7 +736,8 @@ SBB<T>::_restart
 
 template <typename T>
 inline void
-SBB<T>::_clean_stack()
+SBB<T>::_clean_stack
+()
 {
   it_Nodes it = _Nodes.begin();
   for( ; it != _Nodes.end(); it++ ) delete *it;

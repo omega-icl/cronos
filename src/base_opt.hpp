@@ -15,13 +15,16 @@ namespace mc
 class BASE_OPT
 {
 public:
+
   //! @brief Infinity
   static double INF;
+
   //! @brief Enumeration type for objective function
   enum t_OBJ{
     MIN=0,	//!< Minimization
     MAX		//!< Maximization
   };
+
   //! @brief Enumeration type for constraints
   enum t_CTR{
     EQ=0,	//!< Equality constraint

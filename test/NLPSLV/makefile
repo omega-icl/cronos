@@ -11,39 +11,20 @@ INC_IPOPT = -I$(PATH_IPOPT)/include
 #LIB_IPOPT = -L$(PATH_IPOPT)/lib -lipopt -lcoinhsl -llapack -lblas -ldl
 #INC_IPOPT = -I$(PATH_IPOPT)/include
 
+#FLAG_ALL = -g -Wall -std=c++11
+FLAG_ALL = -g -Ofast -Wall -std=c++11
+LIB_ALL  = $(LIB_MC) $(LIB_IPOPT)
+INC_ALL  = $(INC_MC) $(INC_IPOPT)
+
 #####
 
 all: test1 test2 test3 test4 test5
 
-test1 : test1.o
-	g++ -o test1 test1.o $(LIB_MC) $(LIB_IPOPT)
+test% : test%.o
+	g++ -o $@ $< $(LIB_ALL)
 
-test1.o: test1.cpp
-	g++ -c -g -Wall -std=c++11 -I../../src $(INC_MC) $(INC_IPOPT) -o test1.o test1.cpp
-
-test2 : test2.o
-	g++ -o test2 test2.o $(LIB_MC) $(LIB_IPOPT)
-
-test2.o: test2.cpp
-	g++ -c -g -Wall -std=c++11 -I../../src $(INC_MC) $(INC_IPOPT) -o test2.o test2.cpp
-
-test3 : test3.o
-	g++ -o test3 test3.o $(LIB_MC) $(LIB_IPOPT)
-
-test3.o: test3.cpp
-	g++ -c -g -Wall -std=c++11 -I../../src $(INC_MC) $(INC_IPOPT) -o test3.o test3.cpp
-
-test4 : test4.o
-	g++ -o test4 test4.o $(LIB_MC) $(LIB_IPOPT)
-
-test4.o: test4.cpp
-	g++ -c -g -Wall -std=c++11 -I../../src $(INC_MC) $(INC_IPOPT) -o test4.o test4.cpp
-
-test5 : test5.o
-	g++ -o test5 test5.o $(LIB_MC) $(LIB_IPOPT)
-
-test5.o: test5.cpp
-	g++ -c -g -Wall -std=c++11 -I../../src $(INC_MC) $(INC_IPOPT) -o test5.o test5.cpp
+test%.o: test%.cpp
+	g++ -c $(FLAG_ALL) -I../../src $(INC_ALL) -o $@ $<
 
 #####
 
@@ -61,5 +42,5 @@ gensvg :
 #####
 
 clean :
-	rm -f test? *.o *.out *.eps *~
+	rm -f test? test?b *.o *.out *.dat *.eps *.dot *~
 

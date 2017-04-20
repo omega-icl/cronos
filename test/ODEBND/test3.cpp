@@ -1,35 +1,33 @@
+const unsigned NPM   = 8;	// <- Order of polynomial expansion
+const unsigned NSAMP = 10;	// <- Number of sampling points for inner approx.
+const double   REDUC = 1.4;	// <- Reduction ratio for convergence analysis
 #define SAVE_RESULTS		// <- Whether to save bounds to file
 #undef  TEST_CONVERGENCE	// <- Whether to test Hausdorff convergence of bounds
 #define USE_CMODEL		// <- whether to use Chebyshev models or Taylor models
-const unsigned NPM   = 5;	// <- Order of polynomial expansion
-const unsigned NSAMP = 10;	// <- Number of sampling points for inner approx.
-const double   REDUC = 1.4;	// <- Reduction ratio for convergence analysis
 
-#include "odeslv_gsl.hpp"
-#include "odebnd_gsl.hpp"
+#include "odebnd_sundials.hpp"
 
 #include "interval.hpp"
 typedef mc::Interval I;
-typedef mc::Ellipsoid E;
 
 #ifdef USE_CMODEL
   #include "cmodel.hpp"
-  typedef mc::CModel<I> TM;
-  typedef mc::CVar<I> TV;
+  typedef mc::CModel<I> PM;
+  typedef mc::CVar<I> PV;
 #else
   #include "tmodel.hpp"
-  typedef mc::TModel<I> TM;
-  typedef mc::TVar<I> TV;
+  typedef mc::TModel<I> PM;
+  typedef mc::TVar<I> PV;
 #endif
 
 int main()
 {
   mc::FFGraph IVP;  // DAG describing the problem
 
-  double t0 = 0., tf = 2.;   // Time span
-  const unsigned NS = 40;  // Time stages
-  double tk[NS+1]; tk[0] = t0;
-  for( unsigned k=0; k<NS; k++ ) tk[k+1] = tk[k] + (tf-t0)/(double)NS;
+  double T0 = 0., TF = 3.;   // Time span
+  const unsigned NS = 120;    // Time stages
+  double TS[NS+1]; TS[0] = T0;
+  for( unsigned k=0; k<NS; k++ ) TS[k+1] = TS[k] + (TF-T0)/(double)NS;
 
   const unsigned NP = 1;  // Parameter dimension
   const unsigned NX = 4;  // State dimension
@@ -82,11 +80,11 @@ int main()
   mc::FFVar FCT[NF*NS];  // State functionals
   for( unsigned k=0; k<NS; k++ ){
     FCT[k*NF+0] = 0.;
-    FCT[k*NF+1] = X[3] * (tf-t0)/(double)NS;
+    FCT[k*NF+1] = X[3] * (TF-T0)/(double)NS;
   }
   FCT[(NS-1)*NF+0] = Q[0];
 
-  I Ip[NP]  = { I(0.99,1.01) };
+  I Ip[NP]  = { I(0.95,1.05) };
   I *Ixk[NS+1], Iq[NQ], If[NF];
   for( unsigned k=0; k<=NS; k++ )
     Ixk[k] = new I[NX];
@@ -96,106 +94,80 @@ int main()
   //for( unsigned k=0; k<=NS; k++ )
   //  xk[k] = new double[NX];
 
-  TM TMEnv( NP, NPM );
-  TV TMp[NP];
-  for( unsigned i=0; i<NP; i++ ) TMp[i].set( &TMEnv, i, Ip[i] );
-  TV *TMxk[NS+1], TMq[NQ], TMf[NF];
+  PM PMEnv( NP, NPM );
+  PV PMp[NP];
+  for( unsigned i=0; i<NP; i++ ) PMp[i].set( &PMEnv, i, Ip[i] );
+  PV *PMxk[NS+1], PMq[NQ], PMf[NF];
   double *Hxk[NS+1];
   for( unsigned k=0; k<=NS; k++ ){
-    TMxk[k] = new TV[NX];
+    PMxk[k] = new PV[NX];
     Hxk[k] = new double[NX];
   }
 
   /////////////////////////////////////////////////////////////////////////
-  // Bound ODE trajectories - sampling
-  mc::ODESLV_GSL<I> LV0;
+  // Bound ODE trajectories - differential inequalities
 
-  LV0.set_dag( &IVP );
-  LV0.set_state( NX, X );
-  LV0.set_parameter( NP, P );
-  LV0.set_differential( NX, RHS );
-  LV0.set_initial( NX, IC );
-  LV0.set_quadrature( NQ, QUAD, Q );
-  LV0.set_function( NF, NS, FCT );
+  mc::ODEBND_SUNDIALS<I,PM,PV> PEND;
 
-  LV0.options.DISPLAY = 1;
-  LV0.options.ATOL    = LV0.options.RTOL = 1e-10;
-  LV0.options.H0      = 1e-6;
-  //LV0.options.INPMETH = mc::ODESLV_GSL<I>::Options::MSBDF;
+  PEND.set_dag( &IVP );
+  PEND.set_time( NS, TS );
+  PEND.set_state( NX, X );
+  PEND.set_parameter( NP, P );
+  PEND.set_differential( NX, RHS );
+  PEND.set_initial( NX, IC );
+  PEND.set_quadrature( NQ, QUAD, Q );
+  PEND.set_function( NS, NF, FCT );
+
+  PEND.options.INTMETH   = mc::ODEBND_SUNDIALS<I,PM,PV>::Options::MSADAMS;
+  PEND.options.JACAPPROX = mc::ODEBND_SUNDIALS<I,PM,PV>::Options::CV_DIAG;//CV_DENSE;//
+  PEND.options.WRAPMIT   = mc::ODEBND_SUNDIALS<I,PM,PV>::Options::ELLIPS;//DINEQ;//NONE;
+  PEND.options.DISPLAY   = 1;
 #if defined( SAVE_RESULTS )
-  LV0.options.RESRECORD = true;
+  PEND.options.RESRECORD = true;
 #endif
+  PEND.options.ORDMIT       = -2; //NPM;
+  PEND.options.ATOL         = 1e-10;
+  PEND.options.RTOL         = 1e-10;
+  PEND.options.ETOL         = 1e-20;
+  PEND.options.ODESLV.ATOL  = 1e-10;
+  PEND.options.ODESLV.RTOL  = 1e-8;
+  PEND.options.NMAX         = 10000;
+  PEND.options.HMIN         = 1e-12;
 
-  std::cout << "\nNON_VALIDATED INTEGRATION - APPROXIMATE ENCLOSURE OF REACHABLE SET:\n\n";
-  //LV0.states( NS, tk, p, xk, q, f );
-  LV0.bounds( NS, tk, Ip, Ixk, Iq, If, NSAMP );
+  std::cout << "\nNON_VALIDATED INTEGRATION - INNER-APPROXIMATION OF REACHABLE SET:\n\n";
+  PEND.bounds( Ip, Ixk, If, NSAMP );
 #if defined( SAVE_RESULTS )
   std::ofstream apprec( "test3_APPROX_STA.dat", std::ios_base::out );
-  LV0.record( apprec );
+  PEND.record( apprec );
 #endif
-
-  /////////////////////////////////////////////////////////////////////////
-  // Bound ODE trajectories - differential inequalities
-#ifdef USE_CMODEL
-  mc::ODEBND_GSL<I,TM,TV> LV2;
-#else
-  mc::ODEBND_GSL<I> LV2;
-#endif
-  LV2.set_dag( &IVP );
-  LV2.set_state( NX, X );
-  LV2.set_parameter( NP, P );
-  LV2.set_differential( NX, RHS );
-  LV2.set_initial( NX, IC );
-  LV2.set_quadrature( NQ, QUAD, Q );
-  LV2.set_function( NF, NS, FCT );
-
-  LV2.options.H0        = 1e-4;
-  //LV2.options.DMAX      = 1e4;
-  LV2.options.NMAX      = 10000;
-  LV2.options.ORDMIT    = 1; //TMp->nord();
-  LV2.options.ATOL      = LV2.options.RTOL = 1e-10;
-  LV2.options.WRAPMIT   = mc::ODEBND_GSL<I,TM,TV>::Options::ELLIPS;//DINEQ;//NONE;//
-#if defined( SAVE_RESULTS )
-  LV2.options.RESRECORD = true;
-#endif
+  { int dum; std::cout << "PAUSED--"; std::cin >> dum; }
 
   std::cout << "\nCONTINUOUS SET-VALUED INTEGRATION - INTERVAL ENCLOSURE OF REACHABLE SET:\n\n";
-  LV2.options.DISPLAY = 1;
-  LV2.bounds( NS, tk, Ip, Ixk, Iq, If );
+  PEND.bounds( Ip, Ixk, If );
 #if defined( SAVE_RESULTS )
-  std::ofstream bndrecIA( "test3_DINEQI_STA.dat", std::ios_base::out );
-  LV2.record( bndrecIA );
+  std::ofstream bnd2recI( "test3_DINEQI_STA.dat", std::ios_base::out );
+  PEND.record( bnd2recI );
 #endif
-#if defined( TEST_CONVERGENCE )
-  LV2.hausdorff( NS, tk, Ip, Hxk, LV0, NSAMP );
-  LV2.options.DISPLAY = 0;
-  std::cout << std::scientific << std::setprecision(5);
-  for( unsigned k=0; k<20; k++ ){
-    I Ip0[NP] = { Ip[0]/std::pow(REDUC,k) };
-    double Hxk0 = (k? Hxk[NS][0]: 0. );
-    LV2.hausdorff( NS, tk, Ip0, Hxk, LV0, NSAMP );
-    std::cout << mc::Op<I>::diam( Ip0[0] ) << "  " << Hxk[NS][0]
-              << "  " << std::log(Hxk0/Hxk[NS][0])/log(REDUC)
-              << std::endl;
-  }
-#endif
+  { int dum; std::cout << "PAUSED--"; std::cin >> dum; }
 
   std::cout << "\nCONTINUOUS SET-VALUED INTEGRATION - POLYNOMIAL MODEL ENCLOSURE OF REACHABLE SET:\n\n";
-  LV2.options.DISPLAY = 1;
-  LV2.bounds( NS, tk, TMp, TMxk, TMq, TMf );
+  PEND.options.PMNOREM = false;
+  PEND.options.DMAX    = 1e2;
+  PEND.bounds( PMp, PMxk, PMf );
 #if defined( SAVE_RESULTS )
-  std::ofstream bndrecPM( "test3_DINEQPM_STA.dat", std::ios_base::out );
-  LV2.record( bndrecPM );
+  std::ofstream bnd2recPM( "test3_DINEQPM_STA.dat", std::ios_base::out );
+  PEND.record( bnd2recPM );
 #endif
+
 #if defined( TEST_CONVERGENCE )
-  LV2.hausdorff( NS, tk, TMp, Hxk, LV0, NSAMP );
-  LV2.options.DISPLAY = 0;
+  PEND.hausdorff( PMp, Hxk, 0, NSAMP );
+  PEND.options.DISPLAY = 0;
   std::cout << std::scientific << std::setprecision(5);
   for( unsigned k=0; k<20; k++ ){
-    TV TMp0[NP] = { TV( &TMEnv, 0, Ip[0]/std::pow(REDUC,k) ) };
+    PV PMp0[NP] = { PV( &PMEnv, 0, Ip[0]/std::pow(REDUC,k) ) };
     double Hxk0 = (k? Hxk[NS][0]: 0. );
-    LV2.hausdorff( NS, tk, TMp0, Hxk, LV0, NSAMP );
-    std::cout << mc::Op<I>::diam( TMp0[0].B() ) << "  " << Hxk[NS][0]
+    PEND.hausdorff( PMp0, Hxk, 0, NSAMP );
+    std::cout << mc::Op<I>::diam( PMp0[0].B() ) << "  " << Hxk[NS][0]
               << "  " << std::log(Hxk0/Hxk[NS][0])/log(REDUC)
               << std::endl;
   }
@@ -203,11 +175,10 @@ int main()
 
   for( unsigned k=0; k<=NS; k++ ){
     delete[] Ixk[k];
-    delete[] TMxk[k];
+    delete[] PMxk[k];
     delete[] Hxk[k];
   }
 
   return 0;
 }
-
 

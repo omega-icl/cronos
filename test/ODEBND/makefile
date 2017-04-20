@@ -9,7 +9,7 @@ INC_GSL =
 LIB_HSL = -lmc13 -lmc21
 INC_HSL = 
 
-PATH_SUNDIALS = /opt/sundials-2.6.2
+PATH_SUNDIALS = /opt/sundials-2.7.0
 #PATH_SUNDIALS = /usr/local
 LIB_SUNDIALS = -L$(PATH_SUNDIALS)/lib -lsundials_cvodes -lsundials_nvecserial \
                -llapack -lblas
@@ -25,7 +25,8 @@ LIB_FILIB  = -L$(PATH_FILIB)/lib -lprim
 INC_FILIB  = -I$(PATH_FILIB)/include/ -I$(PATH_FILIB)/include/interval
 FLAG_FILIB = -frounding-math -ffloat-store
 
-FLAG_ALL = -g -Wall -std=c++11 $(FLAG_FILIB)
+#FLAG_ALL = -g -Wall -Wno-misleading-indentation -std=c++11 $(FLAG_FILIB)
+FLAG_ALL = -g -Ofast -Wall -Wno-misleading-indentation -std=c++11 $(FLAG_FILIB)
 LIB_ALL  = $(LIB_MC) $(LIB_PROFIL) $(LIB_FILIB) $(LIB_GSL) $(LIB_HSL) $(LIB_SUNDIALS) $(LIB_LAPACK)
 INC_ALL  = $(INC_MC) $(INC_PROFIL) $(INC_FILIB) $(INC_GSL) $(INC_HSL) $(INC_SUNDIALS) $(INC_LAPACK)
 
@@ -55,5 +56,5 @@ gensvg :
 #####
 
 clean :
-	rm -f test? *.o *.out *.dat *.eps *~
+	rm -f test? test?? *.o *.out *.dat *.dot *.eps *~
 

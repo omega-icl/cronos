@@ -26,21 +26,25 @@ int main()
 
       mc::ODEBND_SUNDIALS<I> LV;
       LV.set_dag( &IVP );
+      LV.set_time( 0., 25. );
       LV.set_state( NX, X );
       LV.set_parameter( NP, P );
       LV.set_differential( NX, RHS );
       LV.set_initial( NX, IC );
-      LV.options.RESRECORD = true;
-      LV.options.ORDMIT = -2;
+
+      LV.options.RESRECORD   = true;
+      LV.options.ORDMIT      = -2;
+      LV.options.DMAX        = 1e2;
+      LV.options.NMAX        = 10000;
+      LV.options.ODESLV.NMAX = 10000;
 
       // Compute Interval Bounds
       I Ip[NP];
       Ip[0] = I(2.95,3.05);
       I Ix0[NX], Ixf[NX];
       I* Ixk[2] = {Ix0, Ixf};
-      double tk[2] = {0., 5.};
 
-      LV.bounds( 1, tk, Ip, Ixk, 0 );
+      LV.bounds( Ip, Ixk, 0 );
       std::ofstream ofileI( "test0_outer_I.out", std::ios_base::out );
       LV.record( ofileI );
 
@@ -55,13 +59,13 @@ int main()
       TV TMx0[NX], TMxf[NX];
       TV* TMxk[2] = {TMx0, TMxf};
 
-      LV.bounds( 1, tk, TMp, TMxk, 0 );
+      LV.bounds( TMp, TMxk, 0 );
       std::ofstream ofilePM( "test0_outer_PM.out", std::ios_base::out );
       LV.record( ofilePM );
 
       // Compute Approximate Bounds (Sampling)
       const unsigned int NSAMP = 50; // Number of sample points
-      LV.bounds( 1, tk, Ip, Ixk, 0, NSAMP );
+      LV.bounds( Ip, Ixk, 0, NSAMP );
       std::ofstream ofile0( "test0_inner.out", std::ios_base::out );
       LV.record( ofile0 );
 
@@ -69,8 +73,8 @@ int main()
       double Hx0[NX], Hxf[NX];
       double* Hxk[2] = {Hx0, Hxf};
 
-      LV.hausdorff( 1, tk, Ip, Hxk, 0, NSAMP );
-      LV.hausdorff( 1, tk, TMp, Hxk, 0, NSAMP );
+      LV.hausdorff( Ip, Hxk, 0, NSAMP );
+      LV.hausdorff( TMp, Hxk, 0, NSAMP );
 
       return 0;
 }

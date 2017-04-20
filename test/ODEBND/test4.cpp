@@ -1,17 +1,11 @@
 #define SAVE_RESULTS		// <- Whether to save bounds to file
 #define USE_CMODEL		// <- whether to use Chebyshev models or Taylor models
-#define USE_SUNDIALS		// <- whether to use SUNDIALS or GSL integrator
 const unsigned NPM   = 3;	// <- Order of polynomial expansion
 const unsigned NSAMP = 10;	// <- Number of sampling points for inner approx.
 const double   REDUC = 1.4;	// <- Reduction ratio for convergence analysis
 
-#include "odeslv_gsl.hpp"
-#ifndef USE_SUNDIALS
-  #include "odebnd_gsl.hpp"
-#else
-  #include "odebnd_sundials.hpp"
-#endif
-#include "odebnd_val.hpp"
+#include "odebnd_sundials.hpp"
+//#include "odebnd_val.hpp"
 
 #include "interval.hpp"
 typedef mc::Interval I;
@@ -31,14 +25,14 @@ int main()
 {
   mc::FFGraph IVP;  // DAG describing the problem
 
-  double t0 = 0., tf = 4000.;   // Time span
-  const unsigned NS = 100;  // Time stages
-  double tk[NS+1]; tk[0] = t0;
-  for( unsigned k=0; k<NS; k++ ) tk[k+1] = tk[k] + (tf-t0)/(double)NS;
+  double T0 = 0., TF = 2000.;   // Time span
+  const unsigned NS = 400;  // Time stages
+  double TS[NS+1]; TS[0] = T0;
+  for( unsigned k=0; k<NS; k++ ) TS[k+1] = TS[k] + (TF-T0)/(double)NS;
 
   const unsigned NP = 2;  // Number of parameters
   const unsigned NX = 2;  // Number of states
-  const unsigned NQ = 0;  // Numboer of state quadratures
+  const unsigned NQ = 0;  // Number of state quadratures
   const unsigned NF = 1;  // Number of state functions
 
   const double k0 = 0.022;
@@ -108,25 +102,20 @@ int main()
 */
   /////////////////////////////////////////////////////////////////////////
   // Bound ODE trajectories - differential inequalities
-#ifndef USE_SUNDIALS             // GSL integrator
-  mc::ODEBND_GSL<I,PM,PV> CSTR;
-#else                            // SUNDIALS integrator
+
   mc::ODEBND_SUNDIALS<I,PM,PV> CSTR;
-#endif
+
   CSTR.set_dag( &IVP );
+  CSTR.set_time( NS, TS );
   CSTR.set_state( NX, X );
   CSTR.set_parameter( NP, P );
   CSTR.set_differential( NX, RHS );
   CSTR.set_initial( NX, IC );
   CSTR.set_function( NF, FCT );
 
-#ifndef USE_SUNDIALS
-  CSTR.options.WRAPMIT   = mc::ODEBND_GSL<I,PM,PV>::Options::ELLIPS;//DINEQ;//NONE;
-#else
   CSTR.options.INTMETH   = mc::ODEBND_SUNDIALS<I,PM,PV>::Options::MSADAMS;
   CSTR.options.JACAPPROX = mc::ODEBND_SUNDIALS<I,PM,PV>::Options::CV_DIAG;//CV_DENSE;//
   CSTR.options.WRAPMIT   = mc::ODEBND_SUNDIALS<I,PM,PV>::Options::ELLIPS;//DINEQ;//NONE;
-#endif
   CSTR.options.DISPLAY   = 1;
 #if defined( SAVE_RESULTS )
   CSTR.options.RESRECORD = true;
@@ -134,11 +123,13 @@ int main()
   CSTR.options.ORDMIT       = -1; //NPM;
   CSTR.options.ATOL         = 1e-10;
   CSTR.options.RTOL         = 1e-10;
+  CSTR.options.ETOL         = 1e-20;
   CSTR.options.ODESLV.ATOL  = 1e-10;
   CSTR.options.ODESLV.RTOL  = 1e-8;
+  CSTR.options.HMIN         = 1e-10;
 
   std::cout << "\nNON_VALIDATED INTEGRATION - INNER-APPROXIMATION OF REACHABLE SET:\n\n";
-  CSTR.bounds( NS, tk, Ip, Ixk, If, NSAMP );
+  CSTR.bounds( Ip, Ixk, If, NSAMP );
 #if defined( SAVE_RESULTS )
   std::ofstream apprec( "test4_APPROX_STA.dat", std::ios_base::out );
   CSTR.record( apprec );
@@ -146,7 +137,7 @@ int main()
   { int dum; std::cout << "PAUSED--"; std::cin >> dum; }
 
   std::cout << "\nCONTINUOUS SET-VALUED INTEGRATION - INTERVAL ENCLOSURE OF REACHABLE SET:\n\n";
-  CSTR.bounds( NS, tk, Ip, Ixk, If );
+  CSTR.bounds( Ip, Ixk, If );
 #if defined( SAVE_RESULTS )
   std::ofstream bnd2recI( "test4_DINEQI_STA.dat", std::ios_base::out );
   CSTR.record( bnd2recI );
@@ -154,9 +145,9 @@ int main()
   { int dum; std::cout << "PAUSED--"; std::cin >> dum; }
 
   std::cout << "\nCONTINUOUS SET-VALUED INTEGRATION - POLYNOMIAL MODEL ENCLOSURE OF REACHABLE SET:\n\n";
-  CSTR.options.PMNOREM = false;
-  CSTR.options.DMAX    = 5.;
-  CSTR.bounds( NS, tk, PMp, PMxk, PMf );
+  //CSTR.options.PMNOREM = false;
+  //CSTR.options.DMAX    = 5.;
+  CSTR.bounds( PMp, PMxk, PMf );
 #if defined( SAVE_RESULTS )
   std::ofstream bnd2recPM( "test4_DINEQPM_STA.dat", std::ios_base::out );
   CSTR.record( bnd2recPM );

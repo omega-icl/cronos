@@ -44,11 +44,11 @@ public:
   {
     //! @brief Constructor
     Options():
-      INTMETH(MSADAMS), H0(0e0), HMIN(0e0), HMAX(0e0), NMAX(0), RTOL(1e-8), ATOL(1e-8),
+      INTMETH(MSADAMS), H0(0e0), HMIN(0e0), HMAX(0e0), NMAX(2000), RTOL(1e-8), ATOL(1e-8),
       ETOL(1e-16), QERR(true), MAXFAIL(10), MAXCORR(5), JACAPPROX(CV_DIAG),
       AUTOTOLS(false), RTOLS(1e-8), ATOLS(1e-8), ETOLS(1e-16), FSACORR(STAGGERED),
       FSAERR(true), QERRS(true), RTOLB(1e-8), ATOLB(1e-8), ETOLB(1e-16), QERRB(true),
-      ASAINTERP(HERMITE), ASACHKPT(1000), RTOLFD(1e-3), ATOLFD(1e-3), CENFD(true)
+      ASAINTERP(HERMITE), ASACHKPT(2000), RTOLFD(1e-3), ATOLFD(1e-3), CENFD(true)
       {}
     //! @brief Assignment operator
     template <typename U> Options& operator=

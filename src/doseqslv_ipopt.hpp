@@ -1,4 +1,4 @@
-// Copyright (C) 2012-2016 Benoit Chachuat, Imperial College London.
+// Copyright (C) 2012-2017 Benoit Chachuat, Imperial College London.
 // All Rights Reserved.
 // This code is published under the Eclipse Public License.
 
@@ -49,6 +49,7 @@ Next, we set the variables and objective/constraint functions by creating a DAG 
   const unsigned int NS = 10;  // Time stages
   double tk[NS+1]; tk[0] = 0.;
   for( unsigned k=0; k<NS; k++ ) tk[k+1] = tk[k] + 1./(double)NS;
+  OC->set_time( NS, tk );
 
   const unsigned NP = 2+NS;    // Decision variables
   mc::FFVar P[NP];
@@ -73,12 +74,9 @@ Next, we set the variables and objective/constraint functions by creating a DAG 
   IC[1] = X10;
   OC->set_initial( NX, IC );
 
-  std::map<unsigned,mc::FFVar> OBJ; OBJ.insert( std::make_pair( 0, TF ) );
-  OC->set_obj( mc::DOSEQSLV_IPOPT::MIN, OBJ );         // objective
-  std::map<unsigned,mc::FFVar> CTR1; CTR1.insert( std::make_pair( NS-1, X[0]-1. ) );
-  OC->add_ctr( mc::DOSEQSLV_IPOPT::EQ,  CTR1 );        // constraint #1
-  std::map<unsigned,mc::FFVar> CTR2; CTR2.insert( std::make_pair( NS-1, X[1] ) );
-  OC->add_ctr( mc::DOSEQSLV_IPOPT::EQ,  CTR2 );        // constraint #2
+  OC->set_obj( mc::DOSEQSLV_IPOPT::MIN, TF );         // objective
+  OC->add_ctr( mc::DOSEQSLV_IPOPT::EQ, std::make_pair( NS-1, X[0]-1. ) );        // constraint #1
+  OC->add_ctr( mc::DOSEQSLV_IPOPT::EQ, std::make_pair( NS-1, X[1] ) );        // constraint #2
 \endcode
 
 Options, such as the output level, maximum number of iterations, tolerance, maximum CPU time, etc can all be modified through the public member mc::DOSEQSLV_IPOPT::Options:
@@ -111,7 +109,7 @@ The dynamic optimization model is solved by passing bounds and an initial guess 
   }
 
   OC->setup();
-  Ipopt::ApplicationReturnStatus status = OC->solve( NS, tk, Ip, p0 );
+  Ipopt::ApplicationReturnStatus status = OC->solve( Ip, p0 );
 \endcode
 
 The return value is of the enumeration type <A href="http://www.coin-or.org/Doxygen/Ipopt/namespace_ipopt.html#efa0497854479cde8b0994cdf132c982">Ipopt::ApplicationReturnStatus</A>. Moreover, the optimization results can be retrieved as follows:
@@ -164,7 +162,6 @@ OC (LOCAL) SOLUTION:
 #undef  MC__DOSEQSLV_IPOPT_TRACE
 
 /* TO DO:
-- Automate check-pointing for backward differentiation
 - Feasibility and optimality tests (both 1st-order and 2nd-order conditions)
 */
 
@@ -179,8 +176,7 @@ namespace mc
 ////////////////////////////////////////////////////////////////////////
 class DOSEQSLV_IPOPT:
   public Ipopt::TNLP,
-  public virtual BASE_DO,
-  public virtual ODESLVS_SUNDIALS
+  public virtual BASE_DO
 {
   // Overloading stdout operator
   friend std::ostream& operator<<
@@ -190,23 +186,15 @@ private:
   //! @brief Internal scaling factor for the objective function (+1: minimize; -1: maximize)
   double _scaling;
 
-  //! @brief vector holding functions
-  std::vector<FFVar> _fct;
-
   //! @brief Structure holding optimization problem data
   struct DATA{
-    unsigned ns;
-    const double*tk;
     const double*p0;
     std::pair<double,double>*P;
-    DATA(): ns(0), tk(0), p0(0), P(0) {}
+    DATA(): p0(0), P(0) {}
     ~DATA() { delete[] P; }
     template <typename T> void set
-      ( const unsigned ns_, const double*tk_, const unsigned np, const double*p0_,
-        const T*P_ )
+      ( const unsigned np, const double*p0_, const T*P_ )
       {
-        ns = ns_;
-        tk = tk_;
         p0 = p0_;
         delete[] P; P = new std::pair<double,double>[np];
         for( unsigned i=0; i<np; i++ ) P[i] = std::make_pair( Op<T>::l(P_[i]), Op<T>::u(P_[i]) );
@@ -215,34 +203,35 @@ private:
 
   //! @brief Structure holding function evaluation results
   struct EVAL{
-    EVAL(): ns(0), f(0), xk(0), fp(0), xpk(0), sens(false), fstruct(0) {}
+    EVAL(): ns(0), f(0), fp(0), sens(false), fstruct(0) {}
+    //EVAL(): ns(0), f(0), xk(0), fp(0), xpk(0), sens(false), fstruct(0) {}
     ~EVAL() { cleanup(); }
     void cleanup
       ()
       {
         delete[] f; delete[] fp; delete[] fstruct;
-        for( unsigned is=0; xk && is<=ns; is++ )  delete[] xk[is];
-        for( unsigned is=0; xpk && is<=ns; is++ ) delete[] xpk[is];
-        delete[] xk; delete[] xpk;
+        //for( unsigned is=0; xk && is<=ns; is++ )  delete[] xk[is];
+        //for( unsigned is=0; xpk && is<=ns; is++ ) delete[] xpk[is];
+        //delete[] xk; delete[] xpk;
       }
     void resize
-      ( const unsigned ns_, const unsigned nf, const unsigned np, const unsigned nx )
+      ( const unsigned ns_, const unsigned nf, const unsigned np )//, const unsigned nx )
       {
         cleanup();
         ns = ns_;
-        xk = new double*[ ns+1 ];
-        for( unsigned is=0; is<=ns; is++ ) xk[is] = new double[ nx ];
+        //xk = new double*[ ns+1 ];
+        //for( unsigned is=0; is<=ns; is++ ) xk[is] = 0;//new double[ nx ];
         f = new double[ nf ];
-        xpk = new double*[ ns+1 ];
-        for( unsigned is=0; is<=ns; is++ ) xpk[is] = new double[ nx*np ];
+        //xpk = new double*[ ns+1 ];
+        //for( unsigned is=0; is<=ns; is++ ) xpk[is] = 0;//new double[ nx*np ];
         fp = new double[ nf*np ];
         fstruct = new std::map<int,bool>[ nf ];
       }
     unsigned ns;
     double *f;
-    double **xk;
+    //double **xk;
     double *fp;
-    double **xpk;
+    //double **xpk;
     bool sens;
     std::map<int,bool>* fstruct;
   } _eval;
@@ -263,32 +252,32 @@ private:
     Ipopt::Number f;
   } _solution;
 
+  //! @brief IVP solution and sensitivity
+  ODESLVS_SUNDIALS _ODESLVS;
+
 public:
   /** @defgroup DOSEQSLV Local Dynamic Optimization using a direct sequential approach with IPOPT, CVODES and MC++
    *  @{
    */
   //! @brief Constructor
   DOSEQSLV_IPOPT()
-    : BASE_DE(), ODESLVS_SUNDIALS()
-    {}
+    { _pDFCTPAR = 0; }
 
   //! @brief Destructor
   virtual ~DOSEQSLV_IPOPT()
-    {}
+    { delete[] _pDFCTPAR; }
 
   //! @brief Dynamic optimization options
-  struct Options:
-    public ODESLVS_SUNDIALS::Options
+  struct Options
   {
     //! @brief Constructor
     Options():
-      ODESLVS_SUNDIALS::Options(), CVTOL(1e-8), PRIMALTOL(1e-8), DUALTOL(1e-4),
-      COMPLTOL(1e-7), MAXITER(100), MAXCPU(1e6), GRADIENT(FORWARD),
-      HESSIAN(LBFGS), TESTDER(false), DISPLAY(0)
-      {}
+      CVTOL(1e-8), PRIMALTOL(1e-8), DUALTOL(1e-4), COMPLTOL(1e-7),
+      MAXITER(100), MAXCPU(1e6), GRADIENT(FORWARD), HESSIAN(LBFGS),
+      LINSLV(MA57), TESTDER(false), DISPLAY(0), ODESLVS()
+      { ODESLVS.DISPLAY = 0; ODESLVS.RESRECORD = 0; }
     //! @brief Assignment operator
     Options& operator= ( Options&options ){
-        ODESLVS_SUNDIALS::Options::operator=(options);
         CVTOL     = options.CVTOL;
         PRIMALTOL = options.PRIMALTOL;
         DUALTOL   = options.DUALTOL;
@@ -297,8 +286,10 @@ public:
         MAXCPU    = options.MAXCPU;
         GRADIENT  = options.GRADIENT;
         HESSIAN   = options.HESSIAN;
+        LINSLV    = options.LINSLV;
         TESTDER   = options.TESTDER;
         DISPLAY   = options.DISPLAY;
+        ODESLVS   = options.ODESLVS;
         return *this;
       }
     //! @brief Enumeration type for Hessian strategy
@@ -310,6 +301,17 @@ public:
     enum GRADIENT_STRATEGY{
       FORWARD=0,	//!< Forward Sensitivity
       BACKWARD		//!< Backward (Adjoint) Sensitivity
+    };
+    //! @brief Enumeration type for gradient strategy
+    enum LINEAR_SOLVER{
+      MA27=0,       //!< use the Harwell routine MA27
+      MA57,         //!< use the Harwell routine MA57
+      MA77,         //!< use the Harwell routine HSL_MA77
+      MA86,         //!< use the Harwell routine HSL_MA86
+      MA97,         //!< use the Harwell routine HSL_MA97
+      PARDISO,      //!< use the Pardiso package
+      WSMP,         //!< use WSMP package
+      MUMPS         //!< use MUMPS package
     };
     //! @brief Convergence tolerance
     double CVTOL;
@@ -327,10 +329,14 @@ public:
     GRADIENT_STRATEGY GRADIENT;
     //! @brief Strategy for Hessian computation during linesearch
     HESSIAN_STRATEGY HESSIAN;
+    //! @brief Linear solver used for step computations
+    LINEAR_SOLVER LINSLV;
     //! @brief Whether to test first- and second-derivatives
     bool TESTDER;
     //! @brief Display level in IPOPT
     int DISPLAY;
+    //! @brief IVP solver options
+    ODESLVS_SUNDIALS::Options ODESLVS;
   } options;
 
   //! @brief Dynamic optimization exceptions
@@ -365,7 +371,7 @@ public:
   //! @brief Solve DO model -- return value is IPOPT status
   template <typename T>
   Ipopt::ApplicationReturnStatus solve
-    ( const unsigned ns, const double*tk, const T*P, const double*p0=0 );
+    ( const T*P, const double*p0=0 );
 
   //! @brief Get IPOPT internal scaling value
   double get_scaling()
@@ -384,6 +390,20 @@ public:
     {
       return _solution;
     }
+
+  //! @brief Computes solution of parametric ODEs
+  BASE_DE::STATUS states
+    ( const double*p, double**xk=0, double*f=0, std::ostream&os=std::cout )
+    { _valSTADEP.clear();
+      for( auto it=_ndxFCTDEP.begin(); it!=_ndxFCTDEP.end(); ++it )
+        _valSTADEP.push_back( p[*it] );
+      _ODESLVS.options = options.ODESLVS;
+      return _ODESLVS.states( _valSTADEP.data(), xk, f, os ); }
+
+  //! @brief Record states in file <a>ores</a>, with accuracy of <a>iprec</a> digits
+  void record
+    ( std::ofstream&ores, const unsigned iprec=5 ) const
+    { return _ODESLVS.record( ores, iprec ); }
   /** @} */
 
 protected:
@@ -457,6 +477,33 @@ private:
   bool _update_functions
     ( const Ipopt::Number *p, const bool sens );
 
+  //! @brief list of operations for parameter-dependent functions
+  std::list<const FFOp*> _opFCTPAR;
+
+  //! @brief const pointers to parameter-dependent function derivatives
+  const FFVar* _pDFCTPAR;
+
+  //! @brief list of operations for parameter-dependent function derivatives
+  std::list<const FFOp*> _opDFCTPAR;
+
+  //! @brief values of parameters participating in parametric IVP
+  std::vector<double> _valSTADEP;
+
+  //! @brief values of state-dependent functions
+  std::vector<double> _valFCTSTA;
+
+  //! @brief derivatives of state-dependent functions
+  std::vector<double> _valDFCTSTA;
+
+  //! @brief values of parameter-dependent functions
+  std::vector<double> _valFCTPAR;
+
+  //! @brief derivatives of parameter-dependent functions
+  std::vector<double> _valDFCTPAR;
+
+  //! @brief workspace for parameter-dependent functions
+  std::vector<double> _wkFCTPAR;
+
   //! @brief Private methods to block default compiler methods
   DOSEQSLV_IPOPT(const DOSEQSLV_IPOPT&);
   DOSEQSLV_IPOPT& operator=(const DOSEQSLV_IPOPT&);
@@ -482,12 +529,36 @@ DOSEQSLV_IPOPT::set_options
     IpoptApp->Options()->SetStringValue( "hessian_approximation", "limited-memory" );
     break;
   }
+  switch( options.LINSLV ){
+   case Options::MA27:
+    IpoptApp->Options()->SetStringValue( "linear_solver", "ma27" );
+    break;
+   case Options::MA57:
+    IpoptApp->Options()->SetStringValue( "linear_solver", "ma57" );
+    break;
+   case Options::MA77:
+    IpoptApp->Options()->SetStringValue( "linear_solver", "ma77" );
+    break;
+   case Options::MA86:
+    IpoptApp->Options()->SetStringValue( "linear_solver", "ma86" );
+    break;
+   case Options::MA97:
+    IpoptApp->Options()->SetStringValue( "linear_solver", "ma97" );
+    break;
+   case Options::PARDISO:
+    IpoptApp->Options()->SetStringValue( "linear_solver", "pardiso" );
+    break;
+   case Options::WSMP:
+    IpoptApp->Options()->SetStringValue( "linear_solver", "wsmp" );
+    break;
+   case Options::MUMPS:
+    IpoptApp->Options()->SetStringValue( "linear_solver", "mumps" );
+    break;
+  }
   IpoptApp->Options()->SetStringValue( "derivative_test", options.TESTDER? "second-order": "none" );
   IpoptApp->Options()->SetIntegerValue( "print_level", options.DISPLAY<0? 0: (options.DISPLAY>12? 12: options.DISPLAY ) );
 
-  ODESLVS_SUNDIALS::options = options;
-  ODESLVS_SUNDIALS::options.DISPLAY = 0;
-  ODESLVS_SUNDIALS::options.RESRECORD = 0;
+  _ODESLVS.options = options.ODESLVS;
 }
 
 inline
@@ -495,122 +566,47 @@ bool
 DOSEQSLV_IPOPT::setup
 ()
 {
-  if( std::get<0>(_obj).size() != 1 ) return false;
-  
-  // Set number of functions and stages
-  const unsigned nf = 1 + std::get<0>(_ctr).size();
-  unsigned ns = std::get<1>(_obj)[0].rbegin()->first+1;
-  auto it = std::get<1>(_ctr).begin();
-  for( ; it!=std::get<1>(_ctr).end(); ++it ){
-    const unsigned nsk = it->rbegin()->first+1;
-    if( ns < nsk ) ns = nsk;
-  }
-  _fct.resize( ns*nf );
-
-  // Set objective stage contributions
-  unsigned is = 0;
-  auto jt = std::get<1>(_obj)[0].begin();
-  for( ; jt!=std::get<1>(_obj)[0].end(); ++jt ){
-    for( ; is<jt->first; ++is ) _fct[nf*is] = 0;
-    _fct[nf*jt->first] = jt->second; ++is;
-  }
-  for( ; is<ns; ++is ) _fct[nf*is] = 0;
-
-  // Set constraint stage contributions
-  it = std::get<1>(_ctr).begin();
-  for( unsigned ic=1; it!=std::get<1>(_ctr).end(); ++it, ++ic ){
-    unsigned is = 0;
-    auto jt = it->begin();
-    for( ; jt!=it->end(); ++jt ){
-      for( ; is<jt->first; ++is ) _fct[nf*is+ic] = 0;
-      _fct[nf*jt->first+ic] = jt->second; ++is;
-    }
-    for( ; is<ns; ++is ) _fct[nf*is+ic] = 0;
-  }
-
-#ifdef MC__DOSEQSLV_IPOPT_DEBUG
-  for( unsigned is=0; is<ns; is++ )
-    for( unsigned ic=0; ic<nf; ic++ )
-      std::cout << "FCT[" << is << "][" << ic << "] = " << _fct[nf*is+ic] << std::endl;
-  int dum;  std::cin >> dum; 
-#endif
-  set_function( ns, nf, _fct.data() );
-
-  // Resize evaluation arrays
-  _eval.resize( ns, nf, _np, _nx );
-
-  // Generate parametric dependence of state
-  std::vector<FFVar> Xk( _nx ), G(nf);
-  if( !_IC_D_SET() ) return false;
-  for( unsigned ix=0; ix<_nx; ix++ ){
-    Xk[ix] = _pIC[ix];
-#ifdef MC__DOSEQSLV_IPOPT_DEBUG
-    std::cout << "X[0][" << ix << "]: " << Xk[ix].dep() << std::endl;
-#endif
-  }
-  for( unsigned is=0; is<ns; ++is ){
-    const unsigned pos_rhs  = ( _vRHS.size()<=1?  0: is );
-    const unsigned pos_quad = ( _vQUAD.size()<=1? 0: is );
-    if( (!is || pos_rhs || pos_quad)
-     && !ODESLV_SUNDIALS::_RHS_D_SET( pos_rhs, pos_quad ) )
-      return false;
-    const FFVar* Fk = _pDAG->compose( _nx, ODESLV_SUNDIALS::_pRHS, _nx, _pX, Xk.data() );
-    for( unsigned ix=0; ix<_nx; ix++ ){
-      Xk[ix] += Fk[ix];
-#ifdef MC__DOSEQSLV_IPOPT_DEBUG
-      std::cout << "X[" << is+1 << "][" << ix << "]: " << Xk[ix].dep() << std::endl;
-#endif
-    }
-    delete[] Fk;
-    bool iterate = true;
-    while( iterate ){
-      iterate = false;
-      const FFVar* Fk = _pDAG->compose( _nx, ODESLV_SUNDIALS::_pRHS, _nx, _pX, Xk.data() );
-      for( unsigned ix=0; ix<_nx; ix++ ){
-        FFVar Xki = Xk[ix];
-        Xk[ix] += Fk[ix];
-        if( Xk[ix].dep() != Xki.dep() ) iterate = true;
-#ifdef MC__DOSEQSLV_IPOPT_DEBUG
-        std::cout << "X[" << is+1 << "][" << ix << "]: " << Xk[ix].dep() << std::endl;
-#endif
-      }
-      delete[] Fk;
-    }
-    // Need to repeat multiple times!
-    const FFVar* pFCT = _vFCT.at( is );
-#ifdef MC__DOSEQSLV_IPOPT_DEBUG
-    for( unsigned ic=0; ic<nf; ic++ )
-      std::cout << "FCT[" << is << "][" << ic << "] = " << pFCT[ic] << std::endl;
-#endif
-    const FFVar* Gk = _pDAG->compose( nf, pFCT, _nx, _pX, Xk.data() );
-    for( unsigned ic=0; ic<nf; ic++ ){
-      if( !is ) G[ic]  = Gk[ic];
-      else      G[ic] += Gk[ic];
-#ifdef MC__DOSEQSLV_IPOPT_DEBUG
-      std::cout << "G[" << is+1 << "][" << ic << "]: " << Gk[ic].dep() << std::endl;
-#endif
-    }
-    delete[] Gk;
-  }
-  for( unsigned ic=0; ic<nf; ic++ ){
-    //_eval.fstruct[ic] = G[ic].dep().dep();
+  // Generate dependency inormation
+  if( !set_depend() ) return false;
+  _eval.resize( _ns, _nf, _np );//, _nx );
+  for( unsigned ic=0; ic<_nf; ic++ ){
     _eval.fstruct[ic].clear();
     for( unsigned ip=0; ip<_np; ip++ ){
-      auto dep = G[ic].dep().dep( _pP[ip].id().second );
-      if( dep.first ) _eval.fstruct[ic].insert( std::make_pair( ip, dep.second ) );
+      auto idep = _depF[ic].dep( _pP[ip].id().second );
+      if( idep.first ){
+        _eval.fstruct[ic][ip] = idep.second;
+      }
     }
   }
+
+  // Setup parametric IVP solver
+  _ODESLVS.set( *this );
+  _ODESLVS.set_time( _ns, _dT.data(), _pT );
+  _ODESLVS.set_parameter( _vFCTDEP.size(), _vFCTDEP.data() );
+  _ODESLVS.set_function( _ns, _ndxFCTSTA.size(), _vFCTSTA.data() );
+
+  // setup derivatives of parameter-dependent functions
+  delete[] _pDFCTPAR;
+  switch( options.GRADIENT ){
+    case Options::FORWARD:  // Forward AD
+      _pDFCTPAR = _pDAG->FAD( _vFCTPAR.size(), _vFCTPAR.data(), _np, _pP ); 
+      break;
+    case Options::BACKWARD: // Backward AD
+      _pDFCTPAR = _pDAG->BAD( _vFCTPAR.size(), _vFCTPAR.data(), _np, _pP ); 
+      break;
+  }
+  _opFCTPAR  = _pDAG->subgraph( _vFCTPAR.size(), _vFCTPAR.data() );
+  _opDFCTPAR = _pDAG->subgraph( _vFCTPAR.size()*_np, _pDFCTPAR );
+  _wkFCTPAR.resize( _opFCTPAR.size()>_opDFCTPAR.size()? _opFCTPAR.size(): _opDFCTPAR.size() );
+  _valFCTSTA.resize( _ndxFCTSTA.size() );
+  _valDFCTSTA.resize( _vFCTDEP.size()*_ndxFCTSTA.size() );
+  _valFCTPAR.resize( _vFCTPAR.size() );
+  _valDFCTPAR.resize( _np*_vFCTPAR.size() );
+
 #ifdef MC__DOSEQSLV_IPOPT_DEBUG
   {int dum; std::cin >> dum;}
 #endif
-/*
-  // dense functions
-  for( unsigned ic=0; ic<nf; ic++ ){
-    _eval.fstruct[ic].clear();
-    for( unsigned ip=0; ip<_np; ip++ )
-      _eval.fstruct[ic].insert( std::make_pair( ip, false ) );
-  }
-*/
+
   return true;
 }
 
@@ -618,7 +614,7 @@ template <typename T>
 inline
 Ipopt::ApplicationReturnStatus
 DOSEQSLV_IPOPT::solve
-( const unsigned ns, const double*tk, const T*P, const double*p0 )
+( const T*P, const double*p0 )
 {
   Ipopt::SmartPtr<Ipopt::IpoptApplication> IpoptApp = new Ipopt::IpoptApplication();
 
@@ -626,7 +622,7 @@ DOSEQSLV_IPOPT::solve
   set_options( IpoptApp );
 
   // Keep track of bounds and initial guess
-  _data.set( ns, tk, _np, p0, P );
+  _data.set( _np, p0, P );
 
   // Run NLP solver
   _solution.status = IpoptApp->Initialize();
@@ -655,12 +651,12 @@ DOSEQSLV_IPOPT::get_nlp_info
   // use the C style indexing (0-based)
   index_style = Ipopt::TNLP::C_STYLE;
 
-//#ifdef MC__NLPSLV_IPOPT_DEBUG
+#ifdef MC__NLPSLV_IPOPT_DEBUG
   std::cout << "n:" << n << std::endl;
   std::cout << "m:" << m << std::endl;
   std::cout << "nnz_jac_g:" << nnz_jac_g << std::endl;
   std::cout << "nnz_h_lag:" << nnz_h_lag << std::endl;
-//#endif
+#endif
 
   return true;
 }
@@ -718,9 +714,9 @@ DOSEQSLV_IPOPT::get_starting_point
   if( !init_p || init_up || init_ug ) return false;
 
   // initialize to the given starting point
-  if( !_data.p0 ) return false;
+  //if( !_data.p0 ) return false;
   for( unsigned ip=0; ip<_np; ip++ ){
-    p[ip] = _data.p0[ip];
+    p[ip] = _data.p0? _data.p0[ip]: 0.;
 #ifdef MC__DOSEQSLV_IPOPT_DEBUG
     std::cout << "  p_0[" << ip << "] = " << p[ip] << std::endl;
 #endif
@@ -736,17 +732,63 @@ DOSEQSLV_IPOPT::_update_functions
 #ifdef MC__DOSEQSLV_IPOPT_TRACE
   std::cout << "  DOSEQSLV_IPOPT::update_functions " << (sens?"Y":"N") << std::endl;
 #endif
-  _eval.sens = sens;
 
-  if( !sens )
-    return( states( _data.ns, _data.tk, p, _eval.xk, _eval.f ) == NORMAL? true: false );
-
-  switch( options.GRADIENT ){
-  case Options::FORWARD:
-    return( states_FSA( _data.ns, _data.tk, p, _eval.xk, _eval.f, _eval.xpk, _eval.fp ) == NORMAL? true: false );
-  case Options::BACKWARD: default:
-    return( states_ASA( _data.ns, _data.tk, p, _eval.xk, _eval.f, _eval.xpk, _eval.fp ) == NORMAL? true: false );
+  // Values and derivatives of parameter-dependent functions
+  try{
+    _pDAG->eval( _opFCTPAR, _wkFCTPAR.data(), _vFCTPAR.size(), _vFCTPAR.data(), _valFCTPAR.data(), _np, _pP, p );
+    if( sens )
+      _pDAG->eval( _opDFCTPAR, _wkFCTPAR.data(), _vFCTPAR.size()*_np, _pDFCTPAR, _valDFCTPAR.data(), _np, _pP, p );
   }
+  catch(...){
+    return false;
+  }
+
+  // Values and derivatives of state-dependent functions
+  _valSTADEP.clear();
+  for( auto it=_ndxFCTDEP.begin(); it!=_ndxFCTDEP.end(); ++it )
+    _valSTADEP.push_back( p[*it] );
+
+  STATUS flag = FATAL;
+  if( !sens )
+    flag = _ODESLVS.states( _valSTADEP.data(), 0, _valFCTSTA.data() );
+  else{
+    switch( options.GRADIENT ){
+    case Options::FORWARD:
+      flag = _ODESLVS.states_FSA( _valSTADEP.data(), 0, _valFCTSTA.data(), 0, _valDFCTSTA.data() );
+      break;
+    case Options::BACKWARD: default:
+      flag = _ODESLVS.states_ASA( _valSTADEP.data(), 0, _valFCTSTA.data(), 0, _valDFCTSTA.data() );
+      break;
+    }
+  }
+  if( flag != NORMAL ) return false;
+
+  // Keep track of evaluation results in _eval
+  _eval.sens = sens;
+  for( unsigned ic=0, icsta=0, icpar=0; ic<_nf; ic++ ){
+    // Parameter-dependent functions
+    if( _ndxFCTSTA.find( ic ) == _ndxFCTSTA.end() ){
+      _eval.f[ic] = _valFCTPAR[icpar];
+      for( unsigned ip=0; sens && ip<_np; ip++ )
+        _eval.fp[ic+ip*_nf] = _valDFCTPAR[icpar+ip*_vFCTPAR.size()];
+      icpar++;
+    }
+    // State-dependent functions
+    else{
+      _eval.f[ic] = _valFCTSTA[icsta];
+      for( unsigned ip=0, ipsta=0; sens && ip<_np; ip++ ){
+        if( _ndxFCTDEP.find( ip ) != _ndxFCTDEP.end() ){
+          _eval.fp[ic+ip*_nf] = _valDFCTSTA[icsta+ipsta*_ndxFCTSTA.size()];
+          ipsta++;
+          continue;
+        }
+        _eval.fp[ic+ip*_nf] = 0.;
+      }
+      icsta++;
+    }
+  }
+
+  return true;
 }
 
 inline

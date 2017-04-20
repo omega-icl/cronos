@@ -18,9 +18,9 @@ namespace mc
 //! using the code CVODES in SUNDIALS and MC++.
 ////////////////////////////////////////////////////////////////////////
 class ODESLV_SUNDIALS:
-  public virtual BASE_DE,
   public virtual BASE_SUNDIALS,
-  public virtual ODESLV_BASE
+  public virtual ODESLV_BASE,
+  public virtual BASE_DE
 {
   typedef int (*CVRhsFn)( realtype t, N_Vector y, N_Vector ydot, void *user_data );
   typedef int (*CVDlsDenseJacFn)( long int N, realtype t, N_Vector y, N_Vector fy,
@@ -94,7 +94,7 @@ public:
     //! @brief Display level (default: 1)
     int DISPLAY;
     //! @brief Whether or not to record results (default: false)
-    bool RESRECORD;
+    unsigned RESRECORD;
   } options;
 
   //! @brief Structure for setting up storing the solver exceptions
@@ -128,8 +128,7 @@ public:
 
   //! @brief Computes solution of parametric ODEs
   STATUS states
-    ( const unsigned ns, const double*tk, const double*p, double**xk=0,
-      double*f=0, std::ostream&os=std::cout );
+    ( const double*p, double**xk=0, double*f=0, std::ostream&os=std::cout );
 
   //! @brief Record results in file <a>ores</a>, with accuracy of <a>iprec</a> digits
   void record
@@ -178,8 +177,7 @@ protected:
 
   //! @brief Solve parametric ODEs forward in time through every time stages
   virtual STATUS _states
-    ( const unsigned ns, const double*tk, const double*p, double**xk,
-      double*f, const bool store, std::ostream&os );
+    ( const double*p, double**xk, double*f, const bool store, std::ostream&os );
 
   //! @brief Private methods to block default compiler methods
   ODESLV_SUNDIALS(const ODESLV_SUNDIALS&);
@@ -191,7 +189,8 @@ ODESLV_SUNDIALS* ODESLV_SUNDIALS::pODESLV = 0;
 inline
 ODESLV_SUNDIALS::ODESLV_SUNDIALS
 ()
-: BASE_DE(), BASE_SUNDIALS(), ODESLV_BASE(), _cv_mem(0), _cv_flag(0),
+: //BASE_DE(), BASE_SUNDIALS(), ODESLV_BASE(),
+  _cv_mem(0), _cv_flag(0),
   _Nx(0), _Nq(0)
 {}
 
@@ -407,25 +406,23 @@ ODESLV_SUNDIALS::MC_CVJACD__
 
 inline typename ODESLV_SUNDIALS::STATUS
 ODESLV_SUNDIALS::_states
-( const unsigned ns, const double*tk, const double*p, double**xk,
-  double*f, const bool store, std::ostream&os )
+( const double*p, double**xk, double*f, const bool store, std::ostream&os )
 {
   // Check size
-  if( !tk || !p || !xk || (_nf && !f) ) return FATAL;
+  if( !p ) return FATAL;
 
   try{
     // Initialize trajectory integration
     if( !_INI_STA( p ) ) return FATAL;
-    _t = tk[0];
+    _t = _dT[0];
+    const unsigned NSTEP = options.RESRECORD? options.RESRECORD: 1;
 
-    // Bounds on initial states/quadratures
+    // Initial state/quadrature values
     if( !_IC_D_SET()
      || !_IC_D_STA( _t, NV_DATA_S( _Nx ) )
      || (_Nq && !_IC_D_QUAD( NV_DATA_S( _Nq ) ) ) )
       { _END_STA(); return FATAL; }
     _GET_D_STA( NV_DATA_S(_Nx), _nq && _Nq? NV_DATA_S(_Nq): 0 );
-    if( xk && !xk[0] ) xk[0] = new double[_nx];
-    for( unsigned ix=0; xk[0] && ix<_nx; ix++ ) xk[0][ix] = _Dx[ix];
 
     // Store full state at initial time
     if( store ){
@@ -434,21 +431,29 @@ ODESLV_SUNDIALS::_states
       _vec_sta.push_back( std::vector<realtype>( vsta, vsta+lsta ) );
     }
 
-    // Display & record initial results
-    if( options.DISPLAY >= 1 )
-      _print_interm( _t, _nx, xk[0], " x", os );
+    // Display / record / return initial results
+    if( options.DISPLAY >= 1 ){
+      _print_interm( _t, _nx, _Dx, " x", os );
+      _print_interm( _nq, _Dq, " q", os );
+    }
     if( options.RESRECORD )
-      results_sta.push_back( Results( tk[0], _nx, xk[0] ) );
+      results_sta.push_back( Results( _t, _nx, NV_DATA_S(_Nx), _nq, _nq? NV_DATA_S(_Nq): 0 ) );
+    if( xk ){
+      if( !xk[0] ) xk[0] = new double[_nx+_nq];
+      unsigned ix = 0;
+      for( ; ix<_nx; ix++ ) xk[0][ix] = _Dx[ix];
+      for( ; ix<_nx+_nq; ix++ ) xk[0][ix] = _Dq[ix-_nx];
+    }
 
     // Integrate ODEs through each stage using SUNDIALS
     pODESLV = this;
     if( !_INI_CVODE( MC_CVRHSD__, MC_CVQUADD__, MC_CVJACD__ ) )
       { _END_STA(); return FATAL; }
 
-    for( _istg=0; _istg<ns; _istg++ ){
-      // Bounds on state discontinuities (if any) at stage times
+    for( _istg=0; _istg<_nsmax; _istg++ ){
+      // State discontinuities (if any) at stage times
       // and integrator reinitialization (if applicable)
-      _pos_ic = ( _vIC.size()>=ns? _istg:0 );
+      _pos_ic = ( _vIC.size()>=_nsmax? _istg:0 );
       if( _pos_ic
        && ( !_CC_D_SET( _pos_ic )
          || !_CC_D_STA( _t, NV_DATA_S( _Nx ) )
@@ -467,18 +472,41 @@ ODESLV_SUNDIALS::_states
         { _END_STA(); return FATAL; }
 
       // integrate till end of time stage
-      _cv_flag = CVodeSetStopTime( _cv_mem, tk[_istg+1] );
+      _cv_flag = CVodeSetStopTime( _cv_mem, _dT[_istg+1] );
       if( _check_cv_flag(&_cv_flag, "CVodeSetStopTime", 1) )
         { _END_STA(); return FATAL; }
-      while( _t < tk[_istg+1] ){
+/*
+      while( _t < _dT[_istg+1] ){
         if( !store )
-          _cv_flag = CVode( _cv_mem, tk[_istg+1], _Nx, &_t, CV_ONE_STEP );
+          _cv_flag = CVode( _cv_mem, _dT[_istg+1], _Nx, &_t, CV_ONE_STEP );
         else
-          _cv_flag = CVodeF( _cv_mem, tk[_istg+1], _Nx, &_t, CV_ONE_STEP, &_nchk );
+          _cv_flag = CVodeF( _cv_mem, _dT[_istg+1], _Nx, &_t, CV_ONE_STEP, &_nchk );
         if( _check_cv_flag(&_cv_flag, store?"CVodeF":"CVode", 1)
          || (options.NMAX && stats_sta.numSteps > options.NMAX) )
           throw Exceptions( Exceptions::INTERN );
         stats_sta.numSteps++;
+*/
+      const double TSTEP = ( _dT[_istg+1] - _t  ) / NSTEP;
+      double TSTOP = _t+TSTEP;
+      for( unsigned k=0; k<NSTEP; k++, TSTOP+=TSTEP ){
+        if( k+1 == NSTEP ) TSTOP = _dT[_istg+1];
+        if( !store )
+          _cv_flag = CVode( _cv_mem, TSTOP, _Nx, &_t, CV_NORMAL );
+        else
+          _cv_flag = CVodeF( _cv_mem, TSTOP, _Nx, &_t, CV_NORMAL, &_nchk );
+        if( _check_cv_flag(&_cv_flag, store?"CVodeF":"CVode", 1) )
+         //|| (options.NMAX && stats_sta.numSteps > options.NMAX) )
+          throw Exceptions( Exceptions::INTERN );
+
+        // intermediate record
+        if( options.RESRECORD ){
+          if( _nq ){
+            _cv_flag = CVodeGetQuad( _cv_mem, &_t, _Nq );
+            if( _check_cv_flag(&_cv_flag, "CVodeGetQuad", 1) )
+              { _END_STA(); return FATAL; }
+          }
+          results_sta.push_back( Results( _t, _nx, NV_DATA_S(_Nx), _nq, _nq? NV_DATA_S(_Nq): 0 ) );
+        }
       }
 
       // Store full state at stage time
@@ -488,7 +516,7 @@ ODESLV_SUNDIALS::_states
         _vec_sta.push_back( std::vector<realtype>( vsta, vsta+lsta ) );
       }
 
-      // Bounds on intermediate states and quadratures
+      // Intermediate states and quadratures
       if( _nq ){
         _cv_flag = CVodeGetQuad( _cv_mem, &_t, _Nq );
         if( _check_cv_flag(&_cv_flag, "CVodeGetQuad", 1) )
@@ -496,22 +524,30 @@ ODESLV_SUNDIALS::_states
       }
      _GET_D_STA( NV_DATA_S(_Nx), _nq && _Nq? NV_DATA_S(_Nq): 0 );
 
-      // Keep track/display/record stage results
-      if( xk && !xk[_istg+1] ) xk[_istg+1] = new double[_nx];
-      for( unsigned ix=0; xk[_istg+1] && ix<_nx; ix++ ) xk[_istg+1][ix] = _Dx[ix];
-      if( options.DISPLAY >= 1 )
-        _print_interm( _t, _nx, xk[_istg+1], " x", os );
-      if( options.RESRECORD )
-        results_sta.push_back( Results( tk[_istg+1], _nx, xk[_istg+1] ) );
+      // Display / return stage results
+      if( xk ){
+        if( !xk[_istg+1] ) xk[_istg+1] = new double[_nx+_nq];
+        unsigned ix = 0;
+        for( ; ix<_nx; ix++ ) xk[_istg+1][ix] = _Dx[ix];
+        for( ; ix<_nx+_nq; ix++ ) xk[_istg+1][ix] = _Dq[ix-_nx];
+      }
+      if( options.DISPLAY >= 1 ){
+        _print_interm( _t, _nx, _Dx, " x", os );
+        _print_interm( _nq, _Dq, " q", os );
+      }
 
       // Add intermediate function terms
-      _pos_fct = ( _vFCT.size()>=ns? _istg:0 );
-      if( (_vFCT.size()>=ns || _istg==ns-1) && !_FCT_D_STA( _pos_fct, _t, f ) )
+      _pos_fct = ( _vFCT.size()>=_nsmax? _istg:0 );
+      if( (_vFCT.size()>=_nsmax || _istg==_nsmax-1) && !_FCT_D_STA( _pos_fct, _t ) )
         { _END_STA(); return FATAL; }
     }
+#ifdef MC__ODESLV_SUNDIALS_DEBUG
+    if( store ) std::cout << "number of checkpoints: " << _nchk << std::endl;
+#endif
 
-    // Bounds on final quadratures and functions
-    if( options.DISPLAY >= 1 ) _print_interm( _nf, f, " f", os );
+    // Display / return function values
+    for( unsigned i=0; f && i<_nf; i++ ) f[i] = _Df[i];
+    if( options.DISPLAY >= 1 ) _print_interm( _nf, _Df, " f", os );
   }
   catch(...){
     _END_STA();
@@ -519,30 +555,33 @@ ODESLV_SUNDIALS::_states
     return FAILURE;
   }
 
+  long int nstp;
+  _cv_flag = CVodeGetNumSteps( _cv_mem, &nstp );
+  stats_sta.numSteps += nstp;
+#ifdef MC__ODESLV_SUNDIALS_DEBUG
+  std::cout << "number of steps: " << nstp << std::endl;
+#endif
+
   _END_STA();
   if( options.DISPLAY >= 1 ) _print_stats( stats_sta, os );
   return NORMAL;
 }
 
 //! @fn inline typename ODESLV_SUNDIALS::STATUS ODESLV_SUNDIALS::states(
-//! const unsigned ns, const double*tk, const double*p, double**xk, double*q,
-//! double*f, std::ostream&os=std::cout )
+//! const double*p, double**xk, double*q, double*f, std::ostream&os=std::cout )
 //!
 //! This function computes a solution to the parametric ODEs:
-//!   - <a>ns</a> [input]  number of time stages
-//!   - <a>tk</a> [input]  stage times, including the initial time
 //!   - <a>p</a>  [input]  parameter values
-//!   - <a>xk</a> [output] state values at stage times
+//!   - <a>xk</a> [output] state & quadrature values at stage times
 //!   - <a>f</a>  [output] function values
 //!   - <a>os</a> [input]  output stream [default: std::cout]
 //! .
 //! The return value is the status.
 inline typename ODESLV_SUNDIALS::STATUS
 ODESLV_SUNDIALS::states
-( const unsigned ns, const double*tk, const double*p, double**xk,
-  double*f, std::ostream&os )
+( const double*p, double**xk, double*f, std::ostream&os )
 {
-  return _states( ns, tk, p, xk, f, false, os );
+  return _states( p, xk, f, false, os );
 }
 
 } // end namescape mc

@@ -36,6 +36,9 @@ protected:
   //! @brief array of list of operations in sensitivity/adjoint RHS evaluation
   std::list<const FFOp*>* _opSARHS;
 
+  //! @brief list of operations in RHS Jacobian
+  std::list<const FFOp*> _opSAJAC;
+
   //! @brief array of list of operations in sensitivity/adjoint quadrature evaluation
   std::list<const FFOp*>* _opSAQUAD;
 
@@ -84,14 +87,11 @@ protected:
   //! @brief pointer to quadrature values **DO NOT FREE**
   double *_Dq;
 
-  //! @brief sensitivity/adjoint time derivatives
-  //double *_Dydot;
-
   //! @brief pointer to sensitivity/adjoint quadrature values **DO NOT FREE**
   double *_Dyq;
 
-  //! @brief sensitivity/adjoint quadrature derivatives
-  //double *_Dyqdot;
+  //! @brief pointer to function derivatives
+  double *_Dfp;
 
   //! @brief preallocated array for evaluation of sensitivity/adjoint RHS functions
   double* _DWRK;
@@ -185,8 +185,7 @@ protected:
 
   //! @brief Function to calculate the function sensitivities at intermediate/end point
   bool _FCT_D_SEN
-    ( const unsigned pos_fct, const unsigned isen, const double t,
-      double*fp );
+    ( const unsigned pos_fct, const unsigned isen, const double t );
 
   //! @brief Private methods to block default compiler methods
   ODESLVS_BASE(const ODESLVS_BASE&);
@@ -199,8 +198,7 @@ ODESLVS_BASE::ODESLVS_BASE
   _pSAFCT(0), _nVAR(0), _nVAR0(0), _pVAR(0)
 {
   _opSARHS = _opSAQUAD = 0;
-  _DWRK = _DVAR = _Dt = _Dp = _Dy = _Dx = _Dq = _Dyq = 0;
-  //_Dydot = _Dyqdot = 0;
+  _DWRK = _DVAR = _Dt = _Dp = _Dy = _Dx = _Dq = _Dyq = _Dfp = 0;
 }
 
 ODESLVS_BASE::~ODESLVS_BASE
@@ -208,6 +206,7 @@ ODESLVS_BASE::~ODESLVS_BASE
 {
   delete[] _pVAR;
   delete[] _DVAR;
+  delete[] _Dfp;
   delete[] _DWRK;
   /* DO NOT FREE _pRHS, _pQUAD */
   for( auto it=_vSARHS.begin(); it!=_vSARHS.end(); ++it ) delete[] *it;
@@ -216,8 +215,59 @@ ODESLVS_BASE::~ODESLVS_BASE
   delete[] _opSAQUAD;
   delete[] _pSACFCT;
   delete[] _pSAFCT;
-  //delete[] _Dydot;
-  //delete[] _Dyqdot;
+}
+
+inline bool
+ODESLVS_BASE::_INI_D_SEN
+( const double*p, const unsigned nf, const unsigned nyq )
+{
+  // Size and set DAG evaluation arrays
+  BASE_DE::set_sensitivity( _nx, nyq );
+  _nVAR0 = _ny + _nx + _np + 1;
+  _nVAR  = _nVAR0 + _nq + nyq;
+  delete[] _pVAR; _pVAR = new FFVar[_nVAR];
+  delete[] _DVAR; _DVAR = new double[_nVAR];
+  delete[] _pSAFCT;  _pSAFCT  = new FFVar[_ny+_np+1+_nq];
+  for( auto it=_vSARHS.begin(); it!=_vSARHS.end(); ++it ){ delete[] *it; *it=0; }
+  for( auto it=_vSAQUAD.begin(); it!=_vSAQUAD.end(); ++it ){ delete[] *it; *it=0; }
+  _vSARHS.resize(nf); _vSAQUAD.resize(nf);
+
+  for( unsigned ix=0; ix<_nx; ix++ ) _pVAR[ix] = _pY[ix];
+  for( unsigned ix=0; ix<_nx; ix++ ) _pVAR[_ny+ix] = _pX[ix];
+  for( unsigned ip=0; ip<_np; ip++ ) _pVAR[_ny+_nx+ip] = _pP[ip];
+  _pVAR[2*_nx+_np] = (_pT? *_pT: 0. );
+  for( unsigned iq=0; iq<_nq; iq++ ) _pVAR[_ny+_nx+_np+1+iq] = _pQ?_pQ[iq]:0.;
+  for( unsigned iyq=0; iyq<nyq; iyq++ ) _pVAR[_ny+_nx+_np+1+_nq+iyq] = _pYQ?_pYQ[iyq]:0.;
+  _Dy = _DVAR;
+  _Dx = _Dy + _ny;
+  _Dp = _Dx + _nx;
+  _Dt = _Dp + _np;
+  _Dq = _Dt + 1;
+  _Dyq = _Dq + _nq;
+  for( unsigned ip=0; ip<_np; ip++ ) _Dp[ip] = p[ip];
+
+  delete[] _Dfp; _Dfp = _nf&&_np? new double[_nf*_np]: 0;
+
+  return true;
+}
+
+template <typename REALTYPE> inline void
+ODESLVS_BASE::_GET_D_SEN
+( const REALTYPE*y, const unsigned nyq, const REALTYPE*yq )
+{
+  _vec2D( y, _ny, _Dy );
+  if( yq ) _vec2D( yq, nyq, _Dyq );
+}
+
+template <typename REALTYPE> inline void
+ODESLVS_BASE::_GET_D_SEN
+( const REALTYPE*x, const REALTYPE*y, const REALTYPE*q,
+  const unsigned nyq, const REALTYPE*yq )
+{
+  _vec2D( x, _nx, _Dx );
+  _vec2D( y, _ny, _Dy );
+  if( q )  _vec2D( q, _nq, _Dq );
+  if( yq ) _vec2D( yq, nyq, _Dyq );
 }
 
 inline bool
@@ -373,60 +423,6 @@ ODESLVS_BASE::_RHS_SET_ASA
   return true;
 }
 
-inline bool
-ODESLVS_BASE::_INI_D_SEN
-( const double*p, const unsigned nf, const unsigned nyq )
-{
-  // Size and set DAG evaluation arrays
-  BASE_DE::set_sensitivity( _nx, nyq );
-  _nVAR0 = _ny + _nx + _np + 1;
-  _nVAR  = _nVAR0 + _nq + nyq;
-  delete[] _pVAR; _pVAR = new FFVar[_nVAR];
-  delete[] _DVAR; _DVAR = new double[_nVAR];
-  delete[] _pSAFCT;  _pSAFCT  = new FFVar[_ny+_np+1+_nq];
-  for( auto it=_vSARHS.begin(); it!=_vSARHS.end(); ++it ){ delete[] *it; *it=0; }
-  for( auto it=_vSAQUAD.begin(); it!=_vSAQUAD.end(); ++it ){ delete[] *it; *it=0; }
-  _vSARHS.resize(nf); _vSAQUAD.resize(nf);
-
-  for( unsigned ix=0; ix<_nx; ix++ ) _pVAR[ix] = _pY[ix];
-  for( unsigned ix=0; ix<_nx; ix++ ) _pVAR[_ny+ix] = _pX[ix];
-  for( unsigned ip=0; ip<_np; ip++ ) _pVAR[_ny+_nx+ip] = _pP[ip];
-  _pVAR[2*_nx+_np] = (_pT? *_pT: 0. );
-  for( unsigned iq=0; iq<_nq; iq++ ) _pVAR[_ny+_nx+_np+1+iq] = _pQ?_pQ[iq]:0.;
-  for( unsigned iyq=0; iyq<nyq; iyq++ ) _pVAR[_ny+_nx+_np+1+_nq+iyq] = _pYQ?_pYQ[iyq]:0.;
-  _Dy = _DVAR;
-  _Dx = _Dy + _ny;
-  _Dp = _Dx + _nx;
-  _Dt = _Dp + _np;
-  _Dq = _Dt + 1;
-  _Dyq = _Dq + _nq;
-  for( unsigned ip=0; ip<_np; ip++ ) _Dp[ip] = p[ip];
-
-  //delete[] _Dydot;  _Dydot  = new double[_ny];
-  //delete[] _Dyqdot; _Dyqdot = _nyq? new double[_nyq]: 0;
-
-  return true;
-}
-
-template <typename REALTYPE> inline void
-ODESLVS_BASE::_GET_D_SEN
-( const REALTYPE*y, const unsigned nyq, const REALTYPE*yq )
-{
-  _vec2D( y, _ny, _Dy );
-  if( yq ) _vec2D( yq, nyq, _Dyq );
-}
-
-template <typename REALTYPE> inline void
-ODESLVS_BASE::_GET_D_SEN
-( const REALTYPE*x, const REALTYPE*y, const REALTYPE*q,
-  const unsigned nyq, const REALTYPE*yq )
-{
-  _vec2D( x, _nx, _Dx );
-  _vec2D( y, _ny, _Dy );
-  if( q )  _vec2D( q, _nq, _Dq );
-  if( yq ) _vec2D( yq, nyq, _Dyq );
-}
-
 template <typename REALTYPE> inline bool
 ODESLVS_BASE::_TC_D_SEN
 ( const double t, const REALTYPE*x, REALTYPE*y )
@@ -491,7 +487,7 @@ ODESLVS_BASE::_RHS_D_SET
 {
   delete[] _opSARHS;  _opSARHS = 0;
   delete[] _opSAQUAD; _opSAQUAD = 0;
-  delete[] _DWRK;   _DWRK = 0; unsigned nWRK = 0;
+  delete[] _DWRK;     _DWRK = 0; unsigned nWRK = 0;
 
   _opSARHS  = new std::list<const FFOp*>[nf];
   for( unsigned ifct=0; ifct<nf; ifct++ ){
@@ -506,10 +502,10 @@ ODESLVS_BASE::_RHS_D_SET
     }
   }
 
-  _opJAC.clear();
-  _opJAC = _pDAG->subgraph( std::get<0>(_pJAC), std::get<3>(_pJAC) );
+  _opSAJAC.clear();
+  _opSAJAC = _pDAG->subgraph( std::get<0>(_pJAC), std::get<3>(_pJAC) );
   delete[] _DJAC; _DJAC = new double[ std::get<0>(_pJAC) ];
-  if( nWRK < _opJAC.size() )  nWRK = _opJAC.size();
+  if( nWRK < _opSAJAC.size() )  nWRK = _opSAJAC.size();
 
   _DWRK = nWRK? new double[ nWRK ]: 0;
   return true;
@@ -536,7 +532,7 @@ ODESLVS_BASE::_JAC_D_SEN
   //*_Dt = t; // current time
   //_vec2D( x, _nx, _Dx ); // current state
   //_vec2D( y, _ny, _Dy ); // set current adjoint bounds
-  _pDAG->eval( _opJAC, _DWRK, std::get<0>(_pJAC), std::get<3>(_pJAC),
+  _pDAG->eval( _opSAJAC, _DWRK, std::get<0>(_pJAC), std::get<3>(_pJAC),
                _DJAC, _nVAR0, _pVAR, _DVAR );
   for( unsigned ie=0; ie<std::get<0>(_pJAC); ++ie ){
     jac[std::get<1>(_pJAC)[ie]][std::get<2>(_pJAC)[ie]] = _DJAC[ie];
@@ -560,17 +556,16 @@ ODESLVS_BASE::_RHS_D_QUAD
 
 inline bool
 ODESLVS_BASE::_FCT_D_SEN
-( const unsigned pos_fct, const unsigned isen, const double t, 
-  double*fp )
+( const unsigned iFCT, const unsigned isen, const double t )
 {
-  if( !_nf || !fp ) return true;
+  if( !_nf ) return true;
   *_Dt = t; // set current time
-  _pIC = _vFCT.at( pos_fct );
+  _pIC = _vFCT.at( iFCT );
   for( unsigned iy=0; iy<_ny; iy++ )   _pSAFCT[iy] = _pY[iy];
   for( unsigned ip=0; ip<_np+1; ip++ ) _pSAFCT[_ny+ip] = (ip==isen? 1.: 0.); // includes time
   for( unsigned iq=0; iq<_nq; iq++ )   _pSAFCT[_nx+_np+1+iq] = _pYQ[iq];
   delete[] _pSACFCT; _pSACFCT = _pDAG->FAD( _nf, _pIC, _nx+_np+1+_nq, _pVAR+_ny, _pSAFCT );
-  _pDAG->eval( _nf, _pSACFCT, fp, _nVAR, _pVAR, _DVAR, pos_fct?true:false );
+  _pDAG->eval( _nf, _pSACFCT, _Dfp+isen*_nf, _nVAR, _pVAR, _DVAR, iFCT?true:false );
 
   return true;
 }

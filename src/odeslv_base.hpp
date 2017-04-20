@@ -43,10 +43,13 @@ class ODESLV_BASE:
   {
     //! @brief Constructors
     Results
-      ( const double tk, const unsigned nxk, const double*xk ):
-      t( tk ), nx( nxk )
+      ( const double tk, const unsigned nx1, const double*x1,
+        const unsigned nx2=0, const double*x2=0 ):
+      t( tk ), nx( nx1+nx2 )
       { X = new double[nx];
-        for( unsigned int ix=0; ix<nx; ix++ ) X[ix] = xk[ix]; }
+        unsigned int ix=0;
+        for( ; ix<nx1; ix++ ) X[ix] = x1[ix];
+        for( ; ix<nx; ix++ )  X[ix] = x2[ix-nx1]; }
     Results
       ( const Results&res ):
       t( res.t ), nx( res.nx )
@@ -95,7 +98,7 @@ class ODESLV_BASE:
   //! @brief pointer to variables for DAG evaluation
   FFVar* _pVAR;
 
-  //! @brief pointer of variable bounds for DAG evaluation
+  //! @brief pointer of variable values for DAG evaluation
   double *_DVAR;
 
   //! @brief pointer to state time **DO NOT FREE**
@@ -107,20 +110,17 @@ class ODESLV_BASE:
   //! @brief pointer to parameter interval bounds **DO NOT FREE**
   double *_Dp;
 
-  //! @brief quadrature interval bounds **DO NOT FREE**
+  //! @brief quadrature values **DO NOT FREE**
   double *_Dq;
+
+  //! @brief function values
+  double *_Df;
 
   //! @brief preallocated array for holding Jacobian evaluation results
   double* _DJAC;
 
   //! @brief preallocated array for DAG evaluation
   double* _DWRK;
-
-  //! @brief state interval bounds time derivatives
-  //double *_Dxdot;
-
-  //! @brief quadrature derivative interval bounds
-  //double *_Dqdot;
 
   //! @brief Function converting integrator array to internal format
   template <typename REALTYPE> static void _vec2D
@@ -176,7 +176,7 @@ class ODESLV_BASE:
 
   //! @brief Function to calculate the functions at intermediate/end point
   bool _FCT_D_STA
-    ( const unsigned iFCT, const double t, double*f );
+    ( const unsigned iFCT, const double t );
 
   //! @brief Record results in file <a>bndrec</a>, with accuracy of <a>iprec</a> digits
   template <typename VRES> static void _record
@@ -191,8 +191,7 @@ inline
 ODESLV_BASE::ODESLV_BASE
 ()
 : BASE_DE(), _pRHS(0), _pJAC(0,0,0,0), _pQUAD(0), _pIC(0), _nVAR(0), _nVAR0(0),
-  _pVAR(0), _DVAR(0), _Dt(0), _Dx(0), _Dp(0), _Dq(0), _DJAC(0), _DWRK(0)
-  //, _Dxdot(0), _Dqdot(0)
+  _pVAR(0), _DVAR(0), _Dt(0), _Dx(0), _Dp(0), _Dq(0), _Df(0), _DJAC(0), _DWRK(0)
 {}
 
 inline
@@ -204,11 +203,10 @@ ODESLV_BASE::~ODESLV_BASE
   delete[] std::get<1>(_pJAC);  std::get<1>(_pJAC) = 0;
   delete[] std::get<2>(_pJAC);  std::get<2>(_pJAC) = 0;
   delete[] std::get<3>(_pJAC);  std::get<3>(_pJAC) = 0;
+  delete[] _Df;
   delete[] _DJAC;
   delete[] _pVAR;
   delete[] _DVAR;   // **DO NOT FREE _Dt, _Dx, _Dp, _Dq**
-  //delete[] _Dxdot;
-  //delete[] _Dqdot;
 }
 
 template <typename REALTYPE>
@@ -240,8 +238,7 @@ ODESLV_BASE::_INI_D_STA
   _Dq = _Dt + 1;
   for( unsigned ip=0; ip<_np; ip++ ) _Dp[ip] = p[ip];
 
-  //delete[] _Dqdot; _Dqdot = _nq? new double[_nq]: 0;
-  //delete[] _Dxdot; _Dxdot = new double[_nx];
+  delete[] _Df; _Df = _nf? new double[_nf]: 0;
 
   return true;
 }
@@ -335,6 +332,7 @@ ODESLV_BASE::_RHS_D_SET
   if( _opJAC.size() > opmax )  opmax = _opJAC.size();
 
   delete[] _DWRK; _DWRK = new double[ opmax ];
+  //std::cout << "size for: " << opmax << std::endl;
   return true;
 }
 
@@ -364,6 +362,7 @@ ODESLV_BASE::_JAC_D_STA
 {
   //*_Dt = t; // current time
   //_vec2D( x, _nx, _Dx ); // current state
+  //std::cout << "need for: " << _opJAC.size() << std::endl;
   _pDAG->eval( _opJAC, _DWRK, std::get<0>(_pJAC), std::get<3>(_pJAC), _DJAC, _nVAR0, _pVAR, _DVAR );
   for( unsigned ie=0; ie<std::get<0>(_pJAC); ++ie ){
     jac[std::get<2>(_pJAC)[ie]][std::get<1>(_pJAC)[ie]] = _DJAC[ie];
@@ -377,12 +376,12 @@ ODESLV_BASE::_JAC_D_STA
 
 inline bool
 ODESLV_BASE::_FCT_D_STA
-( const unsigned iFCT, const double t, double*f )
+( const unsigned iFCT, const double t )
 {
-  if( !_nf || !f ) return true;
+  if( !_nf ) return true;
   *_Dt = t; // current time
   const FFVar* pFCT = _vFCT.at( iFCT );
-  _pDAG->eval( _nf, pFCT, f, _nVAR, _pVAR, _DVAR, iFCT?true:false );
+  _pDAG->eval( _nf, pFCT, _Df, _nVAR, _pVAR, _DVAR, iFCT?true:false );
   return true;
 }
 

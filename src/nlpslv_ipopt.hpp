@@ -230,6 +230,7 @@ public:
         MAXCPU    = options.MAXCPU;
         GRADIENT  = options.GRADIENT;
         HESSIAN   = options.HESSIAN;
+        LINSLV    = options.LINSLV;
         TESTDER   = options.TESTDER;
         DISPLAY   = options.DISPLAY;
         return *this;
@@ -329,7 +330,7 @@ public:
   const SOLUTION& solution() const
     {
       return _solution;
-    }
+    }zz
   /** @} */
 
 protected:

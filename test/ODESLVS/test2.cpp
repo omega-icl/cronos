@@ -40,25 +40,26 @@ int main()
 
   /////////////////////////////////////////////////////////////////////////
   // Compute ODE solutions
+
   mc::ODESLVS_SUNDIALS LV;
-  LV.options.JACAPPROX = mc::ODESLV_SUNDIALS::Options::CV_DIAG;//CV_DENSE;//CV_DIAG;//
-  LV.options.INTMETH   = mc::ODESLV_SUNDIALS::Options::MSBDF;//MSADAMS;//MSBDF;
-  LV.options.NMAX      = 20000;
+
+  LV.options.JACAPPROX = mc::BASE_SUNDIALS::Options::CV_DIAG;//CV_DENSE;
+  LV.options.INTMETH   = mc::BASE_SUNDIALS::Options::MSBDF;//MSADAMS;
+  LV.options.NMAX      = 0; //20000;
+  LV.options.DISPLAY   = 1;
+  LV.options.ATOL      = LV.options.ATOLB      = LV.options.ATOLS  = 1e-9;
+  LV.options.RTOL      = LV.options.RTOLB      = LV.options.RTOLS  = 1e-9;
+#if defined( SAVE_RESULTS )
+  LV.options.RESRECORD = true;
+#endif
 
   LV.set_dag( &IVP );
-  LV.set_time( &T );
+  LV.set_time( NS, tk, &T );
   LV.set_state( NX, X );
   LV.set_parameter( NP, P );
   LV.set_differential( NS, NX, RHS );
   LV.set_initial( NX, IC );
   LV.set_function( NS, NF, FCT );
-
-#if defined( SAVE_RESULTS )
-  LV.options.RESRECORD = true;
-#endif
-  LV.options.DISPLAY   = 1;
-  LV.options.ATOL      = LV.options.ATOLB      = LV.options.ATOLS  = 1e-9;
-  LV.options.RTOL      = LV.options.RTOLB      = LV.options.RTOLS  = 1e-9;
 
   double p0[NP];
   p0[0] = 6.;
@@ -67,12 +68,9 @@ int main()
     p0[2+is] = 0.5;
 
   double *xk[NS+1], f[NF], *xpk[NS+1], *lk[NS+1], fp[NF*NP];
-  for( unsigned k=0; k<=NS; k++ ){
-    xk[k]  = new double[NX];
-    xpk[k] = new double[NX*NP];
-    lk[k]  = new double[NX*NF];
-  }
-  std::ofstream direcSTA, direcSEN, direcADJ;
+
+  std::ofstream direcSTA, direcFSA[NP], direcASA[NF];
+  char fname[50];
 
   std::cout << "\nCONTINUOUS-TIME INTEGRATION:\n\n";
   LV.states( NS, tk, p0, xk, f );

@@ -1,22 +1,13 @@
 #define SAVE_RESULTS		// <- Whether to save bounds to file
-#define USE_SUNDIALS		// <- whether to use SUNDIALS or GSL integrator
 
-#ifndef USE_SUNDIALS
-  #include "odeslvs_gsl.hpp"
-  #include "interval.hpp"
-  typedef mc::Interval I;
-#else
-  #include "odeslvs_sundials.hpp"
-#endif
+#include "odeslvs_sundials.hpp"
 
 int main()
 {
   mc::FFGraph IVP;  // DAG describing the problem
 
-  double t0 = 0., tf = 6.;     // Time span
-  const unsigned int NS = 1;  // Time stages
-  double tk[NS+1]; tk[0] = t0;
-  for( unsigned k=0; k<NS; k++ ) tk[k+1] = tk[k] + (tf-t0)/(double)NS;
+  double t0 = 0., tf = 10.;     // Time span
+  const unsigned NS = 1;  // Time stages
 
   const unsigned NP = 1;  // Number of parameters
   const unsigned NX = 2;  // Number of states
@@ -62,18 +53,23 @@ int main()
 
   /////////////////////////////////////////////////////////////////////////
   // Compute ODE solutions
-#ifndef USE_SUNDIALS // GSL integrator
-  mc::ODESLVS_GSL<I> LV;
-  LV.options.INTMETH  = mc::ODESLV_GSL<I>::Options::MSBDF;
-#else // SUNDIALS integrator
+
   mc::ODESLVS_SUNDIALS LV;
-  LV.options.JACAPPROX = mc::ODESLV_SUNDIALS::Options::CV_DIAG;//CV_DENSE;//CV_DIAG;//
-  LV.options.INTMETH   = mc::ODESLV_SUNDIALS::Options::MSBDF;//MSADAMS;//MSBDF;
-  LV.options.NMAX      = 20000;
+
+  LV.options.JACAPPROX = mc::BASE_SUNDIALS::Options::CV_DIAG;//CV_DENSE;//CV_DIAG;//
+  LV.options.INTMETH   = mc::BASE_SUNDIALS::Options::MSBDF;//MSADAMS;//MSBDF;
+  LV.options.NMAX      = 2000;
+  LV.options.DISPLAY   = 1;
+  LV.options.ATOL      = LV.options.ATOLB      = LV.options.ATOLS  = 1e-9;
+  LV.options.RTOL      = LV.options.RTOLB      = LV.options.RTOLS  = 1e-9;
+  LV.options.ASACHKPT  = 200;
+#if defined( SAVE_RESULTS )
+  LV.options.RESRECORD = 100;
 #endif
 
   LV.set_dag( &IVP );
   LV.set_state( NX, X );
+  LV.set_time( t0, tf );
   LV.set_parameter( NP, P );
   LV.set_differential( NX, RHS );
   LV.set_initial( NX, IC );
@@ -82,51 +78,53 @@ int main()
   //LV.set_function( NF, FCT );
   LV.set_function( NS, NF, FCT );
 
-#if defined( SAVE_RESULTS )
-  LV.options.RESRECORD = true;
-#endif
-  LV.options.DISPLAY   = 1;
-  LV.options.ATOL      = LV.options.ATOLB      = LV.options.ATOLS  = 1e-9;
-  LV.options.RTOL      = LV.options.RTOLB      = LV.options.RTOLS  = 1e-9;
-
   double p[NP] = { 2.95 };  // Parameter values
-  double *xk[NS+1], f[NF], *xpk[NS+1], *lk[NS+1], fp[NF*NP];
-  for( unsigned k=0; k<=NS; k++ ){
-    xk[k]  = new double[NX];
-    xpk[k] = new double[NX*NP];
-    lk[k]  = new double[NX*NF];
-  }
-  std::ofstream direcSTA, direcSEN, direcADJ;
+  //double *xk[NS+1], f[NF], *xpk[NS+1], *lk[NS+1], fp[NF*NP];
+  //for( unsigned k=0; k<=NS; k++ ){
+  //  xk[k]  = new double[NX+NQ];
+  //  xpk[k] = new double[(NX+NQ)*NP];
+  //  lk[k]  = new double[(NX+NP)*NF];
+  //}
+
+  std::ofstream direcSTA, direcFSA[NP], direcASA[NF];
+  char fname[50];
 
   std::cout << "\nCONTINUOUS-TIME INTEGRATION:\n\n";
-  LV.states( NS, tk, p, xk, f );
+  LV.states( p ); //, xk, f );
 #if defined( SAVE_RESULTS )
   direcSTA.open( "test1_STA.dat", std::ios_base::out );
   LV.record( direcSTA );
 #endif
 
   std::cout << "\nCONTINUOUS-TIME INTEGRATION WITH FORWARD SENSITIVITY ANALYSIS:\n\n";
-  LV.states_FSA( NS, tk, p, xk, f, xpk, fp );
+  LV.states_FSA( p ); //, xk, f, xpk, fp );
 #if defined( SAVE_RESULTS )
   direcSTA.open( "test1_STA.dat", std::ios_base::out );
-  direcSEN.open( "test1_SEN.dat", std::ios_base::out );
-  LV.record( direcSTA, direcSEN );
+  for( unsigned i=0; i<NP; ++i ){
+    sprintf( fname, "test1_FSA%d.dat",i );  
+    direcFSA[i].open( fname, std::ios_base::out );
+  }
+  LV.record( direcSTA, direcFSA );
 #endif
 
   std::cout << "\nCONTINUOUS-TIME INTEGRATION WITH ADJOINT SENSITIVITY ANALYSIS:\n\n";
-  LV.states_ASA( NS, tk, p, xk, f, lk, fp );
+  //for( unsigned i=0; i<1000; i++ )
+  LV.states_ASA( p ); //, xk, f, lk, fp );
 #if defined( SAVE_RESULTS )
   direcSTA.open( "test1_STA.dat", std::ios_base::out );
-  direcADJ.open( "test1_ADJ.dat", std::ios_base::out );
-  LV.record( direcSTA, direcADJ );
+  for( unsigned i=0; i<NF; ++i ){
+    sprintf( fname, "test1_ASA%d.dat",i );  
+    direcASA[i].open( fname, std::ios_base::out );
+  }
+  LV.record( direcSTA, direcASA );
 #endif
 
   // cleanup
-  for( unsigned k=0; k<=NS; k++ ){
-    delete[] xk[k];
-    delete[] xpk[k];
-    delete[] lk[k];
-  }
+  //for( unsigned k=0; k<=NS; k++ ){
+  //  delete[] xk[k];
+  //  delete[] xpk[k];
+  //  delete[] lk[k];
+  //}
 
   return 0;
 }

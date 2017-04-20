@@ -1,9 +1,9 @@
 # Third-Party Libraries -->> CHANGE ACCORDINGLY <<--
-PATH_MC = /home/bchachua/Programs/Devel/MC++/MC++_2.0
+PATH_MC = $(HOME)/Programs/Devel/MC++/MC++_2.0
 LIB_MC = -llapack -lblas
 INC_MC = -I$(PATH_MC)/include -I$(PATH_MC)/src/3rdparty/fadbad++ -I$(PATH_MC)/src/3rdparty/cpplapack/include
 
-PATH_SUNDIALS = /opt/sundials-2.5.0
+PATH_SUNDIALS = /opt/sundials-2.7.0
 LIB_SUNDIALS = -L$(PATH_SUNDIALS)/lib -lsundials_cvodes -lsundials_nvecserial \
                -llapack -lblas
 INC_SUNDIALS = -I$(PATH_SUNDIALS)/include -I$(PATH_SUNDIALS)/include/sundials \
@@ -12,14 +12,14 @@ INC_SUNDIALS = -I$(PATH_SUNDIALS)/include -I$(PATH_SUNDIALS)/include/sundials \
 LIB_GSL = -lgsl -lgslcblas -lm
 INC_GSL = 
 
-FLAG_ALL = -g -Wall -std=c++11 $(FLAG_FILIB)
-#FLAG_ALL = -g -O3 -Wall -std=c++11 $(FLAG_FILIB)
+#FLAG_ALL = -g -Wall -std=c++11 $(FLAG_FILIB)
+FLAG_ALL = -g -Ofast -Wall -std=c++11 $(FLAG_FILIB)
 LIB_ALL  = $(LIB_MC) $(LIB_GSL) $(LIB_SUNDIALS) $(LIB_LAPACK)
 INC_ALL  = $(INC_MC) $(INC_GSL) $(INC_SUNDIALS) $(INC_LAPACK)
 
 #####
 
-all: test1 test2
+all: test1 test2 test3
 
 test% : test%.o
 	g++ -o $@ $< $(LIB_ALL)

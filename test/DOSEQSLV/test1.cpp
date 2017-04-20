@@ -28,24 +28,24 @@ int main()
 ////////////////////////////////////////////////////////////////////////
 {
   Ipopt::SmartPtr<mc::DOSEQSLV_IPOPT> OC = new mc::DOSEQSLV_IPOPT;
-  mc::FFGraph IVP;             // DAG of the IVP
-  OC->set_dag( &IVP );
+  mc::FFGraph DAG;             // DAG of the DAG
+  OC->set_dag( &DAG );
 
-  const unsigned int NS = 100;   // Time stages
+  const unsigned int NS = 50;   // Time stages
   double tk[NS+1]; tk[0] = 0.;
   for( unsigned k=0; k<NS; k++ ) tk[k+1] = tk[k] + 1./(double)NS;
-  mc::FFVar T; T.set( &IVP );  // Time
-  //OC->set_time( &T );
+  //mc::FFVar T; T.set( &DAG );  // Time
+  OC->set_time( NS, tk ); //,&T );
 
   const unsigned NP = 2+NS;    // Number of parameters
   mc::FFVar P[NP];             // Parameters
-  for( unsigned int i=0; i<NP; i++ ) P[i].set( &IVP );
+  for( unsigned int i=0; i<NP; i++ ) P[i].set( &DAG );
   mc::FFVar TF = P[0], X10 = P[1], *U = P+2;
   OC->set_parameter( NP, P );
 
   const unsigned NX = 2;       // Number of states
   mc::FFVar X[NX];             // States
-  for( unsigned int i=0; i<NX; i++ ) X[i].set( &IVP );
+  for( unsigned int i=0; i<NX; i++ ) X[i].set( &DAG );
   OC->set_state( NX, X );
 
   mc::FFVar RHS[NX*NS];        // Right-hand side function
@@ -61,12 +61,9 @@ int main()
   IC[1] = X10;
   OC->set_initial( NX, IC );
 
-  std::map<unsigned,mc::FFVar> OBJ; OBJ.insert( std::make_pair( 0, TF ) );
-  OC->set_obj( mc::DOSEQSLV_IPOPT::MIN, OBJ );         // objective
-  std::map<unsigned,mc::FFVar> CTR1; CTR1.insert( std::make_pair( NS-1, X[0]-1. ) );
-  OC->add_ctr( mc::DOSEQSLV_IPOPT::EQ,  CTR1 );        // constraint #1
-  std::map<unsigned,mc::FFVar> CTR2; CTR2.insert( std::make_pair( NS-1, X[1] ) );
-  OC->add_ctr( mc::DOSEQSLV_IPOPT::EQ,  CTR2 );        // constraint #2
+  OC->set_obj( mc::DOSEQSLV_IPOPT::MIN, TF );                              // objective
+  OC->add_ctr( mc::DOSEQSLV_IPOPT::EQ, std::make_pair( NS-1, X[0]-1. ) );  // constraint #1
+  OC->add_ctr( mc::DOSEQSLV_IPOPT::EQ, std::make_pair( NS-1, X[1] ) );     // constraint #2
 
   typedef mc::Interval I;
   I Ip[NP];
@@ -82,21 +79,34 @@ int main()
   OC->options.TESTDER   = false;
   OC->options.CVTOL     = 1e-7;
   OC->options.GRADIENT  = mc::DOSEQSLV_IPOPT::Options::BACKWARD; //FORWARD; //BACKWARD;
-  OC->options.INTMETH   = mc::DOSEQSLV_IPOPT::Options::MSBDF;   // MSADAMS;
-  OC->options.JACAPPROX = mc::DOSEQSLV_IPOPT::Options::CV_DENSE;//CV_DIAG;
-  OC->options.NMAX      = 20000;
-  OC->options.ATOL      = OC->options.ATOLB      = OC->options.ATOLS  = 1e-9;
-  OC->options.RTOL      = OC->options.RTOLB      = OC->options.RTOLS  = 1e-9;
+  OC->options.ODESLVS.INTMETH   = mc::BASE_SUNDIALS::Options::MSBDF; // MSADAMS;
+  OC->options.ODESLVS.JACAPPROX = mc::BASE_SUNDIALS::Options::CV_DENSE; //CV_DIAG;
+  OC->options.ODESLVS.NMAX = 0;
+  OC->options.ODESLVS.DISPLAY = 0;
+  OC->options.ODESLVS.ATOL = OC->options.ODESLVS.ATOLB = OC->options.ODESLVS.ATOLS = 1e-9;
+  OC->options.ODESLVS.RTOL = OC->options.ODESLVS.RTOLB = OC->options.ODESLVS.RTOLS = 1e-9;
 
   OC->setup();
-  Ipopt::ApplicationReturnStatus status = OC->solve( NS, tk, Ip, p0 );
+  OC->solve( Ip, p0 );
 
-  if( status == Ipopt::Solve_Succeeded ){
-    std::cout << "OC (LOCAL) SOLUTION: " << std::endl;
-    std::cout << "  f* = " << OC->solution().f << std::endl;
-    for( unsigned int ip=0; ip<NP; ip++ )
-      std::cout << "  p*(" << ip << ") = " << OC->solution().p[ip] << std::endl;
+  // Piecewise constant optimal control profile
+  std::ofstream direcCON( "test1_CON.dat", std::ios_base::out );
+  direcCON << std::scientific << std::setprecision(5);
+  double t = 0.;
+  direcCON << t << "  " << OC->solution().p[2] << std::endl;
+  for( unsigned int is=0; is<NS; is++ ){
+    t += OC->solution().p[0]/NS;
+    direcCON << t << "  " << OC->solution().p[2+is] << std::endl;
   }
+  direcCON.close();
+
+  // Optimal response trajectories
+  OC->options.ODESLVS.DISPLAY   = 1;
+  OC->options.ODESLVS.RESRECORD = 20;
+  OC->states( OC->solution().p );
+  std::ofstream direcSTA( "test1_STA.dat", std::ios_base::out );
+  OC->record( direcSTA );
+  direcSTA.close();
 
   return 0;
 }

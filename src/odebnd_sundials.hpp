@@ -138,7 +138,7 @@ public:
   {
     //! @brief Constructor
     Options():
-      BASE_SUNDIALS::Options(), WRAPMIT(ELLIPS), ORDMIT(2), PMOPT(typename PMT::Options()),
+      BASE_SUNDIALS::Options(), WRAPMIT(ELLIPS), ORDMIT(-2), PMOPT(typename PMT::Options()),
       QSCALE(1e-5), PMNOREM(false), USEINV(true), DMAX(1e20), DISPLAY(1), 
       RESRECORD(false), ODESLV(typename ODESLV_SUNDIALS::Options())
       {}
@@ -166,7 +166,7 @@ public:
     };
     //! @brief Wrapping mitigation strategy
     WRAPPING_STRATEGY WRAPMIT;
-    //! @brief Option for wrapping mitigation strategy with ellipsoidal bounder (Default: 2)
+    //! @brief Option for wrapping mitigation strategy with ellipsoidal bounder (Default: -2)
     int ORDMIT;
     //! @brief Options of internal polynomial model arithmetic for wrapping mitigation
     typename PMT::Options PMOPT;
@@ -217,33 +217,27 @@ public:
 
   //! @brief Computes interval enclosure of reachable set of parametric ODEs
   STATUS bounds
-    ( const unsigned ns, const double*tk, const T*Ip, T**Ixk,
-      T*If, std::ostream&os=std::cout );
+    ( const T*Ip, T**Ixk, T*If, std::ostream&os=std::cout );
 
   //! @brief Computes Hausdorff distance between interval enclosure and actual reachable set of parametric ODEs, using parameter sampling
   STATUS hausdorff
-    ( const unsigned ns, const double*tk, const T*Ip, double**Hxk,
-      double*Hf, const unsigned nsamp, std::ostream&os=std::cout );
+    ( const T*Ip, double**Hxk, double*Hf, const unsigned nsamp, std::ostream&os=std::cout );
 
   //! @brief Computes polynomial model enclosure of reachable set of parametric ODEs
   STATUS bounds
-    ( const unsigned ns, const double*tk, const PVT*PMp, PVT**PMxk,
-      PVT*PMf, std::ostream&os=std::cout );
+    ( const PVT*PMp, PVT**PMxk, PVT*PMf, std::ostream&os=std::cout );
 
   //! @brief Computes polynomial model enclosure of reachable set of parametric ODEs
   STATUS bounds
-    ( const unsigned ns, const double*tk, const PVT*PMp, PVT**PMxk,
-      E*ERxk, PVT*PMf, std::ostream&os=std::cout );
+    ( const PVT*PMp, PVT**PMxk, E*ERxk, PVT*PMf, std::ostream&os=std::cout );
 
   //! @brief Computes Hausdorff distance between polynomial model remainder enclosure and actual remainder function range, using parameter sampling
   STATUS hausdorff
-    ( const unsigned ns, const double*tk, const PVT*PMp, double**Hxk,
-      double*Hf, const unsigned nsamp, std::ostream&os=std::cout );
+    ( const PVT*PMp, double**Hxk, double*Hf, const unsigned nsamp, std::ostream&os=std::cout );
 
  //! @brief Compute approximate interval enclosure of reachable set of parametric ODEs using parameter sampling
   STATUS bounds
-    ( const unsigned ns, const double*tk, const T*Ip, T**Ixk,
-      T*If, const unsigned nsamp, std::ostream&os=std::cout );
+    ( const T*Ip, T**Ixk, T*If, const unsigned nsamp, std::ostream&os=std::cout );
 
   //! @brief Record results in file <a>bndrec</a>, with accuracy of <a>iprec</a> digits
   void record
@@ -287,8 +281,7 @@ protected:
 
   //! @brief Propagate state/quadrature interval bounds forward in time through every time stages
   virtual STATUS _bounds
-    ( const unsigned ns, const double*tk, const T*Ip, T**Ixk,
-      T*If, const bool store, std::ostream&os );
+    ( const T*Ip, T**Ixk, T*If, const bool store, std::ostream&os );
 
   //! @brief Function to initialize GSL for state polynomial models
   bool _INI_PM_STA
@@ -308,8 +301,7 @@ protected:
 
   //! @brief Propagate state/quadrature polynomial models forward in time through every time stages
   virtual STATUS _bounds
-    ( const unsigned ns, const double*tk, const PVT*PMp, PVT**PMxk,
-      E*ERxk, PVT*PMf, const bool store, std::ostream&os );
+    ( const PVT*PMp, PVT**PMxk, E*ERxk, PVT*PMf, const bool store, std::ostream&os );
  
   //! @brief Private methods to block default compiler methods
   ODEBND_SUNDIALS(const ODEBND_SUNDIALS&);
@@ -322,8 +314,7 @@ template <typename T, typename PMT, typename PVT>
 template <typename T, typename PMT, typename PVT> inline
 ODEBND_SUNDIALS<T,PMT,PVT>::ODEBND_SUNDIALS
 ()
-: BASE_DE(), BASE_SUNDIALS(), ODEBND_BASE<T,PMT,PVT>(), _cv_mem(0), _cv_flag(0),
-  _Nx(0), _Nq(0), _Nf(0), _NTOLx(0), pODESLV()
+: _cv_mem(0), _cv_flag(0), _Nx(0), _Nq(0), _Nf(0), _NTOLx(0)
 {}
 
 template <typename T, typename PMT, typename PVT> inline
@@ -567,16 +558,15 @@ ODEBND_SUNDIALS<T,PMT,PVT>::MC_CVQUADI__
 template <typename T, typename PMT, typename PVT>
 inline typename ODEBND_SUNDIALS<T,PMT,PVT>::STATUS
 ODEBND_SUNDIALS<T,PMT,PVT>::_bounds
-( const unsigned ns, const double*tk, const T*Ip, T**Ixk, T*If,
-  const bool store, std::ostream&os )
+( const T*Ip, T**Ixk, T*If, const bool store, std::ostream&os )
 {
   // Check size
-  if( !tk || !Ip || !Ixk || (_nf && !If) ) return FATAL;
+  if( !Ip || !Ixk || (_nf && !If) ) return FATAL;
 
   try{
     // Initialize trajectory integration
     if( !_INI_I_STA( _np, Ip ) ) return FATAL;
-    _t = tk[0];
+    _t = _dT[0];
 
     // Bounds on initial states/quadratures
     if( !_IC_I_SET( options )
@@ -598,17 +588,17 @@ ODEBND_SUNDIALS<T,PMT,PVT>::_bounds
       _print_interm( _t, _nx, Ixk[0], "x", os );
     }
     if( options.RESRECORD )
-      results_sta.push_back( Results( tk[0], _nx, Ixk[0] ) );
+      results_sta.push_back( Results( _dT[0], _nx, Ixk[0] ) );
 
     // Integrate ODEs through each stage using SUNDIALS
     pODEBND = this;
     if( !_INI_CVODE( MC_CVRHSI__, MC_CVQUADI__ ) )
       { _END_STA(); return FATAL; }
 
-    for( _istg=0; _istg<ns; _istg++ ){
+    for( _istg=0; _istg<_nsmax; _istg++ ){
       // Bounds on state discontinuities (if any) at stage times
       // and integrator reinitialization (if applicable)
-      _pos_ic = ( _vIC.size()>=ns? _istg:0 );
+      _pos_ic = ( _vIC.size()>=_nsmax? _istg:0 );
       if( _pos_ic
        && ( !_CC_I_SET( options, _pos_ic )
          || !_CC_I_STA( options, _t, NV_DATA_S( _Nx ) )
@@ -627,14 +617,14 @@ ODEBND_SUNDIALS<T,PMT,PVT>::_bounds
         { _END_STA(); return FATAL; }
 
       // integrate till end of time stage
-      _cv_flag = CVodeSetStopTime( _cv_mem, tk[_istg+1] );
+      _cv_flag = CVodeSetStopTime( _cv_mem, _dT[_istg+1] );
       if( _check_cv_flag(&_cv_flag, "CVodeSetStopTime", 1) )
         { _END_STA(); return FATAL; }
-      while( _t < tk[_istg+1] ){
+      while( _t < _dT[_istg+1] ){
         if( !store )
-          _cv_flag = CVode( _cv_mem, tk[_istg+1], _Nx, &_t, CV_ONE_STEP );
+          _cv_flag = CVode( _cv_mem, _dT[_istg+1], _Nx, &_t, CV_ONE_STEP );
         else
-          _cv_flag = CVodeF( _cv_mem, tk[_istg+1], _Nx, &_t, CV_ONE_STEP, &_nchk );
+          _cv_flag = CVodeF( _cv_mem, _dT[_istg+1], _Nx, &_t, CV_ONE_STEP, &_nchk );
         if( _check_cv_flag(&_cv_flag, store?"CVodeF":"CVode", 1)
          || (options.NMAX && stats_sta.numSteps > options.NMAX)
          || _diam( _nx, _Ix ) > options.DMAX )
@@ -663,13 +653,13 @@ ODEBND_SUNDIALS<T,PMT,PVT>::_bounds
       if( options.DISPLAY >= 1 )
         _print_interm( _t, _nx, Ixk[_istg+1], "x", os );
       if( options.RESRECORD )
-        results_sta.push_back( Results( tk[_istg+1], _nx, Ixk[_istg+1] ) );
+        results_sta.push_back( Results( _dT[_istg+1], _nx, Ixk[_istg+1] ) );
 
       // Add intermediate function terms
       _GET_I_STA( options, NV_DATA_S(_Nx), _nq && _Nq? NV_DATA_S(_Nq): 0 );
-      _pos_fct = ( _vFCT.size()>=ns? _istg:0 );
+      _pos_fct = ( _vFCT.size()>=_nsmax? _istg:0 );
       if( _nf
-       && (_vFCT.size()>=ns || _istg==ns-1)
+       && (_vFCT.size()>=_nsmax || _istg==_nsmax-1)
        && !_FCT_I_STA( options, _pos_fct, _t, NV_DATA_S( _Nf ), If ) )
         { _END_STA(); return FATAL; }
     }
@@ -693,13 +683,10 @@ ODEBND_SUNDIALS<T,PMT,PVT>::_bounds
 }
 
 //! @fn template <typename T, typename PMT, typename PVT> inline typename ODEBND_SUNDIALS<T,PMT,PVT>::STATUS ODEBND_SUNDIALS<T,PMT,PVT>::bounds(
-//! const unsigned ns, const double*tk, const T*Ip, T**Ixk, T*If,
-//! std::ostream&os=std::cout )
+//! const T*Ip, T**Ixk, T*If, std::ostream&os=std::cout )
 //!
 //! This function computes an interval enclosure of the reachable set of 
 //! the parametric ODEs defined in IVP using equally spaced samples:
-//!   - <a>ns</a> [input] number of time stages
-//!   - <a>tk</a> [input] stage times, including the initial time
 //!   - <a>Ip</a> [input] interval parameter set
 //!   - <a>Ixk</a> [output] interval state enclosures at stage times
 //!   - <a>If</a> [output] interval function enclosures
@@ -709,20 +696,16 @@ ODEBND_SUNDIALS<T,PMT,PVT>::_bounds
 template <typename T, typename PMT, typename PVT>
 inline typename ODEBND_SUNDIALS<T,PMT,PVT>::STATUS
 ODEBND_SUNDIALS<T,PMT,PVT>::bounds
-( const unsigned ns, const double*tk, const T*Ip, T**Ixk, T*If,
-  std::ostream&os )
+( const T*Ip, T**Ixk, T*If, std::ostream&os )
 {
-  return _bounds( ns, tk, Ip, Ixk, If, false, os );
+  return _bounds( Ip, Ixk, If, false, os );
 }
 
 //! @fn template <typename T, typename PMT, typename PVT> inline typename ODEBND_SUNDIALS<T,PMT,PVT>::STATUS ODEBND_SUNDIALS<T,PMT,PVT>::hausdorff(
-//! const unsigned ns, const double*tk, const T*Ip, double**Hxk,
-//! const unsigned nsamp, std::ostream&os )
+//! const T*Ip, double**Hxk, const unsigned nsamp, std::ostream&os )
 //!
 //! This function computes the Hausdorff distance between the interval enclosure
 //! and the exact reachable set projected onto each variable:
-//!   - <a>ns</a>    [input]  number of time stages
-//!   - <a>tk</a>    [input]  stage times, including the initial time
 //!   - <a>Ip</a>    [input]  interval parameter set
 //!   - <a>Hxk</a>   [output] Hausdorff distance between the interval enclosure
 //!                           and the exact reachable set projected onto each
@@ -734,10 +717,9 @@ ODEBND_SUNDIALS<T,PMT,PVT>::bounds
 template <typename T, typename PMT, typename PVT>
 inline typename ODEBND_SUNDIALS<T,PMT,PVT>::STATUS
 ODEBND_SUNDIALS<T,PMT,PVT>::hausdorff
-( const unsigned ns, const double*tk, const T*Ip, double**Hxk,
-  double*Hf, const unsigned nsamp, std::ostream&os )
+( const T*Ip, double**Hxk, double*Hf, const unsigned nsamp, std::ostream&os )
 {
-  return _hausdorff( ns, tk, Ip, Hxk, Hf, *this, nsamp, os )? NORMAL: FAILURE;
+  return _hausdorff( Ip, Hxk, Hf, *this, nsamp, os )? NORMAL: FAILURE;
 }
 
 template <typename T, typename PMT, typename PVT> inline bool
@@ -832,16 +814,15 @@ ODEBND_SUNDIALS<T,PMT,PVT>::MC_CVQUADPM__
 template <typename T, typename PMT, typename PVT>
 inline typename ODEBND_SUNDIALS<T,PMT,PVT>::STATUS
 ODEBND_SUNDIALS<T,PMT,PVT>::_bounds
-( const unsigned ns, const double*tk, const PVT*PMp, PVT**PMxk,
-  E*ERxk, PVT*PMf, const bool store, std::ostream&os )
+( const PVT*PMp, PVT**PMxk, E*ERxk, PVT*PMf, const bool store, std::ostream&os )
 {
   // Check arguments
-  if( !tk || !PMxk || !PMp || (_nf && !PMf) ) return FATAL;
+  if( !PMxk || !PMp || (_nf && !PMf) ) return FATAL;
 
   try{
     // Initialize trajectory integration
     if( !_INI_PM_STA( _np, PMp ) ) return FATAL;
-    _t = tk[0];
+    _t = _dT[0];
 
     // Bounds on initial states/quadratures
     if( !_IC_PM_SET( options )
@@ -863,17 +844,17 @@ ODEBND_SUNDIALS<T,PMT,PVT>::_bounds
     if( options.DISPLAY >= 1 )
       _print_interm( _t, _nx, PMxk[0], "x", os );
     if( options.RESRECORD )
-      results_sta.push_back( Results( tk[0], _nx, PMxk[0] ) );
+      results_sta.push_back( Results( _dT[0], _nx, PMxk[0] ) );
 
     // Integrate ODEs through each stage using SUNDIALS
     pODEBND = this;
     if( !_INI_CVODE( MC_CVRHSPM__, MC_CVQUADPM__ ) )
       { _END_STA(); return FATAL; }
 
-    for( _istg=0; _istg<ns; _istg++ ){
+    for( _istg=0; _istg<_nsmax; _istg++ ){
       // Bounds on state discontinuities (if any) at stage times
       // and integrator reinitialization (if applicable)
-      _pos_ic = ( _vIC.size()>=ns? _istg:0 );
+      _pos_ic = ( _vIC.size()>=_nsmax? _istg:0 );
       if( _pos_ic
        && ( !_CC_PM_SET( options, _pos_ic )
          || !_CC_PM_STA( options, _t, NV_DATA_S( _Nx ) )
@@ -892,14 +873,14 @@ ODEBND_SUNDIALS<T,PMT,PVT>::_bounds
         { _END_STA(); return FATAL; }
 
       // integrate till end of time stage
-      _cv_flag = CVodeSetStopTime( _cv_mem, tk[_istg+1] );
+      _cv_flag = CVodeSetStopTime( _cv_mem, _dT[_istg+1] );
       if( _check_cv_flag(&_cv_flag, "CVodeSetStopTime", 1) )
         { _END_STA(); return FATAL; }
-      while( _t < tk[_istg+1] ){
+      while( _t < _dT[_istg+1] ){
         if( !store )
-          _cv_flag = CVode( _cv_mem, tk[_istg+1], _Nx, &_t, CV_ONE_STEP );
+          _cv_flag = CVode( _cv_mem, _dT[_istg+1], _Nx, &_t, CV_ONE_STEP );
         else
-          _cv_flag = CVodeF( _cv_mem, tk[_istg+1], _Nx, &_t, CV_ONE_STEP, &_nchk );
+          _cv_flag = CVodeF( _cv_mem, _dT[_istg+1], _Nx, &_t, CV_ONE_STEP, &_nchk );
         if( _check_cv_flag(&_cv_flag, store?"CVodeF":"CVode", 1)
          || (options.NMAX && stats_sta.numSteps > options.NMAX)
          || _diam( _nx, _PMx ) > options.DMAX
@@ -930,12 +911,12 @@ ODEBND_SUNDIALS<T,PMT,PVT>::_bounds
       if( options.DISPLAY >= 1 )
         _print_interm( _t, _nx, PMxk[_istg+1], "x", os );
       if( options.RESRECORD )
-        results_sta.push_back( Results( tk[_istg+1], _nx, PMxk[_istg+1] ) );
+        results_sta.push_back( Results( _dT[_istg+1], _nx, PMxk[_istg+1] ) );
 
       // Add intermediate function terms
-      _pos_fct = ( _vFCT.size()>=ns? _istg:0 );
+      _pos_fct = ( _vFCT.size()>=_nsmax? _istg:0 );
       if( _nf
-       && (_vFCT.size()>=ns || _istg==ns-1)
+       && (_vFCT.size()>=_nsmax || _istg==_nsmax-1)
        && !_FCT_PM_STA( _pos_fct, _t, PMf ) )
         { _END_STA(); return FATAL; }
     }
@@ -959,13 +940,10 @@ ODEBND_SUNDIALS<T,PMT,PVT>::_bounds
 }
 
 //! @fn template <typename T, typename PMT, typename PVT> inline typename ODEBND_SUNDIALS<T,PMT,PVT>::STATUS ODEBND_SUNDIALS<T,PMT,PVT>::bounds(
-//! const unsigned ns, const double*tk, const PVT*PMp, PVT**PMxk, 
-//! PVT*PMf, std::ostream&os=std::cout )
+//! const PVT*PMp, PVT**PMxk, PVT*PMf, std::ostream&os=std::cout )
 //!
 //! This function computes an enclosure of the reachable set of the parametric ODEs
 //! using propagation of polynomial models with convex remainders (intervals, ellipsoids):
-//!   - <a>ns</a>   [input]  number of time stages
-//!   - <a>tk</a>   [input]  stage times, including the initial time
 //!   - <a>PMp</a>  [input]  polynomial model of parameter set
 //!   - <a>PMxk</a> [output] polynomial model of state varibles at stage times
 //!   - <a>PMf</a>  [output] polynomial model of state-dependent functions
@@ -975,20 +953,16 @@ ODEBND_SUNDIALS<T,PMT,PVT>::_bounds
 template <typename T, typename PMT, typename PVT>
 inline typename ODEBND_SUNDIALS<T,PMT,PVT>::STATUS
 ODEBND_SUNDIALS<T,PMT,PVT>::bounds
-( const unsigned ns, const double*tk, const PVT*PMp, PVT**PMxk,
-  PVT*PMf, std::ostream&os )
+( const PVT*PMp, PVT**PMxk, PVT*PMf, std::ostream&os )
 {
-  return _bounds( ns, tk, PMp, PMxk, 0, PMf, false, os );
+  return _bounds( PMp, PMxk, 0, PMf, false, os );
 }
 
 //! @fn template <typename T, typename PMT, typename PVT> inline typename ODEBND_SUNDIALS<T,PMT,PVT>::STATUS ODEBND_SUNDIALS<T,PMT,PVT>::bounds(
-//! const unsigned ns, const double*tk, const PVT*PMp, PVT**PMxk, 
-//! PVT*PMf, std::ostream&os=std::cout )
+//! const PVT*PMp, PVT**PMxk, E*ERxk, PVT*PMf, std::ostream&os=std::cout )
 //!
 //! This function computes an enclosure of the reachable set of the parametric ODEs
 //! using propagation of polynomial models with convex remainders (intervals, ellipsoids):
-//!   - <a>ns</a>   [input]  number of time stages
-//!   - <a>tk</a>   [input]  stage times, including the initial time
 //!   - <a>PMp</a>  [input]  polynomial model of parameter set
 //!   - <a>PMxk</a> [output] polynomial model of state variables at stage times
 //!   - <a>ERxk</a> [output] ellipsoidal remainder of state variables at stage times (only if ellipsoidal bounder is selected)
@@ -999,54 +973,48 @@ ODEBND_SUNDIALS<T,PMT,PVT>::bounds
 template <typename T, typename PMT, typename PVT>
 inline typename ODEBND_SUNDIALS<T,PMT,PVT>::STATUS
 ODEBND_SUNDIALS<T,PMT,PVT>::bounds
-( const unsigned ns, const double*tk, const PVT*PMp, PVT**PMxk,
-  E*ERxk, PVT*PMf, std::ostream&os )
+( const PVT*PMp, PVT**PMxk, E*ERxk, PVT*PMf, std::ostream&os )
 {
-  return _bounds( ns, tk, PMp, PMxk, ERxk, PMf, false, os );
+  return _bounds( PMp, PMxk, ERxk, PMf, false, os );
 }
 
 //! @fn template <typename T, typename PMT, typename PVT> inline typename ODEBND_SUNDIALS<T,PMT,PVT>::STATUS ODEBND_SUNDIALS<T,PMT,PVT>::hausdorff(
-//! const unsigned ns, const double*tk, const PVT*PMp, double**Hxk,
-//! const unsigned nsamp, std::ostream&os=std::cout )
+//! const PVT*PMp, double**Hxk, double*Hf, const unsigned nsamp, std::ostream&os=std::cout )
 //!
 //! This function computes the Hausdorff distance between the polynomial model
 //! remainder and the actual (sampled) range of the remainder function
 //! in projection onto each variable and for each stage time
 //! remainder and the actual range of the remainder function:
-//!   - <a>ns</a>    [input]  number of time stages
-//!   - <a>tk</a>    [input]  stage times, including the initial time
 //!   - <a>PMp</a>   [input]  polynomial model of parameter set
 //!   - <a>Hxk</a>   [output] Hausdorff distance between the polynomial model
 //!                           remainder and the actual (sampled) range of the
-//!                           remainder function, at stage times
-//!   - <a>traj</a>  [input]  trajectory ODE integrator
+//!                           remainder term for states at stage times
+//!   - <a>Hf</a>    [output] Hausdorff distance between the polynomial model
+//!                           remainder and the actual (sampled) range of the
+//!                           remainder term for state-dependent functions
 //!   - <a>nsamp</a> [input]  number of samples for each parameter
 //!   - <a>os</a>    [input]  output stream [default: std::cout]
 
 template <typename T, typename PMT, typename PVT>
 inline typename ODEBND_SUNDIALS<T,PMT,PVT>::STATUS
 ODEBND_SUNDIALS<T,PMT,PVT>::hausdorff
-( const unsigned ns, const double*tk, const PVT*PMp, double**Hxk,
-  double*Hf, const unsigned nsamp, std::ostream&os )
+( const PVT*PMp, double**Hxk, double*Hf, const unsigned nsamp, std::ostream&os )
 {
   pODESLV.set( *this );
   pODESLV.options = options.ODESLV;
-  return _hausdorff( ns, tk, PMp, Hxk, Hf, *this, pODESLV, nsamp, os )?
+  return _hausdorff( PMp, Hxk, Hf, *this, pODESLV, nsamp, os )?
          NORMAL: FAILURE;
 }
 
 //! @fn template <typename T, typename PMT, typename PVT> inline typename ODEBND_SUNDIALS<T,PMT,PVT>::STATUS ODEBND_SUNDIALS<T,PMT,PVT>::bounds(
-//! const unsigned ns, const double*tk, const T*Ip, T**Ixk, T*q, T*f,
-//! const unsigned nsamp, std::ostream&os=std::cout )
+//! const T*Ip, T**Ixk, T*If, const unsigned nsamp, std::ostream&os=std::cout )
 //!
 //! This function computes projections of an inner-approximation enclosure of
 //! the reachable set of the parametric ODEs using sampling and continuous-time
 //! integration:
-//!   - <a>ns</a>    [input] number of time stages
-//!   - <a>tk</a>    [input] stage times, including the initial time
 //!   - <a>Ip</a>    [input] interval parameter set
 //!   - <a>Ixk</a>   [output] approximate interval state enclosures at stage times
-//!   - <a>If</a>    [output] approximate function enclosures
+//!   - <a>If</a>    [output] approximate state-dependent function enclosures
 //!   - <a>nsamp</a> [input] number of samples for each parameter
 //!   - <a>os</a>    [input] output stream
 //! .
@@ -1054,28 +1022,27 @@ ODEBND_SUNDIALS<T,PMT,PVT>::hausdorff
 template <typename T, typename PMT, typename PVT>
 inline typename ODEBND_SUNDIALS<T,PMT,PVT>::STATUS
 ODEBND_SUNDIALS<T,PMT,PVT>::bounds
-( const unsigned ns, const double*tk, const T*Ip, T**Ixk,
-  T*If, const unsigned nsamp, std::ostream&os )
+( const T*Ip, T**Ixk, T*If, const unsigned nsamp, std::ostream&os )
 {
   // Sample inner approximation
   STATUS flag = NORMAL;
   pODESLV.set( *this );
   pODESLV.options = options.ODESLV;
-  if( !_bounds( ns, tk, Ip, Ixk, If, pODESLV, nsamp, os ) )
+  if( !_bounds( Ip, Ixk, If, pODESLV, nsamp, os ) )
     flag = FAILURE;
 
   // Display results
   if( options.DISPLAY >= 1 ){
-    for( unsigned is=0; Ixk && is<=ns; is++ )
-      _print_interm( tk[is], _nx, Ixk[is], "x", os );
+    for( unsigned is=0; Ixk && is<=_nsmax; is++ )
+      _print_interm( _dT[is], _nx, Ixk[is], "x", os );
     if( If ) _print_interm( _nf, If, "f", os );
   }
 
   // Record intermediate results
   results_sta.clear();
   if( options.RESRECORD )
-    for( unsigned is=0; Ixk && is<=ns; is++ )
-      results_sta.push_back( Results( tk[is], _nx, Ixk[is] ) );
+    for( unsigned is=0; Ixk && is<=_nsmax; is++ )
+      results_sta.push_back( Results( _dT[is], _nx, Ixk[is] ) );
   
   return flag;
 }

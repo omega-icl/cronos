@@ -592,39 +592,35 @@ class ODEBND_BASE:
 
   //! @brief Computes inner bounds approximation using parameter sampling
   template <typename ODESLV> inline bool _bounds
-    ( const unsigned ns, const double*tk, const T*Ip, T**Ixk,
-      T*If, ODESLV&traj, const unsigned nsamp, std::ostream&os );
+    ( const T*Ip, T**Ixk, T*If, ODESLV&traj, const unsigned nsamp, std::ostream&os );
 
   //! @brief Recursive function computing bounds on solutions of IVP in ODEs using sampling
   template <typename ODESLV> inline bool _sampling
-    ( const unsigned ns, const double*tk, const T*Ip, T**Ixk, T*If,
-      ODESLV&traj, const unsigned nsamp, unsigned* vsamp, const unsigned ipar,
-      double*p, double**xk, double*f, std::ostream&os );
+    ( const T*Ip, T**Ixk, T*If, ODESLV&traj, const unsigned nsamp, unsigned* vsamp,
+      const unsigned ipar, double*p, double**xk, double*f, std::ostream&os );
 
   //! @brief Computes Hausdorff distance between interval enclosure and actual reachable set of parametric ODEs, using parameter sampling
   template <typename ODEBND> inline bool _hausdorff
-    ( const unsigned ns, const double*tk, const T*Ip, double**Hxk,
-      double*Hf, ODEBND&dineq, const unsigned nsamp,
+    ( const T*Ip, double**Hxk, double*Hf, ODEBND&dineq, const unsigned nsamp,
       std::ostream&os=std::cout );
 
   //! @brief Computes Hausdorff distance between polynomial model remainder enclosure and actual remainder function range, using parameter sampling
   template <typename ODEBND, typename ODESLV> inline bool _hausdorff
-    ( const unsigned ns, const double*tk, const PVT*PMp, double**Hxk,
-      double*Hf, ODEBND&dineq, ODESLV&traj, const unsigned nsamp,
-      std::ostream&os=std::cout );
+    ( const PVT*PMp, double**Hxk, double*Hf, ODEBND&dineq, ODESLV&traj,
+      const unsigned nsamp, std::ostream&os=std::cout );
 
   //! @brief Function to bound the remainder function relative to a polynomial model at sampling points -- return value is status
   template<typename ODESLV> bool _remainders
-    ( const unsigned ns, const double*tk, const unsigned np, const T*Ip,
-      const PVT*const*PMxk, const PVT*PMf, T**Rxk, T*Rf,
-      ODESLV&traj, const unsigned nsamp, std::ostream&os=std::cout );
+    ( const unsigned ns, const unsigned np, const T*Ip, const PVT*const*PMxk,
+      const PVT*PMf, T**Rxk, T*Rf, ODESLV&traj, const unsigned nsamp,
+      std::ostream&os=std::cout );
 
   //! @brief Recrusive function computing bounds on errors between solutions of IVP in ODEs and polynomial approximant using sampling
   template<typename ODESLV> bool _remainders
-    ( const unsigned ns, const double*tk, const unsigned np, const T*Ip,
-      const PVT*const*PMxk, const PVT*PMf, T**Rxk, T*Rf,
-      ODESLV&traj, const unsigned nsamp, unsigned* vsamp, const unsigned ip,
-      double*p, double**xk, double*f, std::ostream&os );
+    ( const unsigned ns, const unsigned np, const T*Ip, const PVT*const*PMxk,
+      const PVT*PMf, T**Rxk, T*Rf, ODESLV&traj, const unsigned nsamp,
+      unsigned* vsamp, const unsigned ip, double*p, double**xk, double*f,
+      std::ostream&os );
 
   //! @brief Position in symmetric matrix stored in lower triangular form
   static unsigned _ndxLT
@@ -2651,8 +2647,7 @@ ODEBND_BASE<T,PMT,PVT>::_RHS_PM_SET
 template <typename T, typename PMT, typename PVT>
 template <typename ODESLV> inline bool
 ODEBND_BASE<T,PMT,PVT>::_bounds
-( const unsigned ns, const double*tk, const T*Ip, T**Ixk,
-  T*If, ODESLV&traj, const unsigned nsamp, std::ostream&os )
+( const T*Ip, T**Ixk, T*If, ODESLV&traj, const unsigned nsamp, std::ostream&os )
 {
   int DISPLAY_SAVE = traj.options.DISPLAY;
   traj.options.DISPLAY = 0;
@@ -2661,19 +2656,19 @@ ODEBND_BASE<T,PMT,PVT>::_bounds
   double *p = new double[_np];
   for( unsigned ip=0; ip<_np; ip++ )
     p[ip] = Op<T>::l(Ip[ip]);
-  double **xk = Ixk? new double*[ns+1]: 0;
-  for( unsigned is=0; Ixk && is<=ns; is++ ){
+  double **xk = Ixk? new double*[_nsmax+1]: 0;
+  for( unsigned is=0; Ixk && is<=_nsmax; is++ ){
     if( !Ixk[is] ) Ixk[is] = new T[_nx];
-    xk[is] = new double[_nx];
+    xk[is] = new double[_nx+_nq];
   }
   double *f = If? new double[_nf]: 0;
-  STATUS stat = traj.states( ns, tk, p, xk, f, os );
+  STATUS stat = traj.states( p, xk, f, os );
   if( stat != NORMAL || nsamp <= 1 ){
     delete[] p; delete[] f;
-    for( unsigned is=0; is<=ns; is++ ) delete[] xk[is]; delete[] xk;
+    for( unsigned is=0; is<=_nsmax; is++ ) delete[] xk[is]; delete[] xk;
     return false;
   }   
-  for( unsigned is=0; Ixk && is<=ns; is++ )
+  for( unsigned is=0; Ixk && is<=_nsmax; is++ )
     for( unsigned ix=0; ix<_nx; ix++ )
       Ixk[is][ix] = xk[is][ix];
   for( unsigned ifn=0; If && ifn<_nf; ifn++ )
@@ -2681,12 +2676,12 @@ ODEBND_BASE<T,PMT,PVT>::_bounds
 
   // Start sampling process
   unsigned* vsamp = new unsigned[_np];
-  bool flag = _sampling( ns, tk, Ip, Ixk, If, traj, nsamp, vsamp, 0, p, xk, f, os );
+  bool flag = _sampling( Ip, Ixk, If, traj, nsamp, vsamp, 0, p, xk, f, os );
   traj.options.DISPLAY = DISPLAY_SAVE;
 
   // Clean-up
   delete[] p; delete[] f;
-  for( unsigned is=0; xk && is<=ns; is++ ) delete[] xk[is]; delete[] xk;
+  for( unsigned is=0; xk && is<=_nsmax; is++ ) delete[] xk[is]; delete[] xk;
   delete[] vsamp;
   
   return flag;
@@ -2695,9 +2690,9 @@ ODEBND_BASE<T,PMT,PVT>::_bounds
 template <typename T, typename PMT, typename PVT>
 template <typename ODESLV> inline bool
 ODEBND_BASE<T,PMT,PVT>::_sampling
-( const unsigned ns, const double*tk, const T*Ip, T**Ixk, T*If,
-  ODESLV&traj, const unsigned nsamp, unsigned* vsamp, const unsigned ipar,
-  double*p, double**xk, double*f, std::ostream&os )
+( const T*Ip, T**Ixk, T*If, ODESLV&traj, const unsigned nsamp,
+  unsigned* vsamp, const unsigned ipar, double*p, double**xk,
+  double*f, std::ostream&os )
 {
   // Update bounds for all sampling points
   for( unsigned isamp=0; isamp<nsamp; isamp++ ){
@@ -2705,8 +2700,8 @@ ODEBND_BASE<T,PMT,PVT>::_sampling
 
     // Continue recursive call
     if( ipar+1 < _np ){
-      if( !_sampling( ns, tk, Ip, Ixk, If, traj, nsamp, vsamp,
-                      ipar+1, p, xk, f, os ) ) return false;
+      if( !_sampling( Ip, Ixk, If, traj, nsamp, vsamp, ipar+1, p, xk, f, os ) )
+        return false;
       continue;
     }
 
@@ -2723,9 +2718,9 @@ ODEBND_BASE<T,PMT,PVT>::_sampling
 #ifdef MC__ODEBND_BASE_SAMPLE_DEBUG
     std::cout << std::endl;
 #endif
-    typename ODESLV::STATUS flag = traj.states( ns, tk, p, xk, f, os );
+    typename ODESLV::STATUS flag = traj.states( p, xk, f, os );
     if( flag != ODESLV::NORMAL ) return flag;
-    for( unsigned is=0; Ixk && is<=ns; is++ )
+    for( unsigned is=0; Ixk && is<=_nsmax; is++ )
       for( unsigned ix=0; ix<_nx; ix++ )
         Ixk[is][ix] = Op<T>::hull( xk[is][ix], Ixk[is][ix] );
     for( unsigned ifn=0; If && ifn<_nf; ifn++ )
@@ -2738,48 +2733,47 @@ ODEBND_BASE<T,PMT,PVT>::_sampling
 template <typename T, typename PMT, typename PVT>
 template <typename ODEBND> inline bool
 ODEBND_BASE<T,PMT,PVT>::_hausdorff
-( const unsigned ns, const double*tk, const T*Ip, double**Hxk,
-  double*Hf, ODEBND&dineq, const unsigned nsamp,
+( const T*Ip, double**Hxk, double*Hf, ODEBND&dineq, const unsigned nsamp,
   std::ostream&os )
 {
   int DISPLAY_ODEBND = dineq.options.DISPLAY;
   dineq.options.DISPLAY = 0;
 
   // Compute inner bounds 
-  T** Ixk0 = new T*[ns+1];
-  for( unsigned is=0; is<ns+1; is++ ) Ixk0[is] = new T[_nx];
+  T** Ixk0 = new T*[_nsmax+1];
+  for( unsigned is=0; is<_nsmax+1; is++ ) Ixk0[is] = new T[_nx];
   T* If0 = _nf? new T[_nf]: 0;
-  if( dineq.bounds( ns, tk, Ip, Ixk0, If0, nsamp, os ) != ODEBND::NORMAL ){
-    for( unsigned is=0; is<ns+1; is++ ) delete[] Ixk0[is];
+  if( dineq.bounds( Ip, Ixk0, If0, nsamp, os ) != ODEBND::NORMAL ){
+    for( unsigned is=0; is<_nsmax+1; is++ ) delete[] Ixk0[is];
     delete[] Ixk0;
     delete[] If0;
     return false;
   }
 
   // Compute outer bounds
-  T** Ixk = new T*[ns+1];
-  for( unsigned is=0; is<ns+1; is++ ) Ixk[is] = new T[_nx];
+  T** Ixk = new T*[_nsmax+1];
+  for( unsigned is=0; is<_nsmax+1; is++ ) Ixk[is] = new T[_nx];
   T* If = _nf? new T[_nf]: 0;
-  try{ dineq.bounds( ns, tk, Ip, Ixk, If, os ); }
+  try{ dineq.bounds( Ip, Ixk, If, os ); }
   catch(...){;}
   unsigned nsf = dineq.final_stage();
 
   dineq.options.DISPLAY = DISPLAY_ODEBND;
-  for( unsigned is=0; is<ns+1; is++ ){
+  for( unsigned is=0; is<_nsmax+1; is++ ){
     for( unsigned i=0; i<_nx; i++ )
       Hxk[is][i] = is<=nsf? _dH( Ixk[is][i], Ixk0[is][i] ): 0./0.;
     if( dineq.options.DISPLAY >= 1 )
-      _print_interm( tk[is], _nx, Hxk[is], "dHx", os );
+      _print_interm( _dT[is], _nx, Hxk[is], "dHx", os );
   }
   for( unsigned i=0; i<_nf; i++ )
-    Hf[i] = nsf==ns? _dH( If[i], If0[i] ): 0./0.;
+    Hf[i] = nsf==_nsmax? _dH( If[i], If0[i] ): 0./0.;
   if( dineq.options.DISPLAY >= 1 && _nf )
     _print_interm( _nf, Hf, "dHf", os );
 
-  for( unsigned is=0; is<ns+1; is++ ) delete[] Ixk0[is];
+  for( unsigned is=0; is<_nsmax+1; is++ ) delete[] Ixk0[is];
   delete[] Ixk0;
   delete[] If0;
-  for( unsigned is=0; is<ns+1; is++ ) delete[] Ixk[is];
+  for( unsigned is=0; is<_nsmax+1; is++ ) delete[] Ixk[is];
   delete[] Ixk;
   delete[] If;
 
@@ -2789,49 +2783,52 @@ ODEBND_BASE<T,PMT,PVT>::_hausdorff
 template <typename T, typename PMT, typename PVT>
 template <typename ODEBND, typename ODESLV> inline bool
 ODEBND_BASE<T,PMT,PVT>::_hausdorff
-( const unsigned ns, const double*tk, const PVT*PMp, double**Hxk, 
-  double*Hf, ODEBND&dineq, ODESLV&traj, const unsigned nsamp,
-  std::ostream&os )
+( const PVT*PMp, double**Hxk, double*Hf, ODEBND&dineq, ODESLV&traj,
+  const unsigned nsamp, std::ostream&os )
 {
   int DISPLAY_ODEBND = dineq.options.DISPLAY;
   int DISPLAY_ODESLV = traj.options.DISPLAY;
   dineq.options.DISPLAY = traj.options.DISPLAY = 0;
 
   // Compute inner bounds
-  PVT** PMxk = new PVT*[ns+1];
-  for( unsigned is=0; is<ns+1; is++ ) PMxk[is] = new PVT[_nx];
+  PVT** PMxk = new PVT*[_nsmax+1];
+  for( unsigned is=0; is<_nsmax+1; is++ ){
+    PMxk[is] = new PVT[_nx];
+    for( unsigned ix=0; ix<_nx; ix++ )
+      PMxk[is][ix] = 0./0.;
+  }
   PVT* PMf = _nf? new PVT[_nf]: 0;
-  try{ dineq.bounds( ns, tk, PMp, PMxk, PMf, os ); }
+  try{ dineq.bounds( PMp, PMxk, PMf, os ); }
   catch(...){;}
   unsigned nsf = dineq.final_stage();
+  traj.set_time( nsf, _dT.data(), _pT );
 
   // Compute remainder (outer) bounds 
   T* Ip = new T[_npar];
   for( unsigned ip=0; ip<_npar; ip++ ) Ip[ip] = PMp[ip].B();
-  T** Rxk = new T*[ns+1];
-  for( unsigned is=0; is<ns+1; is++ ) Rxk[is] = new T[_nx];
+  T** Rxk = new T*[_nsmax+1];
+  for( unsigned is=0; is<_nsmax+1; is++ ) Rxk[is] = new T[_nx];
   T* Rf = _nf? new T[_nf]: 0;
-  bool flag = _remainders( nsf, tk, _npar, Ip, PMxk, PMf, Rxk, Rf,
-                           traj, nsamp, os );
+  bool flag = _remainders( nsf, _npar, Ip, PMxk, PMf, Rxk, Rf, traj, nsamp, os );
 
   dineq.options.DISPLAY = DISPLAY_ODEBND;
   traj.options.DISPLAY = DISPLAY_ODESLV;
-  for( unsigned is=0; is<ns+1; is++ ){
+  for( unsigned is=0; is<_nsmax+1; is++ ){
     for( unsigned ix=0; ix<_nx; ix++ )
       Hxk[is][ix] = is<=nsf? _dH( PMxk[is][ix].R(), Rxk[is][ix] ): 0./0.;
     if( dineq.options.DISPLAY >= 1 ){
-      _print_interm( tk[is], _nx, Hxk[is], "dHx", os );
+      _print_interm( _dT[is], _nx, Hxk[is], "dHx", os );
     }
   }
   for( unsigned i=0; i<_nf; i++ )
-    Hf[i] = nsf==ns? _dH( PMf[i].R(), Rf[i] ): 0./0.;
+    Hf[i] = nsf==_nsmax? _dH( PMf[i].R(), Rf[i] ): 0./0.;
   if( dineq.options.DISPLAY >= 1 && _nf )
     _print_interm( _nf, Hf, "dHf", os );
 
-  for( unsigned is=0; is<ns+1; is++ ) delete[] Rxk[is];
+  for( unsigned is=0; is<_nsmax+1; is++ ) delete[] Rxk[is];
   delete[] Rxk;
   delete[] Rf;
-  for( unsigned is=0; is<ns+1; is++ ) delete[] PMxk[is];
+  for( unsigned is=0; is<_nsmax+1; is++ ) delete[] PMxk[is];
   delete[] PMxk;
   delete[] PMf;
   delete[] Ip;
@@ -2842,9 +2839,9 @@ ODEBND_BASE<T,PMT,PVT>::_hausdorff
 template <typename T, typename PMT, typename PVT>
 template<typename ODESLV> inline bool
 ODEBND_BASE<T,PMT,PVT>::_remainders
-( const unsigned ns, const double*tk, const unsigned np, const T*Ip,
-  const PVT*const*PMxk, const PVT*PMf, T**Rxk, T*Rf,
-  ODESLV&traj, const unsigned nsamp, std::ostream&os )
+( const unsigned ns, const unsigned np, const T*Ip, const PVT*const*PMxk,
+  const PVT*PMf, T**Rxk, T*Rf, ODESLV&traj, const unsigned nsamp,
+  std::ostream&os )
 {
    // Initialization of sampled bounds at parameter lower bound
   double *p = new double[np];
@@ -2852,9 +2849,9 @@ ODEBND_BASE<T,PMT,PVT>::_remainders
     p[ip] = Op<T>::l(Ip[ip]);
   double **xk = new double*[ns+1];
   for( unsigned is=0; is<=ns; is++ )
-    xk[is] = new double[_nx];
+    xk[is] = new double[_nx+_nq];
   double *f = _nf? new double[_nf]:0;
-  typename ODESLV::STATUS flag = traj.states( ns, tk, p, xk, f, os );
+  typename ODESLV::STATUS flag = traj.states( p, xk, f, os );
   if( flag != ODESLV::NORMAL || nsamp <= 1 ){
     delete[] p; delete[] f;
     for( unsigned is=0; is<=ns; is++ ) delete[] xk[is]; delete[] xk;
@@ -2868,8 +2865,8 @@ ODEBND_BASE<T,PMT,PVT>::_remainders
 
   // Start sampling process
   unsigned* vsamp = new unsigned[np];
-  bool flag2 = _remainders( ns, tk, np, Ip, PMxk, PMf, Rxk, Rf, traj,
-                            nsamp, vsamp, 0, p, xk, f, os );
+  bool flag2 = _remainders( ns, np, Ip, PMxk, PMf, Rxk, Rf, traj, nsamp,
+                            vsamp, 0, p, xk, f, os );
   
   // Clean-up
   delete[] p; delete[] f;
@@ -2882,10 +2879,9 @@ ODEBND_BASE<T,PMT,PVT>::_remainders
 template <typename T, typename PMT, typename PVT>
 template<typename ODESLV> inline bool
 ODEBND_BASE<T,PMT,PVT>::_remainders
-( const unsigned ns, const double*tk, const unsigned np, const T*Ip,
-  const PVT*const*PMxk, const PVT*PMf, T**Rxk, T*Rf,
-  ODESLV&traj, const unsigned nsamp, unsigned* vsamp, const unsigned ip,
-  double*p, double**xk, double*f, std::ostream&os )
+( const unsigned ns, const unsigned np, const T*Ip, const PVT*const*PMxk,
+  const PVT*PMf, T**Rxk, T*Rf, ODESLV&traj, const unsigned nsamp, unsigned* vsamp,
+  const unsigned ip, double*p, double**xk, double*f, std::ostream&os )
 {
   typename ODESLV::STATUS flag = ODESLV::NORMAL;
 
@@ -2895,8 +2891,8 @@ ODEBND_BASE<T,PMT,PVT>::_remainders
 
     // Continue recursive call
     if( ip+1 < np ){
-      if( !_remainders( ns, tk, np, Ip, PMxk, PMf, Rxk, Rf, traj,
-                        nsamp, vsamp, ip+1, p, xk, f, os ) ) return false;
+      if( !_remainders( ns, np, Ip, PMxk, PMf, Rxk, Rf, traj, nsamp, vsamp,
+                        ip+1, p, xk, f, os ) ) return false;
       continue;
     }
 
@@ -2913,7 +2909,7 @@ ODEBND_BASE<T,PMT,PVT>::_remainders
 #ifdef MC__ODEBND_SUNDIALS_DINEQPM_DEBUG
     std::cout << std::endl;
 #endif
-    flag = traj.states( ns, tk, p, xk, f, os );
+    flag = traj.states( p, xk, f, os );
     if( flag != ODESLV::NORMAL ) return false;
     for( unsigned is=0; is<=ns; is++ )
       for( unsigned i=0; i<_nx; i++ )

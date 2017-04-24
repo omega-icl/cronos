@@ -440,9 +440,8 @@ ODESLV_SUNDIALS::_states
       results_sta.push_back( Results( _t, _nx, NV_DATA_S(_Nx), _nq, _nq? NV_DATA_S(_Nq): 0 ) );
     if( xk ){
       if( !xk[0] ) xk[0] = new double[_nx+_nq];
-      unsigned ix = 0;
-      for( ; ix<_nx; ix++ ) xk[0][ix] = _Dx[ix];
-      for( ; ix<_nx+_nq; ix++ ) xk[0][ix] = _Dq[ix-_nx];
+      for( unsigned ix=0; ix<_nx+_nq; ix++ )
+        xk[0][ix] = ix<_nx? _Dx[ix]: _Dq[ix-_nx];
     }
 
     // Integrate ODEs through each stage using SUNDIALS
@@ -463,6 +462,8 @@ ODESLV_SUNDIALS::_states
        && ( ( _Nq && !_IC_D_QUAD( NV_DATA_S( _Nq ) ) ) // quadrature reinitialization
          || !_CC_CVODE_QUAD() ) )
         { _END_STA(); return FAILURE; }
+      if( options.RESRECORD )
+        results_sta.push_back( Results( _t, _nx, NV_DATA_S(_Nx), _nq, _nq? NV_DATA_S(_Nq): 0 ) );
 
       // update list of operations in RHS, JAC and QUAD
       _pos_rhs  = ( _vRHS.size()<=1? 0: _istg );
@@ -485,6 +486,7 @@ ODESLV_SUNDIALS::_states
          || (options.NMAX && stats_sta.numSteps > options.NMAX) )
           throw Exceptions( Exceptions::INTERN );
         stats_sta.numSteps++;
+      }
 */
       const double TSTEP = ( _dT[_istg+1] - _t  ) / NSTEP;
       double TSTOP = _t+TSTEP;
@@ -551,6 +553,9 @@ ODESLV_SUNDIALS::_states
   }
   catch(...){
     _END_STA();
+    long int nstp;
+    _cv_flag = CVodeGetNumSteps( _cv_mem, &nstp );
+    stats_sta.numSteps += nstp;
     if( options.DISPLAY >= 1 ) _print_stats( stats_sta, os );
     return FAILURE;
   }

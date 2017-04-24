@@ -395,12 +395,15 @@ ODESLV_BASE::_record
   ofile << std::right << std::scientific << std::setprecision(iprec);
 
   // Record computed states at stage times
-  auto it = res.begin();
+  auto it = res.begin(), it0 = it;
   for( ; it != res.end(); ++it ){
+    if( it != res.begin() && it->t == it0->t )
+      ofile << std::endl;
     ofile << std::setw(iprec+9) << it->t;
     for( unsigned ix=0; ix<it->nx; ix++ )
       ofile << std::setw(iprec+9) << it->X[ix];
     ofile << std::endl;
+    it0 = it;
   }
 }
 

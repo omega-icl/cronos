@@ -85,7 +85,7 @@ class ODESLVS_SUNDIALS:
   //! @brief Statistics for sensitivity/adjoint integration
   Stats stats_sen;
 
-  //! @brief Vector storing interval adjoint bounds (see Options::RESRECORD)
+  //! @brief Vector storing adjoint/sensitivity trajectyories (see Options::RESRECORD)
   std::vector< std::vector< Results > > results_sen;
 
  //! @brief Propagate states and state-sensitivities forward in time through every time stages
@@ -96,14 +96,14 @@ class ODESLVS_SUNDIALS:
   STATUS states_ASA
     ( const double*p, double**xk=0, double*f=0, double**lk=0, double*fp=0, std::ostream&os=std::cout );
 
-  //! @brief Record state and sensitivity bounds in files <a>obndsta</a> and <a>obndsa</a>, with accuracy of <a>iprec</a> digits
+  //! @brief Record state and sensitivity trajectories in files <a>obndsta</a> and <a>obndsa</a>, with accuracy of <a>iprec</a> digits
   void record
     ( std::ofstream&obndsta, std::ofstream*obndsen, const unsigned iprec=5 ) const
     { this->ODESLV_SUNDIALS::record( obndsta, iprec );
       for( unsigned isen=0; isen<results_sen.size(); ++isen )
         this->ODESLV_BASE::_record( obndsen[isen], results_sen[isen], iprec ); }
 
-  //! @brief Record state and sensitivity bounds in files <a>obndsta</a> and <a>obndsa</a>, with accuracy of <a>iprec</a> digits
+  //! @brief Record state trajectories in files <a>obndsta</a>, with accuracy of <a>iprec</a> digits
   void record
     ( std::ofstream&obndsta, const unsigned iprec=5 ) const
     { ODESLV_SUNDIALS::record( obndsta, iprec ); }
@@ -521,8 +521,8 @@ ODESLVS_SUNDIALS::states_ASA
 
     // Terminal adjoint & quadrature values
     if( lk && !lk[_nsmax] ) lk[_nsmax] = new double[(_nx+_np)*_nf];
+    _pos_fct = ( _vFCT.size()>=_nsmax? _nsmax-1:0 );
     for( _ifct=0; _ifct < _nf; _ifct++ ){
-      _pos_fct = ( _vFCT.size()>=_nsmax? _nsmax-1:0 );
       if( !_TC_SET_ASA( _pos_fct, _ifct )
        || !_TC_D_SEN( _t, _vec_sta[_nsmax].data(), NV_DATA_S(_Ny[_ifct]) )
        || ( _Nyq && _Nyq[_ifct] && !_TC_D_QUAD_ASA( NV_DATA_S(_Nyq[_ifct]) ) ) )
@@ -540,9 +540,8 @@ ODESLVS_SUNDIALS::states_ASA
       }
       if( options.RESRECORD )
         results_sen[_ifct].push_back( Results( _t, _nx, _Dy, _np, _Dyq ) );
-      unsigned iy=0;
-      for( ; lk && iy<_ny; iy++ )     lk[_nsmax][_ifct*(_nx+_np)+iy] = _Dy[iy];
-      for( ; lk && iy<_ny+_np; iy++ ) lk[_nsmax][_ifct*(_nx+_np)+iy] = _Dyq[iy-_ny];
+      for( unsigned iy=0; lk && iy<_ny+_np; iy++ )
+        lk[_nsmax][_ifct*(_nx+_np)+iy] = iy<_ny? _Dy[iy]: _Dyq[iy-_ny];
     }
 
     // Initialization of adjoint integration
@@ -562,90 +561,6 @@ ODESLVS_SUNDIALS::states_ASA
        || !_RHS_SET_ASA( _pos_rhs, _pos_quad, _pos_fct )
        || !_RHS_D_SET( _nf, _np ) )
         { _END_SEN(); return FATAL; }
-/*
-      // Propagate bounds backward to previous stage time
-      bool finished = false;
-      while( !finished ){
-        _cv_flag = CVodeB( _cv_mem, _dT[_istg-1], CV_ONE_STEP );
-        if( _check_cv_flag(&_cv_flag, "CVodeB", 1)
-         || (options.NMAX && stats_sen.numSteps > options.NMAX) )
-          throw Exceptions( Exceptions::INTERN );
-        stats_sen.numSteps++;
-        finished = true;
-        for( _ifct=0; _ifct < _nf; _ifct++ ){
-          _cv_flag = CVodeGetB( _cv_mem, _indexB[_ifct], &_t, _Ny[_ifct]);
-          if( _check_cv_flag( &_cv_flag, "CVodeGetB", 1) )
-            { _END_SEN(); return FATAL; }
-#ifdef MC__ODESLVS_SUNDIALS_DEBUG
-          for( unsigned iy=0; iy<_ny; iy++ )
-            std::cout << "_Ny" << _ifct << "[" << iy << "] = " << NV_Ith_S(_Ny[_ifct],iy) << std::endl;
-#endif
-          if( _t > _dT[_istg-1] ) finished = false;
-          if( options.RESRECORD ){
-            _cv_flag = CVodeGetQuadB( _cv_mem, _indexB[_ifct], &_t, _Nyq[_ifct]);
-            if( _check_cv_flag( &_cv_flag, "CVodeGetQuadB", 1) )
-              { _END_SEN(); return FATAL; }
-#ifdef MC__ODESLVS_SUNDIALS_DEBUG
-            for( unsigned ip=0; ip<_np; ip++ )
-             std::cout << "_Nyq" << _ifct << "[" << ip << "] = " << NV_Ith_S(_Nyq[_ifct],ip) << std::endl;
-#endif
-            if( _t == results_sen[_ifct].rbegin()->t ) continue;
-            results_sen[_ifct].push_back( Results( _t, _nx, NV_DATA_S(_Ny[_ifct]), _np, _Nyq && _Nyq[_ifct]? NV_DATA_S(_Nyq[_ifct]): 0 ) );
-          }
-
-//#ifdef MC__ODESLVS_SUNDIALS_DEBUG
-          std::cout << "Adjoint #" << _ifct << ": " << _t << " > " << _dT[_istg-1] << std::endl;
-//#endif
-        }
-      }
-
-      // Propagate bounds backward to previous stage time
-      if( options.RESRECORD ){
-        bool finished = false;
-        while( !finished ){
-          _cv_flag = CVodeB( _cv_mem, _dT[_istg-1], CV_ONE_STEP );
-          if( _check_cv_flag(&_cv_flag, "CVodeB", 1)
-           || (options.NMAX && stats_sen.numSteps > options.NMAX) )
-            throw Exceptions( Exceptions::INTERN );
-          stats_sen.numSteps++;
-          finished = true;
-          for( _ifct=0; _ifct < _nf; _ifct++ ){
-            _cv_flag = CVodeGetB( _cv_mem, _indexB[_ifct], &_t, _Ny[_ifct]);
-            if( _check_cv_flag( &_cv_flag, "CVodeGetB", 1) )
-              { _END_SEN(); return FATAL; }
-#ifdef MC__ODESLVS_SUNDIALS_DEBUG
-            for( unsigned iy=0; iy<_ny; iy++ )
-              std::cout << "_Ny" << _ifct << "[" << iy << "] = " << NV_Ith_S(_Ny[_ifct],iy) << std::endl;
-#endif
-            _cv_flag = CVodeGetQuadB( _cv_mem, _indexB[_ifct], &_t, _Nyq[_ifct]);
-            if( _check_cv_flag( &_cv_flag, "CVodeGetQuadB", 1) )
-              { _END_SEN(); return FATAL; }
-#ifdef MC__ODESLVS_SUNDIALS_DEBUG
-            for( unsigned ip=0; ip<_np; ip++ )
-              std::cout << "_Nyq" << _ifct << "[" << ip << "] = " << NV_Ith_S(_Nyq[_ifct],ip) << std::endl;
-#endif
-            if( _t > _dT[_istg-1] ) finished = false;
-            if( _t == results_sen[_ifct].rbegin()->t ) continue;
-            results_sen[_ifct].push_back( Results( _t, _nx, NV_DATA_S(_Ny[_ifct]), _np, _Nyq && _Nyq[_ifct]? NV_DATA_S(_Nyq[_ifct]): 0 ) );
-#ifdef MC__ODESLVS_SUNDIALS_DEBUG
-            std::cout << "Adjoint #" << _ifct << ": " << _t << std::endl;
-#endif
-          }
-        }
-      }
-      else{
-        _cv_flag = CVodeB( _cv_mem, _dT[_istg-1], CV_NORMAL );
-        if( _check_cv_flag(&_cv_flag, "CVodeB", 1) )
-          { _END_SEN(); return FATAL; }
-        //_t = _dT[_istg-1];
-        for( _ifct=0; _ifct < _nf; _ifct++ ){
-          void *cv_memB = CVodeGetAdjCVodeBmem(_cv_mem, _indexB[_ifct] );
-         long int nstpB;
-          _cv_flag = CVodeGetNumSteps( cv_memB, &nstpB );
-          stats_sen.numSteps += nstpB;
-        }
-      }
-*/
 
       // Propagate bounds backward to previous stage time
       const double TSTEP = ( _t - _dT[_istg-1] ) / NSTEP;
@@ -663,6 +578,7 @@ ODESLVS_SUNDIALS::states_ASA
             if( _check_cv_flag( &_cv_flag, "CVodeGetB", 1) )
               { _END_SEN(); return FATAL; }
 #ifdef MC__ODESLVS_SUNDIALS_DEBUG
+            std::cout << "Adjoint #" << _ifct << ": " << _t << std::endl;
             for( unsigned iy=0; iy<_ny; iy++ )
               std::cout << "_Ny" << _ifct << "[" << iy << "] = " << NV_Ith_S(_Ny[_ifct],iy) << std::endl;
 #endif
@@ -674,17 +590,14 @@ ODESLVS_SUNDIALS::states_ASA
               std::cout << "_Nyq" << _ifct << "[" << ip << "] = " << NV_Ith_S(_Nyq[_ifct],ip) << std::endl;
 #endif
             results_sen[_ifct].push_back( Results( _t, _nx, NV_DATA_S(_Ny[_ifct]), _np, _Nyq && _Nyq[_ifct]? NV_DATA_S(_Nyq[_ifct]): 0 ) );
-#ifdef MC__ODESLVS_SUNDIALS_DEBUG
-            std::cout << "Adjoint #" << _ifct << ": " << _t << std::endl;
-#endif
           }
         }
       }
       for( _ifct=0; _ifct < _nf; _ifct++ ){
         void *cv_memB = CVodeGetAdjCVodeBmem(_cv_mem, _indexB[_ifct] );
         long int nstpB;
-         _cv_flag = CVodeGetNumSteps( cv_memB, &nstpB );
-         stats_sen.numSteps += nstpB;
+        _cv_flag = CVodeGetNumSteps( cv_memB, &nstpB );
+        stats_sen.numSteps += nstpB;
 #ifdef MC__ODESLVS_SUNDIALS_DEBUG
         std::cout << "Number of steps for adjoint #" << _ifct << ": " 
                   << nstpB << std::endl;
@@ -749,9 +662,8 @@ ODESLVS_SUNDIALS::states_ASA
         }
         if( options.RESRECORD )
           results_sen[_ifct].push_back( Results( _t, _nx, _Dy, _np, _Dyq ) );
-        unsigned iy=0;
-        for( ; lk && iy<_ny; iy++ )     lk[_istg-1][_ifct*(_nx+_np)+iy] = _Dy[iy];
-        for( ; lk && iy<_ny+_np; iy++ ) lk[_istg-1][_ifct*(_nx+_np)+iy] = _Dyq[iy-_ny];
+        for( unsigned iy=0; lk && iy<_ny+_np; iy++ )
+          lk[_istg-1][_ifct*(_nx+_np)+iy] = iy<_ny? _Dy[iy]: _Dyq[iy-_ny];
 
         // Keep track of function derivatives
         for( unsigned iq=0; iq<_np; iq++ ) _Dfp[iq*_nf+_ifct] = _Dyq[iq];
@@ -772,9 +684,9 @@ ODESLVS_SUNDIALS::states_ASA
     if( options.DISPLAY >= 1 ) _print_stats( stats_sen, os );
     return FAILURE;
   }
+
   _END_SEN();
   if( options.DISPLAY >= 1 ) _print_stats( stats_sen, os );
-
   return NORMAL;
 }
 
@@ -809,7 +721,7 @@ ODESLVS_SUNDIALS::_INI_FSA
 
   // Reset result record and statistics
   results_sen.clear();
-  results_sen.resize( _nf );
+  results_sen.resize( _np );
   _init_stats( stats_sen );
 
   return true;
@@ -911,11 +823,8 @@ ODESLVS_SUNDIALS::states_FSA
     }
     if( options.RESRECORD )
       results_sta.push_back( Results( _t, _nx, NV_DATA_S(_Nx), _nq, NV_DATA_S(_Nq) ) );
-    if( xk ){
-      unsigned ix = 0;
-      for( ; ix<_nx; ix++ ) xk[0][ix] = ODESLV_BASE::_Dx[ix];
-      for( ; ix<_nx+_nq; ix++ ) xk[0][ix] = ODESLV_BASE::_Dq[ix-_nx];
-    }
+    for( unsigned ix=0; xk && ix<_nx+_nq; ix++ )
+      xk[0][ix] = ix<_nx? ODESLV_BASE::_Dx[ix]: ODESLV_BASE::_Dq[ix-_nx];
 
     // Initial state/quadrature sensitivities
     if( xpk && !xpk[0] ) xpk[0] = new double[(_nx+_nq)*_np];
@@ -935,11 +844,8 @@ ODESLVS_SUNDIALS::states_FSA
       }
       if( options.RESRECORD )
         results_sen[_isen].push_back( Results( _t, _nx, NV_DATA_S(_Ny[_isen]), _nq, NV_DATA_S(_Nyq[_isen]) ) );
-      if( xpk ){
-        unsigned ix = 0;
-        for( ; ix<_nx; ix++ ) xpk[0][ix] = _Dy[ix];
-        for( ; ix<_nx+_nq; ix++ ) xpk[0][ix] = _Dyq[ix-_nx];
-      }
+      for( unsigned ix=0; xpk && ix<_nx+_nq; ix++ )
+        xpk[0][(_nx+_nq)*_isen+ix] = ix<_nx? _Dy[ix]: _Dyq[ix-_nx];
     }
 
     // Integrate ODEs through each stage using SUNDIALS
@@ -961,6 +867,8 @@ ODESLVS_SUNDIALS::states_FSA
        && ( ( _Nq && !ODESLV_BASE::_IC_D_QUAD( NV_DATA_S( _Nq ) ) ) // quadrature reinitialization
          || !ODESLV_SUNDIALS::_CC_CVODE_QUAD() ) )
         { _END_STA(); _END_SEN(); return FAILURE; }
+      if( options.RESRECORD )
+        results_sta.push_back( Results( _t, _nx, NV_DATA_S(_Nx), _nq, NV_DATA_S(_Nq) ) );
       for( _isen=0; _isen<_np; _isen++ ){
         if( _pos_ic
          && ( !_CC_SET_FSA( _pos_ic, _isen )
@@ -977,6 +885,8 @@ ODESLVS_SUNDIALS::states_FSA
         for( unsigned iy=0; _nq && iy<NV_LENGTH_S(_Nyq[_isen]); iy++ )
           std::cout << "_Nyq" << _isen << "[" << iy << "] = " << NV_Ith_S(_Nyq[_isen],iy) << std::endl;
 #endif
+        if( options.RESRECORD )
+          results_sen[_isen].push_back( Results( _t, _nx, NV_DATA_S(_Ny[_isen]), _nq, NV_DATA_S(_Nyq[_isen]) ) );
       }
 
       // update list of operations in RHS, JAC, QUAD, RHSFSA and QUADFSA
@@ -1042,11 +952,8 @@ ODESLVS_SUNDIALS::states_FSA
       }
       ODESLV_SUNDIALS::_GET_D_STA( NV_DATA_S(_Nx), _nq && _Nq? NV_DATA_S(_Nq): 0 );
       // Display / return stage results
-      if( xk ){
-        unsigned ix = 0;
-        for( ; ix<_nx; ix++ ) xk[_istg+1][ix] = _Dx[ix];
-        for( ; ix<_nx+_nq; ix++ ) xk[_istg+1][ix] = _Dq[ix-_nx];
-      }
+      for( unsigned ix=0; xk && ix<_nx+_nq; ix++ )
+        xk[_istg+1][ix] = ix<_nx? ODESLV_SUNDIALS::_Dx[ix]: ODESLV_SUNDIALS::_Dq[ix-_nx];
       if( options.DISPLAY >= 1 ){
         _print_interm( _t, _nx, ODESLV_BASE::_Dx, " x", os );
         _print_interm( _nq, ODESLV_BASE::_Dq, " q", os );
@@ -1056,7 +963,6 @@ ODESLVS_SUNDIALS::states_FSA
       if( (_vFCT.size()>=_nsmax || _istg==_nsmax-1)
        && !ODESLV_BASE::_FCT_D_STA( _pos_fct, _t ) )
         { _END_STA(); _END_SEN(); return FATAL; }
-
 
       // Intermediate state and quadrature sensitivities
       if( xpk && !xpk[_istg+1] ) xpk[_istg+1] = new double[(_nx+_nq)*_np];
@@ -1078,11 +984,8 @@ ODESLVS_SUNDIALS::states_FSA
           std::ostringstream oqp; oqp << " qp[" << _isen << "]";
           _print_interm( _nq, _Dyq, oqp.str(), os );
         }
-        if( xpk ){
-          unsigned ix = 0;
-          for( ; ix<_nx; ix++ ) xpk[_istg+1][ix] = _Dy[ix];
-          for( ; ix<_nx+_nq; ix++ ) xpk[_istg+1][ix] = _Dyq[ix-_nx];
-        }
+        for( unsigned ix=0; xpk && ix<_nx+_nq; ix++ )
+          xpk[_istg+1][(_nx+_nq)*_isen+ix] = ix<_nx? _Dy[ix]: _Dyq[ix-_nx];
         // Add intermediate function derivative terms
         if( (_vFCT.size()>=_nsmax || _istg==_nsmax-1)
          && !_FCT_D_SEN( _pos_fct, _isen, _t ) )
@@ -1103,6 +1006,10 @@ ODESLVS_SUNDIALS::states_FSA
   }
   catch(...){
     _END_STA(); _END_SEN();
+    long int nstp;
+    _cv_flag = CVodeGetNumSteps( _cv_mem, &nstp );
+    stats_sta.numSteps += nstp;
+    stats_sen.numSteps += nstp;
     if( options.DISPLAY >= 1 ) _print_stats( stats_sen, os );
     return FAILURE;
   }

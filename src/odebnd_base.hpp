@@ -52,27 +52,35 @@ class ODEBND_BASE:
   {
     //! @brief Constructors
     Results
-      ( const double tk, const unsigned int nxk, const T*Ixk ):
-      t( tk ), nx( nxk )
+      ( const double tk, const unsigned nx1, const double*x1,
+        const unsigned nx2=0, const double*x2=0 ):
+      t( tk ), nx( nx1+nx2 )
       { X = new T[nx];
-        for( unsigned int ix=0; ix<nx; ix++ ) X[ix] = Ixk[ix]; }
+        for( unsigned ix=0; ix<nx; ix++ ) X[ix] = ix<nx1? x1[ix]: x2[ix-nx1]; }
     Results
-      ( const double tk, const unsigned int nxk, const PVT*PMxk ):
-      t( tk ), nx( nxk )
+      ( const double tk, const unsigned nx1, const T*Ix1,
+        const unsigned nx2=0, const T*Ix2=0 ):
+      t( tk ), nx( nx1+nx2 )
       { X = new T[nx];
-        for( unsigned int ix=0; ix<nx; ix++ ) X[ix] = PMxk[ix].B(); }
+        for( unsigned ix=0; ix<nx; ix++ ) X[ix] = ix<nx1? Ix1[ix]: Ix2[ix-nx1]; }
+    Results
+      ( const double tk, const unsigned nx1, const PVT*PMx1,
+        const unsigned nx2=0, const PVT*PMx2=0 ):
+      t( tk ), nx( nx1+nx2 )
+      { X = new T[nx];
+        for( unsigned ix=0; ix<nx; ix++ ) X[ix] = ix<nx1? PMx1[ix].B(): PMx2[ix-nx1].B(); }
     Results
       ( const Results&res ):
       t( res.t ), nx( res.nx )
       { X = new T[nx];
-        for( unsigned int ix=0; ix<nx; ix++ ) X[ix] = res.X[ix]; }
+        for( unsigned ix=0; ix<nx; ix++ ) X[ix] = res.X[ix]; }
     //! @brief Destructor
     ~Results()
       { delete[] X; }
-    //! @brief Time instant
+    //! @brief Time point
     double t;
     //! @brief Solution dimension
-    unsigned int nx;
+    unsigned nx;
     //! @brief Solution bounds
     T* X;
   };
@@ -177,6 +185,9 @@ class ODEBND_BASE:
   //! @brief quadrature derivative interval bounds
   T *_Iqdot;
 
+  //! @brief function bounds
+  T *_If;
+
   //! @brief polynomial model environment
   PMT *_PMenv;
 
@@ -206,6 +217,9 @@ class ODEBND_BASE:
 
   //! @brief quadrature derivative polynomial model
   PVT *_PMqdot;
+
+  //! @brief function polynomial model
+  PVT *_PMf;
 
   //! @brief quadrature PM remainder radius time derivatives
   double *_radRqdot;
@@ -444,11 +458,11 @@ class ODEBND_BASE:
 
   //! @brief Function to calculate the functions at intermediate/end point
   bool _FCT_I_STA
-    ( const unsigned pos_fct, const double t, T*If );
+    ( const unsigned pos_fct, const double t );
 
   //! @brief Function to calculate the functions at intermediate/end point
   template <typename REALTYPE, typename OPT> bool _FCT_I_STA
-    ( const OPT&options, const unsigned pos_fct, const double t, REALTYPE*fct, T*If );
+    ( const OPT&options, const unsigned pos_fct, const double t, REALTYPE*fct );
 
   //! @brief Function converting polynomial model with interval remainder to GSL array
   template <typename REALTYPE> static void _PMI2vec
@@ -588,16 +602,18 @@ class ODEBND_BASE:
 
   //! @brief Function to calculate the functions at intermediate/end point
   bool _FCT_PM_STA
-    ( const unsigned pos_fct, const double t, PVT*PMf );
+    ( const unsigned pos_fct, const double t );
 
   //! @brief Computes inner bounds approximation using parameter sampling
   template <typename ODESLV> inline bool _bounds
-    ( const T*Ip, T**Ixk, T*If, ODESLV&traj, const unsigned nsamp, std::ostream&os );
+    ( const T*Ip, T**Ixk, T*If, ODESLV&traj, const unsigned nsamp,
+      std::vector<Results>&results, std::ostream&os );
 
   //! @brief Recursive function computing bounds on solutions of IVP in ODEs using sampling
   template <typename ODESLV> inline bool _sampling
-    ( const T*Ip, T**Ixk, T*If, ODESLV&traj, const unsigned nsamp, unsigned* vsamp,
-      const unsigned ipar, double*p, double**xk, double*f, std::ostream&os );
+    ( const T*Ip, T**Ixk, T*If, ODESLV&traj, const unsigned nsamp,
+      unsigned* vsamp, const unsigned ipar, double*p, double**xk,
+      double*f, std::vector<Results>&results, std::ostream&os );
 
   //! @brief Computes Hausdorff distance between interval enclosure and actual reachable set of parametric ODEs, using parameter sampling
   template <typename ODEBND> inline bool _hausdorff
@@ -663,9 +679,9 @@ ODEBND_BASE<T,PMT,PVT>::ODEBND_BASE
   // Initalize state/parameter arrays
   _opRHSi = 0;
   _IRHS = _IJAC = _IIC = _IDIC = _IVAR = _It = _Ip = _Ix = _Ixdot =
-  _Iq = _Iqdot = 0;
+  _Iq = _Iqdot = _If = 0;
   _PMRHS = _PMJAC = _PMIC = _PMDIC = _PMVAR = _PMt = _PMp = _PMx = _PMxdot =
-  _PMq = _PMqdot = 0;
+  _PMq = _PMqdot = _PMf = 0;
   _xLdot = _xUdot = _RxLdot = _RxUdot = _radRqdot = 0;
   _PMenv = 0;
 
@@ -709,8 +725,10 @@ ODEBND_BASE<T,PMT,PVT>::~ODEBND_BASE
   delete[] _RxLdot;
   delete[] _RxUdot;
   delete[] _PMqdot;
+  delete[] _PMf;
   delete[] _radRqdot;
   delete[] _Ixdot;
+  delete[] _If;
   delete[] _xLdot;
   delete[] _xUdot;
   delete[] _Iqdot;
@@ -984,6 +1002,109 @@ ODEBND_BASE<T,PMT,PVT>::_E2vec
 }
 
 template <typename T, typename PMT, typename PVT>
+template <typename OPT> inline bool
+ODEBND_BASE<T,PMT,PVT>::_INI_I_STA
+( const OPT&options, const unsigned np, const T*Ip, const double QTOL )
+{
+  // Update effective number of parameters
+  // (possibly larger than _np if lifting is used)
+  _npar = np;
+
+  // Size and set DAG evaluation arrays
+  _nVAR0 = _nx+_npar+1;
+  _nVAR  = _nVAR0+_nq;
+  delete[] _pVAR; _pVAR = new FFVar[_nVAR];
+  delete[] _IVAR; _IVAR = new T[_nVAR];
+  for( unsigned ix=0; ix<_nx; ix++ ) _pVAR[ix] = _pX[ix];
+  for( unsigned ip=0; ip<_npar; ip++ ) _pVAR[_nx+ip] = _pP[ip];
+  _pVAR[_nx+_npar] = (_pT? *_pT: 0. );
+  for( unsigned iq=0; iq<_nq; iq++ ) _pVAR[_nx+_npar+1+iq] = _pQ?_pQ[iq]:0.;
+  for( unsigned ip=0; ip<_npar; ip++ ) _IVAR[_nx+ip] = Ip[ip];
+  _Ix = _IVAR;
+  _Ip = _Ix + _nx;
+  _It = _Ip + _npar;
+  _Iq = _It + 1;
+
+  // Reset _MVXPenv and related variables
+  unsigned ordmit = options.ORDMIT<0? -options.ORDMIT: options.ORDMIT;
+  if( _MVXPenv && ( _MVXPenv->nord() != ordmit 
+                 || _MVXPenv->nvar() != _nx+_npar ) ){
+    delete[] _MVXPf;   _MVXPf = 0;
+    delete[] _MVXPd;   _MVXPd = 0;
+    delete[] _MVXPVAR; _MVXPVAR = 0;
+    delete   _MVXPenv; _MVXPenv = 0;
+  }
+
+  // Reset _MVPenv and related variables
+  if( _MVPenv && ( _MVPenv->nord() != 1 
+                || _MVPenv->nvar() != _npar ) ){
+    delete[] _MVPx;   _MVPx = 0;
+    delete[] _MVPp;   _MVPp = 0;
+    delete   _MVPenv; _MVPenv = 0;
+  }
+
+  // Set parameterization variables
+  delete[] _Iqdot; _Iqdot = _nq? new T[_nq]: 0;
+  delete[] _If; _If = _nf? new T[_nf]: 0;
+
+  switch( options.WRAPMIT){
+  case OPT::DINEQ:
+    delete[] _xLdot;   _xLdot = new double[_nx];
+    delete[] _xUdot;   _xUdot = new double[_nx];
+  case OPT::NONE:
+    delete[] _Ixdot;   _Ixdot = new T[_nx];
+    break;
+
+  case OPT::ELLIPS:
+  default:
+    delete[] _pref;    _pref    = new double[_npar];
+    delete[] _xref;    _xref    = new double[_nx];
+    delete[] _A;       _A       = new double[_nx*_nx];
+    delete[] _B;       _B       = new double[_nx*_npar];
+    delete[] _Bq;      _Bq      = _nq? new double[_nq*_npar]: 0;
+    delete[] _Q;       _Q       = new double[_nx*(_nx+1)/2];
+    delete[] _Ir;      _Ir      = new T[_nx];
+    delete[] _Irq;     _Irq     = _nq? new T[_nq]: 0;
+    delete[] _xrefdot; _xrefdot = new double[_nx];
+    delete[] _Bdot;    _Bdot    = new double[_nx*_npar];
+    delete[] _Bqdot;   _Bqdot   = _nq? new double[_nq*_npar]: 0;
+    delete[] _Bfct;    _Bfct    = _nf? new double[_nf*_npar]: 0;
+    delete[] _Qdot;    _Qdot    = new double[_nx*(_nx+1)/2];
+    delete[] _Irdot;   _Irdot   = new T[_nx];
+    delete[] _Irqdot;  _Irqdot  = _nq? new T[_nq]: 0;
+    delete[] _Irfct;   _Irfct   = _nf? new T[_nf]: 0;
+
+    delete   _MVXPenv; _MVXPenv = new PMT( _nx+_npar, ordmit );
+    _MVXPenv->options = options.PMOPT;
+    delete[] _MVXPd;   _MVXPd   = new PVT[_nx];
+    delete[] _MVXPf;   _MVXPf   = new PVT[_nx];
+    delete[] _MVXPqdot;_MVXPqdot= _nq? new PVT[_nq]: 0;
+    delete[] _MVXPfct; _MVXPfct = _nf? new PVT[_nf]: 0;
+    delete[] _MVXPVAR; _MVXPVAR = new PVT[_nVAR];
+    _MVXPx = _MVXPVAR;
+    _MVXPp = _MVXPx + _nx;
+    _MVXPt = _MVXPp + _npar;
+    _MVXPq = _MVXPt + 1;
+    for( unsigned jp=0; jp<_npar; jp++ )
+      _MVXPp[jp].set( _MVXPenv, _nx+jp, _Ip[jp] );
+
+    delete   _MVPenv;  _MVPenv  = new PMT( _npar, 1 );
+    _MVPenv->options = options.PMOPT;
+    delete[] _MVPx;    _MVPx    = new PVT[_nx];
+    delete[] _MVPp;    _MVPp    = new PVT[_npar+1];
+    _MVPt = _MVPp + _npar;
+    for( unsigned ip=0; ip<_npar; ip++ ){
+      _pref[ip] = Op<T>::mid( _Ip[ip] );
+      _MVPp[ip].set( _MVPenv, ip, _Ip[ip] );
+    }
+    _QTOLx = QTOL;
+    break;
+  }
+
+  return true;
+}
+
+template <typename T, typename PMT, typename PVT>
 template <typename REALTYPE, typename OPT> inline void
 ODEBND_BASE<T,PMT,PVT>::_GET_I_STA
 ( const OPT &options, const REALTYPE*x, const REALTYPE*q )
@@ -1149,7 +1270,6 @@ ODEBND_BASE<T,PMT,PVT>::_CC_I_ELL
   const unsigned np, double*reff, double*Bf, T*Idf, double*Qf,
   const double QTOL, const double EPS )
 {
-  // Extract time derivatives of constant, linear and remainder parts
   for( unsigned ix=0; ix<nx; ix++ ){
     If[ix] = MVXPf[ix].bound();
 #ifdef MC__ODEBND_BASE_DINEQI_DEBUG
@@ -1506,9 +1626,9 @@ ODEBND_BASE<T,PMT,PVT>::_JAC_I_STA
 
 template <typename T, typename PMT, typename PVT> inline bool
 ODEBND_BASE<T,PMT,PVT>::_FCT_I_STA
-( const unsigned pos_fct, const double t, T*If )
+( const unsigned pos_fct, const double t )
 {
-  if( !_nf || !If ) return true;
+  if( !_nf ) return true;
 
   *_It = t; // set current time
   const FFVar* pFCT = _vFCT.at( pos_fct );
@@ -1516,7 +1636,7 @@ ODEBND_BASE<T,PMT,PVT>::_FCT_I_STA
     for( unsigned j=0; j<_nq; j++ )
       std::cout << "Iq[" << j << "] = " << _Iq[j] << std::endl;
 #endif
-  _pDAG->eval( _nf, pFCT, If, _nVAR, _pVAR, _IVAR, pos_fct?true:false );
+  _pDAG->eval( _nf, pFCT, _If, _nVAR, _pVAR, _IVAR, pos_fct?true:false );
   return true;
 }
 
@@ -1524,7 +1644,7 @@ template <typename T, typename PMT, typename PVT>
 template <typename REALTYPE, typename OPT> inline bool
 ODEBND_BASE<T,PMT,PVT>::_FCT_I_STA
 ( const OPT&options, const unsigned pos_fct, const double t,
-  REALTYPE*fct, T*If )
+  REALTYPE*fct )
 {
   if( !_nf || !fct ) return true;
   _pFCT = _vFCT.at( pos_fct );
@@ -1533,8 +1653,8 @@ ODEBND_BASE<T,PMT,PVT>::_FCT_I_STA
   case OPT::NONE:
   case OPT::DINEQ:
     *_It = t; // set current time
-    _pDAG->eval( _nf, _pFCT, If, _nVAR, _pVAR, _IVAR, pos_fct?true:false );
-    _I2vec( _nf, If, fct );
+    _pDAG->eval( _nf, _pFCT, _If, _nVAR, _pVAR, _IVAR, pos_fct?true:false );
+    _I2vec( _nf, _If, fct );
     break;
 
   case OPT::ELLIPS:
@@ -1549,7 +1669,7 @@ ODEBND_BASE<T,PMT,PVT>::_FCT_I_STA
       std::cout << "MVXPq[" << j << "] = " << _MVXPq[j] << std::endl;
 #endif
     if( pos_fct ){
-      _vec2I( fct, _nf, _npar, _pref, _Ip, _Bfct, _Irfct, If );
+      _vec2I( fct, _nf, _npar, _pref, _Ip, _Bfct, _Irfct, _If );
       _ep2x( _nf, _npar, _Irfct, _pref, _MVXPp, _Bfct, 0, _MVXPfct );
       _pDAG->eval( _nf, _pFCT, _MVXPfct, _nVAR, _pVAR, _MVXPVAR, true );
     }
@@ -1559,110 +1679,8 @@ ODEBND_BASE<T,PMT,PVT>::_FCT_I_STA
     for( unsigned j=0; j<_nf; j++ )
       std::cout << "MVXPfct[" << j << "] = " << _MVXPfct[j] << std::endl;
 #endif
-    _QUAD_I_ELL( _nf, _npar, _nx, _MVXPfct, _Bfct, _Irfct, If );
+    _QUAD_I_ELL( _nf, _npar, _nx, _MVXPfct, _Bfct, _Irfct, _If );
     _I2vec( _nf, _npar, _Bfct, _Irfct, fct );
-    break;
-  }
-
-  return true;
-}
-
-template <typename T, typename PMT, typename PVT>
-template <typename OPT> inline bool
-ODEBND_BASE<T,PMT,PVT>::_INI_I_STA
-( const OPT&options, const unsigned np, const T*Ip, const double QTOL )
-{
-  // Update effective number of parameters
-  // (possibly larger than _np if lifting is used)
-  _npar = np;
-
-  // Size and set DAG evaluation arrays
-  _nVAR0 = _nx+_npar+1;
-  _nVAR  = _nVAR0+_nq;
-  delete[] _pVAR; _pVAR = new FFVar[_nVAR];
-  delete[] _IVAR; _IVAR = new T[_nVAR];
-  for( unsigned ix=0; ix<_nx; ix++ ) _pVAR[ix] = _pX[ix];
-  for( unsigned ip=0; ip<_npar; ip++ ) _pVAR[_nx+ip] = _pP[ip];
-  _pVAR[_nx+_npar] = (_pT? *_pT: 0. );
-  for( unsigned iq=0; iq<_nq; iq++ ) _pVAR[_nx+_npar+1+iq] = _pQ?_pQ[iq]:0.;
-  for( unsigned ip=0; ip<_npar; ip++ ) _IVAR[_nx+ip] = Ip[ip];
-  _Ix = _IVAR;
-  _Ip = _Ix + _nx;
-  _It = _Ip + _npar;
-  _Iq = _It + 1;
-
-  // Reset _MVXPenv and related variables
-  unsigned ordmit = options.ORDMIT<0? -options.ORDMIT: options.ORDMIT;
-  if( _MVXPenv && ( _MVXPenv->nord() != ordmit 
-                 || _MVXPenv->nvar() != _nx+_npar ) ){
-    delete[] _MVXPf;   _MVXPf = 0;
-    delete[] _MVXPd;   _MVXPd = 0;
-    delete[] _MVXPVAR; _MVXPVAR = 0;
-    delete   _MVXPenv; _MVXPenv = 0;
-  }
-
-  // Reset _MVPenv and related variables
-  if( _MVPenv && ( _MVPenv->nord() != 1 
-                || _MVPenv->nvar() != _npar ) ){
-    delete[] _MVPx;   _MVPx = 0;
-    delete[] _MVPp;   _MVPp = 0;
-    delete   _MVPenv; _MVPenv = 0;
-  }
-
-  // Set parameterization variables
-  delete[] _Iqdot; _Iqdot = _nq? new T[_nq]: 0;
-
-  switch( options.WRAPMIT){
-  case OPT::DINEQ:
-    delete[] _xLdot;   _xLdot = new double[_nx];
-    delete[] _xUdot;   _xUdot = new double[_nx];
-  case OPT::NONE:
-    delete[] _Ixdot;   _Ixdot = new T[_nx];
-    break;
-
-  case OPT::ELLIPS:
-  default:
-    delete[] _pref;    _pref    = new double[_npar];
-    delete[] _xref;    _xref    = new double[_nx];
-    delete[] _A;       _A       = new double[_nx*_nx];
-    delete[] _B;       _B       = new double[_nx*_npar];
-    delete[] _Bq;      _Bq      = _nq? new double[_nq*_npar]: 0;
-    delete[] _Q;       _Q       = new double[_nx*(_nx+1)/2];
-    delete[] _Ir;      _Ir      = new T[_nx];
-    delete[] _Irq;     _Irq     = _nq? new T[_nq]: 0;
-    delete[] _xrefdot; _xrefdot = new double[_nx];
-    delete[] _Bdot;    _Bdot    = new double[_nx*_npar];
-    delete[] _Bqdot;   _Bqdot   = _nq? new double[_nq*_npar]: 0;
-    delete[] _Bfct;    _Bfct    = _nf? new double[_nf*_npar]: 0;
-    delete[] _Qdot;    _Qdot    = new double[_nx*(_nx+1)/2];
-    delete[] _Irdot;   _Irdot   = new T[_nx];
-    delete[] _Irqdot;  _Irqdot  = _nq? new T[_nq]: 0;
-    delete[] _Irfct;   _Irfct   = _nf? new T[_nf]: 0;
-
-    delete   _MVXPenv; _MVXPenv = new PMT( _nx+_npar, ordmit );
-    _MVXPenv->options = options.PMOPT;
-    delete[] _MVXPd;   _MVXPd   = new PVT[_nx];
-    delete[] _MVXPf;   _MVXPf   = new PVT[_nx];
-    delete[] _MVXPqdot;_MVXPqdot= _nq? new PVT[_nq]: 0;
-    delete[] _MVXPfct; _MVXPfct = _nf? new PVT[_nf]: 0;
-    delete[] _MVXPVAR; _MVXPVAR = new PVT[_nVAR];
-    _MVXPx = _MVXPVAR;
-    _MVXPp = _MVXPx + _nx;
-    _MVXPt = _MVXPp + _npar;
-    _MVXPq = _MVXPt + 1;
-    for( unsigned jp=0; jp<_npar; jp++ )
-      _MVXPp[jp].set( _MVXPenv, _nx+jp, _Ip[jp] );
-
-    delete   _MVPenv;  _MVPenv  = new PMT( _npar, 1 );
-    _MVPenv->options = options.PMOPT;
-    delete[] _MVPx;    _MVPx    = new PVT[_nx];
-    delete[] _MVPp;    _MVPp    = new PVT[_npar+1];
-    _MVPt = _MVPp + _npar;
-    for( unsigned ip=0; ip<_npar; ip++ ){
-      _pref[ip] = Op<T>::mid( _Ip[ip] );
-      _MVPp[ip].set( _MVPenv, ip, _Ip[ip] );
-    }
-    _QTOLx = QTOL;
     break;
   }
 
@@ -1761,17 +1779,35 @@ ODEBND_BASE<T,PMT,PVT>::_e2x
 #ifdef MC__ODEBND_BASE_DINEQPM_DEBUG
   std::cout << "Er =" << Er << std::endl;
 #endif
+/*
   if( regPSD && !Er.psdQ() ){
 //#ifdef MC__ODEBND_BASE_DINEQPM_DEBUG
     std::cout << "Er not a p.s.d. matrix; lmin =" << Er.eigQ().first(0) << std::endl;
 //#endif
     return false;
   }
-/*
+*/
   if( regPSD && !Er.psdQ() ){
+    auto eigdec = Er.eigQ();
+#ifdef MC__ODEBND_BASE_DINEQPM_DEBUG
+    std::cout << "Er not a p.s.d. matrix; lmin =" << eigdec.first(0) << std::endl;
+#endif
+    for( unsigned i=0; eigdec.first(i)<0 && i<nx; i++ ){
+      auto Qcor = eigdec.first(i) * ( eigdec.second.col(i) * t( eigdec.second.col(i) ) );
+      for( unsigned ix=0; ix<nx; ix++ )
+        for( unsigned jx=0; jx<=ix; jx++ )
+          Qr[_ndxLT(ix,jx,nx)] = Er.Q(ix,jx) -= Qcor(ix,jx);
+#ifdef MC__ODEBND_BASE_DINEQPM_DEBUG
+      Er.reset_aux();
+      std::cout << "Er =" << Er << std::endl;
+      std::cout << "lmin =" << Er.eigQ().first(0) << std::endl;
+      int dum; std::cin >> dum;
+#endif
+    }
+/*
     double lmin = Er.eigQ().first(0);
 //#ifdef MC__ODEBND_BASE_DINEQPM_DEBUG
-    std::cout << "lmin =" << lmin << std::endl;
+    std::cout << "Er not a p.s.d. matrix; lmin =" << lmin << std::endl;
 //#endif
     for( unsigned ix=0; ix<nx; ix++ )
       Qr[_ndxLT(ix,ix,nx)] = Er.Q(ix,ix) -= lmin;
@@ -1779,8 +1815,9 @@ ODEBND_BASE<T,PMT,PVT>::_e2x
     std::cout << "Er =" << Er << std::endl;
     int dum; std::cin >> dum;
 #endif
-  }
 */
+  }
+
   for( unsigned ix=0; ix<nx; ix++ )
     Ir[ix] = T( Er.l(ix), Er.u(ix) );
 
@@ -1919,6 +1956,7 @@ ODEBND_BASE<T,PMT,PVT>::_INI_PM_STA
   _PMt = _PMp + _npar;
   _PMq = _PMt + 1;
 
+
   return true;
 }
 
@@ -1942,9 +1980,10 @@ ODEBND_BASE<T,PMT,PVT>::_INI_PM_STA
   }
 
   // Size state/quadrature derivative arrays
-  delete[] _PMxdot; _PMxdot = new PVT[_nx];
-  delete[] _PMqdot; _PMqdot = _nq? new PVT[_nq]: 0;
-  delete[] _radRqdot;  _radRqdot  = _nq? new double[_nq]: 0;
+  delete[] _PMxdot;   _PMxdot = new PVT[_nx];
+  delete[] _PMqdot;   _PMqdot = _nq? new PVT[_nq]: 0;
+  delete[] _PMf;      _PMf = _nf? new PVT[_nf]: 0;
+  delete[] _radRqdot; _radRqdot  = _nq? new double[_nq]: 0;
 
   switch( options.WRAPMIT){
   case OPT::NONE:
@@ -2348,6 +2387,7 @@ ODEBND_BASE<T,PMT,PVT>::_RHS_PM_STA
     *_PMt = t; // set current time   
 #ifdef MC__ODEBND_BASE_DINEQPM_DEBUG
     _print_interm( t, _nx, _PMx, _Er, "PMx Intermediate", std::cerr );
+    std::cout << "l =" << _Er.eigQ().first(0) << " ; " << _Er.eigQ().first(_nx-1) << std::endl;
 #endif
 
     // In this variant a bound on the Jacobian matrix is computed and the
@@ -2422,8 +2462,10 @@ ODEBND_BASE<T,PMT,PVT>::_RHS_PM_STA
     else
       _PME2vec( _PMenv, _nx, _PMxdot, 0, xdot );
 #ifdef MC__ODEBND_BASE_DINEQPM_DEBUG
-    _print_interm( t, _nx, _PMxdot, "PMxdot Intermediate", std::cerr );
-    {int dum; std::cin >> dum;}
+    _Er = E(_nx,_Qdot);
+    _print_interm( t, _nx, _PMxdot, _Er, "PMxdot Intermediate", std::cerr );
+    std::cout << "l =" << _Er.eigQ().first(0) << " ; " << _Er.eigQ().first(_nx-1) << std::endl;
+    { std::cout << "--paused--"; int dum; std::cin >> dum; }
 #endif
     return 0;
    }
@@ -2590,9 +2632,9 @@ ODEBND_BASE<T,PMT,PVT>::_JAC_PM_STA
 
 template <typename T, typename PMT, typename PVT> inline bool
 ODEBND_BASE<T,PMT,PVT>::_FCT_PM_STA
-( const unsigned pos_fct, const double t, PVT*PMf )
+( const unsigned pos_fct, const double t )
 {
-  if( !_nf || !PMf ) return true;
+  if( !_nf ) return true;
 
   *_PMt = t; // set current time
   const FFVar* pFCT = _vFCT.at( pos_fct );
@@ -2600,7 +2642,7 @@ ODEBND_BASE<T,PMT,PVT>::_FCT_PM_STA
     for( unsigned j=0; j<_nq; j++ )
       std::cout << "PMq[" << j << "] = " << _PMq[j] << std::endl;
 #endif
-  _pDAG->eval( _nf, pFCT, PMf, _nVAR, _pVAR, _PMVAR, pos_fct?true:false );
+  _pDAG->eval( _nf, pFCT, _PMf, _nVAR, _pVAR, _PMVAR, pos_fct?true:false );
   return true;
 }
 
@@ -2647,7 +2689,8 @@ ODEBND_BASE<T,PMT,PVT>::_RHS_PM_SET
 template <typename T, typename PMT, typename PVT>
 template <typename ODESLV> inline bool
 ODEBND_BASE<T,PMT,PVT>::_bounds
-( const T*Ip, T**Ixk, T*If, ODESLV&traj, const unsigned nsamp, std::ostream&os )
+( const T*Ip, T**Ixk, T*If, ODESLV&traj, const unsigned nsamp, 
+  std::vector<Results>&results, std::ostream&os )
 {
   int DISPLAY_SAVE = traj.options.DISPLAY;
   traj.options.DISPLAY = 0;
@@ -2658,25 +2701,33 @@ ODEBND_BASE<T,PMT,PVT>::_bounds
     p[ip] = Op<T>::l(Ip[ip]);
   double **xk = Ixk? new double*[_nsmax+1]: 0;
   for( unsigned is=0; Ixk && is<=_nsmax; is++ ){
-    if( !Ixk[is] ) Ixk[is] = new T[_nx];
+    if( !Ixk[is] ) Ixk[is] = new T[_nx+_nq];
     xk[is] = new double[_nx+_nq];
   }
   double *f = If? new double[_nf]: 0;
   STATUS stat = traj.states( p, xk, f, os );
   if( stat != NORMAL || nsamp <= 1 ){
-    delete[] p; delete[] f;
-    for( unsigned is=0; is<=_nsmax; is++ ) delete[] xk[is]; delete[] xk;
+    delete[] p;
+    delete[] f;
+    for( unsigned is=0; is<=_nsmax; is++ ) delete[] xk[is];
+    delete[] xk;
     return false;
   }   
   for( unsigned is=0; Ixk && is<=_nsmax; is++ )
-    for( unsigned ix=0; ix<_nx; ix++ )
+    for( unsigned ix=0; ix<_nx+_nq; ix++ )
       Ixk[is][ix] = xk[is][ix];
   for( unsigned ifn=0; If && ifn<_nf; ifn++ )
     If[ifn] = f[ifn];
 
+  // Initialize result vector with current trajectory
+  results.clear();
+  auto it=traj.results_sta.begin();
+  for( ; traj.options.RESRECORD && it!=traj.results_sta.end(); ++it )
+    results.push_back( Results( it->t, it->nx, it->X ) );
+
   // Start sampling process
   unsigned* vsamp = new unsigned[_np];
-  bool flag = _sampling( Ip, Ixk, If, traj, nsamp, vsamp, 0, p, xk, f, os );
+  bool flag = _sampling( Ip, Ixk, If, traj, nsamp, vsamp, 0, p, xk, f, results, os );
   traj.options.DISPLAY = DISPLAY_SAVE;
 
   // Clean-up
@@ -2692,7 +2743,7 @@ template <typename ODESLV> inline bool
 ODEBND_BASE<T,PMT,PVT>::_sampling
 ( const T*Ip, T**Ixk, T*If, ODESLV&traj, const unsigned nsamp,
   unsigned* vsamp, const unsigned ipar, double*p, double**xk,
-  double*f, std::ostream&os )
+  double*f, std::vector<Results>&results, std::ostream&os )
 {
   // Update bounds for all sampling points
   for( unsigned isamp=0; isamp<nsamp; isamp++ ){
@@ -2700,7 +2751,7 @@ ODEBND_BASE<T,PMT,PVT>::_sampling
 
     // Continue recursive call
     if( ipar+1 < _np ){
-      if( !_sampling( Ip, Ixk, If, traj, nsamp, vsamp, ipar+1, p, xk, f, os ) )
+      if( !_sampling( Ip, Ixk, If, traj, nsamp, vsamp, ipar+1, p, xk, f, results, os ) )
         return false;
       continue;
     }
@@ -2721,11 +2772,17 @@ ODEBND_BASE<T,PMT,PVT>::_sampling
     typename ODESLV::STATUS flag = traj.states( p, xk, f, os );
     if( flag != ODESLV::NORMAL ) return flag;
     for( unsigned is=0; Ixk && is<=_nsmax; is++ )
-      for( unsigned ix=0; ix<_nx; ix++ )
+      for( unsigned ix=0; ix<_nx+_nq; ix++ )
         Ixk[is][ix] = Op<T>::hull( xk[is][ix], Ixk[is][ix] );
     for( unsigned ifn=0; If && ifn<_nf; ifn++ )
       If[ifn] = Op<T>::hull( f[ifn], If[ifn] );
   }
+
+  // Update result vector with current trajectory
+  auto it=traj.results_sta.begin();
+  for( unsigned k=0; traj.options.RESRECORD && it!=traj.results_sta.end(); ++it, k++ )
+    for( unsigned i=0; i<it->nx; i++ )
+      results[k].X[i] = Op<T>::hull( it->X[i], results[k].X[i] );
 
   return true;
 }  
@@ -2741,9 +2798,9 @@ ODEBND_BASE<T,PMT,PVT>::_hausdorff
 
   // Compute inner bounds 
   T** Ixk0 = new T*[_nsmax+1];
-  for( unsigned is=0; is<_nsmax+1; is++ ) Ixk0[is] = new T[_nx];
+  for( unsigned is=0; is<_nsmax+1; is++ ) Ixk0[is] = new T[_nx+_nq];
   T* If0 = _nf? new T[_nf]: 0;
-  if( dineq.bounds( Ip, Ixk0, If0, nsamp, os ) != ODEBND::NORMAL ){
+  if( dineq.bounds( nsamp, Ip, Ixk0, If0, os ) != ODEBND::NORMAL ){
     for( unsigned is=0; is<_nsmax+1; is++ ) delete[] Ixk0[is];
     delete[] Ixk0;
     delete[] If0;
@@ -2752,23 +2809,27 @@ ODEBND_BASE<T,PMT,PVT>::_hausdorff
 
   // Compute outer bounds
   T** Ixk = new T*[_nsmax+1];
-  for( unsigned is=0; is<_nsmax+1; is++ ) Ixk[is] = new T[_nx];
+  for( unsigned is=0; is<_nsmax+1; is++ ) Ixk[is] = new T[_nx+_nq];
   T* If = _nf? new T[_nf]: 0;
   try{ dineq.bounds( Ip, Ixk, If, os ); }
   catch(...){;}
   unsigned nsf = dineq.final_stage();
 
   dineq.options.DISPLAY = DISPLAY_ODEBND;
-  for( unsigned is=0; is<_nsmax+1; is++ ){
-    for( unsigned i=0; i<_nx; i++ )
-      Hxk[is][i] = is<=nsf? _dH( Ixk[is][i], Ixk0[is][i] ): 0./0.;
+  double **Hxk_ = Hxk? Hxk: new double*[_nsmax+1];
+  for( unsigned is=0; is<=_nsmax; is++ ){
+    if( !Hxk_[is] ) Hxk_[is] = new double[_nx+_nq];
+    for( unsigned i=0; i<_nx+_nq; i++ )
+      Hxk_[is][i] = is<=nsf? _dH( Ixk[is][i], Ixk0[is][i] ): 0./0.;
     if( dineq.options.DISPLAY >= 1 )
-      _print_interm( _dT[is], _nx, Hxk[is], "dHx", os );
+      _print_interm( _dT[is], _nx, Hxk_[is], "dHx", os );
+      _print_interm( _nq, Hxk_[is]+_nx, "dHq", os );
   }
+  double *Hf_ = Hf? Hf: new double[_nf];
   for( unsigned i=0; i<_nf; i++ )
-    Hf[i] = nsf==_nsmax? _dH( If[i], If0[i] ): 0./0.;
+    Hf_[i] = nsf==_nsmax? _dH( If[i], If0[i] ): 0./0.;
   if( dineq.options.DISPLAY >= 1 && _nf )
-    _print_interm( _nf, Hf, "dHf", os );
+    _print_interm( _nf, Hf_, "dHf", os );
 
   for( unsigned is=0; is<_nsmax+1; is++ ) delete[] Ixk0[is];
   delete[] Ixk0;
@@ -2776,6 +2837,9 @@ ODEBND_BASE<T,PMT,PVT>::_hausdorff
   for( unsigned is=0; is<_nsmax+1; is++ ) delete[] Ixk[is];
   delete[] Ixk;
   delete[] If;
+  for( unsigned is=0; !Hxk && is<_nsmax+1; is++ ) delete[] Hxk_[is];
+  if( !Hxk ) delete[] Hxk_;
+  if( !Hf )  delete[] Hf_;
 
   return true;
 }
@@ -2793,8 +2857,8 @@ ODEBND_BASE<T,PMT,PVT>::_hausdorff
   // Compute inner bounds
   PVT** PMxk = new PVT*[_nsmax+1];
   for( unsigned is=0; is<_nsmax+1; is++ ){
-    PMxk[is] = new PVT[_nx];
-    for( unsigned ix=0; ix<_nx; ix++ )
+    PMxk[is] = new PVT[_nx+_nq];
+    for( unsigned ix=0; ix<_nx+_nq; ix++ )
       PMxk[is][ix] = 0./0.;
   }
   PVT* PMf = _nf? new PVT[_nf]: 0;
@@ -2807,23 +2871,27 @@ ODEBND_BASE<T,PMT,PVT>::_hausdorff
   T* Ip = new T[_npar];
   for( unsigned ip=0; ip<_npar; ip++ ) Ip[ip] = PMp[ip].B();
   T** Rxk = new T*[_nsmax+1];
-  for( unsigned is=0; is<_nsmax+1; is++ ) Rxk[is] = new T[_nx];
+  for( unsigned is=0; is<_nsmax+1; is++ ) Rxk[is] = new T[_nx+_nq];
   T* Rf = _nf? new T[_nf]: 0;
   bool flag = _remainders( nsf, _npar, Ip, PMxk, PMf, Rxk, Rf, traj, nsamp, os );
 
   dineq.options.DISPLAY = DISPLAY_ODEBND;
   traj.options.DISPLAY = DISPLAY_ODESLV;
-  for( unsigned is=0; is<_nsmax+1; is++ ){
-    for( unsigned ix=0; ix<_nx; ix++ )
-      Hxk[is][ix] = is<=nsf? _dH( PMxk[is][ix].R(), Rxk[is][ix] ): 0./0.;
+  double **Hxk_ = Hxk? Hxk: new double*[_nsmax+1];
+  for( unsigned is=0; is<=_nsmax; is++ ){
+    if( !Hxk_[is] ) Hxk_[is] = new double[_nx+_nq];
+    for( unsigned ix=0; ix<_nx+_nq; ix++ )
+      Hxk_[is][ix] = is<=nsf? _dH( PMxk[is][ix].R(), Rxk[is][ix] ): 0./0.;
     if( dineq.options.DISPLAY >= 1 ){
-      _print_interm( _dT[is], _nx, Hxk[is], "dHx", os );
+      _print_interm( _dT[is], _nx, Hxk_[is], "dHx", os );
+      _print_interm( _nq, Hxk_[is]+_nx, "dHq", os );
     }
   }
+  double *Hf_ = Hf? Hf: new double[_nf];
   for( unsigned i=0; i<_nf; i++ )
-    Hf[i] = nsf==_nsmax? _dH( PMf[i].R(), Rf[i] ): 0./0.;
+    Hf_[i] = nsf==_nsmax? _dH( PMf[i].R(), Rf[i] ): 0./0.;
   if( dineq.options.DISPLAY >= 1 && _nf )
-    _print_interm( _nf, Hf, "dHf", os );
+    _print_interm( _nf, Hf_, "dHf", os );
 
   for( unsigned is=0; is<_nsmax+1; is++ ) delete[] Rxk[is];
   delete[] Rxk;
@@ -2832,6 +2900,9 @@ ODEBND_BASE<T,PMT,PVT>::_hausdorff
   delete[] PMxk;
   delete[] PMf;
   delete[] Ip;
+  for( unsigned is=0; !Hxk && is<_nsmax+1; is++ ) delete[] Hxk_[is];
+  if( !Hxk ) delete[] Hxk_;
+  if( !Hf )  delete[] Hf_;
 
   return flag;
 }
@@ -2858,7 +2929,7 @@ ODEBND_BASE<T,PMT,PVT>::_remainders
     return( flag==ODESLV::NORMAL? true: false );
   }   
   for( unsigned is=0; is<=ns; is++ )
-    for( unsigned i=0; i<_nx; i++ )
+    for( unsigned i=0; i<_nx+_nq; i++ )
       Rxk[is][i] = xk[is][i] - PMxk[is][i].polynomial( p );
   for( unsigned i=0; i<_nf; i++ )
     Rf[i] = f[i] - PMf[i].polynomial(p);
@@ -2912,7 +2983,7 @@ ODEBND_BASE<T,PMT,PVT>::_remainders
     flag = traj.states( p, xk, f, os );
     if( flag != ODESLV::NORMAL ) return false;
     for( unsigned is=0; is<=ns; is++ )
-      for( unsigned i=0; i<_nx; i++ )
+      for( unsigned i=0; i<_nx+_nq; i++ )
         Rxk[is][i] = Op<T>::hull( xk[is][i]-PMxk[is][i].polynomial(p), Rxk[is][i] );
     for( unsigned i=0; i<_nf; i++ )
       Rf[i] = Op<T>::hull( f[i]-PMf[i].polynomial(p), Rf[i] );
@@ -2963,13 +3034,16 @@ ODEBND_BASE<T,PMT,PVT>::_record
   ofile << std::right << std::scientific << std::setprecision(iprec);
 
   // Record computed interval bounds at stage times
-  auto it = bnd.begin();
+  auto it = bnd.begin(), it0 = it;
   for( ; it != bnd.end(); ++it ){
+    if( it != bnd.begin() && it->t == it0->t )
+      ofile << std::endl;
     ofile << std::setw(iprec+9) << it->t;
     for( unsigned ix=0; ix<it->nx; ix++ )
       ofile << std::setw(iprec+9) << mc::Op<T>::l( it->X[ix] )
             << std::setw(iprec+9) << mc::Op<T>::u( it->X[ix] );
     ofile << std::endl;
+    it0 = it;
   }
 }
 

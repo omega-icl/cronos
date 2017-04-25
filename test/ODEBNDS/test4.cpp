@@ -20,29 +20,27 @@ typedef mc::Interval I;
 #include "odebnds_sundials.hpp"
 
 const unsigned int NM = 12;
-const double yS1[NM] ={0.74, 0.63, 0.61, 0.58, 0.59, 0.60, 0.61, 0.63, 0.64, 0.66, 0.67, 0.70}; 
-const double yS2[NM] ={2.3, 2.2, 2.2, 2.1, 2.2, 2.3, 2.3, 2.3, 2.4, 2.4, 2.4, 2.5}; 
-const double yC[NM]  ={51.1, 53.4, 54.0, 54.0, 54.0, 54.0, 53.9, 53.9, 53.8, 53.8, 53.8, 53.7};
+const double Tm[NM]  = { 1., 2., 3., 4., 5., 6., 7., 8., 9., 10., 11., 12. }; 
+const double yS1[NM] = { 0.74, 0.63, 0.61, 0.58, 0.59, 0.60, 0.61, 0.63, 0.64, 0.66, 0.67, 0.70 }; 
+const double yS2[NM] = { 2.3, 2.2, 2.2, 2.1, 2.2, 2.3, 2.3, 2.3, 2.4, 2.4, 2.4, 2.5 }; 
+const double yC[NM]  = { 51.1, 53.4, 54.0, 54.0, 54.0, 54.0, 53.9, 53.9, 53.8, 53.8, 53.8, 53.7 };
 
 int main()
 {
   mc::FFGraph IVP;  // DAG describing the problem
 
-  double t0 = 0., tf = 3.;  // Time span
-  const unsigned NS = 1*NM; //12; // Time stages
-  assert( !(NS % NM) );
-  double tk[NS+1]; tk[0] = t0;
-  for( unsigned k=0; k<NS; k++ ) tk[k+1] = tk[k] + (tf-t0)/(double)NS;
+  double TS[NM+1]; TS[0] = 0.;
+  for( unsigned k=0; k<NM; k++ ) TS[k+1] = Tm[k];
 
   const unsigned NP = 3;  // Number of parameters
   const unsigned NX = 6;  // Number of states
   const unsigned NF = 1;  // Number of state functions
 
   mc::FFVar P[NP];  // Parameters
-  for( unsigned int i=0; i<NP; i++ ) P[i].set( &IVP );
+  for( unsigned i=0; i<NP; i++ ) P[i].set( &IVP );
 
   mc::FFVar X[NX];  // States
-  for( unsigned int i=0; i<NX; i++ ) X[i].set( &IVP );
+  for( unsigned i=0; i<NX; i++ ) X[i].set( &IVP );
   mc::FFVar S1 = X[0];
   mc::FFVar S2 = X[1];
   mc::FFVar C  = X[2];
@@ -95,31 +93,31 @@ int main()
   IC[4] = P[1]; //X2
   IC[5] = 50.;  //Z
 
-  mc::FFVar FCT[NF*NS];  // State functions
-  for( unsigned k=0; k<NF*NS; k++ ) FCT[k] = 0.;
-  for( unsigned k=0; k<NM; k++ ){
-    FCT[(k+1)*NS/NM-1] = pow((yS1[k] - S1),2) + pow((yS2[k] - S2),2) + pow((yC[k] - C),2);
-    //FCT[k*(NS/NM)] = pow((yS1[k] - S1),2) + pow((yS2[k] - S2),2) + pow((yC[k] - C),2);
-  }
+  mc::FFVar FCT[NF*NM];  // State functions
+  for( unsigned k=0; k<NM; k++ )
+    FCT[k] = pow((yS1[k]-S1),2) + pow((yS2[k]-S2),2) + pow((yC[k]-C),2);
 
   I Ip[NP]; Ip[0]= 0.5*I(0.98,1.02); Ip[1] = I(0.98,1.02); Ip[2] = 40.*I(0.98,1.02);
-  I *Ixk[NS+1], *Iyk[NS+1], *Ixpk[NS+1];
-  for( unsigned k=0; k<=NS; k++ ){
-    Ixk[k] = new I[NX];
-    Iyk[k] = new I[NF*NX];
-    Ixpk[k] = new I[NP*NX];
-  }
-  I If[NF], Ifp[NF*NP];
+  //I *Ixk[NS+1], *Iyk[NS+1], *Ixpk[NS+1];
+  //for( unsigned k=0; k<=NS; k++ ){
+  //  Ixk[k] = new I[NX];
+  //  Iyk[k] = new I[NF*NX];
+  //  Ixpk[k] = new I[NP*NX];
+  //}
+  //I If[NF], Ifp[NF*NP];
 
   PM PMEnv( NP, NPM );
   PV PMp[NP] = { PV( &PMEnv, 0, Ip[0] ), PV( &PMEnv, 1, Ip[1] ), PV( &PMEnv, 2, Ip[2] ) };
-  PV *PMxk[NS+1], *PMyk[NS+1], *PMxpk[NS+1];
-  for( unsigned k=0; k<=NS; k++ ){
-    PMxk[k] = new PV[NX];
-    PMyk[k] = new PV[NF*NX];
-    PMxpk[k] = new PV[NP*NX];
-  }
-  PV PMf[NF], PMfp[NF*NP];
+  //PV *PMxk[NS+1], *PMyk[NS+1], *PMxpk[NS+1];
+  //for( unsigned k=0; k<=NS; k++ ){
+  //  PMxk[k] = new PV[NX];
+  //  PMyk[k] = new PV[NF*NX];
+  //  PMxpk[k] = new PV[NP*NX];
+  //}
+  //PV PMf[NF], PMfp[NF*NP];
+
+  std::ofstream ofSTA, ofFSA[NP], ofASA[NF];
+  char fname[50];
 
   /////////////////////////////////////////////////////////////////////////////
   //// DIFFERENTIAL INEQUALITIES
@@ -127,7 +125,7 @@ int main()
 
   AD.options.DISPLAY   = 1;
 #if defined( SAVE_RESULTS )
-  AD.options.RESRECORD = true;
+  AD.options.RESRECORD = 100;
 #endif
   AD.options.ATOL      = AD.options.ATOLB      = AD.options.ATOLS  = 1e-10;
   AD.options.RTOL      = AD.options.RTOLB      = AD.options.RTOLS  = 1e-8;
@@ -144,94 +142,106 @@ int main()
   AD.options.QERRB     = true;
   AD.options.QSCALE    = 1e-5;
   AD.options.HMIN      = 1e-14;
-
-  AD.options.ODESLV.NMAX = AD.options.ODESLV.ASACHKPT = 25000;
-  AD.options.ODESLV.INTMETH   = mc::ODESLVS_SUNDIALS::Options::MSBDF;//MSADAMS;//MSBDF;
-  AD.options.ODESLV.JACAPPROX = mc::ODESLVS_SUNDIALS::Options::CV_DIAG;//CV_DENSE;//CV_DIAG;
+  AD.options.ODESLVS   = AD.options;
 
   AD.set_dag( &IVP );
+  AD.set_time( NM, TS );
   AD.set_state( NX, X );
   AD.set_parameter( NP, P );
   AD.set_differential( NX, RHS );
   AD.set_initial( NX, IC );
-  AD.set_function( NS, NF, FCT );
+  AD.set_function( NM, NF, FCT );
 
-  std::ofstream ofSTA, ofSEN;
 
   std::cout << "\nNON_VALIDATED INTEGRATION - INNER-APPROXIMATION OF REACHABLE SET AND ADJOINT SENSITIVITY:\n\n";
-  AD.bounds_ASA( NS, tk, Ip, Ixk, If, Iyk, Ifp, NSAMP );
+  AD.bounds_ASA( NSAMP, Ip );//, Ixk, If, Iyk, Ifp );
 #if defined( SAVE_RESULTS )
   ofSTA.open( "test4_APPROX_STA.dat", std::ios_base::out );
-  ofSEN.open( "test4_APPROX_ASA.dat", std::ios_base::out );
-  AD.record( ofSTA, ofSEN );
+  for( unsigned i=0; i<NF; ++i ){
+    sprintf( fname, "test4_APPROX_ASA%d.dat",i );  
+    ofASA[i].open( fname, std::ios_base::out );
+  }
+  AD.record( ofSTA, ofASA );
   ofSTA.close();
-  ofSEN.close();
+  for( unsigned i=0; i<NF; ++i ) ofASA[i].close();
 #endif
-  { int dum; std::cout << "PAUSED--"; std::cin >> dum; }
-/*
+
   std::cout << "\nCONTINUOUS SET-VALUED INTEGRATION - INTERVAL ENCLOSURE OF REACHABLE SET AND ADJOINT SENSITIVITY:\n\n";
-  AD.bounds_ASA( NS, tk, Ip, Ixk, If, Iyk, Ifp );
+  AD.bounds_ASA( Ip );//, Ixk, If, Iyk, Ifp );
 #if defined( SAVE_RESULTS )
   ofSTA.open( "test4_DINEQI_STA.dat", std::ios_base::out );
-  ofSEN.open( "test4_DINEQI_ASA.dat", std::ios_base::out );
-  AD.record( ofSTA, ofSEN );
+  for( unsigned i=0; i<NF; ++i ){
+    sprintf( fname, "test4_DINEQI_ASA%d.dat",i );  
+    ofASA[i].open( fname, std::ios_base::out );
+  }
+  AD.record( ofSTA, ofASA );
   ofSTA.close();
-  ofSEN.close();
+  for( unsigned i=0; i<NF; ++i ) ofASA[i].close();
 #endif
-*/
+
   std::cout << "\nCONTINUOUS SET-VALUED INTEGRATION - POLYNOMIAL MODEL ENCLOSURE OF REACHABLE SET AND ADJOINT SENSITIVITY:\n\n";
-  //AD.bounds( NS, tk, PMp, PMxk, PMf );
-  AD.bounds_ASA( NS, tk, PMp, PMxk, PMf, PMyk, PMfp );
+  AD.bounds_ASA( PMp );//, PMxk, PMf, PMyk, PMfp );
 #if defined( SAVE_RESULTS )
   ofSTA.open( "test4_DINEQPM_STA.dat", std::ios_base::out );
-  ofSEN.open( "test4_DINEQPM_ASA.dat", std::ios_base::out );
-  AD.record( ofSTA, ofSEN );
+  for( unsigned i=0; i<NF; ++i ){
+    sprintf( fname, "test4_DINEQPM_ASA%d.dat",i );  
+    ofASA[i].open( fname, std::ios_base::out );
+  }
+  AD.record( ofSTA, ofASA );
   ofSTA.close();
-  ofSEN.close();
+  for( unsigned i=0; i<NF; ++i ) ofASA[i].close();
 #endif
-  { int dum; std::cout << "--PAUSED "; std::cin >> dum; }
+
 
   std::cout << "\nNON_VALIDATED INTEGRATION - INNER-APPROXIMATION OF REACHABLE SET AND FORWARD SENSITIVITY:\n\n";
-  AD.bounds_FSA( NS, tk, Ip, Ixk, If, Ixpk, Ifp, NSAMP );
+  AD.bounds_FSA( NSAMP, Ip );//, Ixk, If, Ixpk, Ifp );
 #if defined( SAVE_RESULTS )
   ofSTA.open( "test4_APPROX_STA.dat", std::ios_base::out );
-  ofSEN.open( "test4_APPROX_FSA.dat", std::ios_base::out );
-  AD.record( ofSTA, ofSEN );
+  for( unsigned i=0; i<NP; ++i ){
+    sprintf( fname, "test4_APPROX_FSA%d.dat",i );  
+    ofFSA[i].open( fname, std::ios_base::out );
+  }
+  AD.record( ofSTA, ofFSA );
   ofSTA.close();
-  ofSEN.close();
-#endif
-  { int dum; std::cout << "PAUSED--"; std::cin >> dum; }
-/*
-  std::cout << "\nCONTINUOUS SET-VALUED INTEGRATION - INTERVAL ENCLOSURE OF REACHABLE SET AND FORWARD SENSITIVITY:\n\n";
-  //AD.bounds( NS, tk, Ip, Ixk, If );
-  AD.bounds_FSA( NS, tk, Ip, Ixk, If, Ixpk, Ifp );
-#if defined( SAVE_RESULTS )
-  ofSTA.open( "test4_DINEQI_STA.dat", std::ios_base::out );
-  ofSEN.open( "test4_DINEQI_FSA.dat", std::ios_base::out );
-  AD.record( ofSTA, ofSEN );
-  ofSTA.close();
-  ofSEN.close();
-#endif
-*/
-  std::cout << "\nCONTINUOUS SET-VALUED INTEGRATION - POLYNOMIAL MODEL ENCLOSURE OF REACHABLE SET AND FORWARD SENSITIVITY:\n\n";
-  AD.bounds_FSA( NS, tk, PMp, PMxk, PMf, PMxpk, PMfp );
-#if defined( SAVE_RESULTS )
-  ofSTA.open( "test4_DINEQPM_STA.dat", std::ios_base::out );
-  ofSEN.open( "test4_DINEQPM_FSA.dat", std::ios_base::out );
-  AD.record( ofSTA, ofSEN );
-  ofSTA.close();
-  ofSEN.close();
+  for( unsigned i=0; i<NP; ++i ) ofFSA[i].close();
 #endif
 
-  // Clean up
-  for( unsigned k=0; k<=NS; k++ ){
-    delete[] Ixk[k];
-    delete[] Iyk[k];
-    delete[] Ixpk[k];
-    delete[] PMxk[k];
-    delete[] PMyk[k];
-    delete[] PMxpk[k];
+  std::cout << "\nCONTINUOUS SET-VALUED INTEGRATION - INTERVAL ENCLOSURE OF REACHABLE SET AND FORWARD SENSITIVITY:\n\n";
+  AD.bounds_FSA( Ip );//, Ixk, If, Ixpk, Ifp );
+#if defined( SAVE_RESULTS )
+  ofSTA.open( "test4_DINEQI_STA.dat", std::ios_base::out );
+  for( unsigned i=0; i<NP; ++i ){
+    sprintf( fname, "test4_DINEQI_FSA%d.dat",i );  
+    ofFSA[i].open( fname, std::ios_base::out );
   }
+  AD.record( ofSTA, ofFSA );
+  ofSTA.close();
+  for( unsigned i=0; i<NP; ++i ) ofFSA[i].close();
+#endif
+
+  std::cout << "\nCONTINUOUS SET-VALUED INTEGRATION - POLYNOMIAL MODEL ENCLOSURE OF REACHABLE SET AND FORWARD SENSITIVITY:\n\n";
+  AD.bounds_FSA( PMp );//, PMxk, PMf, PMxpk, PMfp );
+#if defined( SAVE_RESULTS )
+  ofSTA.open( "test4_DINEQPM_STA.dat", std::ios_base::out );
+  for( unsigned i=0; i<NP; ++i ){
+    sprintf( fname, "test4_DINEQPM_FSA%d.dat",i );  
+    ofFSA[i].open( fname, std::ios_base::out );
+  }
+  AD.record( ofSTA, ofFSA );
+  ofSTA.close();
+  for( unsigned i=0; i<NP; ++i ) ofFSA[i].close();
+#endif
+
+
+  // Clean up
+  //for( unsigned k=0; k<=NS; k++ ){
+  //  delete[] Ixk[k];
+  //  delete[] Iyk[k];
+  //  delete[] Ixpk[k];
+  //  delete[] PMxk[k];
+  //  delete[] PMyk[k];
+  //  delete[] PMxpk[k];
+  //}
 
   return 0;
 }

@@ -26,7 +26,7 @@ int main()
   mc::FFGraph IVP;  // DAG describing the problem
 
   double T0 = 0., TF = 2000.;   // Time span
-  const unsigned NS = 400;  // Time stages
+  const unsigned NS = 1;  // Time stages
   double TS[NS+1]; TS[0] = T0;
   for( unsigned k=0; k<NS; k++ ) TS[k+1] = TS[k] + (TF-T0)/(double)NS;
 
@@ -62,44 +62,11 @@ int main()
   FCT[0] = X[0];
 
   I Ip[NP] = { I(350.,370.), I(290.,310.) };
-  I *Ixk[NS+1], If[NF];
-  for( unsigned k=0; k<=NS; k++ )
-    Ixk[k] = new I[NX];
 
   PM PMEnv( NP, NPM );
   PV PMp[NP];
   for( unsigned i=0; i<NP; i++ ) PMp[i].set( &PMEnv, i, Ip[i] );
-  PV *PMxk[NS+1], PMf[NF];
-  for( unsigned k=0; k<=NS; k++ )
-    PMxk[k] = new PV[NX];
-/*
-  /////////////////////////////////////////////////////////////////////////
-  // Bound ODE trajectories - sampling
-  mc::ODESLV_GSL<I> LV0;
 
-  LV0.set_dag( &IVP );
-  LV0.set_state( NX, X );
-  LV0.set_parameter( NP, P );
-  LV0.set_differential( NX, RHS );
-  LV0.set_initial( NX, IC );
-  LV0.set_function( NF, FCT );
-
-  LV0.options.DISPLAY = 1;
-  LV0.options.ATOL    = LV0.options.RTOL = 1e-10;
-  LV0.options.H0      = 1e-6;
-  //LV0.options.INPMETH = mc::ODESLV_GSL<I>::Options::MSBDF;
-#if defined( SAVE_RESULTS )
-  LV0.options.RESRECORD = true;
-#endif
-
-  std::cout << "\nNON_VALIDATED INTEGRATION - APPROXIMATE ENCLOSURE OF REACHABLE SET:\n\n";
-  //LV0.states( NS, tk, p, xk, q, f );
-  LV0.bounds( NS, tk, Ip, Ixk, Iq, If, NSAMP );
-#if defined( SAVE_RESULTS )
-  std::ofstream apprec( "test4_APPROX_STA.dat", std::ios_base::out );
-  LV0.record( apprec );
-#endif
-*/
   /////////////////////////////////////////////////////////////////////////
   // Bound ODE trajectories - differential inequalities
 
@@ -113,50 +80,42 @@ int main()
   CSTR.set_initial( NX, IC );
   CSTR.set_function( NF, FCT );
 
+#if defined( SAVE_RESULTS )
+  CSTR.options.RESRECORD = 1000;
+#endif
   CSTR.options.INTMETH   = mc::ODEBND_SUNDIALS<I,PM,PV>::Options::MSADAMS;
   CSTR.options.JACAPPROX = mc::ODEBND_SUNDIALS<I,PM,PV>::Options::CV_DIAG;//CV_DENSE;//
   CSTR.options.WRAPMIT   = mc::ODEBND_SUNDIALS<I,PM,PV>::Options::ELLIPS;//DINEQ;//NONE;
   CSTR.options.DISPLAY   = 1;
-#if defined( SAVE_RESULTS )
-  CSTR.options.RESRECORD = true;
-#endif
-  CSTR.options.ORDMIT       = -1; //NPM;
-  CSTR.options.ATOL         = 1e-10;
-  CSTR.options.RTOL         = 1e-10;
-  CSTR.options.ETOL         = 1e-20;
-  CSTR.options.ODESLV.ATOL  = 1e-10;
-  CSTR.options.ODESLV.RTOL  = 1e-8;
-  CSTR.options.HMIN         = 1e-10;
+  CSTR.options.ORDMIT    = -2; //NPM;
+  CSTR.options.ATOL      = 1e-10;
+  CSTR.options.RTOL      = 1e-10;
+  CSTR.options.ETOL      = 1e-20;
+  CSTR.options.HMIN      = 1e-10;
+  CSTR.options.ODESLVS   = CSTR.options;
 
   std::cout << "\nNON_VALIDATED INTEGRATION - INNER-APPROXIMATION OF REACHABLE SET:\n\n";
-  CSTR.bounds( Ip, Ixk, If, NSAMP );
+  CSTR.bounds( NSAMP, Ip );
 #if defined( SAVE_RESULTS )
   std::ofstream apprec( "test4_APPROX_STA.dat", std::ios_base::out );
   CSTR.record( apprec );
 #endif
-  { int dum; std::cout << "PAUSED--"; std::cin >> dum; }
 
   std::cout << "\nCONTINUOUS SET-VALUED INTEGRATION - INTERVAL ENCLOSURE OF REACHABLE SET:\n\n";
-  CSTR.bounds( Ip, Ixk, If );
+  CSTR.bounds( Ip );
 #if defined( SAVE_RESULTS )
   std::ofstream bnd2recI( "test4_DINEQI_STA.dat", std::ios_base::out );
   CSTR.record( bnd2recI );
 #endif
-  { int dum; std::cout << "PAUSED--"; std::cin >> dum; }
 
   std::cout << "\nCONTINUOUS SET-VALUED INTEGRATION - POLYNOMIAL MODEL ENCLOSURE OF REACHABLE SET:\n\n";
   //CSTR.options.PMNOREM = false;
   //CSTR.options.DMAX    = 5.;
-  CSTR.bounds( PMp, PMxk, PMf );
+  CSTR.bounds( PMp );
 #if defined( SAVE_RESULTS )
   std::ofstream bnd2recPM( "test4_DINEQPM_STA.dat", std::ios_base::out );
   CSTR.record( bnd2recPM );
 #endif
-
-  for( unsigned k=0; k<=NS; k++ ){
-    delete[] Ixk[k];
-    delete[] PMxk[k];
-  }
 
   return 0;
 }

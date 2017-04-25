@@ -822,7 +822,7 @@ ODESLVS_SUNDIALS::states_FSA
       _print_interm( _nq, ODESLV_BASE::_Dq, " q", os );
     }
     if( options.RESRECORD )
-      results_sta.push_back( Results( _t, _nx, NV_DATA_S(_Nx), _nq, NV_DATA_S(_Nq) ) );
+      results_sta.push_back( Results( _t, _nx, NV_DATA_S(_Nx), _nq, _nq? NV_DATA_S(_Nq): 0 ) );
     for( unsigned ix=0; xk && ix<_nx+_nq; ix++ )
       xk[0][ix] = ix<_nx? ODESLV_BASE::_Dx[ix]: ODESLV_BASE::_Dq[ix-_nx];
 
@@ -843,7 +843,7 @@ ODESLVS_SUNDIALS::states_FSA
         _print_interm( _nq, _Dyq, oqp.str(), os );
       }
       if( options.RESRECORD )
-        results_sen[_isen].push_back( Results( _t, _nx, NV_DATA_S(_Ny[_isen]), _nq, NV_DATA_S(_Nyq[_isen]) ) );
+        results_sen[_isen].push_back( Results( _t, _nx, NV_DATA_S(_Ny[_isen]), _nq, _nq? NV_DATA_S(_Nyq[_isen]):0 ) );
       for( unsigned ix=0; xpk && ix<_nx+_nq; ix++ )
         xpk[0][(_nx+_nq)*_isen+ix] = ix<_nx? _Dy[ix]: _Dyq[ix-_nx];
     }
@@ -868,7 +868,7 @@ ODESLVS_SUNDIALS::states_FSA
          || !ODESLV_SUNDIALS::_CC_CVODE_QUAD() ) )
         { _END_STA(); _END_SEN(); return FAILURE; }
       if( options.RESRECORD )
-        results_sta.push_back( Results( _t, _nx, NV_DATA_S(_Nx), _nq, NV_DATA_S(_Nq) ) );
+        results_sta.push_back( Results( _t, _nx, NV_DATA_S(_Nx), _nq, _nq? NV_DATA_S(_Nq): 0 ) );
       for( _isen=0; _isen<_np; _isen++ ){
         if( _pos_ic
          && ( !_CC_SET_FSA( _pos_ic, _isen )
@@ -886,7 +886,7 @@ ODESLVS_SUNDIALS::states_FSA
           std::cout << "_Nyq" << _isen << "[" << iy << "] = " << NV_Ith_S(_Nyq[_isen],iy) << std::endl;
 #endif
         if( options.RESRECORD )
-          results_sen[_isen].push_back( Results( _t, _nx, NV_DATA_S(_Ny[_isen]), _nq, NV_DATA_S(_Nyq[_isen]) ) );
+          results_sen[_isen].push_back( Results( _t, _nx, NV_DATA_S(_Ny[_isen]), _nq, _nq? NV_DATA_S(_Nyq[_isen]): 0 ) );
       }
 
       // update list of operations in RHS, JAC, QUAD, RHSFSA and QUADFSA
@@ -927,7 +927,7 @@ ODESLVS_SUNDIALS::states_FSA
             if( _check_cv_flag(&_cv_flag, "CVodeGetQuad", 1) )
               { _END_STA(); return FATAL; }
           }
-          results_sta.push_back( Results( _t, _nx, NV_DATA_S(_Nx), _nq, NV_DATA_S(_Nq) ) );
+          results_sta.push_back( Results( _t, _nx, NV_DATA_S(_Nx), _nq, _nq? NV_DATA_S(_Nq): 0 ) );
           for( _isen=0; _isen<_np; _isen++ ){
             _cv_flag = CVodeGetSens1(_cv_mem, &_t, _isen, _Ny[_isen] );
             if( _check_cv_flag( &_cv_flag, "CVodeGetSens", 1) )
@@ -937,8 +937,7 @@ ODESLVS_SUNDIALS::states_FSA
               if( _check_cv_flag( &_cv_flag, "CVodeGetQuadSens", 1) )
                 { _END_STA(); _END_SEN(); return FATAL; }
             }
-            results_sen[_isen].push_back( Results( _t, _nx, NV_DATA_S(_Ny[_isen]),
-              _np, _Nyq && _Nyq[_isen]? NV_DATA_S(_Nyq[_isen]): 0 ) );
+            results_sen[_isen].push_back( Results( _t, _nx, NV_DATA_S(_Ny[_isen]), _nq, _nq? NV_DATA_S(_Nyq[_isen]): 0 ) );
           }
         }
       }

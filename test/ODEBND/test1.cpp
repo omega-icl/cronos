@@ -25,7 +25,7 @@ int main()
 {
   mc::FFGraph IVP;  // DAG describing the problem
 
-  const unsigned int NS = 300;  // Time stages
+  const unsigned int NS = 3;  // Time stages
   double T0 = 0., TF = 15.;   // Time span
   double TS[NS+1]; TS[0] = T0;
   for( unsigned k=0; k<NS; k++ ) TS[k+1] = TS[k] + (TF-T0)/(double)NS;
@@ -76,7 +76,7 @@ int main()
   I Ip[NP] = { I(2.9,3.1) };
   I *Ixk[NS+1];
   for( unsigned k=0; k<=NS; k++ )
-    Ixk[k] = new I[NX];
+    Ixk[k] = new I[NX+NQ];
   I If[NF];
 
   PM PMEnv( NP, NPM );
@@ -84,11 +84,10 @@ int main()
   PV *PMxk[NS+1];
   double *Hxk[NS+1];
   for( unsigned k=0; k<=NS; k++ ){
-    PMxk[k] = new PV[NX];
-    Hxk[k] = new double[NX];
+    PMxk[k] = new PV[NX+NQ];
+    Hxk[k] = new double[NX+NQ];
   }
   PV PMf[NF];
-  double Hf[NF];
 
 
   /////////////////////////////////////////////////////////////////////////
@@ -155,16 +154,15 @@ int main()
   LV2.options.NMAX      = 3000;
   LV2.options.DISPLAY   = 1;
 #if defined( SAVE_RESULTS )
-  LV2.options.RESRECORD = true;
+  LV2.options.RESRECORD = 100;
 #endif
 
   std::cout << "\nNON_VALIDATED INTEGRATION - INNER-APPROXIMATION OF REACHABLE SET:\n\n";
-  LV2.bounds( Ip, Ixk, If, NSAMP );
+  LV2.bounds( NSAMP, Ip, Ixk, If );
 #if defined( SAVE_RESULTS )
   std::ofstream apprec( "test1_APPROX_STA.dat", std::ios_base::out );
   LV2.record( apprec );
 #endif
-  { int dum; std::cout << "PAUSED--"; std::cin >> dum; }
 
   std::cout << "\nCONTINUOUS SET-VALUED INTEGRATION - INTERVAL ENCLOSURE OF REACHABLE SET:\n\n";
   LV2.bounds( Ip, Ixk, If );
@@ -172,8 +170,6 @@ int main()
   std::ofstream bnd2recI( "test1_DINEQI_STA.dat", std::ios_base::out );
   LV2.record( bnd2recI );
 #endif
-  //LV2.hausdorff( NS, tk, Ip, Hxk, LV0, NSAMP );
-  { int dum; std::cout << "PAUSED--"; std::cin >> dum; }
 
   std::cout << "\nCONTINUOUS SET-VALUED INTEGRATION - POLYNOMIAL MODEL ENCLOSURE OF REACHABLE SET:\n\n";
   LV2.options.PMNOREM = false;
@@ -183,7 +179,6 @@ int main()
   std::ofstream bnd2recPM( "test1_DINEQPM_STA.dat", std::ios_base::out );
   LV2.record( bnd2recPM );
 #endif
-  //LV2.hausdorff( PMp, Hxk, Hf, NSAMP );
 
 #if defined( TEST_CONVERGENCE )
   LV2.options.DISPLAY = 0;
@@ -191,8 +186,7 @@ int main()
   for( unsigned int k=0; k<10; k++ ){
     I Ipred = mc::Op<I>::mid(Ip[0])+I(-0.5,0.5)*mc::Op<I>::diam(Ip[0])*pow(0.8,k);
     PV PMp0[NP] = { PV( &PMEnv, 0, Ipred ) };
-    //LV2.hausdorff( Ip, Hxk, NSAMP );
-    LV2.hausdorff( PMp0, Hxk, Hf, NSAMP );
+    LV2.hausdorff( NSAMP, PMp0, Hxk );
     std::cout << mc::Op<I>::diam( PMp0[0].B() ) << "  " << Hxk[NS][0] << std::endl;
   }
 #endif

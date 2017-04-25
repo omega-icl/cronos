@@ -1,5 +1,5 @@
 const unsigned int NPM   = 3;	// <- Order of polynomial expansion
-const unsigned int NSAMP = 3;	// <- Number of sampling points for inner approx.
+const unsigned int NSAMP = 4;	// <- Number of sampling points for inner approx.
 #define SAVE_RESULTS		// <- Saving the results to file
 #define USE_CMODEL		// <- whether to use Chebyshev models or Taylor models
 
@@ -25,7 +25,7 @@ int main()
   mc::FFGraph IVP;  // DAG describing the problem
 
   double T0 = 0., TF = 50.;   // Time span
-  const unsigned int NS = 100;  // Time stages
+  const unsigned int NS = 1;  // Time stages
   double TS[NS+1]; TS[0] = T0;
   for( unsigned k=0; k<NS; k++ ) TS[k+1] = TS[k] + (TF-T0)/(double)NS;
 
@@ -68,8 +68,6 @@ int main()
   //// PARAMETER AND STATE BOUNDS
   I Ip[NP] = { I(6.48,6.52), I(4.98,5.02), I(14.98,15.02),
                I(0.46,0.47), I(1.074,1.076), I(2.19,2.21) };
-  I *Ixk[NS+1], If[NF];
-  for( unsigned k=0; k<=NS; k++ ) Ixk[k] = new I[NX];
 
   PM PMEnv( NP, NPM );
   PV PMp[NP];
@@ -119,49 +117,42 @@ int main()
   LV2.set_quadrature( NQ, QUAD, Q );
   LV2.set_function( NF, FCT );
 
+#if defined( SAVE_RESULTS )
+  LV2.options.RESRECORD = 100;
+#endif
   LV2.options.INTMETH   = mc::ODEBND_SUNDIALS<I,PM,PV>::Options::MSADAMS;
   LV2.options.JACAPPROX = mc::ODEBND_SUNDIALS<I,PM,PV>::Options::CV_DIAG;//CV_DENSE;//
   LV2.options.WRAPMIT   = mc::ODEBND_SUNDIALS<I,PM,PV>::Options::ELLIPS;//DINEQ;//NONE;
   LV2.options.DISPLAY   = 1;
-#if defined( SAVE_RESULTS )
-  LV2.options.RESRECORD = true;
-#endif
-  LV2.options.ORDMIT       = -2; //NPM;
-  LV2.options.ATOL         = 1e-10;
-  LV2.options.RTOL         = 1e-10;
-  LV2.options.ETOL         = 1e-20;
-  LV2.options.ODESLV.ATOL  = 1e-10;
-  LV2.options.ODESLV.RTOL  = 1e-8;
+  LV2.options.ORDMIT    = -2; //NPM;
+  LV2.options.ATOL      = 1e-10;
+  LV2.options.RTOL      = 1e-10;
+  LV2.options.ETOL      = 1e-20;
+  LV2.options.ODESLVS   = LV2.options;
 
   std::cout << "\nNON_VALIDATED INTEGRATION - INNER-APPROXIMATION OF REACHABLE SET:\n\n";
-  LV2.bounds( Ip, Ixk, If, NSAMP );
+  LV2.bounds( NSAMP, Ip );
 #if defined( SAVE_RESULTS )
   std::ofstream apprec( "test2_APPROX_STA.dat", std::ios_base::out );
   LV2.record( apprec );
 #endif
-  { int dum; std::cout << "PAUSED--"; std::cin >> dum; }
 
   std::cout << "\nCONTINUOUS SET-VALUED INTEGRATION - INTERVAL ENCLOSURE OF REACHABLE SET:\n\n";
-  LV2.bounds( Ip, Ixk, If );
+  LV2.bounds( Ip );
 #if defined( SAVE_RESULTS )
   std::ofstream bnd2recI( "test2_DINEQI_STA.dat", std::ios_base::out );
   LV2.record( bnd2recI );
 #endif
-  { int dum; std::cout << "PAUSED--"; std::cin >> dum; }
+
 
   std::cout << "\nCONTINUOUS SET-VALUED INTEGRATION - POLYNOMIAL MODEL ENCLOSURE OF REACHABLE SET:\n\n";
   LV2.options.PMNOREM = false;
   LV2.options.DMAX    = 5.;
-  LV2.bounds( PMp, PMxk, PMf );
+  LV2.bounds( PMp );
 #if defined( SAVE_RESULTS )
   std::ofstream bnd2recPM( "test2_DINEQPM_STA.dat", std::ios_base::out );
   LV2.record( bnd2recPM );
 #endif
-
-  for( unsigned k=0; k<=NS; k++ ){
-    delete[] Ixk[k];
-    delete[] PMxk[k];
-  }
 
   return 0;
 }

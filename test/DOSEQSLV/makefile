@@ -22,7 +22,7 @@ INC_ALL  = $(INC_MC) $(INC_IPOPT) $(INC_SUNDIALS)
 
 #####
 
-all: test1 test2 test3 test3b
+all: test1 test2 test3 test3b test4
 
 test% : test%.o
 	g++ -o $@ $< $(LIB_ALL)

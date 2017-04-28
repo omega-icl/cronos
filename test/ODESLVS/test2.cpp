@@ -67,40 +67,37 @@ int main()
   for( unsigned int is=0; is<NS; is++ )
     p0[2+is] = 0.5;
 
-  double *xk[NS+1], f[NF], *xpk[NS+1], *lk[NS+1], fp[NF*NP];
-
   std::ofstream direcSTA, direcFSA[NP], direcASA[NF];
   char fname[50];
 
   std::cout << "\nCONTINUOUS-TIME INTEGRATION:\n\n";
-  LV.states( NS, tk, p0, xk, f );
+  LV.states( p0 );
 #if defined( SAVE_RESULTS )
   direcSTA.open( "test2_STA.dat", std::ios_base::out );
   LV.record( direcSTA );
 #endif
 
   std::cout << "\nCONTINUOUS-TIME INTEGRATION WITH FORWARD SENSITIVITY ANALYSIS:\n\n";
-  LV.states_FSA( NS, tk, p0, xk, f, xpk, fp );
+  LV.states_FSA( p0 );
 #if defined( SAVE_RESULTS )
   direcSTA.open( "test2_STA.dat", std::ios_base::out );
-  direcSEN.open( "test2_SEN.dat", std::ios_base::out );
-  LV.record( direcSTA, direcSEN );
+  for( unsigned i=0; i<NP; ++i ){
+    sprintf( fname, "test2_FSA%d.dat",i );  
+    direcFSA[i].open( fname, std::ios_base::out );
+  }
+  LV.record( direcSTA, direcFSA );
 #endif
 
   std::cout << "\nCONTINUOUS-TIME INTEGRATION WITH ADJOINT SENSITIVITY ANALYSIS:\n\n";
-  LV.states_ASA( NS, tk, p0, xk, f, lk, fp );
+  LV.states_ASA( p0 );
 #if defined( SAVE_RESULTS )
   direcSTA.open( "test2_STA.dat", std::ios_base::out );
-  direcADJ.open( "test2_ADJ.dat", std::ios_base::out );
-  LV.record( direcSTA, direcADJ );
-#endif
-
-  // cleanup
-  for( unsigned k=0; k<=NS; k++ ){
-    delete[] xk[k];
-    delete[] xpk[k];
-    delete[] lk[k];
+  for( unsigned i=0; i<NF; ++i ){
+    sprintf( fname, "test2_ASA%d.dat",i );  
+    direcASA[i].open( fname, std::ios_base::out );
   }
+  LV.record( direcSTA, direcASA );
+#endif
 
   return 0;
 }

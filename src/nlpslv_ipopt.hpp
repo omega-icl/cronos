@@ -330,7 +330,7 @@ public:
   const SOLUTION& solution() const
     {
       return _solution;
-    }zz
+    }
   /** @} */
 
 protected:

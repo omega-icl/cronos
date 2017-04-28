@@ -1,0 +1,543 @@
+/*!
+
+@mainpage ODEBND (version 2.0): Enclosing the Reachable Set of Parametric Nonlinear ODEs
+
+@author Benoit C. Chachuat (b.chachuat@imperial.ac.uk), Boris Houska (bhouska@sjtu.edu.cn), Radoslav Paulen (Radoslav.Paulen@bci.tu-dortmund.de), Nikola Peric (nikola.peric09@imperial.ac.uk), Mario Villanueva (mario.villanueva10@imperial.ac.uk)
+@version 2.0
+@date 2012-2014
+
+<B>ODEBND</B> is a collection of C++ class for computing enclosures of the reachable set of parametric nonlinear ordinary differential equations (ODEs) of the form
+\f[\forall t\in[t_0,t_{\rm f}]\,, \quad \dot{x}(t)=f(t, x(t),p) \quad\text{with}\quad x(t_0)=h(p), \f]
+where \f$p\in P\subset\mathbb{R}^{n_p}\f$ denotes the parameter vector; \f$x(t)\in\mathbb{R}^{n_x}\f$, the state vector at a given time \f$t\f$; \f$f: \mathbb{R}^{n_x}\times\mathbb{R}^{n_p}\to\mathbb{R}^{n_x}\f$, the right-hand side function; and \f$h: \mathbb{R}^{n_p}\to\mathbb{R}^{n_x}\f$, the initial value function. It is assumed that \f$f\f$ and \f$h\f$ are factorable and sufficiently many times continuously differentiable.
+
+Existing methods for set-valued ODE integration can be broadly classified into either continuous or discretized methods. Implementations for both methods are available in <B>ODEBND</B>:
+
+- \htmlonly<U>Continuous-time set-valued integration</U>\endhtmlonly construct a set of auxiliary ODEs whose solutions provide the desired enclosures. Two different approaches are implemented in the class mc::ODEBND_GSL (header file <tt>odebnd_gsl.hpp</tt>), which enable the propagation of convex enclosures and nonconvex enclosures based on interval arithmetic and polynomial model arithmetic, respectively. The types of polynomial models currently available are Taylor models and Chebyshev models, both through the library <A href="https://projects.coin-or.org/MCpp">MC++ (ver 2.0)</A>. Moreover, the following contractors can be used to enhance the propagation:
+  - differential inequalities contractor [Lakshmikantham & Leela, 1969; Walter, 1970; Harrison, 1977]
+  - ellipsoidal contractor [Houska <I>et al.</I>, 2012]
+  .
+Combination of these contractors with Taylor models are described, for instance, in [Chachuat & Villanueva, 2012; Villanueva <I>et al.</I>, 2013a], and this combination is analogous for Chebyshev models. Moreover, the construction and convergence analysis of these methods are described in [Villanueva <i>et al.</I>, in press].
+
+- \htmlonly<U>Discretized set-valued integration</U>\endhtmlonly proceed by first discretizing the integration horizon into finite steps and then propagating the reachable set enclosures between time steps by accounting for the discretization (truncation) errors. The class mc::ODEBND_VAL (header file <tt>odebnd_val.hpp</tt>) implements this approach based on polynomial model arithmetic. The types of polynomial models currently available are Taylor models and Chebyshev models, both through the library <A href="https://projects.coin-or.org/MCpp">MC++ (ver 2.0)</A>. Besides propagation of polynomial models with interval remainders, mc::ODEBND_VAL enables ellipsoidal contractors [Houska <I>et al.</I>, 2013]. A description and stability analysis of the discretized set-valued integrator can be found in [Villanueva <I>et al</I>, 2014; Houska <I>et al.</I>, submitted].
+.
+
+The class mc::ODEBND_GSL and mc::ODEBND_VAL in <B>ODEBND</B> have three template parameters: T, PMT and PVT
+- T is the class that implements the underlying interval arithmetic. Both verified and non-verified types are currently supported. For verified interval computations [optional], the libraries <A href="http://www.ti3.tu-harburg.de/Software/PROFILEnglisch.html">PROFIL</A> (header file <tt>mcprofil.hpp</tt>) and <A href="http://www.math.uni-wuppertal.de/~xsc/software/filib.html">FILIB++</A> (header file <tt>mcfilib.hpp</tt>) are supported; the non-verified interval type mc::Interval in <A href="https://projects.coin-or.org/MCpp">MC++</A>  (header file <tt>interval.hpp</tt>) can also be used. More generally, any interval type can be used provided that the templated structure mc::Op<> is instantiated for that type - See <A href="http://www3.imperial.ac.uk/environmentenergyoptimisation/software">MC++</A> documentation for details.
+
+- PMT and PVT are classes implementing polynomial model arithmetic. Currently available types through <A href="https://projects.coin-or.org/MCpp">MC++</A> are: Taylor models (classes mc::TModel and mc::TVar, default template arguments); and Chebyshev models (classes mc::CModel and mc::CVar).
+.
+
+
+\section sec_ODEBND_use How Do I Obtain, Install and Run ODEBND?
+
+<B>ODEBND</B> is released as open source code under the <A href="http://www.eclipse.org/legal/epl-v10.html">Eclipse Public License (EPL)</A>.
+
+A number of third-party libraries are needed in order to compile and run mc::ODEBND_GSL and mc::ODEBND_VAL:
+- Library <A href="http://www3.imperial.ac.uk/environmentenergyoptimisation/software">MC++</A> (version 2.0), for computing interval bounds and Taylor/Chebyshev models for factorable functions. Note that <A href="http://www3.imperial.ac.uk/environmentenergyoptimisation/software">MC++</A> uses <A href="http://www.fadbad.com/fadbad.html">FADBAD++</A> (version 2.1) for automatic differentiation (forward, backward and Taylor methods of automatic differentiation) and <A href="http://www.netlib.org/blas/">BLAS</A>/<A href="http://www.netlib.org/lapack/">LAPACK</A> for linear algebra computations. Moreover, <A href="http://www3.imperial.ac.uk/environmentenergyoptimisation/software">MC++</A> is compatible with <A href="http://www.ti3.tu-harburg.de/Software/PROFILEnglisch.html">PROFIL</A> and <A href="http://www.math.uni-wuppertal.de/~xsc/software/filib.html">FILIB++</A> for verified interval arithmetic - See <A href="http://www3.imperial.ac.uk/environmentenergyoptimisation/software">MC++</A> documentation for details.
+- Library <A href="https://www.gnu.org/software/gsl">GNU Scientific Library (GSL, version 1.15)</A>, for numerical integration of ODEs using the integrator <tt><A href="https://www.gnu.org/software/gsl/manual/html_node/Ordinary-Differential-Equations.html">gsl_odeiv2</A></tt>.
+.
+
+On distribution, the main directory should contain the files <TT>AUTHORS</TT>,<TT>CHANGELOG</TT>, <TT>INSTALL</TT>, <TT>LICENSE</TT> and <TT>README</TT>, as well as 3 subdirectories: <tt>src</tt>, <tt>test</tt>, and <tt>doc</tt>. The library comes with a Doxygen documentation, which can be accessed by opening the file <tt>doc/html/index.html</tt> with any html interpreter. Also, a test example is provided in the <tt>test</tt> subdirectory. Note that <B>ODEBND</B> consists of header files only, which can be found in the <tt>src</tt> directory, and we have only tested it under Linux/Ubuntu using the GCC compiler.
+
+Running <B>ODEBND</B> first requires that you alter the <TT>makefile</TT> in order to point to the third-party libraries. A test example is provided in the subdirectory <TT>test</TT>. Change to this directory and type the following from the command line:
+
+\verbatim
+  $ make test1
+\endverbatim
+
+This creates the executable file <TT>test1</TT>, which can be executed by doing:
+
+\verbatim
+  $ ./test1
+\endverbatim
+
+The following output should be produced:
+
+\verbatim
+
+NON_VALIDATED INTEGRATION - APPROXIMATE ENCLOSURE OF REACHABLE SET:
+
+ @t = 0.000000e+00 :
+ x[0] = [  1.20000e+00 :  1.20000e+00 ]
+ x[1] = [  1.10000e+00 :  1.10000e+00 ]
+ @t = 5.000000e+00 :
+ x[0] = [  8.03136e-01 :  8.18644e-01 ]
+ x[1] = [  9.87776e-01 :  1.08750e+00 ]
+
+
+DISCRETIZED SET-VALUED INTEGRATION - POLYNOMIAL MODEL ENCLOSURE OF REACHABLE SET:
+
+ @t = 0.0000e+00 :
+ x[0] = 
+   a0    =  1.20000e+00
+   R     = [  0.00000e+00 :  0.00000e+00 ]
+   B     =  [  1.20000e+00 :  1.20000e+00 ]
+
+ x[1] = 
+   a0    =  1.10000e+00
+   R     = [  0.00000e+00 :  0.00000e+00 ]
+   B     =  [  1.10000e+00 :  1.10000e+00 ]
+
+ Rx =
+center:
+ 0.00000e+00
+ 0.00000e+00
+shape:
+ 0.00000e+00 {0.00000e+00}
+ 0.00000e+00  0.00000e+00 
+
+ @t = 5.0000e+00 :
+ x[0] = 
+   a0    =  8.08494e-01     0
+   a1    = -7.58680e-03     1
+   a2    =  2.54910e-03     2
+   a3    = -1.57304e-05     3
+   R     =  [ -2.73030e-05 :  2.73030e-05 ]
+   B     =  [  8.02559e-01 :  8.19192e-01 ]
+
+ x[1] = 
+   a0    =  1.03753e+00     0
+   a1    = -4.99778e-02     1
+   a2    =  1.08644e-04     2
+   a3    =  1.17340e-04     3
+   R     =  [ -2.91695e-05 :  2.91695e-05 ]
+   B     =  [  9.87098e-01 :  1.08818e+00 ]
+
+ Rx =
+center:
+ 0.00000e+00
+ 0.00000e+00
+shape:
+ 7.45451e-10 {4.20329e-11}
+ 4.20329e-11  8.50861e-10 
+
+ No STEPS  854
+ No EVALATIONS   TRHS:  854 (IA)  854 (PM)   FTRHS: 0 (IA)  854 (PM)
+ CPU TIME (SEC)     0.14775
+
+
+CONTINUOUS SET-VALUED INTEGRATION - POLYNOMIAL MODEL ENCLOSURE OF REACHABLE SET:
+
+ @t = 0.0000e+00 :
+ x[0] = 
+   a0    =  1.20000e+00
+   R     = [  0.00000e+00 :  0.00000e+00 ]
+   B     =  [  1.20000e+00 :  1.20000e+00 ]
+
+ x[1] = 
+   a0    =  1.10000e+00
+   R     = [  0.00000e+00 :  0.00000e+00 ]
+   B     =  [  1.10000e+00 :  1.10000e+00 ]
+
+ Rx =
+center:
+ 0.00000e+00
+ 0.00000e+00
+shape:
+ 0.00000e+00 {0.00000e+00}
+ 0.00000e+00  0.00000e+00 
+
+ @t = 5.0000e+00 :
+ x[0] = 
+   a0    =  8.08494e-01     0
+   a1    = -7.58680e-03     1
+   a2    =  2.54910e-03     2
+   a3    = -1.57304e-05     3
+   R     =  [ -2.46530e-05 :  2.46530e-05 ]
+   B     =  [  8.03082e-01 :  8.18670e-01 ]
+
+ x[1] = 
+   a0    =  1.03753e+00     0
+   a1    = -4.99778e-02     1
+   a2    =  1.08644e-04     2
+   a3    =  1.17340e-04     3
+   R     =  [ -2.65044e-05 :  2.65044e-05 ]
+   B     =  [  9.87519e-01 :  1.08776e+00 ]
+
+ Rx =
+center:
+ 0.00000e+00
+ 0.00000e+00
+shape:
+ 6.07771e-10 {4.14806e-11}
+ 4.14806e-11  7.02486e-10 
+
+ No STEPS  266
+ No EVALATIONS   RHS: 1874   JAC: 0
+ CPU TIME (SEC)     0.01465
+
+\endverbatim
+
+
+\section sec_ODEBND_setup How Do I Specify my ODE Problem in ODEBND?
+
+Suppose we want to bound the reachable set of the following Lotka-Volterra problem:
+\f[\left\{\begin{array}{rl}
+\dot{x}_1(t)=px_1(t)\,[1-x_2(t)] & \quad \text{with}\quad x_1(0)=1.2\\
+\dot{x}_2(t)=px_2(t)\,[x_1(t)-1] & \quad \text{with}\quad x_2(0)=1.1,
+\end{array}\right.\f]
+that depends on the (scalar) parameter \f$p\f$. 
+
+The implementation starts by defining the variables and functions in the form of a DAG using the classes mc::FFGraph and mc::FFVar in <A href="https://projects.coin-or.org/MCpp">MC++</A>:
+
+\code
+      mc::FFGraph IVP;    // DAG describing the problem
+
+      const unsigned int NP = 1;  // Parameter dimension
+      const unsigned int NX = 2;  // State dimension
+
+      mc::FFVar P[NP];    // Parameter array
+      for( unsigned int i=0; i<NP; i++ ) P[i].set( &IVP );
+
+      mc::FFVar X[NX];    // State array
+      for( unsigned int i=0; i<NX; i++ ) X[i].set( &IVP );
+
+      mc::FFVar RHS[NX];  // Right-hand-side function
+      RHS[0] = P[0] * X[0] * ( 1. - X[1] );
+      RHS[1] = P[0] * X[1] * ( X[0] - 1. );
+
+      mc::FFVar IC[NX];   // Initial-value function
+      IC[0] = 1.2;
+      IC[1] = 1.1;
+\endcode
+
+
+\section sec_ODEBND_IA How Do I Compute an Interval Enclosure of the Reachable Set of my ODE Problem?
+
+The focus here is on computing an enclosure of the reachable using continuous-time set-valued integration in mc::ODEBND_GSL, but discretized set-valued integration in mc::ODEBND_VAL proceeds in the exact same way.
+
+We start by defining an instance of mc::ODEBND_GSL and set the variables \f$x\f$, the parameters \f$p\f$, the right-hand-side function \f$f\f$ and the initial-value function \f$h\f$ for the Lotka-Volterra problem defined above:
+
+\code
+      typedef mc::Interval I;    // Default interval type in MC++
+      mc::ODEBND_GSL<I> LV;      // Continuous-time set-valued integrator
+
+      LV.set_dag( &IVP );
+      LV.set_state( NX, X );
+      LV.set_parameter( NP, P );
+      LV.set_dynamic( RHS );
+      LV.set_initial( IC );
+\endcode
+
+For simplicity, we have defined the template type T of mc::ODEBND_GSL as the default interval type mc::Interval in <A href="https://projects.coin-or.org/MCpp">MC++</A>. The other two template parameters are not specified and therefore default to the Taylor model types mc::TModel and mc::TVar here.
+
+Now, suppose we want to compute an interval enclosure of the reachable set of this problem, with \f$p\in [2.95,3.05]\f$ and final time \f$t_{\rm f}=2\f$. This is done by invoking the method mc::ODEBND_GSL::bounds, after defining the parameter set \f$P\f$ and integration timespan \f$[t_0,t_{\rm f}]\f$:
+
+\code
+      I Ip[NP];
+      Ip[0] = I(2.95,3.05);
+
+      I Ix0[NX], Ixf[NX];
+      I* Ixk[2] = {Ix0, Ixf};
+
+      double tk[2] = {0., 5.};
+
+      LV.bounds( 1, tk, Ip, Ixk );
+\endcode
+
+Note that <B>enclosures at intermediate times</B> can also be computed by modifying the arrays <A>tk</A> and <A>Ixk</A> accordingly.
+
+The following result is displayed during the computations:
+
+\verbatim
+ @t = 0.0000e+00 :
+ x[0] = [  1.20000e+00 :  1.20000e+00 ]
+ x[1] = [  1.10000e+00 :  1.10000e+00 ]
+ @t = 5.0000e+00 :
+ x[0] = [  7.95292e-01 :  8.21697e-01 ]
+ x[1] = [  9.81849e-01 :  1.09322e+00 ]
+ No STEPS  96
+ No EVALATIONS   RHS: 714   JAC: 0
+ CPU TIME (SEC)     0.00484
+\endverbatim
+
+With the default <B>options</B>, this enclosure was generated using an ellipsoidal contractor with wrapping mitigation order of 1 and the integration method is an explicit embedded Runge-Kutta-Fehlberg (4,5) method with both relative and absolute tolerances set to 1e-7.
+
+The default <B>options</B> can be modified via the public member mc::ODEBND_GSL::options; see \ref sec_ODEBND_opt for a complete list of options. For instance, display can be suppressed and intermediate results can be recorded by setting the DISPLAY and RESRECORD options as:
+
+\code
+      LV.options.DISPLAY = 0;
+      LV.options.RESRECORD = true;
+\endcode
+
+When intermediate results are recorded during the enclosure propagation, the computed enclosures at stage times can be <B>exported to a file</B> by using the method mc::ODEBND_GSL::record after an integration was completed:
+
+\code
+      #include <fstream>
+      std::ofstream ofile( "LV.out", std::ios_base::out );
+      LV.record( ofile );
+\endcode
+
+This creates (or updates) the file <TT>LV.out</TT> in the current directory as follows -- This requires the option RESRECORD to be set to `true' before calling mc::ODEBND_GSL::bounds:
+
+\verbatim
+   0.00000e+00   1.20000e+00   1.20000e+00   1.10000e+00   1.10000e+00
+   5.00000e+00   7.95292e-01   8.21697e-01   9.81849e-01   1.09322e+00
+\endverbatim
+
+Estimate of the <B>Hausdorff distance</B> between the computed enclosure and the actual reachable set - after projection onto each variable - can be computed by using the method mc::ODEBND_GSL::hausdorff as follows:
+\code
+      const unsigned int NSAMP = 100;  // Number of sampling points
+      double Hx0[NX], Hxf[NX];
+      double* Hxk[2] = {Hx0, Hxf};
+      LV.hausdorff( 1, tk, Ip, Hxk, NSAMP );
+\endcode
+
+This method simply evaluates the ODEs by sampling parameter set at <a>NSAMP</a> equally spaced points, and keeping whichever response is minimal or maximal. Nonetheless, such a brute force approach quickly becomes computationally intractable when the ODE problem contains more than just a few parameters, especially for a large number of sample points for each parameter.
+
+The following results are displayed in this case:
+
+\verbatim
+ @t = 0.0000e+00 :
+ dH[0] = 0.0000e+00
+ dH[1] = 0.0000e+00
+ @t = 5.0000e+00 :
+ dH[0] = 7.8393e-03
+ dH[1] = 5.9276e-03
+\endverbatim
+
+In particular, such estimates of the Hausdorff metric are useful to assess the convergence rate of the bounding techniques.
+
+
+\section sec_ODEBND_TM How Do I Compute a Polynomial Model Enclosure of the Reachable Set of my ODE Problem?
+
+We now consider computing a 4th-order Taylor model enclosure of the reachable set of the same Lotka-Volterra system. Note that computing a Chebyshev model can be done in the exact same way, by using the template arguments mc::CModel and mc::CVar for the instantiation of mc::ODEBND_GSL.
+
+A Taylor model of the parameter set \f$P\f$ is defined as follows:
+\code
+      typedef mc::TModel<I> TM;
+      typedef mc::TVar<I>   TV;
+
+      const unsigned int NTM = 4; // Order of Taylor model
+      TM TMenv( NP, NTM );        // Taylor model environment
+      TV TMp[NP];
+      TMp[0] = TV( &TMenv, 0, I(2.95,3.05) );
+\endcode
+
+The desired Taylor model enclosure is computed exactly as previously - the method mc::ODEBND_GSL::bounds being overloaded for polynomial model types:
+
+\code
+      TV TMx0[NX], TMxf[NX];
+      TV* TMxk[2] = {TMx0, TMxf};
+
+      LV.bounds( 1, tk, TMp, TMxk );
+\endcode
+
+The following results are obtained:
+
+\verbatim
+ @t = 0.0000e+00 :
+ x[0] = 
+   a0    =  1.20000e+00
+   R     = [  0.00000e+00 :  0.00000e+00 ]
+   B     =  [  1.20000e+00 :  1.20000e+00 ]
+
+ x[1] = 
+   a0    =  1.10000e+00
+   R     = [  0.00000e+00 :  0.00000e+00 ]
+   B     =  [  1.10000e+00 :  1.10000e+00 ]
+
+ Rx =
+center:
+ 0.00000e+00
+ 0.00000e+00
+shape:
+ 0.00000e+00 {0.00000e+00}
+ 0.00000e+00  0.00000e+00 
+
+ @t = 5.0000e+00 :
+ x[0] = 
+   a0    =  8.05943e-01     0
+   a1    = -1.50791e-01     1
+   a2    =  2.04224e+00     2
+   a3    = -5.10978e-01     3
+   a4    = -1.16864e+00     4
+   R     =  [ -2.91408e-05 :  2.91408e-05 ]
+   B     =  [  8.03060e-01 :  8.18682e-01 ]
+
+ x[1] = 
+   a0    =  1.03742e+00     0
+   a1    = -1.00659e+00     1
+   a2    =  9.72546e-02     2
+   a3    =  3.75263e+00     3
+   a4    = -4.16086e+00     4
+   R     =  [ -3.09151e-05 :  3.09151e-05 ]
+   B     =  [  9.86807e-01 :  1.08849e+00 ]
+
+ Rx =
+center:
+ 0.00000e+00
+ 0.00000e+00
+shape:
+ 8.49186e-10 {6.10540e-11}
+ 6.10540e-11  9.55741e-10 
+
+ No STEPS  136
+ No EVALATIONS   RHS: 1024   JAC: 0
+ CPU TIME (SEC)     0.00940
+\endverbatim
+
+Estimates of the <B>Hausdorff distance</B> between the Taylor model remainder bound and the actual range of the remainder function - after projection onto each variable - can be computed by using the method mc::ODEBND_GSL::hausdorff as follows:
+\code
+      double Hx0[NX], Hxf[NX];
+      double* Hxk[2] = {Hx0, Hxf};
+      LV.hausdorff( 1, tk, TMp, Hxk, NSAMP );
+\endcode
+
+The following result is displayed after the computations:
+
+\verbatim
+ @t = 0.0000e+00 :
+ dH[0] = 0.0000e+00
+ dH[1] = 0.0000e+00
+ @t = 5.0000e+00 :
+ dH[0] = 2.9298e-05
+ dH[1] = 3.1074e-05
+\endverbatim
+
+The overestimation is much reduced compared to the interval bounding case above.
+
+
+\section sec_ODEBND_opt How Are the Options Set in ODEBND?
+
+The options are defined in the structures mc::ODEBND_GSL::Options and mc::ODEBND_VAL::Options, and they can be modified through their public (non-static) members mc::ODEBND_GSL::options and mc::ODEBND_VAL::options:
+
+\code
+      mc::ODEBND_GSL<T> LV;
+      LV.options.RTOL    = LV.options.ATOL = 1e-8;
+      LV.options.INTMETH = mc::ODEBND_GSL<T>::Options::RK8PD;
+      LV.options.WRAPMIT = mc::ODEBND_GSL<T>::Options::DINEQ;
+\endcode
+
+Full lists of options and corresponding default values are reported in the following tables.
+
+<TABLE border="1">
+<CAPTION><EM>Options in mc::ODEBND_GSL: name, type and
+description</EM></CAPTION>
+     <TR><TH><b>Name</b>  <TD><b>Type</b><TD><b>Default</b>
+         <TD><b>Description</b>
+     <TR><TH><tt>INTMETH</tt> <TD><tt>mc::ODEBND_GSL::Options::INTEGRATION_METHOD</tt> <TD>mc::ODEBND_GSL::Options::RKF45
+         <TD>Numerical integration method
+     <TR><TH><tt>WRAPMIT</tt> <TD><tt>mc::ODEBND_GSL::Options::WRAPPING_STRATEGY</tt> <TD>mc::ODEBND_GSL::Options::ELLIPS
+         <TD>Wrapping mitigation strategy
+     <TR><TH><tt>ORDMIT</tt> <TD><tt>unsigned int</tt> <TD>1
+         <TD>Order of nonlinearity bounder in ellipsoidal contractor
+     <TR><TH><tt>PMOPT</tt> <TD><tt>PMT::Options</tt> <TD>PMT::Options()
+         <TD>Options of polynomial model arithmetic for wrapping mitigation with ellipsoidal contractor
+     <TR><TH><tt>ODESLVOPT</tt> <TD><tt>PMT::Options</tt> <TD>mc::ODESLV_GSL::Options()
+         <TD>Options of non-validated ODE solver for reachable set inner-approximation
+     <TR><TH><tt>USEINV</tt> <TD><tt>bool</tt> <TD>true
+         <TD>Use the specified invariants for bounds contraction
+     <TR><TH><tt>H0</tt> <TD><tt>double</tt> <TD>1e-2
+         <TD>Initial step-size
+     <TR><TH><tt>HMIN</tt> <TD><tt>double</tt> <TD>0e0 (unrestricted)
+         <TD>Minimal step-size
+     <TR><TH><tt>HMAX</tt> <TD><tt>double</tt> <TD>0e0 (unrestricted)
+         <TD>Maximal step-size
+     <TR><TH><tt>NMAX</tt> <TD><tt>unsigned int</tt> <TD>0 (unlimited)
+         <TD>Maximal number of steps per time stage
+     <TR><TH><tt>ATOL</tt> <TD><tt>double</tt> <TD>1e-6
+         <TD>Absolute tolerance for <TT>gsl_odeiv2</TT>
+     <TR><TH><tt>RTOL</tt> <TD><tt>double</tt> <TD>1e-6
+         <TD>Relative tolerance for <TT>gsl_odeiv2</TT>
+     <TR><TH><tt>QTOL</tt> <TD><tt>double</tt> <TD>mc::machprec()
+         <TD>Tolerance when dividing by trace of shape matrix in ellipsoidal bounds
+     <TR><TH><tt>DISPLAY</tt> <TD><tt>int</tt> <TD>1
+         <TD>Display option
+     <TR><TH><tt>RESRECORD</tt> <TD><tt>bool</tt> <TD>false
+         <TD>Keep track of intermediate results
+</TABLE>
+<br>
+
+<TABLE border="1">
+<CAPTION><EM>Options in mc::ODEBND_VAL: name, type and
+description</EM></CAPTION>
+     <TR><TH><b>Name</b>  <TD><b>Type</b><TD><b>Default</b>
+         <TD><b>Description</b>
+     <TR><TH><tt>TSORDER</tt> <TD><tt>unsigned int</tt> <TD>7
+         <TD>Taylor series expansion order
+     <TR><TH><tt>WRAPMIT</tt> <TD><tt>mc::ODEBND_VAL::Options::WRAPPING_STRATEGY</tt> <TD>mc::ODEBND_VAL::Options::ELLIPS
+         <TD>Wrapping mitigation strategy
+     <TR><TH><tt>ORDMIT</tt> <TD><tt>unsigned int</tt> <TD>1
+         <TD>Order of nonlinearity bounder in ellipsoidal contractor
+     <TR><TH><tt>DMAX</tt> <TD><tt>double</tt> <TD>1e20
+         <TD>Maximum enclosure diameter
+     <TR><TH><tt>HMIN</tt> <TD><tt>double</tt> <TD>1e-8
+         <TD>Minimal step-size
+     <TR><TH><tt>HMAX</tt> <TD><tt>double</tt> <TD>1e8
+         <TD>Maximal step-size
+     <TR><TH><tt>HREDUC</tt> <TD><tt>double</tt> <TD>0.8
+         <TD>Reduction factor for step-size validation (between 0-1)
+     <TR><TH><tt>HSTAB</tt> <TD><tt>bool</tt> <TD>true
+         <TD>Consider stepsize dependence in Taylor truncation term for stabilizing properties
+     <TR><TH><tt>PMVALID</tt> <TD><tt>bool</tt> <TD>false
+         <TD>Use polynomial models for stepsize validation
+     <TR><TH><tt>TSTOP</tt> <TD><tt>bool</tt> <TD>true
+         <TD>Stop and reinitialize integrator at time steps
+     <TR><TH><tt>ODESLVOPT</tt> <TD><tt>PMT::Options</tt> <TD>mc::ODESLV_GSL::Options()
+         <TD>Options of non-validated ODE solver for reachable set inner-approximation
+     <TR><TH><tt>USEINV</tt> <TD><tt>bool</tt> <TD>true
+         <TD>Use the specified invariants for bounds contraction
+     <TR><TH><tt>TOL</tt> <TD><tt>double</tt> <TD>1e-7
+         <TD>Tolerance on truncation error for step size selection
+     <TR><TH><tt>SCALING</tt> <TD><tt>bool</tt> <TD>true
+         <TD>Adjust scaling for state components
+     <TR><TH><tt>ATOL</tt> <TD><tt>double</tt> <TD>1e-10
+         <TD>Relative tolerance for <TT>gsl_odeiv2</TT>
+     <TR><TH><tt>QTOL</tt> <TD><tt>double</tt> <TD>mc::machprec()
+         <TD>Tolerance when dividing by trace of shape matrix in ellipsoidal bounds
+     <TR><TH><tt>DISPLAY</tt> <TD><tt>int</tt> <TD>1
+         <TD>Display option
+     <TR><TH><tt>RESRECORD</tt> <TD><tt>bool</tt> <TD>false
+         <TD>Keep track of intermediate results
+</TABLE>
+
+
+\section sec_ODEBND_err What Errors Can I Encounter with ODEBND?
+
+Errors are managed based on the exception handling mechanism of the C++ language. Each time an error is encountered during a set-valued integration, a class object mc::ODEBND_GSL::Exceptions or mc::ODEBND_VAL::Exceptions is thrown, which contains the type and description of the error. It is the user's responsibility to test whether an exception was thrown during the integration of parametric ODEs, and make the appropriate changes accordingly. Should an exception be thrown and not caught by the calling program, the execution will stop.
+
+Possible errors encountered during set-valued integration of parametric ODEs are reported in the following tables.
+
+<TABLE border="1">
+<CAPTION><EM>Exceptions in mc::ODEBND_GSL: number and description</EM></CAPTION>
+     <TR><TH><b>Number</b> <TD><b>Description</b>
+     <TR><TH><tt>1</tt> <TD>State reinitialization/discontinuity at intermediate stage not allowed
+     <TR><TH><tt>-33</tt> <TD>Calling a feature not yet implemented
+</TABLE>
+<br>
+
+<TABLE border="1">
+<CAPTION><EM>Exceptions in mc::ODEBND_VAL: number and description</EM></CAPTION>
+     <TR><TH><b>Number</b> <TD><b>Description</b>
+     <TR><TH><tt>1</tt> <TD>State reinitialization/discontinuity at intermediate stage not allowed
+     <TR><TH><tt>2</tt> <TD>Invalid stepsize reduction parameter
+     <TR><TH><tt>-33</tt> <TD>Calling a feature not yet implemented
+</TABLE>
+
+Naturally, exceptions may be thrown by the embedded classes T, PMT or PVT themsevelves as well as by third-party programs.
+
+
+\section sec_ODEBND_refs References
+
+Chachuat, B. and M.E. Villanueva, <A href="http://www.sciencedirect.com/science/article/pii/B9780444595201501202">"Bounding the solutions of parametric ODEs: When Taylor models meet differential inequalities"</A>, <I>Proceedings of the 22nd European Conference on Computer Aided Process Engineering (ESCAPE 22)</I>, I.D.L. Bogle and M. Fairweather (Eds), 2012
+
+Harrison, G. W., <A href="http://www.scopus.com/inward/record.url?eid=2-s2.0-33144466465&partnerID=10&rel=R3.0.0&md5=f895b2aca80eed7c0120c8cce4ae2de3">"Dynamic Models with Uncertain Parameters"</A>, <I><A href="http://books.google.co.uk/books/about/Proceedings_of_the_First_International_C.html?id=gRpLYAAACAAJ&redir_esc=y">Proceedings of the 1st International Conference on Mathematical Modeling</A></I>, X. Avula (Ed), vol. 1, pp. 295-304, 1977
+
+Houska, B., F. Logist, J. Van Impe, and M. Diehl, <A href="http://www.sciencedirect.com/science/article/pii/S095915241200073X">"Robust optimization of nonlinear dynamic systems with application to a jacketed tubular reactor"</A>, <I>Journal of Process Control</I>, <B>22</B>(6):1152-1160, 2012
+
+Houska, B., M.E. Villanueva, and B. Chachuat, <A href="http://dx.doi.org/10.1109/CDC.2013.6759928">"A validated integration algorithm for nonlinear ODEs using Taylor models and ellipsoidal calculus"</A>, <I>52nd IEEE Conference on Decision and Control (CDC)</I>, 10-13 December 2013, Florence, Italy
+
+Houska, B., M.E. Villanueva, and B. Chachuat, "Stable set-valued integration of nonlinear dynamic systems using affine set parameterizations", <I>SIAM Journal on Numerical Analysis</I>, <B>submitted</B>
+
+Lakshmikantham, V., S. Leela, <I><A href="http://books.google.co.uk/books/about/Differential_and_integral_inequalities_t.html?id=_sZ_SlLHtiQC&redir_esc=y">"Differential and Integral Inequalities, Theory and Applications: Volume I, Ordinary Differential Equations"</A></I>, Academic Press, 1969
+
+Villanueva, M.E., B. Houska, and B. Chachuat, <A href="http://dx.doi.org/10.1007/s10898-014-0235-6">"Unified framework for the propagation of continuous-time enclosures for parametric nonlinear ODEs"</A>, <I>Journal of Global Optimization</I>, <B>in press</B>
+
+Villanueva, M.E., R. Paulen, B. Houska, and B. Chachuat, <A href="http://dx.doi.org/10.1016/B978-0-444-63234-0.50164-0">"Enclosing the reachable set of parametric ODEs using Taylor models and ellipsoidal calculus"</A>, <I>Proceedings of the 23rd European Conference on Computer Aided Process Engineering (ESCAPE 23)</I>, A. Kraslawski and I. Turunen (Eds), 2013
+
+Villanueva, M.E., B. Houska, and B. Chachuat, <A href="http://dx.doi.org/10.1016/B978-0-444-63456-6.50100-9">"On the stability of set-valued integration for nonlinear parametric ODEs"</A>, <I>Proceedings of the 24th European Conference on Computer Aided Process Engineering (ESCAPE 24)</I>, J.J. Klemes, P.S. Varbanov and P.Y. Liew (Eds), 2014
+
+Walter, W., <I><A href="http://books.google.co.uk/books/about/Differential_and_integral_inequalities.html?id=DU8fAQAAIAAJ&redir_esc=y">"Differential and Integral Inequalities"</A></I>, Springer-Verlag, Berlin, 1970
+
+*/

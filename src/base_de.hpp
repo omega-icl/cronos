@@ -262,7 +262,10 @@ public:
   //! @brief Define quadrature equations in multi-stage IVP-DAE with <a>ns</a> stages
   void set_quadrature
     ( const unsigned ns, const unsigned nq, const FFVar*const QUAD, const FFVar*pQ )
-    { _nq = nq; _pQ = pQ; _vQUAD.clear(); for( unsigned i=0; i<ns; i++ ) _vQUAD.push_back( QUAD+i*_nq ); }
+    { _nq = nq; _pQ = pQ; _ndxQ.clear();
+      for( unsigned iq=0; iq<_nq; iq++ )
+        _ndxQ.insert( std::make_pair( _pQ[iq].id().second, iq ) );
+      _vQUAD.clear(); for( unsigned i=0; i<ns; i++ ) _vQUAD.push_back( QUAD+i*_nq ); }
 
   //! @brief Define invariant equations in single-stage IVP-DAE
   void set_invariant
@@ -303,8 +306,10 @@ public:
   void set
     ( const BASE_DE&de )
     { _pDAG = de._pDAG;
-      _nsmax = de._nsmax; _nx = de._nx; _nx0 = de._nx0; _nq = de._nq; _np = de._np; _ni = de._ni; _nf = de._nf;
+      _nsmax = de._nsmax; _nx = de._nx; _nx0 = de._nx0; _nd = de._nd; _na = de._na;
+      _nq = de._nq; _np = de._np; _ni = de._ni; _nf = de._nf;
       _dT = de._dT; _pT = de._pT; _pX = de._pX; _pP = de._pP; _pQ = de._pQ;
+      _ndxX = de._ndxX; _ndxQ = de._ndxQ;
       delete[] _pDX; _pDX = (de._pDX && _nx? new FFVar[_nx]:0);
       delete[] _pY; delete[] _pYQ; _pY = _pYQ = 0; _ny = _nyq = 0;
       _vIC = de._vIC; _vRHS = de._vRHS; _vAE = de._vAE; _vQUAD = de._vQUAD;
@@ -473,6 +478,9 @@ BASE_DE::set_depend
       const unsigned pos_quad = ( _vQUAD.size()<=1? 0: is );
       const FFVar* pQUAD = _pQUAD(pos_quad);
       if( !pQUAD ) return false;
+#ifdef MC__DEBUG__BASE_DE
+      _pDAG->output( _pDAG->subgraph( _nq, pQUAD ) );
+#endif
       _pDAG->eval( _nq, pQUAD, _depQ.data()+_nq*is, _np+1+_nx, vVAR.data(), depVAR.data() ); 
       for( unsigned iq=0; iq<_nq; iq++ ){
 #ifdef MC__DEBUG__BASE_DE
@@ -515,7 +523,7 @@ BASE_DE::_print_interm
   os << " @t = " << std::scientific << std::setprecision(4)
                  << std::left << t << " :" << std::endl;
   _print_interm( nx, x, var, os );
-  os << " " << "R" << var.c_str() << " =" << r << std::endl;
+  os << " " << "R" << var << " =" << r << std::endl;
   return;
 }
 
@@ -525,7 +533,7 @@ BASE_DE::_print_interm
 {
   if( !x ) return;
   for( unsigned ix=0; ix<nx; ix++ )
-    os << " " << var.c_str() << "[" << ix << "] = " << x[ix] << std::endl;
+    os << " " << var << "[" << ix << "] = " << x[ix] << std::endl;
   return;
 }
 

@@ -338,10 +338,10 @@ BASE_DO::set_function
 #endif
   }
 
+#ifdef MC__BASE_DO__DEBUG
   for( auto itv=_mapFCTSTA.begin(); itv!=_mapFCTSTA.end(); ++itv )
     std::cout << "_mapFCTSTA[" << itv->first.first << "," << itv->first.second << "] = "
               << itv->second << std::endl;
-#ifdef MC__BASE_DO__DEBUG
   for( unsigned is=0; is<_ns; is++ )
     for( unsigned ic=0; ic<_nf; ic++ )
       std::cout << "FCT[" << is << "][" << ic << "] = " << _pFCT[_nf*is+ic] << std::endl;

@@ -35,7 +35,7 @@ class ODEBND_SUNDIALS:
   public virtual ODEBND_BASE<T,PMT,PVT>
 {
   typedef Ellipsoid E;
-  typedef BASE_DE::STATUS STATUS;
+  //typedef BASE_DE::STATUS STATUS;
   typedef int (*CVRhsFn)( realtype t, N_Vector y, N_Vector ydot, void *user_data );
 
  protected:

@@ -757,9 +757,9 @@ SBP<T,NODE,LT_NODE>::solve
 
     // Select node, remove it for the set _open_nodes, and test termination criterion
     NODE* pNode = *_open_nodes.begin();
-    _open_nodes.erase( _open_nodes.begin() );
     _open_measure = pNode->measure();
     if( _terminate() ) break;
+    _open_nodes.erase( _open_nodes.begin() );
 
     // Display node
     _display_add( _node_index );

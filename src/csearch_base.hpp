@@ -21,7 +21,6 @@
 #include "sbp.hpp"
 #include "lprelax_base.hpp"
 #include "scmodel.hpp"
-#include "aebnd.hpp"
 
 #undef MC__NLGO_DEBUG
 //#undef MC__NLGO_TRACE
@@ -49,7 +48,6 @@ class CSEARCH_BASE:
   typedef std::map< t_expmon, double > t_coefmon;
   typedef std::set< FFVar*, lt_FFVar > t_FFVar;
   typedef typename LPRELAX_BASE<T>::LP_STATUS LP_STATUS;
-  typedef AEBND< T, SCModel<T>, SCVar<T> > t_AEBND;
 
 protected:
   //! @brief pointer to problem DAG
@@ -130,8 +128,6 @@ protected:
   //! @brief Storage vector for function evaluation in Chebyshev arithmetic
   std::vector< SCVar<T> > _op_CMfg;
 
-  //! @brief Implicit equation bounder
-  t_AEBND _AEBND;
   //! @brief Chebyshev reduced-space [-1,1] scaled model environment
   SCModel<T>* _CMrenv;
   //! @brief Chebyshev reduced-space [-1,1] scaled variables
@@ -313,9 +309,12 @@ protected:
   template <typename OPT>
   void _set_SBPoptions
     ( const OPT&options ) const;
-  //! @brief Set local optimizer and options
+  //! @brief Set local optimizer
   virtual void _set_SLVLOC
     () = 0;
+  //! @brief Get local optimum
+  virtual const double* _get_SLVLOC
+    ( const double*p ) = 0;
 
   //! @brief Append scores for Chebyshev-derived cuts
   void _add_chebscores
@@ -454,9 +453,9 @@ CSEARCH_BASE<T>::_setup
   _op_CMfg.resize(nfgop);
   _op_POLfg.resize(nfgop);
 
-  // identify linear objective/constraint functions in NLP
+  // identify linear objective/constraint functions
   _fct_lin.clear();
-  if( options.CMODRED == OPT::APPEND ){
+  if( options.CMODRED != OPT::SUBSTITUTE ){
     if( std::get<0>(_obj).size() ){
       FFDep fdep = std::get<1>(_obj)[0].dep();
       auto it = fdep.dep().cbegin();
@@ -480,98 +479,8 @@ CSEARCH_BASE<T>::_setup
        << "NONLINEAR OBJECTIVE/CONSTRAINT FUNCTIONS: " << _nctr-_fct_lin.size()+std::get<0>(_obj).size() << std::endl;
   }
 
-  // Identify linear variables in NLP and exclude from branching
-  FFDep fgdep = std::get<0>(_obj).size()? std::get<1>(_obj)[0].dep(): 0.;
-  for( unsigned j=0; j<_nctr; j++ )
-    fgdep += std::get<1>(_ctr)[j].dep();
-#ifdef MC__NLGO_DEBUG
-  std::cout << "NLP <- " << fgdep << std::endl;
-  //int dum; std::cin >> dum;
-#endif
-  _var_lin.clear();
-  for( unsigned i=0; i<_nvar; i++ ){
-    auto it = fgdep.dep().find(i);
-    if( it == fgdep.dep().end() || it->second )
-      _var_lin.insert(i);
-  }
-
-  if( options.DISPLAY ){
-    os << "LINEAR VARIABLES IN FUNCTIONS:            " << _var_lin.size() << std::endl
-       << "NONLINEAR VARIABLES IN FUNCTIONS:         " << _nvar-_var_lin.size() << std::endl;
-  }
-
-  _var_excl.clear();
-  if( options.BLKDECUSE ){
-    // User did not define an equations subsystem
-    if( !_neq ){
-      // Perform bordered-block decomposition of equation subsystem
-      BASE_OPT::t_CTR* Ctype = std::get<0>(_ctr).data();
-      FFVar* Cvar = std::get<1>(_ctr).data();
-      for( unsigned i=0; i<_nctr; i++ )
-        if( Ctype[i] == BASE_OPT::EQ ) _eq.push_back( Cvar[i] );
-      _neq = _eq.size();
-      if( _neq ){
-        std::vector<int> IP(_neq), IQ(_nvar), IPROF(_nvar), IFLAG(3);
-        _dag->MC33( _neq, _eq.data(), _nvar, _var.data(), IP.data(),
-                    IQ.data(), IPROF.data(), IFLAG.data(), options.DISPLAY>1?true:false );
-        // Identify linear variables in dependent blocks and exclude from branching
-        _nrvar = IFLAG[2];
-        _nrdep = IFLAG[1]-_nrvar;
-        _AEBND.set_dag( _dag );
-        _AEBND.reset_dep();
-        _AEBND.reset_sys();
-        for( unsigned i=0; i<_nrdep; ++i ){
-          _AEBND.add_dep( _var[IQ[i]-1] );
-          _AEBND.add_sys( _eq[IP[i]-1] );
-          _var_rperm[_nrvar+i] = IQ[i]-1;
-          _var_fperm[IQ[i]-1] = _nrvar+i;
-        }
-        _AEBND.reset_var();
-        for( int i=_nrdep; i<IFLAG[1]; ++i ){
-          _AEBND.add_var( _var[IQ[i]-1] );
-          _var_rperm[i-_nrdep] = IQ[i]-1;
-          _var_fperm[IQ[i]-1] = i-_nrdep;
-        }
-      }
-    }
-    _AEBND.options.DISPLAY = options.DISPLAY;
-    _AEBND.setup();
-    _AEBND.options = options.AEBND;
-
-    // Exclude linear variables or dependents from branching
-    unsigned ndeplin = 0; 
-    for( unsigned ib=0; ib<_AEBND.noblk(); ib++ ){
-      if( !_AEBND.linblk(ib) ) continue;
-      for( unsigned j=0; j<_AEBND.nblk(ib); j++ ){ // variables in block
-        auto jdep = _AEBND.depblk(ib)[j].dep().dep();
-        assert( jdep.size() == 1 );
-        if( !_AEBND.lindepblk(ib,j) ) continue;
-        _var_excl.insert( jdep.begin()->first );
-        ndeplin++;
-      }
-      //if( !_AEBND.linblk(ib) ) continue;
-      //for( unsigned j=0; j<_AEBND.nblk(ib); j++ ){ // variables in block
-      //  auto jdep = _AEBND.depblk(ib)[j].dep().dep();
-      //  assert( jdep.size() == 1 );
-      //  _var_excl.insert( jdep.begin()->first );
-      //  ndeplin++;
-      //}
-    }
-
-    if( options.DISPLAY ){
-      os << "LINEAR VARIABLES IN DEPENDENT BLOCKS:     " << ndeplin << std::endl
-         << "TOTAL VARIABLES IN DEPENDENT BLOCKS:      " << _AEBND.dep().size() << std::endl;
-#ifdef MC__NLGO_DEBUG
-      { int dum; std::cout << "PAUSED--"; std::cin >> dum; }
-#endif
-    }
-  }
-  else{
-    _nrvar = _nvar;
-    _nrdep = 0;
-    _AEBND.reset_dep();
-    _AEBND.reset_sys();
-  }
+  // Initialize local solution
+  _set_SLVLOC();
 
 /*
   // setup Lagrangian gradient evaluation
@@ -584,19 +493,6 @@ CSEARCH_BASE<T>::_setup
   _op_dL = _dag->subgraph( _nvar, _lagr_grad );
 */
 }
-/*
-template <typename T>
-template <typename OPT>
-inline void
-CSEARCH_BASE<T>::_set_AEBND
-( const OPT&options )
-{
-  if( !_nrdep || !options.CMODDEPS ) return;
-  _AEBND.options = options.AEBND;
-  _AEBND.set( *this );
-  _AEBND.setup();
-}
-*/
 
 template <typename T>
 template <typename OPT, typename STAT>
@@ -651,30 +547,28 @@ CSEARCH_BASE<T>::_solve_init_inc
 
   // Check feasibility of user-supplied point
   double f_loc;
-  std::vector<double> p_loc;
   if( p0 ){
-    p_loc.assign( p0, p0+_nvar );
-    if( _subproblem_feasibility( options, p_loc.data(), f_loc ) == SBB<T>::NORMAL )
-      _update_incumbent( p_loc.data(), f_loc );
+    if( _subproblem_feasibility( options, p0, f_loc ) == SBB<T>::NORMAL )
+      _update_incumbent( p0, f_loc );
   }
 
   // Find local solution
-  _set_SLVLOC();
-  std::vector<T> P_loc(_nvar);
-  p_loc.resize(_nvar);
   _local( locopt, stats, P, p0 );
+  const double* p_loc = _get_SLVLOC( locopt->solution().p );
 
   // Rounding solution point to nearest integer in case of MIP
   if( isMIP
-   && _subproblem_feasibility( options, locopt->solution().p, f_loc ) == SBB<T>::NORMAL ){
+   && _subproblem_feasibility( options, p_loc, f_loc ) == SBB<T>::NORMAL ){
+    std::vector<T> Pround(_nvar);
     for( unsigned ivar=0; ivar<_nvar; ivar++ )
-      P_loc[ivar] = tvar[ivar]? std::round( locopt->solution().p[ivar] ): P[ivar];
-    _local( locopt, stats, P_loc.data(), locopt->solution().p );
+      Pround[ivar] = tvar[ivar]? std::round( p_loc[ivar] ): P[ivar];
+    _local( locopt, stats, Pround.data(), p_loc );
+    p_loc = _get_SLVLOC( locopt->solution().p );
   }
 
   // Update incumbent
-  if( _subproblem_feasibility( options, locopt->solution().p, f_loc ) == SBB<T>::NORMAL )
-    _update_incumbent( locopt->solution().p, f_loc );
+  if( _subproblem_feasibility( options, p_loc, f_loc ) == SBB<T>::NORMAL )
+    _update_incumbent( p_loc, f_loc );
 }
 
 template <typename T>
@@ -762,7 +656,8 @@ CSEARCH_BASE<T>::_solve_pwl
   _solve_init_rel( options, stats, P0, tvar, P, os );
   _display_pwl_init();
   std::vector<T> P_loc(_nvar);
-  std::vector<double> p_loc(_nvar);
+  std::vector<double> p_rel(_nvar);
+  const double* p_loc;
   double f_loc;
 
   // Iterative relaxation solution and refinement
@@ -805,14 +700,15 @@ CSEARCH_BASE<T>::_solve_pwl
     // Solve local NLP model (integer variable bounds fixed to relaxed solution if MIP)
     unsigned ivar = 0;
     for( auto itv=_var.begin(); itv!=_var.end(); ++itv, ivar++ ){
-      p_loc[ivar] = get_variable( *itv );
-      P_loc[ivar] = (tvar && tvar[ivar])? p_loc[ivar]: P[ivar];
+      p_rel[ivar] = get_variable( *itv );
+      P_loc[ivar] = (tvar && tvar[ivar])? p_rel[ivar]: P[ivar];
     }
-    locopt->solve( P_loc.data(), p_loc.data() );
+    locopt->solve( P_loc.data(), p_rel.data() );
+    p_loc = _get_SLVLOC( locopt->solution().p );
 
     // Update incumbent
-    if( _subproblem_feasibility( options, locopt->solution().p, f_loc ) == SBB<T>::NORMAL )
-      _update_incumbent( locopt->solution().p, f_loc );
+    if( _subproblem_feasibility( options, p_loc, f_loc ) == SBB<T>::NORMAL )
+      _update_incumbent( p_loc, f_loc );
 
     // Test termination criteria
     if( !_p_inc.empty() ){
@@ -1027,16 +923,14 @@ CSEARCH_BASE<T>::_contract
   const unsigned*tvar, const double*inc, const bool reset,
   const bool feastest )
 {
-  std::vector<T> P0( P, P+_nvar);
-
   // Dependent bounds
   if( reset ){
     _set_depbnd( stats, P );
     _set_depcheb( options, stats );
     _tighten_depbnd( stats, P );
 #ifdef MC__CSEARCH_SHOW_REDUC
-    std::cout << "Reduction #0: " << std::fixed << std::setprecision(1)
-              << _reducrel( _nvar, P, P0.data() )*1e2 << "%\n";
+    //std::cout << "Reduction #0: " << std::fixed << std::setprecision(1)
+    //          << _reducrel( _nvar, P, P )*1e2 << "%\n";
 #endif
     _set_polrelax( options, stats, P, tvar, feastest );
   }
@@ -1047,6 +941,7 @@ CSEARCH_BASE<T>::_contract
   //}
 
   // Main loop for relaxation and domain reduction
+  std::vector<T> P0( P, P+_nvar);
   std::vector<T> P1;
   for( nred=0; nred < options.DOMREDMAX; nred++ ){
     P1.assign( P, P+_nvar );
@@ -1121,7 +1016,7 @@ CSEARCH_BASE<T>::_subproblems
 
   // FEASIBILITY TEST
   case SBB<T>::FEASTEST:
-    status = _subproblem_feasibility( options, p.data(), f ); break;
+    status = _subproblem_feasibility( options, _get_SLVLOC( p.data() ), f ); break;
 
   // PRE/POST-PROCESSING
   case SBB<T>::PREPROC:
@@ -1150,6 +1045,13 @@ CSEARCH_BASE<T>::_subproblem_local
   stats.tLOCSOL -= cpuclock();
   stats.nLOCSOL++;
 
+#if defined (MC__CSEARCH_SHOW_BOXES)
+  std::cout << "\nLocal Box:\n";
+  for( unsigned i=0; i<_nvar; i++ )
+    //if( _exclude_vars.find(i) == _exclude_vars.end() )
+      std::cout << "P[" << i << "] = " << P[i] << std::endl;
+#endif
+
   // Solve local optimization model
   // Set integer variable bounds fixed to relaxed solution if MIP
   std::vector<T> P_loc;
@@ -1157,10 +1059,11 @@ CSEARCH_BASE<T>::_subproblem_local
   for( unsigned ivar=0; ivar<_nvar; ivar++ )
     P_loc.push_back( (tvar && tvar[ivar])? p[ivar]: P[ivar] );
   locopt->solve( P_loc.data(), p.data() );
+  const double* p_loc = _get_SLVLOC( locopt->solution().p );
 
   // Update incumbent on return
   for( unsigned ivar=0; ivar<_nvar; ivar++ )
-    p[ivar] = locopt->solution().p[ivar];
+    p[ivar] = p_loc[ivar];
   auto flag = _subproblem_feasibility( options, p.data(), f );
 
   stats.tLOCSOL += cpuclock(); 
@@ -1185,6 +1088,21 @@ CSEARCH_BASE<T>::_subproblem_relaxed
   std::vector<T> P0 = P;
 
   // Update bounds for dependents
+  if( _update_depbnd( stats, P.data() ) ){
+    _ndxdep.insert( _Indxdep.begin(), _Indxdep.end() );
+    if( _update_depcheb( options, stats ) )
+      _ndxdep.insert( _CMndxdep.begin(), _CMndxdep.end() );
+    _tighten_depbnd( stats, P.data() );
+  }
+  else{
+    _CMndxdep.clear();
+  }
+#ifdef MC__CSEARCH_SHOW_REDUC
+  std::cout << "Reduction #0: " << std::fixed << std::setprecision(1)
+            << _reducrel( _nvar, P.data(), P0.data() )*1e2 << "%\n";
+#endif
+/*
+  // Update bounds for dependents
   if( !_update_depbnd( stats, P.data() )
    || !_update_depcheb( options, stats ) )
     return SBB<T>::INFEASIBLE;
@@ -1195,11 +1113,14 @@ CSEARCH_BASE<T>::_subproblem_relaxed
   std::cout << "Reduction #0: " << std::fixed << std::setprecision(1)
             << _reducrel( _nvar, P.data(), P0.data() )*1e2 << "%\n";
 #endif
-
+*/
   // Main loop for relaxation and domain reduction
   std::vector<T> P1;
   for( unsigned nred=0; nred < options.DOMREDMAX; nred++ ){
     P1 = P;
+    if( nred )
+      _update_depcheb( options, stats, P.data() );
+      //_rescale_depcheb( options, stats, P.data() );
     _update_polrelax( options, stats, P.data(), tvar );
     // Solve relaxation
     //_relax( options, stats, P.data(), tvar, 0, false );
@@ -1479,7 +1400,7 @@ CSEARCH_BASE<T>::_check_inclusion
                           << " U:" << Op<BND>::u(C[j]) << std::endl;
 #endif
     switch( (*itc) ){
-      case EQ: flag1 = false;
+      case EQ: //flag1 = false;
                if( Op<BND>::u(C[j]) < -options.FEASTOL
                 || Op<BND>::l(C[j]) >  options.FEASTOL )
                  flag2 = false;
@@ -1739,7 +1660,7 @@ CSEARCH_BASE<T>::_set_lincuts
       continue;
     }
   }
-#ifdef MC__NLGO_DEBUG
+#ifdef MC__CSEARCH_DEBUG
   std::cout << _POLenv;
 #endif
 }
@@ -1793,7 +1714,7 @@ CSEARCH_BASE<T>::_set_poacuts
       continue;
     }
   }
-#ifdef MC__NLGO_DEBUG
+#ifdef MC__CSEARCH_DEBUG
   std::cout << _POLenv;
 #endif
 }
@@ -2117,8 +2038,13 @@ CSEARCH_BASE<T>::_set_depcheb
   }
 
   // Update reduced Chebyshev variables
-  for( unsigned ip=0; ip<_nrvar; ip++ )
+  for( unsigned ip=0; ip<_nrvar; ip++ ){
     _CMrvar[ip].set( _CMrenv, ip, P? P[_var_rperm[ip]]: _Irvar[ip] );
+#ifdef MC__CSEARCH_DEBUG
+    std::cout << "SCVar #" << ip << ": " << _CMrenv->bndvar()[ip] << " "
+              << _CMrenv->refvar()[ip] << " " << _CMrenv->scalvar()[ip] << " " << std::endl;
+#endif
+  }
   for( unsigned ip=0; ip<_nrdep; ip++ )
     _CMrdep[ip] = P? P[_var_rperm[_nrvar+ip]]: _Irdep[ip];
 
@@ -2142,13 +2068,17 @@ CSEARCH_BASE<T>::_update_depcheb
 
   // Update reduced Chebyshev variables
   stats.tDEPBND -= cpuclock();
-  for( unsigned ip=0; ip<_nrvar; ip++ )
+  for( unsigned ip=0; ip<_nrvar; ip++ ){
     _CMrvar[ip].set( _CMrenv, ip, P? P[_var_rperm[ip]]: _Irvar[ip] );
+#ifdef MC__CSEARCH_DEBUG
+    std::cout << "Var #" << ip << ": " << _CMrenv->bndvar()[ip] << " "
+              << _CMrenv->refvar()[ip] << " " << _CMrenv->scalvar()[ip] << " " << std::endl;
+#endif
+  }
   for( unsigned ip=0; ip<_nrdep; ip++ )
     _CMrdep[ip] = P? P[_var_rperm[_nrvar+ip]]: _Irdep[ip];
 
   // Get dependent Chebyshev variables
-  //std::cerr << "_get_depcheb()\n";
   const bool feas = _get_depcheb();
   stats.nDEPBND++;
   stats.tDEPBND += cpuclock();
@@ -2264,9 +2194,9 @@ CSEARCH_BASE<T>::_tighten_depbnd
   //for( unsigned i=0; _CMrdep.size() && i<_nrdep; i++ ){   // <- maybe not necessary?
     //if( !Op<T>::inter( P[_var_rperm[_nrvar+i]], P[_var_rperm[_nrvar+i]], _CMrdep[i].B() ) ){
       //P[_nrvar+i] = _CMrdep[i].B(); // we may need to revisit this (e.g., AEBND failure?)
-//#ifdef MC__NLGO_DEBUG_CHEBDEPS
+#ifdef MC__NLGO_DEBUG_CHEBDEPS
       std::cout << "PM intersection with dependent #" << idep << " failed!\n";
-//#endif
+#endif
       continue;
     }
   }

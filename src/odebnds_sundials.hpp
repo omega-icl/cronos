@@ -39,7 +39,7 @@ class ODEBNDS_SUNDIALS:
 {
  protected:
   typedef Ellipsoid E;
-  typedef BASE_DE::STATUS STATUS;
+  //typedef BASE_DE::STATUS STATUS;
   typedef int (*CVRhsFn)( realtype t, N_Vector y, N_Vector ydot, void *user_data );
   typedef int (*CVADJRhsFn)( realtype t, N_Vector x, N_Vector y, N_Vector ydot, void *user_data );
   typedef int (*CVSENRhs1Fn)( int Ns, realtype t, N_Vector x, N_Vector xdot, int is,

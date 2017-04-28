@@ -33,12 +33,13 @@
 // Set-Membership Estimation: BOD model wtih noisy simulated measurements
 
 const double Tmax = 8.; // [day]
-const unsigned NDAT = 16; // 2^n
+const unsigned NDAT = 4; // 2^n
 const unsigned NP = 2;
 
 const double varYm = 1.;
-const double conf  = 0.90; // % confidence level
-const double Chi2  = gsl_cdf_chisq_Pinv( conf, (double)NDAT );
+const double conf  = 0.95; // % confidence level
+//const double Chi2  = gsl_cdf_chisq_Pinv( conf, (double)NDAT );
+const double Chi2  = gsl_cdf_chisq_Pinv( conf, (double)NP );
 
 const double preal[NP] = { 20., 0.5 };  // Assumed "true" parameter values
 I Ip[NP+NDAT+1] = { I(5.,35.), I(0.,2.) }; // Parameter range
@@ -155,10 +156,12 @@ int main()
   LSE.setup();
   LSE.solve( Ip );
 */
+  const double JLS = LSE.get_local_solution().f;
   std::cout << std::setprecision(8);
   for( unsigned i=0; i<NP; i++ )
     std::cout << "  p(" << i << ") = " << LSE.get_local_solution().p[i];
   std::cout << std::endl << std::endl;
+  std::cout << "JLS = " << JLS << std::endl;
 
   { int dum; std::cout << "PAUSED--"; std::cin >> dum; }
   //return 0;
@@ -264,7 +267,7 @@ int main()
     std::cout << "  Em(" << i << ") = " << LSE.get_local_solution().p[NP+i];
   std::cout << "  lambda = " << LSE.get_local_solution().p[NP+NDAT];
   std::cout << std::endl << std::endl;
-  std::cout << "U = " << LSE.get_local_solution().f << std::endl;
+  std::cout << "JU = " << JU << std::endl;
 
   { int dum; std::cout << "PAUSED--"; std::cin >> dum; }
 
@@ -351,7 +354,7 @@ int main()
   SMMLE.options.VARMEAS     = mc::NLCP<I>::Options::USER;
   SMMLE.options.BRANCHVAR   = mc::SBP<I>::Options::RGREL;
   SMMLE.options.BRANCHSEL   = two_phase_branching;
-  SMMLE.options.CVTOL       = 1e-2;
+  SMMLE.options.CVTOL       = 8e-3;
   SMMLE.options.FEASTOL     = 1e-6;
   SMMLE.options.BLKDECUSE   = false;
   SMMLE.options.DOMREDMAX   = 10;
@@ -375,6 +378,8 @@ int main()
   ofile.close();
 #endif
 
+  { int dum; std::cout << "PAUSED--"; std::cin >> dum; }
+
   // Set-Membership Regression Region - Enclosure
 
   mc::NLCP<I> SMMLE2;
@@ -385,7 +390,7 @@ int main()
   SMMLE2.options.DISPLAY     = 2;
   SMMLE2.options.MAXITER     = 0;
   SMMLE2.options.NODEMEAS    = mc::SBP<I>::Options::RELMAXLEN;
-  SMMLE2.options.CVTOL       = 4e-3;
+  SMMLE2.options.CVTOL       = 5e-4;
   SMMLE2.options.FEASTOL     = 1e-6;
   SMMLE2.options.BLKDECUSE   = false;
   SMMLE2.options.BRANCHVAR   = mc::SBP<I>::Options::RGREL;
@@ -405,6 +410,41 @@ int main()
   sprintf( fname, "test7a_%2.0f%s_Nm%d.out",100.*conf,"%",NDAT );
   ofile.open( fname, std::ios_base::out );
   SMMLE2.output_nodes( ofile );
+  ofile.close();
+#endif
+
+  { int dum; std::cout << "PAUSED--"; std::cin >> dum; }
+
+  // Log-Likelihood Ratio Confidence Region
+
+  mc::NLCP<I> SMMLE3;
+  SMMLE3.set_dag( &DAG );
+  SMMLE3.set_var( NP, P );
+  SMMLE3.add_ctr( mc::BASE_OPT::LE, J - JLS - Chi2*varYm );
+
+  SMMLE3.options.DISPLAY     = 2;
+  SMMLE3.options.MAXITER     = 0;
+  SMMLE3.options.NODEMEAS    = mc::SBP<I>::Options::RELMAXLEN;
+  SMMLE3.options.CVTOL       = 5e-4;
+  SMMLE3.options.FEASTOL     = 1e-6;
+  SMMLE3.options.BLKDECUSE   = false;
+  SMMLE3.options.BRANCHVAR   = mc::SBP<I>::Options::RGREL;
+  SMMLE3.options.DOMREDMAX   = 10;
+  SMMLE3.options.DOMREDTHRES = 1e-1;
+  SMMLE3.options.DOMREDBKOFF = 1e-6;
+  SMMLE3.options.RELMETH     = mc::NLCP<I>::Options::CHEB;
+  SMMLE3.options.CMODPROP    = 3;
+  SMMLE3.options.CMODCUTS    = 2;
+  SMMLE3.options.CMODDEPS    = 0;
+
+  SMMLE3.setup();
+  SMMLE3.solve( Ip );
+  SMMLE3.stats.display();
+
+#if defined(SAVE_RESULTS )
+  sprintf( fname, "test7d_%2.0f%s_Nm%d.out",100.*conf,"%",NDAT );
+  ofile.open( fname, std::ios_base::out );
+  SMMLE3.output_nodes( ofile );
   ofile.close();
 #endif
 

@@ -194,6 +194,7 @@ Other options can be modified to tailor the search, including output level, maxi
 
 #include "csearch_base.hpp"
 #include "nlpslv_ipopt.hpp"
+#include "aebnd.hpp"
 
 #undef MC__NLGO_DEBUG
 //#undef MC__NLGO_TRACE
@@ -202,7 +203,7 @@ Other options can be modified to tailor the search, including output level, maxi
 namespace mc
 {
 
-//! @brief C++ class for global optimization of NLP and MINLP using complete search
+//! @brief C++ class for global optimization of MINLP using complete search
 ////////////////////////////////////////////////////////////////////////
 //! mc::NLGO is a C++ class for global optimization of NLP and
 //! MINLP using complete search. Relaxations for the nonlinea or
@@ -215,6 +216,12 @@ class NLGO:
   public virtual BASE_NLP
 {
 public:
+
+  // Typedef's
+  typedef typename LPRELAX_BASE<T>::LP_STATUS LP_STATUS;
+  typedef AEBND< T, SCModel<T>, SCVar<T> >  t_AEBND;
+  typedef Ipopt::SmartPtr<mc::NLPSLV_IPOPT> t_NLPSLV;
+
 
   //! @brief NLGO options
   struct Options
@@ -229,9 +236,9 @@ public:
       DOMREDMAX(5), DOMREDTHRES(0.1), DOMREDBKOFF(1e-8), RELMETH(CHEB),
       LPALGO( LPRELAX_BASE<T>::LPALGO_DEFAULT ), LPPRESOLVE(-1),
       LPFEASTOL(1e-9), LPOPTIMTOL(1e-9), MIPRELGAP(1e-7), MIPABSGAP(1e-7),
-      PRESOS2BIGM(-1.), CMODEL(), CMODPROP(2), CMODCUTS(0), CMODDMAX(1e20),
-      CMODDEPS(0), CMODRED(APPEND), CMODWARMS(false), CMODRTOL(2e-1),
-      CMODATOL(1e-8), CMODJOINT(false), MAXITER(0), MAXCPU(7.2e3),
+      PRESOS2BIGM(-1.), CMODEL(), CMODMIG(1e-6), CMODPROP(2), CMODCUTS(0),
+      CMODDMAX(1e20), CMODDEPS(0), CMODRED(APPEND), CMODWARMS(false),
+      CMODRTOL(2e-1), CMODATOL(1e-8), CMODJOINT(false), MAXITER(0), MAXCPU(7.2e3),
       DISPLAY(2), MIPDISPLAY(0), MIPFILE(""), POLIMG(), NLPSLV(), AEBND()
       { AEBND.DISPLAY = 0;
         AEBND.BOUNDER = t_AEBND::Options::ALGORITHM::GS;
@@ -268,6 +275,7 @@ public:
         MIPABSGAP    = options.MIPABSGAP;
         PRESOS2BIGM  = options.PRESOS2BIGM;
         CMODEL       = options.CMODEL;
+        CMODMIG      = options.CMODMIG;
         CMODPROP     = options.CMODPROP;
         CMODCUTS     = options.CMODCUTS;
         CMODDMAX     = options.CMODDMAX;
@@ -367,6 +375,8 @@ public:
     double PRESOS2BIGM;
     //! @brief CModel options
     typename SCModel<T>::Options CMODEL;
+    //! @brief Minimal magnitude of coefficient in Chebyhev model
+    double CMODMIG;
     //! @brief Chebyhev model propagation order (0: no propag.)
     unsigned CMODPROP;
     //! @brief Chebyhev model cut order (0: same as propag.)
@@ -400,7 +410,7 @@ public:
     //! @brief NLPSLV_IPOPT (local optinmization) options
     typename NLPSLV_IPOPT::Options NLPSLV;
     //! @brief AEBND (algebraic equaiton bounder) options
-    typename AEBND<T,SCModel<T>,SCVar<T>>::Options AEBND;
+    typename t_AEBND::Options AEBND;
     //! @brief Display
     void display
       ( std::ostream&out ) const;
@@ -414,7 +424,7 @@ public:
   public:
     //! @brief Enumeration type for NLGO exception handling
     enum TYPE{
-      NLPOBJ=1,		//!< Optimization problem may not have more than one objective functions
+      MOBJ=1,		//!< Optimization problem may not have more than one objective functions
       SETUP,		//!< Incomplete setup before a solve
       INTERN=-33	//!< Internal error
     };
@@ -425,7 +435,7 @@ public:
     //! @brief Inline function returning the error description
     std::string what(){
       switch( _ierr ){
-      case NLPOBJ:
+      case MOBJ:
         return "NLGO::Exceptions  Optimization problem may not have more than one objective functions";
       case SETUP:
         return "NLGO::Exceptions  Incomplete setup before a solve";
@@ -447,11 +457,11 @@ public:
       { os << std::fixed << std::setprecision(2)
            << "#  TOTAL:  " << tALL    << " CPU SEC" << std::endl
            << "#  POLIMG: " << tPOLIMG << " CPU SEC" << std::endl
-           << "#  DEPBND: " << tDEPBND << " CPU SEC  (" << nDEPBND << ")" << std::endl
-           << "#  LPSET:  " << tLPSET  << " CPU SEC" << std::endl
-           << "#  LPSOL:  " << tLPSOL  << " CPU SEC  (" << nLPSOL << ")" << std::endl 
-           << "#  LOCSOL: " << tLOCSOL << " CPU SEC  (" << nLOCSOL << ")" << std::endl
-           << std::endl; }
+           << "#  LPSET:  " << tLPSET  << " CPU SEC" << std::endl;
+        if( nLPSOL )  os << "#  LPSOL:  " << tLPSOL  << " CPU SEC  (" << nLPSOL << ")" << std::endl; 
+        if( nLOCSOL ) os << "#  LOCSOL: " << tLOCSOL << " CPU SEC  (" << nLOCSOL << ")" << std::endl;
+        if( nDEPBND ) os << "#  DEPBND: " << tDEPBND << " CPU SEC  (" << nDEPBND << ")" << std::endl;
+        os << std::endl; }
     double tALL;
     double tDEPBND;
     unsigned nDEPBND;
@@ -467,23 +477,20 @@ public:
   template <typename U> friend std::ostream& operator<<
     ( std::ostream&os, const NLGO<U>& );
 
+protected:
   // Typedef's
-  typedef AEBND< T, SCModel<T>, SCVar<T> > t_AEBND;
   typedef std::pair< unsigned, std::map< unsigned, unsigned > > t_expmon;
   typedef std::map< t_expmon, double > t_coefmon;
   typedef std::set< FFVar*, lt_FFVar > t_FFVar;
-  typedef typename LPRELAX_BASE<T>::LP_STATUS LP_STATUS;
-
-protected:
 
   //! @brief Members of CSEARCH_BASE
-  using CSEARCH_BASE<T>::_AEBND;
   using CSEARCH_BASE<T>::_nrdep;
   using CSEARCH_BASE<T>::_nrvar;
   using CSEARCH_BASE<T>::_nvar;
   using CSEARCH_BASE<T>::_var;
   using CSEARCH_BASE<T>::_var_fperm;
   using CSEARCH_BASE<T>::_var_rperm;
+  using CSEARCH_BASE<T>::_var_excl;
   using CSEARCH_BASE<T>::_nctr;
   using CSEARCH_BASE<T>::_ctr;
   using CSEARCH_BASE<T>::_neq;
@@ -509,7 +516,10 @@ protected:
   using LPRELAX_BASE<T>::_set_LPrelax;
 
   //! @brief Local NLP search
-  Ipopt::SmartPtr<mc::NLPSLV_IPOPT> _NLPSLV;
+  t_NLPSLV _NLPSLV;
+
+  //! @brief Implicit equation bounder
+  t_AEBND _AEBND;
 
 public:
   //! @brief Constructor
@@ -543,7 +553,8 @@ public:
   LP_STATUS relax
     ( const T*P, const unsigned*tvar=0, const unsigned refine=0,
       const bool reset=true, const bool feastest=false )
-    { return CSEARCH_BASE<T>::_relax( options, stats, P, tvar, refine, reset, feastest ); }
+    { _ignore_deps = false;
+      return CSEARCH_BASE<T>::_relax( options, stats, P, tvar, refine, reset, feastest ); }
 
   //! @brief Solve bound contraction problems from relaxed model, starting with variable range <a>P</a>, for variable types <a>tvar</a> and incumbent value <a>inc</a> (or constraint backoff if <a>feastest</a> is true), and using the options specified in <a>NLGO::Options::DOMREDMAX</a> and <a>NLGO::Options::DOMREDTHRES</a> -- returns updated variable bounds <a>P</a>, and number of iterative refinements <a>nred</a> 
   LP_STATUS contract
@@ -567,6 +578,10 @@ protected:
   //! @brief Set local optimizer
   void _set_SLVLOC
     ();
+
+  //! @brief Get local optimum
+  const double* _get_SLVLOC
+    ( const double*p );
 
   //! @brief Compute dependent Chebyshev variables
   bool _get_depcheb
@@ -621,7 +636,7 @@ NLGO<T>::setup
 
   // objective functino
   _obj = BASE_NLP::_obj;
-  if( std::get<0>(_obj).size() > 1 ) throw Exceptions( Exceptions::NLPOBJ );
+  if( std::get<0>(_obj).size() > 1 ) throw Exceptions( Exceptions::MOBJ );
 
   // full set of constraints (main & equation system)
   _ctr = BASE_NLP::_ctr;
@@ -636,11 +651,105 @@ NLGO<T>::setup
   _nctr = std::get<0>(_ctr).size();
   _neq = _eq.size();
 
-  // initialize implicit equation bounder
-  if( _neq ) _AEBND.set( *this );
-
   // internal setup, including structure detection
   CSEARCH_BASE<T>::_setup( options, _dag, os );
+
+  // Identify linear variables
+  FFDep fgdep = std::get<0>(_obj).size()? std::get<1>(_obj)[0].dep(): 0.;
+  for( unsigned j=0; j<_nctr; j++ )
+    fgdep += std::get<1>(_ctr)[j].dep();
+//#ifdef MC__CSEARCH_DEBUG
+  std::cout << "DO <- " << fgdep << std::endl;
+  //int dum; std::cin >> dum;
+//#endif
+  _var_lin.clear();
+  for( unsigned i=0; i<_nvar; i++ ){
+    auto it = fgdep.dep().find( _var[i].id().second );
+    if( it == fgdep.dep().end() || it->second )
+      _var_lin.insert(i);
+  }
+
+  if( options.DISPLAY ){
+    os << "LINEAR VARIABLES IN FUNCTIONS:            " << _var_lin.size() << std::endl
+       << "NONLINEAR VARIABLES IN FUNCTIONS:         " << _nvar-_var_lin.size() << std::endl;
+  }
+
+  _var_excl.clear();
+  if( options.BLKDECUSE ){
+    // User has defined an equations subsystem
+    if( _neq ){
+      _AEBND.set( *this );
+    }
+    // User has not defined an equations subsystem
+    else{
+      // Perform bordered-block decomposition of equation subsystem
+      BASE_OPT::t_CTR* Ctype = std::get<0>(_ctr).data();
+      FFVar* Cvar = std::get<1>(_ctr).data();
+      for( unsigned i=0; i<_nctr; i++ )
+        if( Ctype[i] == BASE_OPT::EQ ) _eq.push_back( Cvar[i] );
+      _neq = _eq.size();
+      if( _neq ){
+        std::vector<int> IP(_neq), IQ(_nvar), IPROF(_nvar), IFLAG(3);
+        _dag->MC33( _neq, _eq.data(), _nvar, _var.data(), IP.data(),
+                    IQ.data(), IPROF.data(), IFLAG.data(), options.DISPLAY>1?true:false );
+        // Identify linear variables in dependent blocks and exclude from branching
+        _nrvar = IFLAG[2];
+        _nrdep = IFLAG[1]-_nrvar;
+        _AEBND.set_dag( _dag );
+        _AEBND.reset_dep();
+        _AEBND.reset_sys();
+        for( unsigned i=0; i<_nrdep; ++i ){
+          _AEBND.add_dep( _var[IQ[i]-1] );
+          _AEBND.add_sys( _eq[IP[i]-1] );
+          _var_rperm[_nrvar+i] = IQ[i]-1;
+          _var_fperm[IQ[i]-1] = _nrvar+i;
+        }
+        _AEBND.reset_var();
+        for( int i=_nrdep; i<IFLAG[1]; ++i ){
+          _AEBND.add_var( _var[IQ[i]-1] );
+          _var_rperm[i-_nrdep] = IQ[i]-1;
+          _var_fperm[IQ[i]-1] = i-_nrdep;
+        }
+      }
+    }
+    _AEBND.options.DISPLAY = options.DISPLAY;
+    _AEBND.setup();
+    _AEBND.options = options.AEBND;
+
+    // Exclude linear variables or dependents from branching
+    unsigned ndeplin = 0; 
+    for( unsigned ib=0; ib<_AEBND.noblk(); ib++ ){
+      if( !_AEBND.linblk(ib) ) continue;
+      for( unsigned j=0; j<_AEBND.nblk(ib); j++ ){ // variables in block
+        auto jdep = _AEBND.depblk(ib)[j].dep().dep();
+        assert( jdep.size() == 1 );
+        if( !_AEBND.lindepblk(ib,j) ) continue;
+        _var_excl.insert( jdep.begin()->first );
+        ndeplin++;
+      }
+      //if( !_AEBND.linblk(ib) ) continue;
+      //for( unsigned j=0; j<_AEBND.nblk(ib); j++ ){ // variables in block
+      //  auto jdep = _AEBND.depblk(ib)[j].dep().dep();
+      //  assert( jdep.size() == 1 );
+      //  _var_excl.insert( jdep.begin()->first );
+      //  ndeplin++;
+      //}
+    }
+
+    if( options.DISPLAY ){
+      os << "LINEAR VARIABLES IN DEPENDENT BLOCKS:     " << ndeplin << std::endl
+         << "TOTAL VARIABLES IN DEPENDENT BLOCKS:      " << _AEBND.dep().size() << std::endl;
+#ifdef MC__NLGO_DEBUG
+      { int dum; std::cout << "PAUSED--"; std::cin >> dum; }
+#endif
+    }
+  }
+  else{
+    _nrvar = _nvar;
+    _nrdep = 0;
+    _AEBND.reset_dep();
+    _AEBND.reset_sys();
+  }
 
   _issetup = true;
   return;
@@ -653,6 +762,14 @@ NLGO<T>::_set_SLVLOC
   _NLPSLV->options = options.NLPSLV;
   _NLPSLV->set( *this );
   _NLPSLV->setup();
+}
+
+template <typename T, typename PMT, typename PVT>
+inline const double*
+DOSEQGO<T,PMT,PVT>::_get_SLVLOC
+( const double*p )
+{
+  return p;
 }
 
 template <typename T> inline int

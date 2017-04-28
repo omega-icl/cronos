@@ -625,7 +625,7 @@ class ODEBND_BASE:
     ( const PVT*PMp, double**Hxk, double*Hf, ODEBND&dineq, ODESLV&traj,
       const unsigned nsamp, std::ostream&os=std::cout );
 
-  //! @brief Function to bound the remainder function relative to a polynomial model at sampling points -- return value is status
+  //! @brief Function to bound the remainder function relative to a polynomial model at sampling points
   template<typename ODESLV> bool _remainders
     ( const unsigned ns, const unsigned np, const T*Ip, const PVT*const*PMxk,
       const PVT*PMf, T**Rxk, T*Rf, ODESLV&traj, const unsigned nsamp,

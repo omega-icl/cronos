@@ -696,7 +696,6 @@ DOSEQSLV_IPOPT::get_bounds_info
   }
   return true;
 }
-
 inline
 bool
 DOSEQSLV_IPOPT::get_starting_point

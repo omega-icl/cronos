@@ -982,9 +982,9 @@ AEBND<T,PMT,PVT>::_gs
         if( options.PMNOREM ) varblk[i] = _cancelrem( Xk );
         else if( !options.INTERBND ) varblk[i] = Xk;
         else if( !Op<U>::inter( varblk[i], Xk, varblk[i] ) ){
-#ifdef  MC__AEBND_DEBUG
+//#ifdef  MC__AEBND_DEBUG
           os << _var[_pblk[ib]+i] << " = " << Xk << " && " << varblk[i] << std::endl;
-#endif
+//#endif
           return EMPTY;
         }
       }

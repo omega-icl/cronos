@@ -25,8 +25,8 @@ LIB_FILIB  = -L$(PATH_FILIB)/lib -lprim
 INC_FILIB  = -I$(PATH_FILIB)/include/ -I$(PATH_FILIB)/include/interval
 FLAG_FILIB = -frounding-math -ffloat-store
 
-FLAG_ALL = -g -Wall -Wno-misleading-indentation -std=c++11 $(FLAG_FILIB)
-#FLAG_ALL = -g -Ofast -Wall -Wno-misleading-indentation -std=c++11 $(FLAG_FILIB)
+#FLAG_ALL = -g -Wall -Wno-misleading-indentation -std=c++11 $(FLAG_FILIB)
+FLAG_ALL = -g -Ofast -Wall -Wno-misleading-indentation -std=c++11 $(FLAG_FILIB)
 LIB_ALL  = $(LIB_MC) $(LIB_PROFIL) $(LIB_FILIB) $(LIB_GSL) $(LIB_HSL) $(LIB_SUNDIALS) $(LIB_LAPACK)
 INC_ALL  = $(INC_MC) $(INC_PROFIL) $(INC_FILIB) $(INC_GSL) $(INC_HSL) $(INC_SUNDIALS) $(INC_LAPACK)
 

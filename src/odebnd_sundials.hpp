@@ -1103,7 +1103,6 @@ ODEBND_SUNDIALS<T,PMT,PVT>::bounds
 //!                           remainder and the actual (sampled) range of the
 //!                           remainder term for state-dependent functions
 //!   - <a>os</a>    [input]  output stream [default: std::cout]
-
 template <typename T, typename PMT, typename PVT>
 inline typename ODEBND_SUNDIALS<T,PMT,PVT>::STATUS
 ODEBND_SUNDIALS<T,PMT,PVT>::hausdorff
@@ -1143,11 +1142,11 @@ ODEBND_SUNDIALS<T,PMT,PVT>::bounds
   STATUS flag = NORMAL;
   pODESLVS.set( *this );
   pODESLVS.options = options.ODESLVS;
-  const unsigned SAVE_RESRECORD = pODESLVS.options.RESRECORD;
-  pODESLVS.options.RESRECORD = options.RESRECORD;
+  //const unsigned SAVE_RESRECORD = pODESLVS.options.RESRECORD;
+  //pODESLVS.options.RESRECORD = options.RESRECORD;
   if( !_bounds( Ip, Ixk_, If_, pODESLVS, nsamp, results_sta, os ) )
     flag = FAILURE;
-  pODESLVS.options.RESRECORD = SAVE_RESRECORD;
+  //pODESLVS.options.RESRECORD = SAVE_RESRECORD;
 
   // Display results
   if( options.DISPLAY >= 1 ){

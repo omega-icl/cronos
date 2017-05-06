@@ -11,7 +11,7 @@
 #include "odebnd_base.hpp"
 #include "base_expand.hpp"
 #include "aebnd.hpp"
-#include "odeslv_sundials.hpp"
+#include "odeslvs_sundials.hpp"
 
 namespace mc
 {
@@ -33,26 +33,19 @@ class ODEBND_EXPAND:
   typedef AEBND<T,PMT,PVT> t_AEBND;
 
  protected:
-  //using ODEBND_BASE<T,PMT,PVT>::_diam;
   using ODEBND_BASE<T,PMT,PVT>::_hausdorff;
   using ODEBND_BASE<T,PMT,PVT>::_bounds;
   using ODEBND_BASE<T,PMT,PVT>::_print_interm;
 
-  //using ODEBND_BASE<T,PMT,PVT>::_PMenv;
-  //using ODEBND_BASE<T,PMT,PVT>::_PMx;
+  using ODEBND_BASE<T,PMT,PVT>::_If;
+  using ODEBND_BASE<T,PMT,PVT>::_PMf;
 
   using ODEBND_BASE<T,PMT,PVT>::_pIC;
   using ODEBND_BASE<T,PMT,PVT>::_pRHS;
   using ODEBND_BASE<T,PMT,PVT>::_pQUAD;
 
-  //using ODEBND_BASE<T,PMT,PVT>::_INI_PM_STA;
   using ODEBND_BASE<T,PMT,PVT>::_IC_SET;
-  //using ODEBND_BASE<T,PMT,PVT>::_IC_PM_QUAD;
-  //using ODEBND_BASE<T,PMT,PVT>::_IC_PM_STA;
-  //using ODEBND_BASE<T,PMT,PVT>::_CC_PM_STA;
   using ODEBND_BASE<T,PMT,PVT>::_RHS_SET;
-  using ODEBND_BASE<T,PMT,PVT>::_FCT_I_STA;
-  using ODEBND_BASE<T,PMT,PVT>::_FCT_PM_STA;
 
  protected:
   //! @brief Implicit equation bounder
@@ -95,7 +88,7 @@ class ODEBND_EXPAND:
   std::vector<PVT> _PMVAR;
 
   //! @brief static pointer to local integrator class
-  ODESLV_SUNDIALS pODESLV;
+  ODESLVS_SUNDIALS pODESLVS;
 
 public:
   typedef typename ODEBND_BASE<T,PMT,PVT>::Results Results;
@@ -114,7 +107,7 @@ public:
     //! @brief Constructor
     Options():
       BASE_EXPAND::Options(), TORD(4), LBLK(3), DBLK(2), DMAX(1e20), DISPLAY(1), 
-      RESRECORD(false), ODESLV(typename ODESLV_SUNDIALS::Options()),
+      RESRECORD(false), ODESLVS(typename ODESLVS_SUNDIALS::Options()),
       AEBND(typename AEBND<T,PMT,PVT>::Options())
       { AEBND.DISPLAY = 0; }
     //! @brief Assignment operator
@@ -127,7 +120,7 @@ public:
         DMAX      = options.DMAX;
         DISPLAY   = options.DISPLAY;
         RESRECORD = options.RESRECORD;
-        ODESLV    = options.ODESLV;
+        ODESLVS   = options.ODESLVS;
         AEBND     = options.AEBND;
         return *this;
       }
@@ -144,7 +137,7 @@ public:
     //! @brief Whether or not to record results (default: false)
     bool RESRECORD;
     //! @brief Options of real-valued integrator for bounds sampling
-    typename ODESLV_SUNDIALS::Options ODESLV;
+    typename ODESLVS_SUNDIALS::Options ODESLVS;
     //! @brief Options of implicit equation bounder
     typename AEBND<T,PMT,PVT>::Options AEBND;
   } options;
@@ -184,23 +177,23 @@ public:
 
   //! @brief Computes interval enclosure of reachable set of parametric ODEs
   STATUS bounds
-    ( const T*Ip, T**Ixk, T*If, std::ostream&os=std::cout );
-
-  //! @brief Computes Hausdorff distance between interval enclosure and actual reachable set of parametric ODEs, using parameter sampling
-  STATUS hausdorff
-    ( const T*Ip, double**Hxk, double*Hf, const unsigned nsamp, std::ostream&os=std::cout );
+    ( const T*Ip, T**Ixk, T*If=0, std::ostream&os=std::cout );
 
   //! @brief Computes polynomial model enclosure of reachable set of parametric ODEs
   STATUS bounds
-    ( const PVT*PMp, PVT**PMxk, PVT*PMf, std::ostream&os=std::cout );
-
-  //! @brief Computes Hausdorff distance between polynomial model remainder enclosure and actual remainder function range, using parameter sampling
-  STATUS hausdorff
-    ( const PVT*PMp, double**Hxk, double*Hf, const unsigned nsamp, std::ostream&os=std::cout );
+    ( const PVT*PMp, PVT**PMxk, PVT*PMf=0, std::ostream&os=std::cout );
 
  //! @brief Compute approximate interval enclosure of reachable set of parametric ODEs using parameter sampling
   STATUS bounds
-    ( const T*Ip, T**Ixk, T*If, const unsigned nsamp, std::ostream&os=std::cout );
+    ( const unsigned nsamp, const T*Ip, T**Ixk=0, T*If=0, std::ostream&os=std::cout );
+
+  //! @brief Computes Hausdorff distance between interval enclosure and actual reachable set of parametric ODEs, using parameter sampling
+  STATUS hausdorff
+    ( const unsigned nsamp, const T*Ip, double**Hxk=0, double*Hf=0, std::ostream&os=std::cout );
+
+  //! @brief Computes Hausdorff distance between polynomial model remainder enclosure and actual remainder function range, using parameter sampling
+  STATUS hausdorff
+    ( const unsigned nsamp, const PVT*PMp, double**Hxk=0, double*Hf=0, std::ostream&os=std::cout );
 
   //! @brief Record results in file <a>bndrec</a>, with accuracy of <a>iprec</a> digits
   void record
@@ -208,9 +201,17 @@ public:
     { return ODEBND_BASE<T,PMT,PVT>::_record( bndrec, results_sta, iprec ); }
 
 protected:
-  //! @brief Function to initialize state interval bounding
+  //! @brief Function to initialize state bounding
   void _INI_STA
     ();
+
+  //! @brief Function to initialize state interval bounding
+  void _INI_STA
+    ( const T*Ip );
+
+  //! @brief Function to initialize state polynomial model bounding
+  void _INI_STA
+    ( const PVT*PMp );
 
   //! @brief Function to finalize state bounding
   void _END_STA
@@ -235,11 +236,19 @@ protected:
 
   //! @brief Function to bound ODE residual solutions using interval arithmetic
   typename t_AEBND::STATUS _AE_SOLVE
-    ( const bool init, const T*Ip, const T*Ix0, const T*Ixap );
+    ( const bool init, const T*Ix0, const T*Ixap );
 
   //! @brief Function to bound ODE residual solutions using polynomial model arithmetic
   typename t_AEBND::STATUS _AE_SOLVE
-    ( const bool init, const PVT*PMp, const PVT*PMx0, const PVT*PMxap );
+    ( const bool init, const PVT*PMx0, const PVT*PMxap );
+
+  //! @brief Function to bound the functions at intermediate/end point
+  bool _FCT_I_STA
+    ( const unsigned pos_fct, const double t, const T*Ix );
+
+  //! @brief Function to bound the functions at intermediate/end point
+  bool _FCT_PM_STA
+    ( const unsigned pos_fct, const double t, const PVT*PMx );
 
   //! @brief Private methods to block default compiler methods
   ODEBND_EXPAND(const ODEBND_EXPAND&);
@@ -250,7 +259,7 @@ template <typename T, typename PMT, typename PVT> inline
 ODEBND_EXPAND<T,PMT,PVT>::ODEBND_EXPAND
 ()
 : //BASE_DE(), BASE_EXPAND(), ODEBND_BASE<T,PMT,PVT>(),
-  _AEBND(), pODESLV()
+  _AEBND(), pODESLVS()
 {}
 
 template <typename T, typename PMT, typename PVT> inline
@@ -265,6 +274,24 @@ ODEBND_EXPAND<T,PMT,PVT>::_INI_STA
   // Reset result record and statistics
   results_sta.clear();
   _init_stats( stats_sta );
+}
+
+template <typename T, typename PMT, typename PVT> inline void
+ODEBND_EXPAND<T,PMT,PVT>::_INI_STA
+( const T*Ip )
+{
+  for( unsigned i=0; i<_np; i++) _IVAR[i] = Ip[i];
+  delete[] _If; _If = _nf? new T[_nf]: 0;
+  return _INI_STA();
+}
+
+template <typename T, typename PMT, typename PVT> inline void
+ODEBND_EXPAND<T,PMT,PVT>::_INI_STA
+( const PVT*PMp )
+{
+  for( unsigned i=0; i<_np; i++) _PMVAR[i] = PMp[i];
+  delete[] _PMf; _PMf = _nf? new PVT[_nf]: 0;
+  return _INI_STA();
 }
 
 template <typename T, typename PMT, typename PVT> inline void
@@ -403,13 +430,14 @@ ODEBND_EXPAND<T,PMT,PVT>::_AE_SET
                     _vRES[_istg].data() );
   }
   else{       // independents to include state at initial time
-    for( unsigned i=0; i<_nx+_nq; i++)
 #ifdef MC__ODEBND_EXPAND_NO_TRIVIAL_RESIDUAL
+    for( unsigned i=0; i<_nx+_nq; i++)
       _vVAR[_np+i] = _vDEP[i];
     _AEBND.set_var( _np+_nx+2+LBLK+1, _vVAR.data() );
     _AEBND.set_dep( (_nx+_nq)*LBLK, _vDEP.data()+_nx+_nq,
                     _vRES[_istg].data()+_nx+_nq );
 #else
+    for( unsigned i=0; i<_nx+_nq; i++)
       _vVAR[_np+i] = _pX[i];
     _AEBND.set_var( _np+_nx+2+LBLK+1, _vVAR.data() );
     _AEBND.set_dep( (_nx+_nq)*(LBLK+1), _vDEP.data(),
@@ -423,25 +451,59 @@ ODEBND_EXPAND<T,PMT,PVT>::_AE_SET
   _AEBND.setup();
 }
 
+template <typename T, typename PMT, typename PVT> inline bool
+ODEBND_EXPAND<T,PMT,PVT>::_FCT_I_STA
+( const unsigned pos_fct, const double t, const T*Ix )
+{
+  if( !_nf ) return true;
+  const FFVar* pFCT = _vFCT.at( pos_fct );
+  for( unsigned ix=0; ix<_nx+_nq; ix++ ){ // current state/quadrature bounds
+    _IVAR[_np+ix] = Ix[ix];
+#ifdef MC__ODEBND_EXPAND_DEBUG
+    std::cout << "Ix[" << ix << "] = " << Ix[ix] << std::endl;
+#endif
+  }
+  if( _pT ) _IVAR[_np+_nx+_nq] = t;       // current time
+  _pDAG->eval( _nf, pFCT, _If, _np+_nx+_nq+1, _vVAR.data(), _IVAR.data(), pos_fct?true:false );
+  return true;
+}
+
+template <typename T, typename PMT, typename PVT> inline bool
+ODEBND_EXPAND<T,PMT,PVT>::_FCT_PM_STA
+( const unsigned pos_fct, const double t, const PVT*PMx )
+{
+  if( !_nf ) return true;
+  const FFVar* pFCT = _vFCT.at( pos_fct );
+  for( unsigned ix=0; ix<_nx+_nq; ix++ ){ // current state/quadrature bounds
+    _PMVAR[_np+ix] = PMx[ix];
+#ifdef MC__ODEBND_EXPAND_DEBUG
+    std::cout << "PMx[" << ix << "] = " << PMx[ix] << std::endl;
+#endif
+  }
+  if( _pT ) _PMVAR[_np+_nx+_nq] = t;       // current time
+  _pDAG->eval( _nf, pFCT, _PMf, _np+_nx+_nq+1, _vVAR.data(), _PMVAR.data(), pos_fct?true:false );
+  return true;
+}
+
 template <typename T, typename PMT, typename PVT>
 inline typename AEBND<T,PMT,PVT>::STATUS
 ODEBND_EXPAND<T,PMT,PVT>::_AE_SOLVE
-( const bool init, const T*Ip, const T*Ix0, const T*Ixap )
+( const bool init, const T*Ix0, const T*Ixap )
 {
   const unsigned LBLK = options.LBLK;
-  assert( _nq == 0 ); // Quadrature enclosures not implemented
+  //assert( _nq == 0 ); // Quadrature enclosures not implemented
 
-  for( unsigned i=0; i<_np; i++)
-    _IVAR[i] = Ip[i];                     // parameters
   for( unsigned i=0; i<_nx; i++)
     _IVAR[_np+i] = Ix0[i];                // initial state
-  if( _pT ) _IVAR[_np+_nx+_nq] = _t;       // initial time
-  _IVAR[_np+_nx+_nq+1] = _h;               // time step
+  for( unsigned i=0; i<_nq; i++)
+    _IVAR[_np+_nx+i] = 0.;                 // initial quadrature
+  if( _pT ) _IVAR[_np+_nx+_nq] = _t;      // initial time
+  _IVAR[_np+_nx+_nq+1] = _h;              // time step
   for( unsigned k=0; _pT && k<LBLK+1; k++)
-    _IVAR[_np+_nx+_nq+2+k] = _t+k*_h;      // stage times
+    _IVAR[_np+_nx+_nq+2+k] = _t+k*_h;     // stage times
 
   for( unsigned k=0, ik=0; k<LBLK+1; k++, ik+=_nx+_nq)
-    for( unsigned i=0; i<_nx; i++ )
+    for( unsigned i=0; i<_nx+_nq; i++ )
       _IDEP[ik+i] = Ixap[i];              // state enclosure
 
   return init? _AEBND.solve( _IVAR.data(), _IDEP.data(), _IDEP.data() ):
@@ -469,12 +531,12 @@ ODEBND_EXPAND<T,PMT,PVT>::bounds
 ( const T*Ip, T**Ixk, T*If, std::ostream&os )
 {
   // Check arguments
-  if( !Ixk || !Ip || (_nf && !If) ) return FATAL;
+  if( !Ip || !Ixk ) return FATAL;
 
   const unsigned LBLK = options.LBLK;
   const unsigned DBLK = options.DBLK;
   const double H0 = options.H0, TOL = 1e-8;
-  _INI_STA();
+  _INI_STA( Ip );
 
   try{
     // Integrate ODEs through each stage
@@ -484,17 +546,19 @@ ODEBND_EXPAND<T,PMT,PVT>::bounds
 
       // First step of stage w/ initial conditions
       _AE_SET( true );
-      auto flag = _AE_SOLVE( true, Ip, Ixk[_istg], Ixk[_istg+1] );
+      auto flag = _AE_SOLVE( true, Ixk[_istg], Ixk[_istg+1] );
       if( flag != t_AEBND::NORMAL ){ _END_STA(); return FAILURE; }
 
-      // Initial state bounds
+      // Display / record / return initial results
       if( !_istg ){
-        for( unsigned ix=0; ix<_nx; ix++ )
+        for( unsigned ix=0; ix<_nx+_nq; ix++ )
           Ixk[_istg][ix] = _IDEP[ix];
-        if( options.DISPLAY >= 1 )
-          _print_interm( _t, _nx, Ixk[0], "x", os );
+        if( options.DISPLAY >= 1 ){
+          _print_interm( _t, _nx, Ixk[_istg], "x", os );
+          _print_interm( _nq, Ixk[_istg]+_nx, "q", os );
+        }
         for( unsigned k=0; options.RESRECORD && k<=DBLK; k++ )
-          results_sta.push_back( Results( _t+k*_h, _nx, _IDEP.data()+(_nx+_nq)*k ) );
+          results_sta.push_back( Results( _t+k*_h, _nx+_nq, _IDEP.data()+(_nx+_nq)*k ) );
       }
 
       // Next steps w/o initial conditions
@@ -504,30 +568,33 @@ ODEBND_EXPAND<T,PMT,PVT>::bounds
         _h = ( _t + LBLK*options.H0 > _dT[_istg+1]-TOL? (_dT[_istg+1]-_t)/LBLK: H0 ); 
 
         if( reinit ){ _AE_SET( false ); reinit = false; }
-        auto flag = _AE_SOLVE( false, Ip, _IDEP.data()+(_nx+_nq)*DBLK, Ixk[_istg+1] );
+        auto flag = _AE_SOLVE( false, _IDEP.data()+(_nx+_nq)*DBLK, Ixk[_istg+1] );
         if( flag != t_AEBND::NORMAL ){ _END_STA(); return FAILURE; }
 
         for( unsigned k=1; options.RESRECORD && k<=DBLK; k++ )
-          results_sta.push_back( Results( _t+k*_h, _nx, _IDEP.data()+(_nx+_nq)*k ) );
+          results_sta.push_back( Results( _t+k*_h, _nx+_nq, _IDEP.data()+(_nx+_nq)*k ) );
       }
       _t += LBLK*_h;
 
-      // End-stage state bounds
-      for( unsigned ix=0; ix<_nx; ix++ )
+      // Display / return stage results
+      for( unsigned ix=0; ix<_nx+_nq; ix++ )
         Ixk[_istg+1][ix] = _IDEP[(_nx+_nq)*LBLK+ix];
-      if( options.DISPLAY >= 1 )
+      if( options.DISPLAY >= 1 ){
         _print_interm( _t, _nx, Ixk[_istg+1], "x", os );
+        _print_interm( _nq, Ixk[_istg+1]+_nx, "q", os );
+      }
 
       // Add intermediate function terms
       _pos_fct = ( _vFCT.size()>=_nsmax? _istg:0 );
       if( _nf
        && (_vFCT.size()>=_nsmax || _istg==_nsmax-1)
-       && !_FCT_I_STA( _pos_fct, _t, If ) )
+       && !_FCT_I_STA( _pos_fct, _t, _IDEP.data()+(_nx+_nq)*LBLK ) )
         { _END_STA(); return FATAL; }
     }
 
-    // Bounds on final quadratures and functions
-    if( options.DISPLAY >= 1 ) _print_interm( _nf, If, "f", os );
+    // Display / return function bounds
+    for( unsigned i=0; If && i<_nf; i++ ) If[i] = _If[i];
+    if( options.DISPLAY >= 1 ) _print_interm( _nf, _If, "f", os );
   }
 
 
@@ -560,22 +627,22 @@ ODEBND_EXPAND<T,PMT,PVT>::bounds
 template <typename T, typename PMT, typename PVT>
 inline typename AEBND<T,PMT,PVT>::STATUS
 ODEBND_EXPAND<T,PMT,PVT>::_AE_SOLVE
-( const bool init, const PVT*PMp, const PVT*PMx0, const PVT*PMxap )
+( const bool init, const PVT*PMx0, const PVT*PMxap )
 {
   const unsigned LBLK = options.LBLK;
-  assert( _nq == 0 ); // Quadrature enclosures not implemented
+  //assert( _nq == 0 ); // Quadrature enclosures not implemented
 
-  for( unsigned i=0; i<_np; i++)
-    _PMVAR[i] = PMp[i];                     // parameters
   for( unsigned i=0; i<_nx; i++)
     _PMVAR[_np+i] = PMx0[i];                // initial state
+  for( unsigned i=0; i<_nq; i++)
+    _PMVAR[_np+_nx+i] = 0.;                  // initial quadrature
   if( _pT ) _PMVAR[_np+_nx+_nq] = _t;       // initial time
   _PMVAR[_np+_nx+_nq+1] = _h;               // time step
   for( unsigned k=0; _pT && k<LBLK+1; k++)
     _PMVAR[_np+_nx+_nq+2+k] = _t+k*_h;      // stage times
 
   for( unsigned k=0, ik=0; k<LBLK+1; k++, ik+=_nx+_nq)
-    for( unsigned i=0; i<_nx; i++ )
+    for( unsigned i=0; i<_nx+_nq; i++ )
       _PMDEP[ik+i] = PMxap[i];              // state enclosure
 
   return init? _AEBND.solve( _PMVAR.data(), _PMDEP.data(), _PMDEP.data() ):
@@ -591,10 +658,10 @@ ODEBND_EXPAND<T,PMT,PVT>::_AE_SOLVE
 //!
 //! This function computes an enclosure of the reachable set of the parametric ODEs
 //! using propagation of polynomial models with convex remainders (intervals, ellipsoids):
-//!   - <a>PMp</a>  [input]  polynomial model of parameter set
-//!   - <a>PMxk</a> [output] polynomial model of state varibles at stage times
-//!   - <a>PMf</a>  [output] polynomial model of state-dependent functions
-//!   - <a>os</a>   [input]  output stream [default: std::cout]
+//!   - <a>PMp</a>  [in]    polynomial model of parameter set
+//!   - <a>PMxk</a> [inout] polynomial model of state variables at stage times
+//!   - <a>PMf</a>  [out]   polynomial model of state-dependent functions
+//!   - <a>os</a>   [in]    output stream [default: std::cout]
 //! .
 //! The return value is the status.
 template <typename T, typename PMT, typename PVT>
@@ -603,12 +670,12 @@ ODEBND_EXPAND<T,PMT,PVT>::bounds
 ( const PVT*PMp, PVT**PMxk, PVT*PMf, std::ostream&os )
 {
   // Check arguments
-  if( !PMxk || !PMp || (_nf && !PMf) ) return FATAL;
+  if( !PMp || !PMxk ) return FATAL;
 
   const unsigned LBLK = options.LBLK;
   const unsigned DBLK = options.DBLK;
   const double H0 = options.H0, TOL = 1e-8;
-  _INI_STA();
+  _INI_STA( PMp );
 
   try{
     // Integrate ODEs through each stage
@@ -618,17 +685,19 @@ ODEBND_EXPAND<T,PMT,PVT>::bounds
 
       // First step of stage w/ initial conditions
       _AE_SET( true );
-      auto flag = _AE_SOLVE( true, PMp, PMxk[_istg], PMxk[_istg+1] );
+      auto flag = _AE_SOLVE( true, PMxk[_istg], PMxk[_istg+1] );
       if( flag != t_AEBND::NORMAL ){ _END_STA(); return FAILURE; }
 
-      // Initial state bounds
+      // Display / record / return initial results
       if( !_istg ){
-        for( unsigned ix=0; ix<_nx; ix++ )
-          PMxk[_istg][ix] = _PMDEP[ix];
-        if( options.DISPLAY >= 1 )
+        for( unsigned ix=0; ix<_nx+_nq; ix++ )
+          PMxk[0][ix] = _PMDEP[ix];
+        if( options.DISPLAY >= 1 ){
           _print_interm( _t, _nx, PMxk[0], "x", os );
+          _print_interm( _nq, PMxk[0]+_nx, "q", os );
+        }
         for( unsigned k=0; options.RESRECORD && k<=DBLK; k++ )
-          results_sta.push_back( Results( _t+k*_h, _nx, _PMDEP.data()+(_nx+_nq)*k ) );
+          results_sta.push_back( Results( _t+k*_h, _nx+_nq, _PMDEP.data()+(_nx+_nq)*k ) );
       }
 
       // Next steps w/o initial conditions
@@ -638,30 +707,33 @@ ODEBND_EXPAND<T,PMT,PVT>::bounds
         _h = ( _t + LBLK*options.H0 > _dT[_istg+1]-TOL? (_dT[_istg+1]-_t)/LBLK: H0 ); 
 
         if( reinit ){ _AE_SET( false ); reinit = false; }
-        auto flag = _AE_SOLVE( false, PMp, _PMDEP.data()+(_nx+_nq)*DBLK, PMxk[_istg+1] );
+        auto flag = _AE_SOLVE( false, _PMDEP.data()+(_nx+_nq)*DBLK, PMxk[_istg+1] );
         if( flag != t_AEBND::NORMAL ){ _END_STA(); return FAILURE; }
 
         for( unsigned k=1; options.RESRECORD && k<=DBLK; k++ )
-          results_sta.push_back( Results( _t+k*_h, _nx, _PMDEP.data()+(_nx+_nq)*k ) );
+          results_sta.push_back( Results( _t+k*_h, _nx+_nq, _PMDEP.data()+(_nx+_nq)*k ) );
       }
       _t += LBLK*_h;
 
-      // End-stage state bounds
-      for( unsigned ix=0; ix<_nx; ix++ )
+      // Display / return stage results
+      for( unsigned ix=0; ix<_nx+_nq; ix++ )
         PMxk[_istg+1][ix] = _PMDEP[(_nx+_nq)*LBLK+ix];
-      if( options.DISPLAY >= 1 )
+      if( options.DISPLAY >= 1 ){
         _print_interm( _t, _nx, PMxk[_istg+1], "x", os );
+        _print_interm( _nq, PMxk[_istg+1]+_nx, "q", os );
+      }
 
       // Add intermediate function terms
       _pos_fct = ( _vFCT.size()>=_nsmax? _istg:0 );
       if( _nf
        && (_vFCT.size()>=_nsmax || _istg==_nsmax-1)
-       && !_FCT_PM_STA( _pos_fct, _t, PMf ) )
+       && !_FCT_PM_STA( _pos_fct, _t, _PMDEP.data()+(_nx+_nq)*LBLK ) )
         { _END_STA(); return FATAL; }
     }
 
-    // Bounds on final quadratures and functions
-    if( options.DISPLAY >= 1 ) _print_interm( _nf, PMf, "f", os );
+    // Display / return function bounds
+    for( unsigned i=0; PMf && i<_nf; i++ ) PMf[i] = _PMf[i];
+    if( options.DISPLAY >= 1 ) _print_interm( _nf, _PMf, "f", os );
   }
 
   catch( typename t_AEBND::Exceptions &expt ){
@@ -690,41 +762,15 @@ ODEBND_EXPAND<T,PMT,PVT>::bounds
   return NORMAL;
 }
 
-//! @fn template <typename T, typename PMT, typename PVT> inline typename ODEBND_EXPAND<T,PMT,PVT>::STATUS ODEBND_EXPAND<T,PMT,PVT>::hausdorff(
-//! const T*Ip, double**Hxk, double**Hf, const unsigned nsamp, std::ostream&os )
-//!
-//! This function computes the Hausdorff distance between the interval enclosure
-//! and the exact reachable set projected onto each variable:
-//!   - <a>Ip</a>    [input]  interval parameter set
-//!   - <a>Hxk</a>   [output] Hausdorff distance between the interval enclosure
-//!                           and the exact reachable set projected onto each
-//!                           variable for states at stage times
-//!   - <a>Hf</a>    [output] Hausdorff distance between the interval enclosure
-//!                           and the exact reachable set projected onto each
-//!                           variable for state-dependent functions
-//!   - <a>nsamp</a> [input]  number of samples for each parameter
-//!   - <a>os</a>    [input]  output stream
-//! .
-//! The return value is the status.
-template <typename T, typename PMT, typename PVT>
-inline typename ODEBND_EXPAND<T,PMT,PVT>::STATUS
-ODEBND_EXPAND<T,PMT,PVT>::hausdorff
-( const T*Ip, double**Hxk, double*Hf, const unsigned nsamp, std::ostream&os )
-{
-  pODESLV.set( *this );
-  pODESLV.options = options.ODESLV;
-  return _hausdorff( Ip, Hxk, Hf, *this, pODESLV, nsamp, os )? NORMAL: FAILURE;
-}
 
 //! @fn template <typename T, typename PMT, typename PVT> inline typename ODEBND_EXPAND<T,PMT,PVT>::STATUS ODEBND_EXPAND<T,PMT,PVT>::hausdorff(
-//! const PVT*PMp, double**Hxk, const unsigned nsamp, std::ostream&os=std::cout )
+//! const unsigned nsamp, const PVT*PMp, double**Hxk, double*Hf, std::ostream&os=std::cout )
 //!
 //! This function computes the Hausdorff distance between the polynomial model
 //! remainder and the actual (sampled) range of the remainder function
 //! in projection onto each variable and for each stage time
 //! remainder and the actual range of the remainder function:
-//!   - <a>ns</a>    [input]  number of time stages
-//!   - <a>tk</a>    [input]  stage times, including the initial time
+//!   - <a>nsamp</a> [input]  number of samples for each parameter
 //!   - <a>PMp</a>   [input]  polynomial model of parameter set
 //!   - <a>Hxk</a>   [output] Hausdorff distance between the polynomial model
 //!                           remainder and the actual (sampled) range of the
@@ -732,56 +778,66 @@ ODEBND_EXPAND<T,PMT,PVT>::hausdorff
 //!   - <a>Hf</a>    [output] Hausdorff distance between the polynomial model
 //!                           remainder and the actual (sampled) range of the
 //!                           remainder term for state-dependent functions
-//!   - <a>nsamp</a> [input]  number of samples for each parameter
 //!   - <a>os</a>    [input]  output stream [default: std::cout]
-
 template <typename T, typename PMT, typename PVT>
 inline typename ODEBND_EXPAND<T,PMT,PVT>::STATUS
 ODEBND_EXPAND<T,PMT,PVT>::hausdorff
-( const PVT*PMp, double**Hxk, double*Hf, const unsigned nsamp, std::ostream&os )
+( const unsigned nsamp, const PVT*PMp, double**Hxk, double*Hf, std::ostream&os )
 {
-  pODESLV.set( *this );
-  pODESLV.options = options.ODESLV;
-  return _hausdorff( PMp, Hxk, Hf, *this, pODESLV, nsamp, os )? NORMAL: FAILURE;
+  pODESLVS.set( *this );
+  pODESLVS.options = options.ODESLVS;
+  return _hausdorff( PMp, Hxk, Hf, *this, pODESLVS, nsamp, os )?
+         NORMAL: FAILURE;
 }
 
 //! @fn template <typename T, typename PMT, typename PVT> inline typename ODEBND_EXPAND<T,PMT,PVT>::STATUS ODEBND_EXPAND<T,PMT,PVT>::bounds(
-//! const T*Ip, T**Ixk, T*q, T*f, const unsigned nsamp, std::ostream&os=std::cout )
+//! const unsigned nsamp, const T*Ip, T**Ixk=0, T*If=0, std::ostream&os=std::cout )
 //!
 //! This function computes projections of an inner-approximation enclosure of
 //! the reachable set of the parametric ODEs using sampling and continuous-time
 //! integration:
+//!   - <a>nsamp</a> [input] number of samples for each parameter
 //!   - <a>Ip</a>    [input] interval parameter set
 //!   - <a>Ixk</a>   [output] approximate interval state enclosures at stage times
-//!   - <a>If</a>    [output] approximate function enclosures
-//!   - <a>nsamp</a> [input] number of samples for each parameter
+//!   - <a>If</a>    [output] approximate state-dependent function enclosures
 //!   - <a>os</a>    [input] output stream
 //! .
 //! The return value is the status.
 template <typename T, typename PMT, typename PVT>
 inline typename ODEBND_EXPAND<T,PMT,PVT>::STATUS
 ODEBND_EXPAND<T,PMT,PVT>::bounds
-( const T*Ip, T**Ixk, T*If, const unsigned nsamp, std::ostream&os )
+( const unsigned nsamp, const T*Ip, T**Ixk, T*If, std::ostream&os )
 {
+  // Local result arrays
+  T** Ixk_ = Ixk? Ixk: new T*[_nsmax+1];
+  for( unsigned is=0; is<=_nsmax; ++is )
+    if( !Ixk ) Ixk_[is] = 0;
+  T* If_  = If? If: new T[_nf];
+
   // Sample inner approximation
   STATUS flag = NORMAL;
-  pODESLV.set( *this );
-  pODESLV.options = options.ODESLV;
-  if( !_bounds( Ip, Ixk, If, pODESLV, nsamp, os ) )
+  pODESLVS.set( *this );
+  pODESLVS.options = options.ODESLVS;
+  //const unsigned SAVE_RESRECORD = pODESLVS.options.RESRECORD;
+  //pODESLVS.options.RESRECORD = options.RESRECORD;
+  if( !_bounds( Ip, Ixk_, If_, pODESLVS, nsamp, results_sta, os ) )
     flag = FAILURE;
+  //pODESLVS.options.RESRECORD = SAVE_RESRECORD;
 
   // Display results
   if( options.DISPLAY >= 1 ){
-    for( unsigned is=0; Ixk && is<=_nsmax; is++ )
-      _print_interm( _dT[is], _nx, Ixk[is], "x", os );
-    if( If ) _print_interm( _nf, If, "f", os );
+    for( unsigned is=0; is<=_nsmax; is++ ){
+      _print_interm( _dT[is], _nx, Ixk_[is], " x", os );
+      _print_interm( _nq, Ixk_[is]+_nx, " q", os );
+    }
+    _print_interm( _nf, If_, " f", os );
   }
 
-  // Record intermediate results
-  results_sta.clear();
-  if( options.RESRECORD )
-    for( unsigned is=0; Ixk && is<=_nsmax; is++ )
-      results_sta.push_back( Results( _dT[is], _nx, Ixk[is] ) );
+  // Clean-up
+  for( unsigned is=0; is<=_nsmax; ++is )
+    if( !Ixk ) delete[] Ixk_[is];
+  if( !Ixk ) delete[] Ixk_;
+  if( !If )  delete[] If_;
   
   return flag;
 }

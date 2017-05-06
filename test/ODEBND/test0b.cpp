@@ -42,9 +42,9 @@ int main()
   LV.options.H0        = 0.1;
   LV.options.LBLK      =
   LV.options.DBLK      = 10;
-  LV.options.RESRECORD = true;
   LV.options.DISPLAY   = 1;
-
+  LV.options.RESRECORD = true;
+  LV.options.ODESLVS.RESRECORD = 1000;
   LV.options.AEBND.MAXIT   = 100;
   LV.options.AEBND.DISPLAY = 1;
   LV.options.AEBND.RTOL    =
@@ -61,15 +61,17 @@ int main()
   LV.set_initial( NX, IC );
   LV.setup();
 
+
   // Compute Interval Bounds
   I Ip[NP];
   Ip[0] = 0.05 * I(-1.,1);
   I Ix0[NX] = { I(0.,5.), I(0.,5.) }, Ixf[NX] = { I(0.,5.), I(0.,5.) };
   I* Ixk[2] = { Ix0, Ixf };
 
-  LV.bounds( Ip, Ixk, 0 );
-  std::ofstream ofileI( "test0_EXPANDI_STA.dat", std::ios_base::out );
+  LV.bounds( Ip, Ixk );
+  std::ofstream ofileI( "test0b_EXPANDI_STA.dat", std::ios_base::out );
   LV.record( ofileI );
+
 
   // Compute Polynomial Bounds
 #ifdef USE_SPARSE
@@ -84,19 +86,20 @@ int main()
   PVI PMx0[NX] = { I(0.,5.), I(0.,5.) }, PMxf[NX] = { I(0.,5.), I(0.,5.) };
   PVI* PMxk[2] = {PMx0, PMxf};
 
-  LV.bounds( PMp, PMxk, 0 );
-  std::ofstream ofilePM( "test0_EXPANDPM_STA.dat", std::ios_base::out );
+  LV.bounds( PMp, PMxk );
+  std::ofstream ofilePM( "test0b_EXPANDPM_STA.dat", std::ios_base::out );
   LV.record( ofilePM );
+
 
   // Compute Approximate Bounds (Sampling)
   const unsigned int NSAMP = 50; // Number of sample points
-  LV.bounds( Ip, Ixk, 0, NSAMP );
-  std::ofstream ofile0( "test0_APPROX_STA.dat", std::ios_base::out );
+  LV.bounds( NSAMP, Ip );
+  std::ofstream ofile0( "test0b_APPROX_STA.dat", std::ios_base::out );
   LV.record( ofile0 );
 
   // Compute Hausdorff Distance for Enclosures
-  double Hx0[NX], Hxf[NX];
-  double* Hxk[2] = {Hx0, Hxf};
+  //double Hx0[NX], Hxf[NX];
+  //double* Hxk[2] = {Hx0, Hxf};
 
   //LV.hausdorff( 1, tk, Ip, Hxk, 0, NSAMP );
   //LV.hausdorff( 1, tk, TMp, Hxk, 0, NSAMP );

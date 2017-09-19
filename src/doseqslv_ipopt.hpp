@@ -391,7 +391,12 @@ public:
       return _solution;
     }
 
-  //! @brief Computes solution of parametric ODEs
+  //! @brief Access to ODE integrator
+  //ODESLVS_SUNDIALS& ODESLVS
+  //  ()
+  //  { return _ODESLVS; }
+
+  //! @brief Numerical solution of parametric ODEs
   BASE_DE::STATUS states
     ( const double*p, double**xk=0, double*f=0, std::ostream&os=std::cout )
     { _valSTADEP.clear();
@@ -399,6 +404,24 @@ public:
         _valSTADEP.push_back( p[*it] );
       _ODESLVS.options = options.ODESLVS;
       return _ODESLVS.states( _valSTADEP.data(), xk, f, os ); }
+
+  //! @brief Forward sensitivity of parametric ODEs
+  BASE_DE::STATUS states_FSA
+    ( const double*p, double**xk=0, double*f=0, double**xpk=0, double*fp=0, std::ostream&os=std::cout )
+    { _valSTADEP.clear();
+      for( auto it=_ndxFCTDEP.begin(); it!=_ndxFCTDEP.end(); ++it )
+        _valSTADEP.push_back( p[*it] );
+      _ODESLVS.options = options.ODESLVS;
+      return _ODESLVS.states_FSA( _valSTADEP.data(), xk, f, xpk, fp, os ); }
+
+  //! @brief Forward sensitivity of parametric ODEs
+  BASE_DE::STATUS states_ASA
+    ( const double*p, double**xk=0, double*f=0, double**lk=0, double*fp=0, std::ostream&os=std::cout )
+    { _valSTADEP.clear();
+      for( auto it=_ndxFCTDEP.begin(); it!=_ndxFCTDEP.end(); ++it )
+        _valSTADEP.push_back( p[*it] );
+      _ODESLVS.options = options.ODESLVS;
+      return _ODESLVS.states_ASA( _valSTADEP.data(), xk, f, lk, fp, os ); }
 
   //! @brief Record states in file <a>ores</a>, with accuracy of <a>iprec</a> digits
   void record
@@ -730,6 +753,12 @@ DOSEQSLV_IPOPT::_update_functions
 {
 #ifdef MC__DOSEQSLV_IPOPT_TRACE
   std::cout << "  DOSEQSLV_IPOPT::update_functions " << (sens?"Y":"N") << std::endl;
+#endif
+#ifdef MC__DOSEQSLV_SHOW_VARITER
+  std::cout << "\n" << std::scientific << std::setprecision(15);
+  for( unsigned int i=0; i<_np; i++ )
+     std::cout << "P[" << i << "] = " << p[i] << std::endl;
+  std::cout << "\n";
 #endif
 
   // Values and derivatives of parameter-dependent functions

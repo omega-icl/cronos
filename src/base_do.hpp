@@ -300,7 +300,7 @@ BASE_DO::set_function
   if( !_set_ns() ) return false;
   _nf = 1 + std::get<0>(_ctr).size();
   _pFCT.resize( _ns*_nf );
-  _fct.resize( _nf, FFVar(0) );
+  _fct.assign( _nf, FFVar(0) );
   _mapFCTSTA.clear();
 
   // Append cost contributions

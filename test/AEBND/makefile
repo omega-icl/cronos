@@ -16,7 +16,7 @@ INC_FILIB   = -I$(PATH_FILIB)/include/ -I$(PATH_FILIB)/include/interval
 FLAGS_FILIB = -frounding-math -ffloat-store
 
 #PROF = -pg
-OPTI = -Ofast
+#OPTI = -Ofast
 #OPTI = -O2
 
 FLAG_ALL = -g $(OPTI) -Wall -std=c++11 $(FLAG_FILIB)

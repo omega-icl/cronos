@@ -299,6 +299,8 @@ BASE_AE::set_block
   for( unsigned i=0; i<ndep; i++ ){
     auto cit = depsys[i].dep().begin();
     for( ; cit != depsys[i].dep().end(); ++cit ){
+      if( !(*cit).second ) // Detecting overall system linearity
+          _linsys = false;
       if( _bwsys.first  < (int)i-(*cit).first ) // Updating lower band width
         _bwsys.first  = (int)i-(*cit).first;
       if( _bwsys.second < (*cit).first-(int)i ) // updating upper band width
@@ -325,7 +327,7 @@ BASE_AE::set_block
         if( _bwblk[ib].second < (*cit).first-(int)i ) // updating upper band width
           _bwblk[ib].second = (*cit).first-(int)i;
       }
-      if( !_linblk[ib] ) _linsys = false; // Overall linearity
+      //if( !_linblk[ib] ) _linsys = false; // Overall linearity
     }
 #ifdef MC__BASE_AE_DEBUG
     std::cout << "BLOCK #" << ib << ": "

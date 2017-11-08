@@ -557,6 +557,10 @@ public:
   const DOSEQSLV_IPOPT::SOLUTION& get_local_solution() const
     { return _DOSEQSLV->solution(); }
 
+  //! @brief Local solver
+  const t_DOSEQSLV& local_solver() const
+    { return _DOSEQSLV; }
+
   //! @brief Solve relaxed optimization model (or relaxed feasibility model if <a>feastest</a> is true) within variable range <a>P</a> and for variable types <a>tvar</a>
   LP_STATUS relax
     ( const T*P, const T*X=0, const unsigned*tvar=0, const unsigned refine=0,
@@ -590,7 +594,7 @@ protected:
   std::vector<PVT> _PM_PAR;
 
   //! @brief Set local optimizer
-  void _set_SLVLOC
+  virtual void _set_SLVLOC
     ();
 
   //! @brief Get local optimum
@@ -661,6 +665,10 @@ DOSEQGO<T,PMT,PVT>::setup
 
   // Generate dependency information
   if( !set_depend() ) return false;
+  _pDAG->output( _pDAG->subgraph( 1, BASE_DO::_fct.data() ) );
+#ifdef MC__DOSEQGO__DEBUG
+  { int dum; std::cout << "PAUSED--"; std::cin >> dum; }
+#endif
 
   //_valFCTSTA.resize( nFCTSTA );
   //_valDFCTSTA.resize( nDEPSTA*nFCTSTA );

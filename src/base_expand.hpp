@@ -10,6 +10,7 @@
 #include <sys/time.h>
 
 #include "mcfunc.hpp"
+#include "base_rk.hpp"
 
 namespace mc
 {
@@ -19,7 +20,8 @@ namespace mc
 //! parametric differential-algebraic equations (DAEs) using
 //! discretization/expansion techniques
 ////////////////////////////////////////////////////////////////////////
-class BASE_EXPAND
+class BASE_EXPAND:
+  protected BASE_RK
 {
 public:
   //! @brief Default class constructor
@@ -49,14 +51,15 @@ public:
         return *this;
       }
     //! @brief Enumeration of numerical integration algorithms
-    enum INTEGRATION_METHOD{
-      TS=0,	    //!< Taylor series expansion
+    enum METHOD{
+      TS=0,	    //!< Explicit Taylor series expansion
+      ITS,	    //!< Implicit Taylor series expansion
       RK,		//!< Explicit Runge-Kutta formula
       IRK,		//!< Implicit Runge-Kutta formula
       RAD		//!< Radau collocation
     };
     //! @brief Numerical integration method [Default: MSADAMS]
-    INTEGRATION_METHOD INTMETH;
+    METHOD INTMETH;
     //! @brief Initial step-size [Default: 0e0 (auto)]
     double H0;
     //! @brief Minimum step-size [Default: 0e0]

@@ -201,6 +201,11 @@ protected:
   using CSEARCH_BASE<T>::_CMrdep;
   using NLGO<T>::_var_excl;
 
+  //! @brief Set local optimizer
+  virtual void _set_SLVLOC
+    ()
+    {}
+
   //! @brief User-function to subproblems in SBB
   virtual typename SBP<T>::STATUS assess
     ( SBPNode<T>*node )

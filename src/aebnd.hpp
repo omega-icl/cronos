@@ -6,6 +6,7 @@
 #define MC__AEBND_HPP
 
 #undef  MC__AEBND_DEBUG
+//#undef  MC__AEBND_SHOW_PRECONDITIONING
 #undef  MC__AEBND_DISABLE_MC21A
 
 #include <stdexcept>
@@ -482,8 +483,8 @@ AEBND<T,PMT,PVT>::_init
     _noblk = 1;
     _nblk.resize(1); _nblk[0] = _ndep;
     _pblk.resize(1); _pblk[0] = 0;
-    _fpdep.resize(_ndep); _rpdep.resize(_ndep);
-    for( unsigned i=0; i<_ndep; i++ ) _fpdep[i] = _rpdep[i] = i;
+    //_fpdep.resize(_ndep); _rpdep.resize(_ndep);
+    //for( unsigned i=0; i<_ndep; i++ ) _fpdep[i] = _rpdep[i] = i;
     _linblk.resize(1); _linblk[0] = BASE_AE::_linsys;
     _bwblk.resize(1);  _bwblk[0]  = BASE_AE::_bwsys;
     break;
@@ -492,11 +493,11 @@ AEBND<T,PMT,PVT>::_init
     _noblk = BASE_AE::_noblk;
     _nblk  = BASE_AE::_nblk;
     _pblk  = BASE_AE::_pblk;
-    _fpdep = BASE_AE::_fpdep;
-    _rpdep = BASE_AE::_rpdep;
     _linblk = BASE_AE::_linblk;
     _bwblk  = BASE_AE::_bwblk;
   }
+  _fpdep = BASE_AE::_fpdep;
+  _rpdep = BASE_AE::_rpdep;
 
   _opsys.resize(_noblk);
   auto it = _jac.begin();
@@ -836,7 +837,7 @@ AEBND<T,PMT,PVT>::_precondlin
                 -= Y(i,k) * _Y(_pblk[ib]+_nblk[ib]+k,_pblk[ib]+_nblk[ib]+j);
           }
       }
-#ifdef MC__AEBND_DEBUG
+#ifdef MC__AEBND_SHOW_PRECONDITIONING
         std::cout << "Full preconditioning matrix:\n" << _Y << std::endl;
 #endif
 
@@ -972,6 +973,7 @@ AEBND<T,PMT,PVT>::_gs
           Xk = refblk[i] + b[i] + temp;
         }
 #ifdef  MC__AEBND_DEBUG
+        std::cout << "varblk[" << i << "] = " << varblk[i];
         std::cout << "refblk[" << i << "] = " << refblk[i];
         std::cout << "b[" << i << "] = " << b[i];
         std::cout << "temp = " << temp;
@@ -982,10 +984,14 @@ AEBND<T,PMT,PVT>::_gs
         if( options.PMNOREM ) varblk[i] = _cancelrem( Xk );
         else if( !options.INTERBND ) varblk[i] = Xk;
         else if( !Op<U>::inter( varblk[i], Xk, varblk[i] ) ){
-#ifdef  MC__AEBND_DEBUG
+#ifdef  MC__AEBND_SHOW_INTER_FAIL
           os << _var[_pblk[ib]+i] << " = " << Xk << " && " << varblk[i] << std::endl;
 #endif
+#ifdef  MC__AEBND_IGNORE_INTER_FAIL
+          varblk[i] = Xk;
+#else
           return EMPTY;
+#endif
         }
       }
 

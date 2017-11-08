@@ -229,7 +229,7 @@ public:
     //! @brief Constructor
     Options():
       CSALGO(BB), CVATOL(1e-3), CVRTOL(1e-3), FEASTOL(1e-5),
-      BLKDECUSE(true), BRANCHPT(SBB<T>::Options::OMEGA), BRANCHDMIN(5e-2),
+      BLKDECUSE(true), BRANCHPT(SBB<T>::Options::OMEGA), BRANCHDMIN(1e-10),
       BRANCHVAR(SBB<T>::Options::RGREL), BRANCHSEL(0), SCOBCHUSE(false),
       SCOBCHVMAX(0), SCOBCHRTOL(1e-1), SCOBCHATOL(0e0), STGBCHDEPTH(0),
       STGBCHDRMAX(1), STGBCHWEIGHT(1./6.), PREPROC(true), DOMREDMIG(1e-10),
@@ -490,6 +490,7 @@ protected:
   using CSEARCH_BASE<T>::_var;
   using CSEARCH_BASE<T>::_var_fperm;
   using CSEARCH_BASE<T>::_var_rperm;
+  using CSEARCH_BASE<T>::_var_lin;
   using CSEARCH_BASE<T>::_var_excl;
   using CSEARCH_BASE<T>::_nctr;
   using CSEARCH_BASE<T>::_ctr;
@@ -540,6 +541,10 @@ public:
     ( const T*P, const unsigned*tvar=0, const double*p0=0,
       std::ostream&os=std::cout );
 
+  //! @brief Global solution information after last NLP optimization
+  std::pair<double,const double*> get_global_solution() const
+    { return std::make_pair(_f_inc,_p_inc.data()); }
+
   //! @brief Solve (continuous) optimization model to local optimality using IPOPT in variable range <a>P</a> and from initial point <a>p0</a> -- return value is IPOPT status
   int local
     ( const T*P, const double*p0=0, const bool reset=true )
@@ -560,7 +565,7 @@ public:
   LP_STATUS contract
     ( T*P, unsigned&nred, const unsigned*tvar=0, const double*inc=0,
       const bool reset=true, const bool feastest=false )
-    { return CSEARCH_BASE<T>::_contract( options, stats, nred, tvar, inc, reset, feastest ); }
+    { return CSEARCH_BASE<T>::_contract( options, stats, P, nred, tvar, inc, reset, feastest ); }
 
   //! @brief Value of DAG variable <a>X</a> after last LP optimization
   using LPRELAX_BASE<T>::get_variable;
@@ -576,7 +581,7 @@ protected:
   bool _issetup;
 
   //! @brief Set local optimizer
-  void _set_SLVLOC
+  virtual void _set_SLVLOC
     ();
 
   //! @brief Get local optimum
@@ -658,10 +663,10 @@ NLGO<T>::setup
   FFDep fgdep = std::get<0>(_obj).size()? std::get<1>(_obj)[0].dep(): 0.;
   for( unsigned j=0; j<_nctr; j++ )
     fgdep += std::get<1>(_ctr)[j].dep();
-//#ifdef MC__CSEARCH_DEBUG
-  std::cout << "DO <- " << fgdep << std::endl;
+#ifdef MC__NLGO_DEBUG
+  std::cout << "DEPS <- " << fgdep << std::endl;
   //int dum; std::cin >> dum;
-//#endif
+#endif
   _var_lin.clear();
   for( unsigned i=0; i<_nvar; i++ ){
     auto it = fgdep.dep().find( _var[i].id().second );
@@ -764,9 +769,9 @@ NLGO<T>::_set_SLVLOC
   _NLPSLV->setup();
 }
 
-template <typename T, typename PMT, typename PVT>
+template <typename T>
 inline const double*
-DOSEQGO<T,PMT,PVT>::_get_SLVLOC
+NLGO<T>::_get_SLVLOC
 ( const double*p )
 {
   return p;

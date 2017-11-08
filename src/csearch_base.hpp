@@ -590,6 +590,8 @@ CSEARCH_BASE<T>::_solve_sbp
 
     // Set variable types and exclusions from B&P
     //_var_excl.insert( _var_lin.begin(), _var_lin.end() ); // excluded branching variables
+    for( unsigned i=0; i<_nvar; i++ )
+      if( Op<T>::diam( P[i] ) <= options.BRANCHDMIN ) _var_excl.insert( i );
     SBP<T>::variables( _nvar, P.data(), _var_excl );
   }
 
@@ -624,6 +626,8 @@ CSEARCH_BASE<T>::_solve_sbb
   // Set variable types and exclusions from B&B
   _set_SBBoptions( options );
   _var_excl.insert( _var_lin.begin(), _var_lin.end() ); // excluded branching variables
+  for( unsigned i=0; i<_nvar; i++ )
+    if( Op<T>::diam( P[i] ) <= options.BRANCHDMIN ) _var_excl.insert( i );
   SBB<T>::variables( _nvar, P.data(), _var_excl );
 
   // Run SBB solver
@@ -2214,7 +2218,7 @@ CSEARCH_BASE<T>::_set_SBBoptions
   SBB<T>::options.STOPPING_ABSTOL              = options.CVATOL;
   SBB<T>::options.STOPPING_RELTOL              = options.CVRTOL;
   SBB<T>::options.BRANCHING_STRATEGY           = options.BRANCHPT;
-  SBB<T>::options.BRANCHING_BOUND_THRESHOLD    = options.BRANCHDMIN;
+  //SBB<T>::options.BRANCHING_BOUND_THRESHOLD    = options.BRANCHDMIN;
   SBB<T>::options.BRANCHING_VARIABLE_CRITERION = options.BRANCHVAR;
   SBB<T>::options.BRANCHING_USERFUNCTION       = options.BRANCHSEL;
   SBB<T>::options.SCORE_BRANCHING_USE          = options.SCOBCHUSE;

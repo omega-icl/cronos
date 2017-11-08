@@ -509,13 +509,14 @@ LPRELAX_BASE<T>::_set_LPcontract
 #endif
     }
   }
-  else
+  else{
 #ifdef MC__USE_CPLEX
     _LPinc.second = (lhsinc <= *inc); _ILOmodel->add( _LPinc.second );
 #else
     _LPinc.second = _GRBmodel->addConstr( GRBLinExpr( jtobj->second,  1. ),
         GRB_LESS_EQUAL, *inc );
 #endif
+  }
   _LPinc.first = true;
 }
 

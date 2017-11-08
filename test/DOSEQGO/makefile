@@ -35,7 +35,7 @@ LIB_CPLEX    = -L$(PATH_CPLEX)/lib/x86-64_linux/static_pic -lilocplex -lcplex \
                -L$(PATH_CONCERT)/lib/x86-64_linux/static_pic -lconcert \
 	       -lm -pthread
 INC_CPLEX    = -I$(PATH_CPLEX)/include -I$(PATH_CONCERT)/include
-FLAGS_CPLEX  = -m64 -fPIC -fexceptions -DIL_STD
+FLAGS_CPLEX  = -m64 -fPIC -fexceptions -DIL_STD -Wno-ignored-attributes
 #FLAGS_CPLEX  = -m64 -fPIC -fexceptions -DNDEBUG -DIL_STD
 
 PATH_GUROBI = $(GUROBI_HOME)
@@ -47,7 +47,7 @@ INC_GUROBI  = -I$(PATH_GUROBI)/include
 
 #PROF = -pg
 
-FLAG_ALL = $(PROF) -g -Ofast -Wall -std=c++11 $(FLAG_FILIB) $(FLAGS_CPLEX)
+FLAG_ALL = $(PROF) -g -Ofast -Wall -Wno-misleading-indentation -std=c++11 $(FLAG_FILIB) $(FLAGS_CPLEX)
 #FLAG_ALL = $(PROF) -g -Wall -Wno-misleading-indentation -std=c++11 $(FLAG_FILIB) $(FLAGS_CPLEX)
 LIB_ALL  = $(LIB_MC) $(LIB_PROFIL) $(LIB_FILIB) $(LIB_HSL) $(LIB_LAPACK) $(LIB_GUROBI) $(LIB_CPLEX) $(LIB_IPOPT) $(LIB_SUNDIALS)
 INC_ALL  = $(INC_MC) $(INC_PROFIL) $(INC_FILIB) $(INC_HSL) $(INC_LAPACK) $(INC_GUROBI) $(INC_CPLEX) $(INC_IPOPT) $(INC_SUNDIALS)

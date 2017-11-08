@@ -32,7 +32,7 @@ LIB_CPLEX    = -L$(PATH_CPLEX)/lib/x86-64_linux/static_pic -lilocplex -lcplex \
                -L$(PATH_CONCERT)/lib/x86-64_linux/static_pic -lconcert \
 	       -lm -pthread
 INC_CPLEX    = -I$(PATH_CPLEX)/include -I$(PATH_CONCERT)/include
-FLAGS_CPLEX  = -m64 -fPIC -fexceptions -DIL_STD
+FLAGS_CPLEX  = -m64 -fPIC -fexceptions -DIL_STD -Wno-ignored-attributes -Wno-deprecated-declarations
 #FLAGS_CPLEX  = -m64 -fPIC -fexceptions -DNDEBUG -DIL_STD
 
 PATH_GUROBI = $(GUROBI_HOME)

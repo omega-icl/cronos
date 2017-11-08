@@ -200,6 +200,21 @@ public:
     ( std::ofstream&bndrec, const unsigned iprec=5 ) const
     { return ODEBND_BASE<T,PMT,PVT>::_record( bndrec, results_sta, iprec ); }
 
+  //! @brief pointer to discretized ODE residuals
+  const std::vector<FFVar>& vRES
+    ( const unsigned istg=0 ) const
+    { return _vRES[istg]; }
+
+  //! @brief pointer to discretized ODE dependents
+  const std::vector<FFVar>& vDEP
+    () const
+    { return _vDEP; }
+
+  //! @brief pointer to discretized ODE independents
+  const std::vector<FFVar>& vVAR
+    () const
+    { return _vVAR; }
+
 protected:
   //! @brief Function to initialize state bounding
   void _INI_STA
@@ -228,7 +243,7 @@ protected:
   //! @brief Function to construct ODE residuals using Taylor series expansion
   void _AE_SET_RHSRES
     ( const unsigned ORD, const FFVar*x1, const FFVar*x2, const FFVar*t1,
-      const FFVar*t2,  const FFVar&h, FFVar*res, const bool ITS=false );
+      const FFVar*t2,  const FFVar&h, FFVar*res );
 
   //! @brief Function to construct nonlinear equation system from ODE residuals
   void _AE_SET
@@ -309,10 +324,15 @@ ODEBND_EXPAND<T,PMT,PVT>::setup
 {
   const unsigned LBLK = options.LBLK;
   const unsigned TORD = options.TORD;
+  if( LBLK < options.DBLK ) return FATAL;
 
   _vVAR.resize( _np+_nx+_nq+2+LBLK+1 );  // independents
   for( unsigned i=0; i<_np; i++)
     _vVAR[i] = _pP[i];                          // parameters
+  for( unsigned i=0; i<_nx; i++)
+    _vVAR[_np+i] = _pX[i];                          // parameters
+  for( unsigned i=0; i<_nq; i++)
+    _vVAR[_np+_nx+i] = _pQ[i];                          // parameters
   if( _pT ) _vVAR[_np+_nx+_nq] = *_pT;          // initial time
   _vVAR[_np+_nx+_nq+1].set( _pDAG );            // time step
   for( unsigned k=0; _pT && k<LBLK+1; k++)
@@ -329,9 +349,13 @@ ODEBND_EXPAND<T,PMT,PVT>::setup
     _vRES[_istg].resize( (_nx+_nq)*(LBLK+2) );
 
     _pos_ic = ( _vIC.size()>=_nsmax? _istg:0 );
-    if( !_IC_SET( _pos_ic ) ) return FATAL;
-    _AE_SET_ICRES( _vDEP.data(), _vRES[_istg].data() );
-
+    if( _pos_ic == _istg ){
+      if( !_IC_SET( _pos_ic ) ) return FATAL;
+      _AE_SET_ICRES( _vDEP.data(), _vRES[_istg].data() );
+    }
+    else{
+      _AE_SET_CCRES( _pX, _vDEP.data(), _vRES[_istg].data() );
+    }
     _pos_rhs  = ( _vRHS.size()<=1? 0: _istg );
     _pos_quad = ( _vQUAD.size()<=1? 0: _istg );
     if( !_RHS_SET( _pos_rhs, _pos_quad ) ) return FATAL;
@@ -339,7 +363,7 @@ ODEBND_EXPAND<T,PMT,PVT>::setup
       _AE_SET_RHSRES( TORD, _vDEP.data()+k*(_nx+_nq),
         _vDEP.data()+(k+1)*(_nx+_nq), _pT?_vVAR.data()+_np+_nx+_nq+2+k:0,
         _pT?_vVAR.data()+_np+_nx+_nq+2+k+1:0, _vVAR[_np+_nx+_nq+1],
-        _vRES[_istg].data()+(k+1)*(_nx+_nq), false );
+        _vRES[_istg].data()+(k+1)*(_nx+_nq) );
 
     _AE_SET_CCRES( _pX, _vDEP.data(), _vRES[_istg].data()+(LBLK+1)*(_nx+_nq) );
   }
@@ -385,36 +409,92 @@ ODEBND_EXPAND<T,PMT,PVT>::_AE_SET_CCRES
   }
 }
 
+// Add option NOINI to specified that initial state bounds are provided; i.e. implement Gaussian elimination for explicit methods, and terminate for implicit methods
+// Create public access to array of vectors of residuals _vRES
+
 template <typename T, typename PMT, typename PVT> inline void
 ODEBND_EXPAND<T,PMT,PVT>::_AE_SET_RHSRES
 ( const unsigned TORD, const FFVar*x1, const FFVar*x2, const FFVar*t1,
-  const FFVar*t2, const FFVar&h, FFVar*res, const bool ITS )
+  const FFVar*t2, const FFVar&h, FFVar*res )
 {
   std::vector<FFVar> fct( _pRHS, _pRHS+_nx );
   if( _nq ) fct.insert( fct.end(), _pQUAD, _pQUAD+_nq );
 
-  const mc::FFVar* tmp1 = _pDAG->compose( _nx+_nq, fct.data(), _pT?1:0, _pT, ITS?t2:t1 );
+  switch( options.INTMETH ){
+
+    // Taylor series method
+    case Options::METHOD::TS:
+    case Options::METHOD::ITS:
+    {
+      // Compute residual
+      const bool EXPL = options.INTMETH==Options::METHOD::TS? true: false;
+      const mc::FFVar* tmp1 = _pDAG->compose( _nx+_nq, fct.data(), _pT?1:0, _pT, EXPL?t1:t2 );
 #ifdef MC__ODEBND_EXPAND_DEBUG
-  _pDAG->output( _pDAG->subgraph( _nx+_nq, tmp1 ) );
+      _pDAG->output( _pDAG->subgraph( _nx+_nq, tmp1 ) );
 #endif
-  const mc::FFVar* tmp2 = _pDAG->compose( _nx+_nq, tmp1, _nx, _pX, ITS?x2:x1 );
+      const mc::FFVar* tmp2 = _pDAG->compose( _nx+_nq, tmp1, _nx, _pX, EXPL?x1:x2 );
 #ifdef MC__ODEBND_EXPAND_DEBUG
-  _pDAG->output( _pDAG->subgraph( _nx+_nq, tmp2 ) );
-  { int dum; std::cout << "0 TO CONTINUE "; std::cin >> dum; }
+      _pDAG->output( _pDAG->subgraph( _nx+_nq, tmp2 ) );
+      { int dum; std::cout << "--PAUSED "; std::cin >> dum; }
 #endif
-  const mc::FFVar* derx = _pDAG->TAD( TORD, _nx+_nq, tmp2, _nx+_nq, ITS?x2:x1, ITS?t2:t1 );
-  for( unsigned k=0; k<TORD; k++ ){
-    for( unsigned i=0; i<_nx+_nq; i++ ){
-      if( !k ) res[i]  = derx[TORD*(_nx+_nq)+i];
-      else     res[i] += derx[(TORD-k)*(_nx+_nq)+i];
-      res[i] *= h;
+      const mc::FFVar* derx = _pDAG->TAD( TORD, _nx+_nq, tmp2, _nx+_nq, EXPL?x1:x2, EXPL?t1:t2 );
+      for( unsigned i=0; i<_nx+_nq; i++ ){
+        res[i]  = 0;
+        for( unsigned k=0; k<TORD; k++ ){
+          if( EXPL || (TORD-k)%2 )
+            res[i] += derx[(TORD-k)*(_nx+_nq)+i];
+          else
+            res[i] -= derx[(TORD-k)*(_nx+_nq)+i];
+          res[i] *= h;
+        }
+        res[i] += x1[i] - x2[i];
+      }
+      // Clean-up
+      if( _pT ) delete[] tmp1;
+      delete[] tmp2;
+      delete[] derx;
+      break;
     }
+
+    // Explicit Runge-Kutta method
+    case Options::METHOD::RK:
+    {
+      BASE_RK::set( TORD );
+      // Compute intermediate K's
+      std::vector<const FFVar*> K( _stages );
+      for( unsigned q=0; q<_stages; q++ ){
+        std::vector<FFVar> xk( x1, x1+_nx ), aK( _nx, 0. );
+        for(unsigned i=0; i<_nx; i++){
+          for( unsigned j=0; j<_alpha[q].first; j++ )
+            aK[i] += (_alpha[q].second)[j].second * K[(_alpha[q].second)[j].first][i];
+          aK[i] *= h;
+          xk[i] += aK[i];
+        }
+        const mc::FFVar* Ftmp1 = fct.data();
+        if( _pT){
+          FFVar tk = *t1 + _tau[q] * h;
+          Ftmp1 = _pDAG->compose( _nx+_nq, fct.data(), 1, _pT, &tk );
+        }
+        K[q] = _pDAG->compose( _nx+_nq, Ftmp1, _nx, _pX, xk.data() );
+        if( _pT ) delete[] Ftmp1;
+      }
+
+      // Compute residual
+      for(unsigned i=0; i<_nx+_nq; i++){
+        res[i] = 0.;
+        for( unsigned j=0; j<_beta.first; j++ )
+          res[i] += (_beta.second)[j].second * K[(_beta.second)[j].first][i];
+        res[i] *= h;
+        res[i] += x1[i] - x2[i];
+      }
+      // Clean-up
+      for( unsigned q=0; q<_stages; q++ ) delete[] K[q];
+    }
+
+    // Other method
+    default:
+      break;
   }
-  if( _pT ) delete[] tmp1;
-  delete[] tmp2;
-  delete[] derx;
-  for( unsigned i=0; i<_nx+_nq; i++ )
-    res[i] += x1[i] - x2[i];
 }
 
 template <typename T, typename PMT, typename PVT> inline void
@@ -425,7 +505,9 @@ ODEBND_EXPAND<T,PMT,PVT>::_AE_SET
   if( init ){ // independents to include state at end of previous stage
     for( unsigned i=0; i<_nx; i++)
       _vVAR[_np+i] = _pX[i];
-    _AEBND.set_var( _np+_nx+2+LBLK+1, _vVAR.data() );
+    for( unsigned i=0; i<_nq; i++)
+      _vVAR[_np+_nx+i] = _pQ[i];
+    _AEBND.set_var( _np+_nx+_nq+2+LBLK+1, _vVAR.data() );
     _AEBND.set_dep( (_nx+_nq)*(LBLK+1), _vDEP.data(),
                     _vRES[_istg].data() );
   }
@@ -433,13 +515,15 @@ ODEBND_EXPAND<T,PMT,PVT>::_AE_SET
 #ifdef MC__ODEBND_EXPAND_NO_TRIVIAL_RESIDUAL
     for( unsigned i=0; i<_nx+_nq; i++)
       _vVAR[_np+i] = _vDEP[i];
-    _AEBND.set_var( _np+_nx+2+LBLK+1, _vVAR.data() );
+    _AEBND.set_var( _np+_nx+_nq+2+LBLK+1, _vVAR.data() );
     _AEBND.set_dep( (_nx+_nq)*LBLK, _vDEP.data()+_nx+_nq,
                     _vRES[_istg].data()+_nx+_nq );
 #else
-    for( unsigned i=0; i<_nx+_nq; i++)
+    for( unsigned i=0; i<_nx; i++)
       _vVAR[_np+i] = _pX[i];
-    _AEBND.set_var( _np+_nx+2+LBLK+1, _vVAR.data() );
+    for( unsigned i=0; i<_nq; i++)
+      _vVAR[_np+_nx+i] = _pQ[i];
+    _AEBND.set_var( _np+_nx+_nq+2+LBLK+1, _vVAR.data() );
     _AEBND.set_dep( (_nx+_nq)*(LBLK+1), _vDEP.data(),
                     _vRES[_istg].data()+_nx+_nq );
 #endif
@@ -543,6 +627,7 @@ ODEBND_EXPAND<T,PMT,PVT>::bounds
     for( _istg=0; _istg<_nsmax; _istg++ ){
       _t = _dT[_istg];
       _h = ( _t + LBLK*options.H0 > _dT[_istg+1]-TOL? (_dT[_istg+1]-_t)/LBLK: H0 ); 
+      std::cout << "STEP SIZE: " << _h << std::endl;
 
       // First step of stage w/ initial conditions
       _AE_SET( true );
@@ -557,9 +642,9 @@ ODEBND_EXPAND<T,PMT,PVT>::bounds
           _print_interm( _t, _nx, Ixk[_istg], "x", os );
           _print_interm( _nq, Ixk[_istg]+_nx, "q", os );
         }
-        for( unsigned k=0; options.RESRECORD && k<=DBLK; k++ )
-          results_sta.push_back( Results( _t+k*_h, _nx+_nq, _IDEP.data()+(_nx+_nq)*k ) );
       }
+      for( unsigned k=0; options.RESRECORD && k<=DBLK; k++ )
+        results_sta.push_back( Results( _t+k*_h, _nx+_nq, _IDEP.data()+(_nx+_nq)*k ) );
 
       // Next steps w/o initial conditions
       bool reinit = true;
@@ -696,9 +781,9 @@ ODEBND_EXPAND<T,PMT,PVT>::bounds
           _print_interm( _t, _nx, PMxk[0], "x", os );
           _print_interm( _nq, PMxk[0]+_nx, "q", os );
         }
-        for( unsigned k=0; options.RESRECORD && k<=DBLK; k++ )
-          results_sta.push_back( Results( _t+k*_h, _nx+_nq, _PMDEP.data()+(_nx+_nq)*k ) );
       }
+      for( unsigned k=0; options.RESRECORD && k<=DBLK; k++ )
+        results_sta.push_back( Results( _t+k*_h, _nx+_nq, _PMDEP.data()+(_nx+_nq)*k ) );
 
       // Next steps w/o initial conditions
       bool reinit = true;

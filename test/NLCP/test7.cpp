@@ -33,19 +33,19 @@
 // Set-Membership Estimation: BOD model wtih noisy simulated measurements
 
 const double Tmax = 8.; // [day]
-const unsigned NDAT = 4; // 2^n
+const unsigned NDAT = 16; // 2^n
 const unsigned NP = 2;
 
 const double varYm = 1.;
-const double conf  = 0.95; // % confidence level
+const double conf  = 0.90; // % confidence level
 //const double Chi2  = gsl_cdf_chisq_Pinv( conf, (double)NDAT );
 const double Chi2  = gsl_cdf_chisq_Pinv( conf, (double)NP );
 
 const double preal[NP] = { 20., 0.5 };  // Assumed "true" parameter values
-I Ip[NP+NDAT+1] = { I(5.,35.), I(0.,2.) }; // Parameter range
+I Ip[NP+NDAT+1] = { I(0.,40.), I(0.,3.) }; // Parameter range
 double p0[NP+NDAT+1];
 
-const unsigned int NDATMAX = 1024;
+const unsigned int NDATMAX = 128;//1024;
 char fname[50];
 std::ofstream ofile;
 
@@ -107,12 +107,12 @@ int main()
   }
 
   std::cout << std::fixed << std::setprecision(3) << std::right;
-  std::cout << std::setfill('_') << std::setw(8*NDAT) << " " << std::endl << std::endl << std::setfill(' ');
+  std::cout << std::setfill('_') << std::setw(8*NDAT+2) << " " << std::endl << std::endl << std::setfill(' ');
   for( unsigned k=0; k<NDAT; k++) std::cout << std::setw(8) << Tm[k];
   std::cout << std::endl;
   for( unsigned k=0; k<NDAT; k++) std::cout << std::setw(8) << Ym[k];
   std::cout << std::endl;
-  std::cout << std::setfill('_') << std::setw(8*NDAT) << " " << std::endl << std::endl << std::setfill(' ');
+  std::cout << std::setfill('_') << std::setw(8*NDAT+2) << " " << std::endl << std::endl << std::setfill(' ');
 
   // DAG
   
@@ -131,6 +131,81 @@ int main()
   const mc::FFVar* dJerrdP = DAG.BAD( 1, &Jerr, NP, P );
   mc::FFVar Lerr = Jerr + lambda * ( Eerr - Chi2*varYm );
   const mc::FFVar* dLerrdE = DAG.BAD( 1, &Lerr, NDAT, Em );
+
+  // Bayesian Estimation with a Flat Prior
+
+#if defined(SAVE_RESULTS )
+  sprintf( fname, "test7_%2.0f%s_Nm%d_CRDATA.out",100.*conf,"%",NDAT );
+  ofile.open( fname, std::ios_base::out );
+  ofile << std::scientific << std::setprecision(6);
+#endif
+  const unsigned NPTS = 500;
+  std::multimap<double,std::vector<double>> Jsamp;
+  std::vector<double> dP(NP);
+  double dJ;
+  for( unsigned i=0; i<=NPTS; i++ ){
+    dP[0] = mc::Op<I>::l(Ip[0]) + i/double(NPTS)*mc::Op<I>::diam(Ip[0]);
+    for( unsigned j=0; j<=NPTS; j++ ){
+      dP[1] = mc::Op<I>::l(Ip[1]) + j/double(NPTS)*mc::Op<I>::diam(Ip[1]);
+      DAG.eval( 1, &J, &dJ, NP, P, dP.data() );
+#if defined(SAVE_RESULTS )
+      ofile << dP[0] << "  " << dP[1] << "  " << dJ << std::endl;
+#endif
+      Jsamp.insert( std::make_pair( dJ, dP ) );
+    }
+#if defined(SAVE_RESULTS )
+    ofile << std::endl;
+#endif
+  }
+#if defined(SAVE_RESULTS )
+  ofile.close();
+#endif
+  double Jsum = 0., Jconf = 0.;
+  auto it=Jsamp.begin();
+  for( ; it!=Jsamp.end(); ++it )
+    Jsum += std::exp(-it->first);
+  for( it=Jsamp.begin(); Jconf < conf*Jsum; ++it )
+    Jconf += std::exp(-it->first);
+  const double JBAYES = it->first;
+  std::cout << "JBAYES = " << JBAYES << std::endl;
+
+  { int dum; std::cout << "PAUSED--"; std::cin >> dum; }
+
+  // Bayesian Credibility Region
+
+  mc::NLCP<I> SMMLE4;
+  SMMLE4.set_dag( &DAG );
+  SMMLE4.set_var( NP, P );
+  SMMLE4.add_ctr( mc::BASE_OPT::LE, J - JBAYES );
+
+  SMMLE4.options.DISPLAY     = 1;
+  SMMLE4.options.MAXITER     = 0;
+  SMMLE4.options.NODEMEAS    = mc::SBP<I>::Options::RELMAXLEN;
+  SMMLE4.options.CVTOL       = 1e-3;
+  SMMLE4.options.FEASTOL     = 1e-6;
+  SMMLE4.options.BLKDECUSE   = false;
+  SMMLE4.options.BRANCHVAR   = mc::SBP<I>::Options::RGREL;
+  SMMLE4.options.DOMREDMAX   = 10;
+  SMMLE4.options.DOMREDTHRES = 1e-1;
+  SMMLE4.options.DOMREDBKOFF = 1e-6;
+  SMMLE4.options.RELMETH     = mc::NLCP<I>::Options::CHEB;
+  SMMLE4.options.CMODPROP    = 3;
+  SMMLE4.options.CMODCUTS    = 2;
+  SMMLE4.options.CMODDEPS    = 0;
+
+  SMMLE4.setup();
+  SMMLE4.solve( Ip );
+  SMMLE4.stats.display();
+
+#if defined(SAVE_RESULTS )
+  sprintf( fname, "test7_%2.0f%s_Nm%d_CR.out",100.*conf,"%",NDAT );
+  ofile.open( fname, std::ios_base::out );
+  SMMLE4.output_nodes( ofile );
+  ofile.close();
+#endif
+
+  { int dum; std::cout << "PAUSED--"; std::cin >> dum; }
+  //return 0;
 
   // Least-Squares Estimation
 
@@ -165,6 +240,43 @@ int main()
 
   { int dum; std::cout << "PAUSED--"; std::cin >> dum; }
   //return 0;
+
+  // Log-Likelihood Ratio Confidence Region
+
+  mc::NLCP<I> SMMLE3;
+  SMMLE3.set_dag( &DAG );
+  SMMLE3.set_var( NP, P );
+  SMMLE3.add_ctr( mc::BASE_OPT::LE, J - JLS - Chi2*varYm );
+  std::cout << "JLR = " << JLS+Chi2*varYm << std::endl;
+
+  SMMLE3.options.DISPLAY     = 1;
+  SMMLE3.options.MAXITER     = 0;
+  SMMLE3.options.NODEMEAS    = mc::SBP<I>::Options::RELMAXLEN;
+  SMMLE3.options.CVTOL       = 1e-3;
+  SMMLE3.options.FEASTOL     = 1e-6;
+  SMMLE3.options.BLKDECUSE   = false;
+  SMMLE3.options.BRANCHVAR   = mc::SBP<I>::Options::RGREL;
+  SMMLE3.options.DOMREDMAX   = 10;
+  SMMLE3.options.DOMREDTHRES = 1e-1;
+  SMMLE3.options.DOMREDBKOFF = 1e-6;
+  SMMLE3.options.RELMETH     = mc::NLCP<I>::Options::CHEB;
+  SMMLE3.options.CMODPROP    = 3;
+  SMMLE3.options.CMODCUTS    = 2;
+  SMMLE3.options.CMODDEPS    = 0;
+
+  SMMLE3.setup();
+  SMMLE3.solve( Ip );
+  SMMLE3.stats.display();
+
+#if defined(SAVE_RESULTS )
+  sprintf( fname, "test7d_%2.0f%s_Nm%d.out",100.*conf,"%",NDAT );
+  ofile.open( fname, std::ios_base::out );
+  SMMLE3.output_nodes( ofile );
+  ofile.close();
+#endif
+
+  { int dum; std::cout << "PAUSED--"; std::cin >> dum; }
+  return 0;
 
   // Worst-case upper bound: Interval set
 
@@ -410,41 +522,6 @@ int main()
   sprintf( fname, "test7a_%2.0f%s_Nm%d.out",100.*conf,"%",NDAT );
   ofile.open( fname, std::ios_base::out );
   SMMLE2.output_nodes( ofile );
-  ofile.close();
-#endif
-
-  { int dum; std::cout << "PAUSED--"; std::cin >> dum; }
-
-  // Log-Likelihood Ratio Confidence Region
-
-  mc::NLCP<I> SMMLE3;
-  SMMLE3.set_dag( &DAG );
-  SMMLE3.set_var( NP, P );
-  SMMLE3.add_ctr( mc::BASE_OPT::LE, J - JLS - Chi2*varYm );
-
-  SMMLE3.options.DISPLAY     = 2;
-  SMMLE3.options.MAXITER     = 0;
-  SMMLE3.options.NODEMEAS    = mc::SBP<I>::Options::RELMAXLEN;
-  SMMLE3.options.CVTOL       = 5e-4;
-  SMMLE3.options.FEASTOL     = 1e-6;
-  SMMLE3.options.BLKDECUSE   = false;
-  SMMLE3.options.BRANCHVAR   = mc::SBP<I>::Options::RGREL;
-  SMMLE3.options.DOMREDMAX   = 10;
-  SMMLE3.options.DOMREDTHRES = 1e-1;
-  SMMLE3.options.DOMREDBKOFF = 1e-6;
-  SMMLE3.options.RELMETH     = mc::NLCP<I>::Options::CHEB;
-  SMMLE3.options.CMODPROP    = 3;
-  SMMLE3.options.CMODCUTS    = 2;
-  SMMLE3.options.CMODDEPS    = 0;
-
-  SMMLE3.setup();
-  SMMLE3.solve( Ip );
-  SMMLE3.stats.display();
-
-#if defined(SAVE_RESULTS )
-  sprintf( fname, "test7d_%2.0f%s_Nm%d.out",100.*conf,"%",NDAT );
-  ofile.open( fname, std::ios_base::out );
-  SMMLE3.output_nodes( ofile );
   ofile.close();
 #endif
 

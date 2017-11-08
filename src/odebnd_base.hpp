@@ -2757,18 +2757,18 @@ ODEBND_BASE<T,PMT,PVT>::_sampling
     }
 
     // Update bounds for current point
-#ifdef MC__ODEBND_BASE_SAMPLE_DEBUG
+//#ifdef MC__ODEBND_BASE_SAMPLE_DEBUG
     std::cout << "Sample: ";
-#endif
+//#endif
     for( unsigned ip=0; ip<_np; ip++ ){
       p[ip] = Op<T>::l( Ip[ip] ) + vsamp[ip]/(nsamp-1.) * Op<T>::diam( Ip[ip] );
-#ifdef MC__ODEBND_BASE_SAMPLE_DEBUG
+//#ifdef MC__ODEBND_BASE_SAMPLE_DEBUG
       std::cout << p[ip] << "  ";
-#endif
+//#endif
     }
-#ifdef MC__ODEBND_BASE_SAMPLE_DEBUG
+//#ifdef MC__ODEBND_BASE_SAMPLE_DEBUG
     std::cout << std::endl;
-#endif
+//#endif
     typename ODESLV::STATUS flag = traj.states( p, xk, f, os );
     if( flag != ODESLV::NORMAL ) return flag;
     for( unsigned is=0; Ixk && is<=_nsmax; is++ )
@@ -2776,13 +2776,13 @@ ODEBND_BASE<T,PMT,PVT>::_sampling
         Ixk[is][ix] = Op<T>::hull( xk[is][ix], Ixk[is][ix] );
     for( unsigned ifn=0; If && ifn<_nf; ifn++ )
       If[ifn] = Op<T>::hull( f[ifn], If[ifn] );
-  }
 
-  // Update result vector with current trajectory
-  auto it=traj.results_sta.begin();
-  for( unsigned k=0; traj.options.RESRECORD && it!=traj.results_sta.end(); ++it, k++ )
-    for( unsigned i=0; i<it->nx; i++ )
-      results[k].X[i] = Op<T>::hull( it->X[i], results[k].X[i] );
+    // Update result vector with current trajectory
+    auto it=traj.results_sta.begin();
+    for( unsigned k=0; traj.options.RESRECORD && it!=traj.results_sta.end(); ++it, k++ )
+      for( unsigned i=0; i<it->nx; i++ )
+        results[k].X[i] = Op<T>::hull( it->X[i], results[k].X[i] );
+  }
 
   return true;
 }  

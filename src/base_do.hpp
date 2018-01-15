@@ -8,6 +8,8 @@
 #include "base_opt.hpp"
 #include "base_de.hpp"
 
+//#undef MC__BASE_DO__DEBUG
+
 namespace mc
 {
 //! @brief C++ structure for comparing variables in a dependency map
@@ -285,11 +287,16 @@ BASE_DO::_build_function
     termsta.push_back( pXQ );
     termdep.push_back( _mapFCTSTA[ndxq] );
   }
-  // Append objective term to _fct[0]
-  const mc::FFVar* term = _pDAG->compose( 1, &jt->second, termdep.size(),
-                                          termsta.data(), termdep.data() );
-  _fct[ic] += term[0];
-  if( termdep.size() ) delete[] term;
+  // Append objective term to _fct[ic]
+  if( termdep.size() ){
+    const mc::FFVar* term = _pDAG->compose( 1, &jt->second, termdep.size(),
+                                            termsta.data(), termdep.data() );
+    _fct[ic] += term[0];
+    delete[] term;
+  }
+  else{
+    _fct[ic] += jt->second;
+  }
 }
 
 inline bool

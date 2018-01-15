@@ -428,16 +428,14 @@ ODEBND_EXPAND<T,PMT,PVT>::_AE_SET_RHSRES
     {
       // Compute residual
       const bool EXPL = options.INTMETH==Options::METHOD::TS? true: false;
-      const mc::FFVar* tmp1 = _pDAG->compose( _nx+_nq, fct.data(), _pT?1:0, _pT, EXPL?t1:t2 );
+      const mc::FFVar* fctcomp = _pT?
+        _pDAG->compose( _nx+_nq, fct.data(), _nx, _pX, EXPL?x1:x2, 1, _pT, EXPL?t1:t2 ):
+        _pDAG->compose( _nx+_nq, fct.data(), _nx, _pX, EXPL?x1:x2 );
 #ifdef MC__ODEBND_EXPAND_DEBUG
-      _pDAG->output( _pDAG->subgraph( _nx+_nq, tmp1 ) );
-#endif
-      const mc::FFVar* tmp2 = _pDAG->compose( _nx+_nq, tmp1, _nx, _pX, EXPL?x1:x2 );
-#ifdef MC__ODEBND_EXPAND_DEBUG
-      _pDAG->output( _pDAG->subgraph( _nx+_nq, tmp2 ) );
+      _pDAG->output( _pDAG->subgraph( _nx+_nq, pfct ) );
       { int dum; std::cout << "--PAUSED "; std::cin >> dum; }
 #endif
-      const mc::FFVar* derx = _pDAG->TAD( TORD, _nx+_nq, tmp2, _nx+_nq, EXPL?x1:x2, EXPL?t1:t2 );
+      const mc::FFVar* derx = _pDAG->TAD( TORD, _nx+_nq, fctcomp, _nx+_nq, EXPL?x1:x2, EXPL?t1:t2 );
       for( unsigned i=0; i<_nx+_nq; i++ ){
         res[i]  = 0;
         for( unsigned k=0; k<TORD; k++ ){
@@ -450,8 +448,7 @@ ODEBND_EXPAND<T,PMT,PVT>::_AE_SET_RHSRES
         res[i] += x1[i] - x2[i];
       }
       // Clean-up
-      if( _pT ) delete[] tmp1;
-      delete[] tmp2;
+      delete[] fctcomp;
       delete[] derx;
       break;
     }
@@ -470,15 +467,14 @@ ODEBND_EXPAND<T,PMT,PVT>::_AE_SET_RHSRES
           aK[i] *= h;
           xk[i] += aK[i];
         }
-        const mc::FFVar* Ftmp1 = fct.data();
         if( _pT){
           FFVar tk = *t1 + _tau[q] * h;
-          Ftmp1 = _pDAG->compose( _nx+_nq, fct.data(), 1, _pT, &tk );
+          K[q] = _pDAG->compose( _nx+_nq, fct.data(), _nx, _pX, xk.data(), 1, _pT, &tk );
         }
-        K[q] = _pDAG->compose( _nx+_nq, Ftmp1, _nx, _pX, xk.data() );
-        if( _pT ) delete[] Ftmp1;
+        else{
+          K[q] = _pDAG->compose( _nx+_nq, fct.data(), _nx, _pX, xk.data() );
+        }
       }
-
       // Compute residual
       for(unsigned i=0; i<_nx+_nq; i++){
         res[i] = 0.;
@@ -491,7 +487,7 @@ ODEBND_EXPAND<T,PMT,PVT>::_AE_SET_RHSRES
       for( unsigned q=0; q<_stages; q++ ) delete[] K[q];
     }
 
-    // Other method
+    // Other methods
     default:
       break;
   }

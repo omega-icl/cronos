@@ -299,7 +299,7 @@ BASE_AE::set_block
   for( unsigned i=0; i<ndep; i++ ){
     auto cit = depsys[i].dep().begin();
     for( ; cit != depsys[i].dep().end(); ++cit ){
-      if( !(*cit).second ) // Detecting overall system linearity
+      if( (*cit).second ) // Detecting overall system linearity
           _linsys = false;
       if( _bwsys.first  < (int)i-(*cit).first ) // Updating lower band width
         _bwsys.first  = (int)i-(*cit).first;
@@ -320,7 +320,7 @@ BASE_AE::set_block
     for( unsigned i=0; i<_nblk[ib]; i++ ){
       auto cit = depblk[i].dep().begin();
       for( ; cit != depblk[i].dep().end(); ++cit ){
-        if( !(*cit).second ) // Detecting block/dependent linearity
+        if( (*cit).second ) // Detecting block/dependent linearity
           _linblk[ib] = _lindep[_pblk[ib]+(*cit).first] = false;
         if( _bwblk[ib].first  < (int)i-(*cit).first ) // Updating lower band width
           _bwblk[ib].first  = (int)i-(*cit).first;

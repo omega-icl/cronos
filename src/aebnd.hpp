@@ -5,9 +5,7 @@
 #ifndef MC__AEBND_HPP
 #define MC__AEBND_HPP
 
-#undef  MC__AEBND_DEBUG
-//#undef  MC__AEBND_SHOW_PRECONDITIONING
-#undef  MC__AEBND_DISABLE_MC21A
+//#undef  MC__AEBND_DEBUG
 
 #include <stdexcept>
 #include <cassert>
@@ -106,9 +104,6 @@ private:
   //! @brief function Jacobian interval bounds
   std::vector<std::vector<T>> _Idfdx;
 
-  //! @brief polynomial model environment
-  PMT *_PMenv;
-
   //! @brief variable bounds for DAG evaluation
   std::vector<PVT> _PMvar;
 
@@ -182,9 +177,9 @@ public:
       DIAG=1,  //!< Full decomposition with independent diagonal blocks
       RECUR=2   //!< Full decomposition with recursive triangular blocks
     };
-    //! @brief Whether to apply block decomposition (default: true)
+    //! @brief Level of block decomposition (default, recursive: 2, diagonal: 1, no decomposition: 0)
     DECOMPOSITION BLKDEC;
-    //! @brief Level of recursive block decomposition (default: 2, current block: 1, all blocks: 0)
+    //! @brief Whether or not to intersect bounds with previous iteration in iterative methods (default: true)
     bool INTERBND;
     //! @brief Maximum number of iterations (default: 10, no limit: 0)
     unsigned int MAXIT;
@@ -285,15 +280,15 @@ private:
 
   //! @brief Set reference value (mid-point) for interval bounds
   void _reference
-    ( const unsigned ib, T*var,  T*ref, T*jacvar );
+    ( const unsigned ib, T*var,  T*ref, T*jacvar, bool zeroref=false );
 
   //! @brief Set reference model (centered polynomial) for polynomial models
   void _reference
-    ( const unsigned ib, PVT*var, PVT*ref, PVT*jacvar );
+    ( const unsigned ib, PVT*var, PVT*ref, PVT*jacvar, bool zeroref=false );
 
   //! @brief Set reference model (centered polynomial) for polynomial models
   void _reference
-    ( const unsigned ib, PVT*var, PVT*ref, T*jacvar );
+    ( const unsigned ib, PVT*var, PVT*ref, T*jacvar, bool zeroref=false );
 
   //! @brief Test convergence for interval bounds
   bool _cvgtest
@@ -329,8 +324,8 @@ private:
   //! @brief Apply Gauss elimination method to given block (linear system only)
   template <typename U>
   STATUS _ge
-    ( const unsigned ib, U*var, std::vector<U>&wk, U*f, std::vector<U>*jacf,
-      std::ostream&os );
+    ( const unsigned ib, U*var, std::vector<U>&wk, U*f, U*ref,
+      std::vector<U>*jacf, std::ostream&os );
 
   //! @brief Apply Gauss elimination method for symbolic solution (linear system only)
   STATUS _ge
@@ -347,13 +342,19 @@ private:
   {
     //! @brief Constructor
     Stats():
-      cputime(0.), maxIter(0)
+      cputime(0.), precond(0.), evalrhs(0.), evaljac(0.), maxIter(0)
       {}
     //! @brief Constructor
     void reset()
-      { cputime = 0.; maxIter = 0; }
+      { cputime = 0.; precond = 0.; evalrhs = 0.; evaljac = 0.; maxIter = 0; }
     //! @brief CPU time
     double cputime;
+    //! @brief preconditioning time
+    double precond;
+    //! @brief RHS evaluation time
+    double evalrhs;
+    //! @brief Jacobian evaluation time
+    double evaljac;
     //! @brief Iteration count
     unsigned long maxIter;
   } _stats_ae;
@@ -383,7 +384,6 @@ AEBND<T,PMT,PVT>::AEBND
   // Initalize state/parameter arrays
   _Ix = _Ip = 0;
   _PMp = _PMx = 0;
-  _PMenv = 0;
 }
 
 template <typename T, typename PMT, typename PVT>
@@ -399,7 +399,7 @@ AEBND<T,PMT,PVT>::~AEBND
     delete[] std::get<3>(*it);
   }
   /* DO NOT DELETE _Ix, _Ip */
-  /* DO NOT DELETE _PMx, _PMp, _PMenv */
+  /* DO NOT DELETE _PMx, _PMp */
 }
 
 template <typename T, typename PMT, typename PVT>
@@ -431,7 +431,11 @@ AEBND<T,PMT,PVT>::_output_stats
      << std::endl
      << " CPU TIME (SEC)     " << std::fixed << std::left
                                << std::setprecision(5) << stats.cputime
-     << std::endl;
+     << std::endl
+     << " PRECOND: " << std::setprecision(1) << stats.precond/stats.cputime*1e2
+     << "%, EVALRHS: " << std::setprecision(1) << stats.evalrhs/stats.cputime*1e2
+     << "%, EVALJAC: " << std::setprecision(1) << stats.evaljac/stats.cputime*1e2
+     << "%" << std::endl;
   return;
 }
 
@@ -522,7 +526,8 @@ AEBND<T,PMT,PVT>::_init
     if( _nblkmax < _nblk[ib] ) _nblkmax = _nblk[ib];
 
     // Initialize block operations and Jacobian
-    _opsys[ib] = _dag->subgraph( _ldblk[ib], _sys.data()+_pblk[ib] );
+    //_opsys[ib] = _dag->subgraph( _ldblk[ib], _sys.data()+_pblk[ib] );
+    _opsys[ib] = _dag->subgraph( _nblk[ib], _sys.data()+_pblk[ib] );
     _jac[ib] = _dag->SFAD( _nblk[ib], _sys.data()+_pblk[ib],
                            _ldblk[ib], _var.data()+_pblk[ib] ); 
     _opjac[ib] = _dag->subgraph( std::get<0>(_jac[ib]), std::get<3>(_jac[ib]) );
@@ -554,7 +559,6 @@ AEBND<T,PMT,PVT>::_init
   _PMx = _PMp = 0;
   _PMf.clear();
   _PMdfdx.clear();
-  _PMenv = 0;
   _PMwk.clear();
 
   // Populate parameters in variable arrays
@@ -589,9 +593,6 @@ AEBND<T,PMT,PVT>::_init
   _PMdfdx.resize(_noblk);
   for( unsigned ib=0; ib<_noblk; ib++ )
     _PMdfdx[ib].resize( std::get<0>(_jac[ib]) );
-  _PMenv = 0;
-  for( unsigned i=0; i<np; i++ )
-    if( PMp[i].env() ) _PMenv = PMp[i].env();
   _PMwk.reserve( _maxop );
 
   // Populate parameters in variable arrays
@@ -633,10 +634,10 @@ AEBND<T,PMT,PVT>::_cvgtest
   for( unsigned i=0; i<nx; i++ ){	
     double diamxi = Op<T>::diam(x[i]);
     if( diamxi > 0. ){
-      rtol = std::max(rtol, (Op<T>::l(x[i]) - Op<T>::l(x0[i]))/diamxi);
-      rtol = std::max(rtol, (Op<T>::u(x0[i]) - Op<T>::u(x[i]))/diamxi);
-      atol = std::max(atol, (Op<T>::l(x[i]) - Op<T>::l(x0[i])));
-      atol = std::max(atol, (Op<T>::u(x0[i]) - Op<T>::u(x[i])));
+      rtol = std::max(rtol, std::fabs(Op<T>::l(x[i]) - Op<T>::l(x0[i]))/diamxi);
+      rtol = std::max(rtol, std::fabs(Op<T>::u(x0[i]) - Op<T>::u(x[i]))/diamxi);
+      atol = std::max(atol, std::fabs(Op<T>::l(x[i]) - Op<T>::l(x0[i])));
+      atol = std::max(atol, std::fabs(Op<T>::u(x0[i]) - Op<T>::u(x[i])));
     }
   }
 #ifdef MC__AEBND_DEBUG
@@ -657,10 +658,10 @@ AEBND<T,PMT,PVT>::_cvgtest
   for( unsigned i=0; i<nx; i++ ){	
     double diamxi = Op<T>::diam(x[i].R());
     if( diamxi > 0. ){
-      rtol = std::max(rtol, (Op<T>::l(x[i].R()) - Op<T>::l(x0[i].R()))/diamxi);
-      rtol = std::max(rtol, (Op<T>::u(x0[i].R()) - Op<T>::u(x[i].R()))/diamxi);
-      atol = std::max(atol, (Op<T>::l(x[i].R()) - Op<T>::l(x0[i].R())));
-      atol = std::max(atol, (Op<T>::u(x0[i].R()) - Op<T>::u(x[i].R())));
+      rtol = std::max(rtol, std::fabs(Op<T>::l(x[i].R()) - Op<T>::l(x0[i].R()))/diamxi);
+      rtol = std::max(rtol, std::fabs(Op<T>::u(x0[i].R()) - Op<T>::u(x[i].R()))/diamxi);
+      atol = std::max(atol, std::fabs(Op<T>::l(x[i].R()) - Op<T>::l(x0[i].R())));
+      atol = std::max(atol, std::fabs(Op<T>::u(x0[i].R()) - Op<T>::u(x[i].R())));
     }
   }
 #ifdef MC__AEBND_DEBUG
@@ -688,35 +689,48 @@ AEBND<T,PMT,PVT>::_cancelrem
 template <typename T, typename PMT, typename PVT>
 inline void
 AEBND<T,PMT,PVT>::_reference
-( const unsigned ib, T*var, T*ref, T*jacvar )
+( const unsigned ib, T*var, T*ref, T*jacvar, bool zeroref )
 {
+  _stats_ae.precond -= cpuclock();
   unsigned ivar = _pblk[ib];
+  for( ; ivar<_pblk[ib]+_nblk[ib]; ivar++ )
+    ref[ivar] = zeroref? 0.: Op<T>::mid( var[ivar] );
   for( ; ivar<_pblk[ib]+_ldblk[ib]; ivar++ )
     ref[ivar] = Op<T>::mid( var[ivar] );
   for( ; ivar<_ndep; ivar++ )
     ref[ivar] = var[ivar];
   if( var != jacvar ) throw Exceptions( Exceptions::INTERN );
+  _stats_ae.precond += cpuclock();
 }
 
 template <typename T, typename PMT, typename PVT>
 inline void
 AEBND<T,PMT,PVT>::_reference
-( const unsigned ib, PVT*var, PVT*ref, PVT*jacvar )
+( const unsigned ib, PVT*var, PVT*ref, PVT*jacvar, bool zeroref )
 {
+  _stats_ae.precond -= cpuclock();
   unsigned ivar = _pblk[ib];
+  for( ; ivar<_pblk[ib]+_nblk[ib]; ivar++ )
+    ref[ivar] = zeroref? 0.: var[ivar].C().P();
   for( ; ivar<_pblk[ib]+_ldblk[ib]; ivar++ )
     ref[ivar] = var[ivar].C().P();
   for( ; ivar<_ndep; ivar++ )
     ref[ivar] = var[ivar];
   if( var != jacvar ) throw Exceptions( Exceptions::INTERN );
+  _stats_ae.precond += cpuclock();
 }
 
 template <typename T, typename PMT, typename PVT>
 inline void
 AEBND<T,PMT,PVT>::_reference
-( const unsigned ib, PVT*var, PVT*ref, T*jacvar )
+( const unsigned ib, PVT*var, PVT*ref, T*jacvar, bool zeroref )
 {
+  _stats_ae.precond -= cpuclock();
   unsigned ivar = _pblk[ib];
+  for( ; ivar<_pblk[ib]+_nblk[ib]; ivar++ ){
+    ref[ivar] = zeroref? 0.: var[ivar].C().P();
+    jacvar[ivar] = var[ivar].B();
+  }
   for( ; ivar<_pblk[ib]+_ldblk[ib]; ivar++ ){
     ref[ivar] = var[ivar].C().P();
     jacvar[ivar] = var[ivar].B();
@@ -725,6 +739,7 @@ AEBND<T,PMT,PVT>::_reference
     ref[ivar] = var[ivar];
     jacvar[ivar] = var[ivar].B();
   }
+  _stats_ae.precond += cpuclock();
 }
 
 template <typename T, typename PMT, typename PVT> 
@@ -743,7 +758,6 @@ AEBND<T,PMT,PVT>::_precondlin
       const unsigned *cJAC = std::get<2>(_jac[ib]);
       const FFVar *pJAC = std::get<3>(_jac[ib]);
       V *vJAC = jacf[ib].data();
-      wkjacf.resize( _opjac[ib].size() );
 #ifdef MC__AEBND_DEBUG
       std::ofstream o_jacf( "jacf.dot", std::ios_base::out );
       _dag->dot_script( neJAC, pJAC, o_jacf );
@@ -752,8 +766,10 @@ AEBND<T,PMT,PVT>::_precondlin
       _dag->dot_script( _ldblk[ib], _sys.data()+_pblk[ib], o_f );
       o_f.close();
 #endif
-      _dag->eval( _opjac[ib], wkjacf.data(), neJAC, pJAC, vJAC, _nvar-_pblk[ib],
+      _stats_ae.evaljac -= cpuclock();
+      _dag->eval( _opjac[ib], wkjacf, neJAC, pJAC, vJAC, _nvar-_pblk[ib],
                   _var.data()+_pblk[ib], jacvar+_pblk[ib] );
+      _stats_ae.evaljac += cpuclock();
 #ifdef MC__AEBND_DEBUG
       std::cout << "Non-Preconditioned LHS Block #" << ib+1 << ":\n";
       for( unsigned ie=0; ie<neJAC; ie++ )
@@ -763,6 +779,7 @@ AEBND<T,PMT,PVT>::_precondlin
 #endif
 
       // Compute diagonal preconditioning block in _Y
+      _stats_ae.precond -= cpuclock();
       CPPL::dgematrix mA, Y;
       CPPL::dgbmatrix mB;
       switch( options.PRECOND ){
@@ -816,30 +833,41 @@ AEBND<T,PMT,PVT>::_precondlin
         CPPL::dgematrix mC;
         mC.resize(_nblk[ib],_ldblk[ib]-_nblk[ib]);
         mC.zero();
+        std::set<unsigned> colY;
         for( unsigned ie=0; ie<neJAC; ie++ )
-          if( cJAC[ie] >= _nblk[ib] )
-            mC(rJAC[ie],cJAC[ie]-_nblk[ib]) = Op<U>::mid( vJAC[ie] );
-        //for( unsigned i=0; i<_nblk[ib]; i++ )
-        //  for( unsigned j=0; j<_ldblk[ib]-_nblk[ib]; j++ )
-        //    mC(i,j) = Op<U>::mid( jacf[_ndx(i,_nblk[ib]+j,_ldblk[ib])] );
+          if( cJAC[ie] >= _nblk[ib] ){
+            auto it = colY.insert( cJAC[ie]-_nblk[ib] );
+            mC(rJAC[ie],*it.first) = Op<U>::mid( vJAC[ie] );
+            //mC(rJAC[ie],cJAC[ie]-_nblk[ib]) = Op<U>::mid( vJAC[ie] );
+          }
 #ifdef MC__AEBND_DEBUG
-        std::cout << "Intermediate matrix:\n" << Y << std::endl;
+        std::cout << "Intermediate matrix Yii:\n" << Y << std::endl;
 #endif
         Y *= mC;
 #ifdef MC__AEBND_DEBUG
-        std::cout << "Intermediate matrix:\n" << Y << std::endl;
+        std::cout << "Intermediate matrix Yii·mC:\n" << Y << std::endl << " { ";
+        for( auto kt=colY.begin(); kt!=colY.end(); ++kt ) std::cout << *kt << " ";
+        std::cout << "}" << std::endl;
 #endif
         for( unsigned i=0; i<_nblk[ib]; i++ )
           for( unsigned j=0; j<_ldblk[ib]-_nblk[ib]; j++ ){
             _Y(_pblk[ib]+i,_pblk[ib]+_nblk[ib]+j) = 0.;
-            for( unsigned k=0; k<_ldblk[ib]-_nblk[ib]; k++ )
+            for( auto kt=colY.begin(); kt!=colY.end(); ++kt )
               _Y(_pblk[ib]+i,_pblk[ib]+_nblk[ib]+j)
-                -= Y(i,k) * _Y(_pblk[ib]+_nblk[ib]+k,_pblk[ib]+_nblk[ib]+j);
+                -= Y(i,*kt) * _Y(_pblk[ib]+_nblk[ib]+*kt,_pblk[ib]+_nblk[ib]+j);
           }
+//        for( unsigned i=0; i<_nblk[ib]; i++ )
+//          for( unsigned j=0; j<_ldblk[ib]-_nblk[ib]; j++ ){
+//            _Y(_pblk[ib]+i,_pblk[ib]+_nblk[ib]+j) = 0.;
+//            for( unsigned k=0; k<_ldblk[ib]-_nblk[ib]; k++ )
+//              _Y(_pblk[ib]+i,_pblk[ib]+_nblk[ib]+j)
+//                -= Y(i,k) * _Y(_pblk[ib]+_nblk[ib]+k,_pblk[ib]+_nblk[ib]+j);
+//          }
       }
 #ifdef MC__AEBND_SHOW_PRECONDITIONING
         std::cout << "Full preconditioning matrix:\n" << _Y << std::endl;
 #endif
+      _stats_ae.precond += cpuclock();
 
       // Set G = Y*dfdx
       for( unsigned i=0; i<_nblk[ib]; i++ ){
@@ -855,14 +883,9 @@ AEBND<T,PMT,PVT>::_precondlin
             const unsigned k = _pblk[jb]-_pblk[ib]+rJAC[ie];
             G[_ndx(i,j,_ldblk[ib])] += _Y(_pblk[ib]+i,_pblk[ib]+k) * vJAC[ie];
           }
-          if( _nblk[ib] == _ldblk[ib] ) break;
+          if( _nblk[ib] == _ldblk[ib] ) break; // diagonal preconditioning
         }
       }
-        //for( unsigned j=0; j<_ldblk[ib]; j++ ){
-        //  G[_ndx(i,j,_ldblk[ib])] = 0.;
-        //  for( unsigned k=0; k<_ldblk[ib]; k++ )
-        //    G[_ndx(i,j,_ldblk[ib])] += _Y(_pblk[ib]+i,_pblk[ib]+k) * jacf[_ndx(k,j,_ldblk[ib])];
-        //}
 #ifdef MC__AEBND_DEBUG
       std::cout << "Preconditioned LHS Block #" << ib+1 << ":\n";
       for( unsigned i=0; i<_nblk[ib]; i++ ){
@@ -872,13 +895,21 @@ AEBND<T,PMT,PVT>::_precondlin
       }
       std::cout << std::endl;
 #endif
+      //_stats_ae.precond += cpuclock();
     }
 
     if( f ){
       //setting b = -Y*f(x)
-      wkf.resize( _opsys[ib].size() );
-      _dag->eval( _opsys[ib], wkf.data(), _ldblk[ib], _sys.data()+_pblk[ib], f+_pblk[ib],
+      _stats_ae.evalrhs -= cpuclock();
+      //_dag->eval( _opsys[ib], wkf, _ldblk[ib], _sys.data()+_pblk[ib], f+_pblk[ib],
+      //            _nvar-_pblk[ib], _var.data()+_pblk[ib], ref+_pblk[ib] );
+      _dag->eval( _opsys[ib], wkf, _nblk[ib], _sys.data()+_pblk[ib], f+_pblk[ib],
                   _nvar-_pblk[ib], _var.data()+_pblk[ib], ref+_pblk[ib] );
+      // Update function value for previous block (if any)
+      if( ib && _nblk[ib] < _ldblk[ib] )
+        _dag->eval( _opsys[ib-1], wkf, _nblk[ib-1], _sys.data()+_pblk[ib-1], f+_pblk[ib-1],
+                    _nvar-_pblk[ib-1], _var.data()+_pblk[ib-1], ref+_pblk[ib-1] );
+      _stats_ae.evalrhs += cpuclock();
 #ifdef MC__AEBND_DEBUG
       _dag->output( _opsys[ib] );
       //std::cout << "Intermediates in Block #" << ib+1 << ":\n";
@@ -892,11 +923,13 @@ AEBND<T,PMT,PVT>::_precondlin
       std::cout << std::endl;
       { int dum; std::cin >> dum; }
 #endif
+      //_stats_ae.precond -= cpuclock();
       for (unsigned i=0; i<_nblk[ib]; i++ ){
         b[i] = 0.;
         for( unsigned j=0; j<_ldblk[ib]; j++)
           b[i] -= _Y(_pblk[ib]+i,_pblk[ib]+j) * f[_pblk[ib]+j];
       }
+      //_stats_ae.precond += cpuclock();
 #ifdef MC__AEBND_DEBUG
       std::cout << "Preconditioned RHS Block #" << ib+1 << ":\n";
       for (unsigned i=0; i<_nblk[ib]; i++ ) std::cout << b[i] << std::endl;
@@ -1015,16 +1048,16 @@ AEBND<T,PMT,PVT>::_gs
 
   return NORMAL;
 }
-
 template <typename T, typename PMT, typename PVT>
 template <typename U>
 inline typename AEBND<T,PMT,PVT>::STATUS
 AEBND<T,PMT,PVT>::_ge
-( const unsigned ib, U*var, std::vector<U>&wk, U*f, std::vector<U>*jacf,
-  std::ostream&os )
+( const unsigned ib, U*var, std::vector<U>&wk, U*f, U*ref,
+  std::vector<U>*jacf, std::ostream&os )
 {
   if( !_stats_ae.maxIter ) _stats_ae.maxIter = 1;
   U*varblk = var + _pblk[ib];
+  U*refblk = ref + _pblk[ib];
 
   // Display
   if( options.DISPLAY >= 2  ){
@@ -1035,20 +1068,22 @@ AEBND<T,PMT,PVT>::_ge
 
   try{
     // Compute preconditionned LHS matrix and RHS vector
-    std::vector<U> G(_nblk[ib]*_ldblk[ib]), b(_nblk[ib]), vartmp(var,var+_nvar); 
-    for( unsigned i=0; i<_ldblk[ib]; i++ ) vartmp[_pblk[ib]+i] = 0.;
-    //for( unsigned i=0; i<_nblk[ib]; i++ ) varblk[i] = 0.;
-    _precondlin( ib, G, b, wk, f, vartmp.data(), wk, jacf, vartmp.data(), os );
-    //_precondlin( ib, G, b, wk, f, var, wk, jacf, var, os );
+    std::vector<U> G(_nblk[ib]*_ldblk[ib]), b(_nblk[ib]); 
+    _reference( ib, var, ref, var, true ); // zero reference to compute right-hand-side vector
+    _precondlin( ib, G, b, wk, f, ref, wk, jacf, var, os );
+
+    // Perform RHS vector correction for block recursivity
+    for( unsigned k=0; k<_nblk[ib]; k++ )
+      for( unsigned j=_nblk[ib]; j<_ldblk[ib]; j++ )
+        b[k] -= G[_ndx(k,j,_ldblk[ib])] * ( varblk[j] - refblk[j] );
 
     // Perform forward substitution
     for( unsigned k=0; k<_nblk[ib]-1; k++ ){
       if( Op<U>::l( G[_ndx(k,k,_ldblk[ib])] ) <= 0. 
        && Op<U>::u( G[_ndx(k,k,_ldblk[ib])] ) >= 0. ) return SINGULAR;
-
       for( unsigned i=k+1; i<_nblk[ib]; i++ ){
         U factor = G[_ndx(i,k,_ldblk[ib])] / G[_ndx(k,k,_ldblk[ib])];
-        for( unsigned j=k+1; j<_ldblk[ib]; j++ )
+        for( unsigned j=k+1; j<_nblk[ib]; j++ )
           G[_ndx(i,j,_ldblk[ib])] -= factor * G[_ndx(k,j,_ldblk[ib])];
         b[i] -= factor * b[k];
       }
@@ -1056,7 +1091,7 @@ AEBND<T,PMT,PVT>::_ge
 #ifdef MC__AEBND_DEBUG
     std::cout << "LHS Block #" << ib+1 << " After Forward Elimination:\n";
     for( unsigned i=0; i<_nblk[ib]; i++ ){
-      for( unsigned j=0; j<_ldblk[ib]; j++ )
+      for( unsigned j=0; j<_nblk[ib]; j++ )
         std::cout << G[_ndx(i,j,_ldblk[ib])] << "  ";
       std::cout << std::endl;
     }
@@ -1074,9 +1109,9 @@ AEBND<T,PMT,PVT>::_ge
       return SINGULAR;
     // std::cout << "NON-SINGULAR!" << std::endl;
     varblk[_nblk[ib]-1] = b[_nblk[ib]-1] / G[_ndx(_nblk[ib]-1,_nblk[ib]-1,_ldblk[ib])];
-    for( unsigned i=_nblk[ib]; i>0; i-- ){
+    for( unsigned i=_nblk[ib]-1; i>0; i-- ){
       U sum = b[i-1];
-      for( unsigned j=i; j<_ldblk[ib]; j++ )
+      for( unsigned j=i; j<_nblk[ib]; j++ )
         sum -= G[_ndx(i-1,j,_ldblk[ib])] * varblk[j];
       varblk[i-1] = sum / G[_ndx(i-1,i-1,_ldblk[ib])];
     }
@@ -1091,61 +1126,7 @@ AEBND<T,PMT,PVT>::_ge
   catch(...){ return FAILURE; }
   return NORMAL;
 }
-/*
-template <typename T, typename PMT, typename PVT>
-template <typename U>
-inline typename AEBND<T,PMT,PVT>::STATUS
-AEBND<T,PMT,PVT>::_ge
-( const unsigned ib, U*var, std::vector<U>&wk, U*f, std::vector<U>*jacf,
-  std::ostream&os )
-{
-  if( !_stats_ae.maxIter ) _stats_ae.maxIter = 1;
-  U*varblk = var + _pblk[ib];
-  //auto vartmp = var;
-  //for( unsigned i=0; i<_ldblk[ib]; i++ ) vartmp[_pblk[ib]+i] = 0.;
 
-  // Compute preconditionned LHS matrix and RHS vector
-  std::vector<U> G(_nblk[ib]*_ldblk[ib]), b(_nblk[ib]); 
-  for( unsigned i=0; i<_nblk[ib]; i++ ) varblk[i] = 0.;
-  _precondlin( ib, G, b, wk, f, var, wk, jacf, var, os );
-
-  try{
-    // Perform forward substitution
-    for( unsigned k=0; k<_nblk[ib]-1; k++ ){
-      if( Op<U>::l( G[_ndx(k,k,_ldblk[ib])] ) <= 0. 
-       && Op<U>::u( G[_ndx(k,k,_ldblk[ib])] ) >= 0. ) return SINGULAR;
-
-      for( unsigned i=k+1; i<_nblk[ib]; i++ ){
-        U factor = G[_ndx(i,k,_ldblk[ib])] / G[_ndx(k,k,_ldblk[ib])];
-        for( unsigned j=k+1; j<_ldblk[ib]; j++ )
-          G[_ndx(i,j,_ldblk[ib])] -= factor * G[_ndx(k,j,_ldblk[ib])];
-        b[i] -= factor * b[k];
-      }
-    }
-
-    // Perform backward elimination
-    // std::cout << "G[" << _ndx(_nblk[ib]-1,_nblk[ib]-1,_nblk[ib]) << "] = "
-    //           << G[_ndx(_nblk[ib]-1,_nblk[ib]-1,_nblk[ib])] << std::endl;
-    if( Op<U>::l( G[_ndx(_nblk[ib]-1,_nblk[ib]-1,_ldblk[ib])] ) <= 0. 
-     && Op<U>::u( G[_ndx(_nblk[ib]-1,_nblk[ib]-1,_ldblk[ib])] ) >= 0. )
-      return SINGULAR;
-    // std::cout << "NON-SINGULAR!" << std::endl;
-    varblk[_nblk[ib]-1] = b[_nblk[ib]-1] / G[_ndx(_nblk[ib]-1,_nblk[ib]-1,_ldblk[ib])];
-    for( unsigned i=_nblk[ib]; i>0; i-- ){
-      U sum = b[i-1];
-      for( unsigned j=i; j<_ldblk[ib]; j++ )
-        sum -= G[_ndx(i-1,j,_ldblk[ib])] * varblk[j];
-      varblk[i-1] = sum / G[_ndx(i-1,i-1,_ldblk[ib])];
-    }
-#ifdef MC__AEBND_DEBUG
-    std::cout << "GE bounds:\n";
-    for( unsigned i=0; i<_nblk[ib]; i++ ) std::cout << varblk[i] << std::endl;
-#endif
-  }
-  catch(...){ return FAILURE; }
-  return NORMAL;
-}
-*/
 //! @fn template <typename T, typename PMT, typename PVT> inline typename AEBND<T,PMT,PVT>::STATUS AEBND<T,PMT,PVT>::solve(
 //! const T*Ip, T*Ix, const T*Ix0=0, std::ostream&os=std::cout )
 //!
@@ -1177,12 +1158,14 @@ AEBND<T,PMT,PVT>::solve
       // No a priori box supplied
       if( !Ix0 ){
         if( !_linblk[_iblk] ) throw Exceptions( Exceptions::APRIORI );
-        flag = _ge( _iblk, _Ivar.data(), _Iwk, _If.data(), _Idfdx.data(), os );
+        flag = _ge( _iblk, _Ivar.data(), _Iwk, _If.data(), _Iref.data(),
+                    _Idfdx.data(), os );
       }
   
       // A priori box supplied and linear case
       else if( _linblk[_iblk] ){
-        flag = _ge( _iblk, _Ivar.data(), _Iwk, _If.data(), _Idfdx.data(), os );
+        flag = _ge( _iblk, _Ivar.data(), _Iwk, _If.data(), _Iref.data(),
+                    _Idfdx.data(), os );
         if( flag != NORMAL ) break;
 
         // check whether supplied bounds are better than GE bounds in parts
@@ -1213,7 +1196,9 @@ AEBND<T,PMT,PVT>::solve
     case Options::ALGORITHM::GE:
       // Check system is linear in dependents
       if( !_linblk[_iblk] ) throw Exceptions( Exceptions::GAUSSEL );
-      flag = _ge( _iblk, _Ivar.data(), _Iwk, _If.data(), _Idfdx.data(), os );
+      //for( unsigned irep=0; irep<1000; ++irep )
+      flag = _ge( _iblk, _Ivar.data(), _Iwk, _If.data(), _Iref.data(),
+                  _Idfdx.data(), os );
       break;
 
     // Gauss-Seidel method
@@ -1222,6 +1207,7 @@ AEBND<T,PMT,PVT>::solve
       if( !Ix0 ) throw Exceptions( Exceptions::APRIORI );
       for( unsigned i=0; i<_nblk[_iblk]; i++ )
         _Ivar[_pblk[_iblk]+i] = Ix0[_rpdep[_pblk[_iblk]+i]];
+      //for( unsigned irep=0; irep<1000; ++irep )
       flag = _gs( _iblk, _Ivar.data(), _Iwk, _If.data(), _Iref.data(),
                   _Iwk, _Idfdx.data(), _Ivar.data(), false, os );
       break;
@@ -1316,12 +1302,14 @@ AEBND<T,PMT,PVT>::solve
       // No a priori box supplied
       if( !PMx0 ){
         if( !_linblk[_iblk] ) throw Exceptions( Exceptions::APRIORI );
-        flag = _ge( _iblk, _PMvar.data(), _PMwk, _PMf.data(), _PMdfdx.data(), os );
+        flag = _ge( _iblk, _PMvar.data(), _PMwk, _PMf.data(), _PMref.data(),
+                    _PMdfdx.data(), os );
       }
   
       // A priori box supplied and linear case
       else if( _linblk[_iblk] ){
-        flag = _ge( _iblk, _PMvar.data(), _PMwk, _PMf.data(), _PMdfdx.data(), os );
+        flag = _ge( _iblk, _PMvar.data(), _PMwk, _PMf.data(), _PMref.data(),
+                    _PMdfdx.data(), os );
         if( flag != NORMAL ) break;
 
         // check whether supplied bounds are better than GE bounds in parts
@@ -1352,7 +1340,8 @@ AEBND<T,PMT,PVT>::solve
     case Options::ALGORITHM::GE:
       // Check system is linear in dependents
       if( !_linblk[_iblk] ) throw Exceptions( Exceptions::GAUSSEL );
-      flag = _ge( _iblk, _PMvar.data(), _PMwk, _PMf.data(), _PMdfdx.data(), os );
+      flag = _ge( _iblk, _PMvar.data(), _PMwk, _PMf.data(), _PMref.data(),
+                  _PMdfdx.data(), os );
       break;
 
     // Gauss-Seidel method

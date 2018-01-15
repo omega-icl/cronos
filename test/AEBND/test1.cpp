@@ -1,6 +1,6 @@
 const unsigned int NPM   = 5;	// <- Order of Taylor/Chebyshev model
 #define USE_CMODEL		// <- Use Chebyshev models?
-#define MC__AEBND_SHOW_PRECONDITIONING
+#undef  MC__AEBND_SHOW_PRECONDITIONING
 
 #include "aebnd.hpp"
 
@@ -56,14 +56,13 @@ int main()
   BND.set_var( NP, P );
   BND.set_dep( NX, X, F );
 
-  BND.options.DISPLAY  = 2;
+  BND.options.DISPLAY  = 1;
   BND.options.INTERBND = true; //false;
   BND.options.MAXIT    = 20;
   BND.options.RTOL     =
   BND.options.ATOL     = 1e-8;
-  BND.options.BOUNDER  = mc::AEBND<I,PM,PV>::Options::ALGORITHM::GS;//GE;//KRAW;//GS;
+  BND.options.BOUNDER  = mc::AEBND<I,PM,PV>::Options::ALGORITHM::GS;//KRAW;//GE;
   BND.options.PRECOND  = mc::AEBND<I,PM,PV>::Options::PRECONDITIONING::INVMD;//QRM;//NONE;
-  BND.options.BLKDEC   = mc::AEBND<I,PM,PV>::Options::DECOMPOSITION::DIAG;//RECUR;//NONE;//DIAG;
   BND.setup();
 
   //BND.setup();
@@ -71,18 +70,19 @@ int main()
   //std::cout << "\nPMx2: " << (3+PMp[0])*PMx[1];
   //return 0;
 
-  BND.options.BLKDEC   = mc::AEBND<I,PM,PV>::Options::DECOMPOSITION::NONE;
+  BND.options.BLKDEC = mc::AEBND<I,PM,PV>::Options::DECOMPOSITION::RECUR;
   std::cout << "\nSuccessful? " << (BND.solve( Ip, Ix, Ix0 )==mc::AEBND<I,PM,PV>::NORMAL?"Y\n":"N\n");
-
-  BND.options.BLKDEC   = mc::AEBND<I,PM,PV>::Options::DECOMPOSITION::DIAG;
-  std::cout << "\nSuccessful? " << (BND.solve( Ip, Ix, Ix0 )==mc::AEBND<I,PM,PV>::NORMAL?"Y\n":"N\n");
-
-  BND.options.BLKDEC   = mc::AEBND<I,PM,PV>::Options::DECOMPOSITION::RECUR;
-  std::cout << "\nSuccessful? " << (BND.solve( Ip, Ix, Ix0 )==mc::AEBND<I,PM,PV>::NORMAL?"Y\n":"N\n");
-  return 0;
-
   std::cout << "\nSuccessful? " << (BND.solve( PMp, PMx, Ix )==mc::AEBND<I,PM,PV>::NORMAL?"Y\n":"N\n");
-  std::cout << "\nPMx2: " << (3+PMp[0])*PMx[1];
+
+  BND.options.BLKDEC = mc::AEBND<I,PM,PV>::Options::DECOMPOSITION::NONE;
+  std::cout << "\nSuccessful? " << (BND.solve( Ip, Ix, Ix0 )==mc::AEBND<I,PM,PV>::NORMAL?"Y\n":"N\n");
+  std::cout << "\nSuccessful? " << (BND.solve( PMp, PMx, Ix )==mc::AEBND<I,PM,PV>::NORMAL?"Y\n":"N\n");
+
+  BND.options.BLKDEC = mc::AEBND<I,PM,PV>::Options::DECOMPOSITION::DIAG;
+  std::cout << "\nSuccessful? " << (BND.solve( Ip, Ix, Ix0 )==mc::AEBND<I,PM,PV>::NORMAL?"Y\n":"N\n");
+  std::cout << "\nSuccessful? " << (BND.solve( PMp, PMx, Ix )==mc::AEBND<I,PM,PV>::NORMAL?"Y\n":"N\n");
+
+  std::cout << "\nPMx2: " << PMx[1]/(3+PMp[0]);
   return 0;
 
   std::cout << "\nSuccessful? " << (BND.solve( SOL )==mc::AEBND<I,PM,PV>::NORMAL?"Y\n":"N\n");

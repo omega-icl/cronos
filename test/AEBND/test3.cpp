@@ -1,5 +1,6 @@
 const unsigned int NPM   = 5;	// <- Order of Taylor model
 #define USE_CMODEL		// <- Use Chebyshev models?
+#undef  MC__AEBND_SHOW_PRECONDITIONING
 
 #include "aebnd.hpp"
 
@@ -32,9 +33,8 @@ int main()
   mc::FFVar F[NX];  // Equations f(x,p)=0
   F[0] = X[0] - sin(P[0]) / sqrt(X[0]) - 25. * P[1];
 
-  //I Ip[NP]  = { I(0.5,4.0), I(1.,1.) },
-  I Ip[NP]  = { I(0.5,0.6), I(1.,1.) },
-    Ix0[NX] = { I(2e1,3e1) },
+  I Ip[NP]  = { I(0.5,2.), I(1.,2.) },
+    Ix0[NX] = { I(20.,60.) },
     Ix[NX];
 
   PM PMEnv( NP, NPM );
@@ -56,7 +56,7 @@ int main()
   BND.options.ATOL     = 1e-10;
   BND.options.BOUNDER  = mc::AEBND<I,PM,PV>::Options::ALGORITHM::AUTO;//GE;//KRAW;//GS;
   BND.options.PRECOND  = mc::AEBND<I,PM,PV>::Options::PRECONDITIONING::INVMD;//QRM;//NONE;
-  BND.options.BLKDEC   = mc::AEBND<I,PM,PV>::Options::DECOMPOSITION::RECUR;//NONE;//DIAG;
+  BND.options.BLKDEC   = mc::AEBND<I,PM,PV>::Options::DECOMPOSITION::NONE;//DIAG;
 
   BND.setup();
   std::cout << "\nSuccessful? " << (BND.solve( Ip, Ix, Ix0 )==mc::AEBND<I,PM,PV>::NORMAL?"Y\n":"N\n");

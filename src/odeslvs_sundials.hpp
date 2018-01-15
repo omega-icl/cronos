@@ -12,6 +12,7 @@
 #include "odeslv_sundials.hpp"
 
 #define MC__ODESLVS_SUNDIALS_USE_BAD
+#undef  MC__ODESLVS_SUNDIALS_DEBUG
 
 namespace mc
 {

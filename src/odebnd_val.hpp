@@ -99,10 +99,10 @@ private:
 
 
   //! @brief preallocated array for DAG evaluation in T arithmetic
-  T* _IDAG;
+  std::vector<T> _IWK;
 
   //! @brief preallocated array for DAG evaluation in PVT arithmetic
-  PVT* _PMDAG;
+  std::vector<PVT> _PMWK;
 
 
   //! @brief list of operations in RHS Taylor coefficients
@@ -470,8 +470,9 @@ ODEBND_VAL<T,PMT,PVT>::ODEBND_VAL
   // Initalize DAG computation
   _nVAR = 0;
   _pVAR = 0;
-  _PMVAR = _MVVAR = _PMDAG = 0;
-  _IVAR = _IDAG = 0;
+  _IVAR = 0;
+  _PMVAR = 0;
+  _MVVAR = 0;
 
   // Initalize dynamic system computation
   _pTRHS = _pFTRHS = _pIC = _pINV = _pFINV = 0;
@@ -498,8 +499,6 @@ ODEBND_VAL<T,PMT,PVT>::~ODEBND_VAL
   delete[] _IVAR;
   delete[] _PMVAR;
   delete[] _MVVAR;
-  delete[] _IDAG;
-  delete[] _PMDAG;
 
   // Do *NOT* free _PMenv
   delete _MVenv;
@@ -647,7 +646,7 @@ ODEBND_VAL<T,PMT,PVT>::_validation
         _PMVAR[ix] += options.HSTAB? h*options.TOL*T(-1,1): options.TOL*T(-1,1);
       }
       _PMVAR[_nx+_np] = _t; // Keep time when stepsize was computed
-      _pDAG->eval( _opTRHSval, _PMDAG, _nx, _pTRHS+(q+1)*_nx, _PMTRHSval, _nVAR, _pVAR, _PMVAR );
+      _pDAG->eval( _opTRHSval, _PMWK, _nx, _pTRHS+(q+1)*_nx, _PMTRHSval, _nVAR, _pVAR, _PMVAR );
       ++stats_traj.numTRHS_PM;
       hval = _stepsize(q, _PMTRHSval, X, options.HSTAB );
     }
@@ -657,7 +656,7 @@ ODEBND_VAL<T,PMT,PVT>::_validation
         _IVAR[ix] += options.HSTAB? h*options.TOL*T(-1,1): options.TOL*T(-1,1);
       }
       _IVAR[_nx+_np] = _t; // Keep time when stepsize was computed
-      _pDAG->eval( _opTRHSval, _IDAG, _nx, _pTRHS+(q+1)*_nx, _ITRHSval, _nVAR, _pVAR, _IVAR );
+      _pDAG->eval( _opTRHSval, _IWK, _nx, _pTRHS+(q+1)*_nx, _ITRHSval, _nVAR, _pVAR, _IVAR );
       ++stats_traj.numTRHS_I;
       hval = _stepsize( q, _ITRHSval, X, options.HSTAB );
     }
@@ -678,7 +677,7 @@ ODEBND_VAL<T,PMT,PVT>::_propagate_INT
   // Taylor series expansion in PVT arithmetic up to order TSORDER+1
   for( unsigned ix=0; ix<_nx; ix++ ) _PMVAR[ix] = _PMx[ix];
   _PMVAR[_nx+_np] = _t;
-  _pDAG->eval( _opTRHS, _PMDAG, (q+2)*_nx, _pTRHS, _PMTRHS, _nVAR, _pVAR, _PMVAR );
+  _pDAG->eval( _opTRHS, _PMWK, (q+2)*_nx, _pTRHS, _PMTRHS, _nVAR, _pVAR, _PMVAR );
   ++stats_traj.numTRHS_PM;
 
   // Stepsize selection and validation
@@ -726,13 +725,13 @@ ODEBND_VAL<T,PMT,PVT>::_propagate_ELL0
     // Taylor series expansion in PVT arithmetic up to order TSORDER+1
     for( unsigned ix=0; ix<_nx; ix++ ) _PMVAR[ix] = _PMx[ix];
     _PMVAR[_nx+_np] = _t; // Keep time when stepsize was computed
-    _pDAG->eval( _opTRHS, _PMDAG, (q+2)*_nx, _pTRHS, _PMTRHS, _nVAR, _pVAR, _PMVAR );
+    _pDAG->eval( _opTRHS, _PMWK, (q+2)*_nx, _pTRHS, _PMTRHS, _nVAR, _pVAR, _PMVAR );
     ++stats_traj.numTRHS_PM;
 
     // Taylor series expansion and differentiation in T arithmetic up to order TSORDER
     for( unsigned ix=0; ix<_nx; ix++ ) _IVAR[ix] = _Ix[ix];
     _IVAR[_nx+_np] = _t;
-    _pDAG->eval( _opFTRHS, _IDAG, (q+1)*_nx*_nx, _pFTRHS, _IFTRHS, _nVAR, _pVAR, _IVAR );
+    _pDAG->eval( _opFTRHS, _IWK, (q+1)*_nx*_nx, _pFTRHS, _IFTRHS, _nVAR, _pVAR, _IVAR );
     ++stats_traj.numFTRHS_I;
 
     // Stepsize selection and validation
@@ -821,7 +820,7 @@ ODEBND_VAL<T,PMT,PVT>::_propagate_ELL1
     // Taylor series expansion in PVT arithmetic up to order TSORDER+1
     for( unsigned ix=0; ix<_nx; ix++ ) _PMVAR[ix] = _PMx[ix];
     _PMVAR[_nx+_np] = _t; // Keep time when stepsize was computed
-    _pDAG->eval( _opTRHS, _PMDAG, (q+2)*_nx, _pTRHS, _PMTRHS, _nVAR, _pVAR, _PMVAR );
+    _pDAG->eval( _opTRHS, _PMWK, (q+2)*_nx, _pTRHS, _PMTRHS, _nVAR, _pVAR, _PMVAR );
     ++stats_traj.numTRHS_PM;
 
     // Taylor series expansion and differentiation in PVT arithmetic up to order TSORDER
@@ -831,7 +830,7 @@ ODEBND_VAL<T,PMT,PVT>::_propagate_ELL1
       _MVVAR[ix] += MVri;
     }
     _MVVAR[_nx+_np] = _t;
-    _pDAG->eval( _opFTRHS, _PMDAG, (q+1)*_nx*_nx, _pFTRHS, _PMFTRHS, _nVAR, _pVAR, _MVVAR );
+    _pDAG->eval( _opFTRHS, _PMWK, (q+1)*_nx*_nx, _pFTRHS, _PMFTRHS, _nVAR, _pVAR, _MVVAR );
     ++stats_traj.numFTRHS_PM;
 
     // Stepsize selection and validation
@@ -928,7 +927,7 @@ ODEBND_VAL<T,PMT,PVT>::_propagate_ELL2
       _MVVAR[ix] += MVri;
     }
     _MVVAR[_nx+_np] = _t;
-    _pDAG->eval( _opTRHS, _PMDAG, (q+2)*_nx, _pTRHS, _PMTRHS, _nVAR, _pVAR, _MVVAR );
+    _pDAG->eval( _opTRHS, _PMWK, (q+2)*_nx, _pTRHS, _PMTRHS, _nVAR, _pVAR, _MVVAR );
     ++stats_traj.numTRHS_PM;
 
     // Stepsize selection and validation
@@ -1009,12 +1008,12 @@ ODEBND_VAL<T,PMT,PVT>::_invariant_ELL0
   // Compute invariants in PVT arithmetic
   for( unsigned i=0; i<_nx; i++ ) _PMVAR[i] = Px[i];
   _PMVAR[_nx+_np] = _t;
-  _pDAG->eval( _opINV, _PMDAG, _ni, _pINV, _PMINV, _nVAR, _pVAR, _PMVAR );
+  _pDAG->eval( _opINV, _PMWK, _ni, _pINV, _PMINV, _nVAR, _pVAR, _PMVAR );
 
   // Compute invariant derivatives in T arithmetic
   for( unsigned i=0; i<_nx; i++ ) _IVAR[i] = _PMx[i].bound() + _Rx[i];
   _IVAR[_nx+_np] = _t;
-  _pDAG->eval( _opFINV, _IDAG, _ni*_nx, _pFINV, _IFINV, _nVAR, _pVAR, _IVAR );
+  _pDAG->eval( _opFINV, _IWK, _ni*_nx, _pFINV, _IFINV, _nVAR, _pVAR, _IVAR );
 
   // Compute invariant directions and remainders
   for( unsigned i=0, ij=0; i<_ni; i++ ){
@@ -1046,7 +1045,7 @@ ODEBND_VAL<T,PMT,PVT>::_invariant_ELL1
   // Compute invariants in PVT arithmetic
   for( unsigned i=0; i<_nx; i++ ) _PMVAR[i] = Px[i];
   _PMVAR[_nx+_np] = _t;
-  _pDAG->eval( _opINV, _PMDAG, _ni, _pINV, _PMINV, _nVAR, _pVAR, _PMVAR );
+  _pDAG->eval( _opINV, _PMWK, _ni, _pINV, _PMINV, _nVAR, _pVAR, _PMVAR );
 
   // Compute invariant derivatives in PVT arithmetic
   for( unsigned i=0; i<_nx; i++ ){
@@ -1059,7 +1058,7 @@ ODEBND_VAL<T,PMT,PVT>::_invariant_ELL1
 #endif
   }
   _MVVAR[_nx+_np] = _t;
-  _pDAG->eval( _opFINV, _PMDAG, _ni*_nx, _pFINV, _PMFINV, _nVAR, _pVAR, _MVVAR );
+  _pDAG->eval( _opFINV, _PMWK, _ni*_nx, _pFINV, _PMFINV, _nVAR, _pVAR, _MVVAR );
 
   for( unsigned i=0, ij=0; i<_ni; i++ ){
     _Rinv[i] = _PMINV[i].remainder();
@@ -1102,7 +1101,7 @@ ODEBND_VAL<T,PMT,PVT>::_invariant_ELL2
 #endif
   }
   _MVVAR[_nx+_np] = _t;
-  _pDAG->eval( _opINV, _PMDAG, _ni, _pINV, _PMINV, _nVAR, _pVAR, _MVVAR );
+  _pDAG->eval( _opINV, _PMWK, _ni, _pINV, _PMINV, _nVAR, _pVAR, _MVVAR );
 
   for( unsigned int i=0; i<_ni; i++ ){
     // Extract state polynomial approximant in p and set to 0
@@ -1291,12 +1290,10 @@ ODEBND_VAL<T,PMT,PVT>::_resize
   delete[] _pTRHS; _pTRHS = _pDAG->TAD( q+1, _nx, _vRHS[iRHS], _nx, _pVAR, _pT );
   _opTRHS = _pDAG->subgraph( (q+2)*_nx, _pTRHS );
   delete[] _PMTRHS; _PMTRHS = new PVT[(q+2)*_nx];
-  unsigned nPMDAG = _opTRHS.size();
 
   _opTRHSval = _pDAG->subgraph( _nx, _pTRHS+(q+1)*_nx );
   delete[] _PMTRHSval; _PMTRHSval = options.PMVALID? new PVT[_nx]: 0;
   delete[] _ITRHSval; _ITRHSval = options.PMVALID? 0: new T[_nx];
-  unsigned nIDAG = options.PMVALID? 0: _opTRHSval.size();
 
   delete[] _pFTRHS; _pFTRHS = 0;
   _opFTRHS.clear();
@@ -1321,38 +1318,30 @@ ODEBND_VAL<T,PMT,PVT>::_resize
       _pINV = _vINV[iRHS];
       _opINV = _pDAG->subgraph( _ni, _pINV );
       _PMINV = new PVT[_ni];
-      if( nPMDAG < _opINV.size() ) nPMDAG = _opINV.size();
     }
     if( !options.ORDMIT ){                         // ELL0
       _pFTRHS = _pDAG->FAD( (q+1)*_nx, _pTRHS, _nx, _pVAR );
       _opFTRHS = _pDAG->subgraph( (q+1)*_nx*_nx, _pFTRHS );
       _IFTRHS  = new T[(q+1)*_nx*_nx];
-      if( nIDAG < _opFTRHS.size() ) nIDAG = _opFTRHS.size();
       if( options.USEINV && _vINV.size() && _ni ){
         _pFINV = _pDAG->FAD( _ni, _pINV, _nx, _pVAR );
         _opFINV = _pDAG->subgraph( _ni*_nx, _pFINV );
         _IFINV  = new T[_ni*_nx];
-        if( nIDAG < _opFINV.size() ) nIDAG = _opFINV.size();
       }
     }
     else if( _PMenv->nord() > _MVenv->nord() ){    // ELL1
       _pFTRHS = _pDAG->FAD( (q+1)*_nx, _pTRHS, _nx, _pVAR );
       _opFTRHS = _pDAG->subgraph( (q+1)*_nx*_nx, _pFTRHS );
       _PMFTRHS = new PVT[(q+1)*_nx*_nx];
-      if( nPMDAG < _opFTRHS.size() ) nPMDAG = _opFTRHS.size();
       if( options.USEINV && _vINV.size() && _ni ){
         _pFINV = _pDAG->FAD( _ni, _pINV, _nx, _pVAR );
         _opFINV = _pDAG->subgraph( _ni*_nx, _pFINV );
         _PMFINV = new PVT[_ni*_nx];
-        if( nPMDAG < _opFINV.size() ) nPMDAG = _opFINV.size();
       }
     }
                                                    // ELL2
     break;
   }
-
-  delete[] _PMDAG; _PMDAG = new PVT[nPMDAG];
-  delete[] _IDAG;  _IDAG  = new T[nIDAG];
 
   return true;
 }
@@ -1405,12 +1394,13 @@ ODEBND_VAL<T,PMT,PVT>::_prepare
 
   case Options::ELLIPS:
   default:
-    if( _Ax.n != _nx ){
+    if( (unsigned)_Ax.n != _nx ){
       _Ax.resize(_nx,_nx);
       delete[] _Rx;    _Rx    = new T[_nx];
       delete[] _Rx_TE; _Rx_TE = new T[_nx];
     }
-    if( options.USEINV && _ni && ( _Ainv.n != _nx || _Ainv.m != _ni ) ){
+    if( options.USEINV && _ni
+     && ( (unsigned)_Ainv.n != _nx || (unsigned)_Ainv.m != _ni ) ){
       _Ainv.resize(_ni,_nx);
       delete[] _Rinv;  _Rinv = new T[_ni];
       delete[] _Ninv;  _Ninv = new T[_ni];
@@ -1437,7 +1427,7 @@ ODEBND_VAL<T,PMT,PVT>::_init
   switch( options.WRAPMIT){
 
   case Options::NONE:
-    _pDAG->eval( _opIC, _nx, _pIC, _PMx, _np, _pVAR+_nx, _PMVAR+_nx );
+    _pDAG->eval( _opIC, _PMWK, _nx, _pIC, _PMx, _np, _pVAR+_nx, _PMVAR+_nx );
     for( unsigned int ix=0; ix<_nx; ix++ )
       _Ix[ix] = _PMx[ix].center().bound();
     _Ex.set();
@@ -1445,7 +1435,7 @@ ODEBND_VAL<T,PMT,PVT>::_init
 
   case Options::ELLIPS:
   default:
-    _pDAG->eval( _opIC, _nx, _pIC, _PMx, _np, _pVAR+_nx, _PMVAR+_nx );
+    _pDAG->eval( _opIC, _PMWK, _nx, _pIC, _PMx, _np, _pVAR+_nx, _PMVAR+_nx );
     for( unsigned int ix=0; ix<_nx; ix++ ){
       _PMx[ix].center();
       _Rx[ix] = _PMx[ix].remainder();

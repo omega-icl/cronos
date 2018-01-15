@@ -1,5 +1,6 @@
 const unsigned int NPM   = 2;	// <- Order of Taylor model
 #define USE_CMODEL		// <- Use Chebyshev models?
+#undef  MC__AEBND_SHOW_PRECONDITIONING
 
 #include "aebnd.hpp"
 
@@ -23,7 +24,7 @@ int main()
   mc::FFGraph NLE;  // DAG describing the problem
 
   const unsigned NP = 1;  // Parameter dimension
-  const unsigned NT = 21;  // State dimension
+  const unsigned NT = 11;  // State dimension
 
   mc::FFVar P[NP];  // Parameters p
   for( unsigned i=0; i<NP; i++ ) P[i].set( &NLE );

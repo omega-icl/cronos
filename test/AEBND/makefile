@@ -1,7 +1,8 @@
 # Third-Party Libraries -->> CHANGE ACCORDINGLY <<--
-PATH_MC = $(HOME)/Programs/Devel/MC++/MC++_2.0
+PATH_MC = $(HOME)/Programs/Devel/MC++/MC++_2.1
 LIB_MC = -llapack -lblas
-INC_MC = -I$(PATH_MC)/include -I$(PATH_MC)/src/3rdparty/fadbad++ -I$(PATH_MC)/src/3rdparty/cpplapack/include
+INC_MC = -I$(PATH_MC)/src/mc -I$(PATH_MC)/src/3rdparty/fadbad++ -I$(PATH_MC)/src/3rdparty/cpplapack-2015.05.11-1/include
+FLAGS_MC = -Wno-misleading-indentation -Wno-unknown-pragmas -DMC__HSL_USE
 
 LIB_HSL = -lmc13 -lmc21 -lmc33 -lgfortran
 INC_HSL = 
@@ -16,16 +17,16 @@ INC_FILIB   = -I$(PATH_FILIB)/include/ -I$(PATH_FILIB)/include/interval
 FLAGS_FILIB = -frounding-math -ffloat-store
 
 #PROF = -pg
-#OPTI = -Ofast
+OPTI = -Ofast
 #OPTI = -O2
 
-FLAG_ALL = -g $(OPTI) -Wall -std=c++11 $(FLAG_FILIB)
+FLAG_ALL = -g $(OPTI) -Wall -std=c++11 $(FLAGS_FILIB) $(FLAGS_MC)
 LIB_ALL  = $(LIB_MC) $(LIB_PROFIL) $(LIB_FILIB) $(LIB_HSL)
 INC_ALL  = $(INC_MC) $(INC_PROFIL) $(INC_FILIB) $(INC_HSL)
 
 #####
 
-all: test1 test2 test3 test4 test5
+all: test1 test2 test3 test4 test5 test6
 
 test% : test%.o
 	g++ $(PROF) -o $@ $< $(LIB_ALL)
@@ -49,5 +50,5 @@ gensvg :
 #####
 
 clean :
-	rm -f test? test?? *.o *.out *.dot *.svg *~
+	rm -f test? test?? *.o *.out *.dot *.svg *.eps *~
 

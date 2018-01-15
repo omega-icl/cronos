@@ -157,6 +157,7 @@ OC (LOCAL) SOLUTION:
 
 #include "base_do.hpp"
 #include "odeslvs_sundials.hpp"
+#include "interval.hpp"
 
 #undef  MC__DOSEQSLV_IPOPT_DEBUG
 #undef  MC__DOSEQSLV_IPOPT_TRACE
@@ -763,9 +764,9 @@ DOSEQSLV_IPOPT::_update_functions
 
   // Values and derivatives of parameter-dependent functions
   try{
-    _pDAG->eval( _opFCTPAR, _wkFCTPAR.data(), _vFCTPAR.size(), _vFCTPAR.data(), _valFCTPAR.data(), _np, _pP, p );
+    _pDAG->eval( _opFCTPAR, _wkFCTPAR, _vFCTPAR.size(), _vFCTPAR.data(), _valFCTPAR.data(), _np, _pP, p );
     if( sens )
-      _pDAG->eval( _opDFCTPAR, _wkFCTPAR.data(), _vFCTPAR.size()*_np, _pDFCTPAR, _valDFCTPAR.data(), _np, _pP, p );
+      _pDAG->eval( _opDFCTPAR, _wkFCTPAR, _vFCTPAR.size()*_np, _pDFCTPAR, _valDFCTPAR.data(), _np, _pP, p );
   }
   catch(...){
     return false;
@@ -831,7 +832,7 @@ DOSEQSLV_IPOPT::eval_f
   if( new_p && !_update_functions( p, false ) ) return false;
   f = _eval.f[0];
 #ifdef MC__DOSEQSLV_IPOPT_DEBUG
-  std::cout << "  f = " << f[0] << std::endl;
+  std::cout << "  f = " << f << std::endl;
 #endif
   return true;
 }

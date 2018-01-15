@@ -120,7 +120,7 @@ class ODESLV_BASE:
   double* _DJAC;
 
   //! @brief preallocated array for DAG evaluation
-  double* _DWRK;
+  std::vector<double> _DWRK;
 
   //! @brief Function converting integrator array to internal format
   template <typename REALTYPE> static void _vec2D
@@ -191,7 +191,7 @@ inline
 ODESLV_BASE::ODESLV_BASE
 ()
 : BASE_DE(), _pRHS(0), _pJAC(0,0,0,0), _pQUAD(0), _pIC(0), _nVAR(0), _nVAR0(0),
-  _pVAR(0), _DVAR(0), _Dt(0), _Dx(0), _Dp(0), _Dq(0), _Df(0), _DJAC(0), _DWRK(0)
+  _pVAR(0), _DVAR(0), _Dt(0), _Dx(0), _Dp(0), _Dq(0), _Df(0), _DJAC(0)
 {}
 
 inline
@@ -199,7 +199,6 @@ ODESLV_BASE::~ODESLV_BASE
 ()
 {
   /* DO NOT FREE _pRHS, _pQUAD, _pIC */
-  delete[] _DWRK;
   delete[] std::get<1>(_pJAC);  std::get<1>(_pJAC) = 0;
   delete[] std::get<2>(_pJAC);  std::get<2>(_pJAC) = 0;
   delete[] std::get<3>(_pJAC);  std::get<3>(_pJAC) = 0;
@@ -331,7 +330,7 @@ ODESLV_BASE::_RHS_D_SET
   delete[] _DJAC; _DJAC = new double[ std::get<0>(_pJAC) ];
   if( _opJAC.size() > opmax )  opmax = _opJAC.size();
 
-  delete[] _DWRK; _DWRK = new double[ opmax ];
+  _DWRK.reserve( opmax );
   //std::cout << "size for: " << opmax << std::endl;
   return true;
 }

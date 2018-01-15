@@ -94,7 +94,7 @@ protected:
   double *_Dfp;
 
   //! @brief preallocated array for evaluation of sensitivity/adjoint RHS functions
-  double* _DWRK;
+  std::vector<double> _DWRK;
 
   //! @brief Function to initialize sensitivity for parameter <a>isen</a>
   bool _IC_SET_FSA
@@ -198,7 +198,7 @@ ODESLVS_BASE::ODESLVS_BASE
   _pSAFCT(0), _nVAR(0), _nVAR0(0), _pVAR(0)
 {
   _opSARHS = _opSAQUAD = 0;
-  _DWRK = _DVAR = _Dt = _Dp = _Dy = _Dx = _Dq = _Dyq = _Dfp = 0;
+  _DVAR = _Dt = _Dp = _Dy = _Dx = _Dq = _Dyq = _Dfp = 0;
 }
 
 ODESLVS_BASE::~ODESLVS_BASE
@@ -207,7 +207,6 @@ ODESLVS_BASE::~ODESLVS_BASE
   delete[] _pVAR;
   delete[] _DVAR;
   delete[] _Dfp;
-  delete[] _DWRK;
   /* DO NOT FREE _pRHS, _pQUAD */
   for( auto it=_vSARHS.begin(); it!=_vSARHS.end(); ++it ) delete[] *it;
   for( auto it=_vSAQUAD.begin(); it!=_vSAQUAD.end(); ++it ) delete[] *it;
@@ -302,7 +301,7 @@ ODESLVS_BASE::_CC_SET_FSA
   _pIC = _vIC.at( pos_ic );
   for( unsigned iy=0; iy<_ny; iy++ )   _pSAFCT[iy] = _pVAR[iy];
   for( unsigned ip=0; ip<_np; ip++ ) _pSAFCT[_ny+ip] = (ip==isen? 1.: 0.);
-  delete[] _pSACFCT; _pSACFCT = _pDAG->FAD( _nx, _pIC, _nx+_np, _pVAR+_ny, _pSAFCT );
+  delete[] _pSACFCT; _pSACFCT = _pDAG->DFAD( _nx, _pIC, _nx+_np, _pVAR+_ny, _pSAFCT );
   for( unsigned iy=0; iy<_ny; iy++ )   _pSAFCT[iy] = _pSACFCT[iy];
 
   return true;
@@ -360,7 +359,7 @@ ODESLVS_BASE::_RHS_SET_FSA
   for( unsigned iy=0; iy<_nx; iy++ ) _pSAFCT[iy] = _pVAR[iy];
   for( unsigned ip=0; ip<_np; ip++ ){
     for( unsigned jp=0; jp<_np; jp++ ) _pSAFCT[_nx+jp] = (ip==jp? 1.: 0.);
-    delete[] _vSARHS[ip];  _vSARHS[ip]  = _pDAG->FAD( _nx, _pRHS, _nx+_np, _pVAR+_nx, _pSAFCT );
+    delete[] _vSARHS[ip];  _vSARHS[ip]  = _pDAG->DFAD( _nx, _pRHS, _nx+_np, _pVAR+_nx, _pSAFCT );
 #ifdef MC__ODESLVS_BASE_DEBUG
     std::ostringstream ofilename;
     ofilename << "vSARHS" << ip << ".dot";
@@ -369,7 +368,7 @@ ODESLVS_BASE::_RHS_SET_FSA
     ofile.close();
 #endif
     if( !_nq ) continue;
-    delete[] _vSAQUAD[ip]; _vSAQUAD[ip] = _pDAG->FAD( _nq, _pQUAD, _nx+_np, _pVAR+_nx, _pSAFCT );
+    delete[] _vSAQUAD[ip]; _vSAQUAD[ip] = _pDAG->DFAD( _nq, _pQUAD, _nx+_np, _pVAR+_nx, _pSAFCT );
 
   }
 
@@ -417,7 +416,6 @@ ODESLVS_BASE::_RHS_SET_ASA
   }
 
   delete[] std::get<1>(_pJAC); delete[] std::get<2>(_pJAC); delete[] std::get<3>(_pJAC);
-  //_pJAC = _pDAG->SFAD( _nx, _pRHS, _nx, _pX ); // Jacobian in sparse format
   _pJAC = _pDAG->SFAD( _nx, _vSARHS[0], _ny, _pY ); // Jacobian in sparse format
 
   return true;
@@ -487,7 +485,7 @@ ODESLVS_BASE::_RHS_D_SET
 {
   delete[] _opSARHS;  _opSARHS = 0;
   delete[] _opSAQUAD; _opSAQUAD = 0;
-  delete[] _DWRK;     _DWRK = 0; unsigned nWRK = 0;
+  unsigned nWRK = 0;
 
   _opSARHS  = new std::list<const FFOp*>[nf];
   for( unsigned ifct=0; ifct<nf; ifct++ ){
@@ -507,7 +505,7 @@ ODESLVS_BASE::_RHS_D_SET
   delete[] _DJAC; _DJAC = new double[ std::get<0>(_pJAC) ];
   if( nWRK < _opSAJAC.size() )  nWRK = _opSAJAC.size();
 
-  _DWRK = nWRK? new double[ nWRK ]: 0;
+  _DWRK.reserve( nWRK );
   return true;
 }
 
@@ -520,6 +518,9 @@ ODESLVS_BASE::_RHS_D_SEN
   *_Dt = t; // set current time
   _vec2D( x, _nx, _Dx ); // set current state bounds
   _vec2D( y, _ny, _Dy ); // set current sensitivity/adjoint bounds
+#ifdef MC__ODESLVS_BASE_DEBUG
+  _pDAG->output( _opSARHS[ifct] );
+#endif
   _pDAG->eval( _opSARHS[ifct], _DWRK, _ny, _vSARHS[ifct], (double*)ydot,
                _nVAR0, _pVAR, _DVAR );
   return true;
@@ -564,7 +565,7 @@ ODESLVS_BASE::_FCT_D_SEN
   for( unsigned iy=0; iy<_ny; iy++ )   _pSAFCT[iy] = _pY[iy];
   for( unsigned ip=0; ip<_np+1; ip++ ) _pSAFCT[_ny+ip] = (ip==isen? 1.: 0.); // includes time
   for( unsigned iq=0; iq<_nq; iq++ )   _pSAFCT[_nx+_np+1+iq] = _pYQ[iq];
-  delete[] _pSACFCT; _pSACFCT = _pDAG->FAD( _nf, _pIC, _nx+_np+1+_nq, _pVAR+_ny, _pSAFCT );
+  delete[] _pSACFCT; _pSACFCT = _pDAG->DFAD( _nf, _pIC, _nx+_np+1+_nq, _pVAR+_ny, _pSAFCT );
   _pDAG->eval( _nf, _pSACFCT, _Dfp+isen*_nf, _nVAR, _pVAR, _DVAR, iFCT?true:false );
 
   return true;

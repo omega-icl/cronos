@@ -1085,8 +1085,10 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_FSA
        && ( (_Nq && !ODEBND_BASE<T,PMT,PVT>::_IC_I_QUAD( options, NV_DATA_S( _Nq ) ) ) // quadrature reinitialization
          || !ODEBND_SUNDIALS<T,PMT,PVT>::_CC_CVODE_QUAD() ) )
         { _END_STA(); _END_SEN(); return FATAL; }
-      if( options.RESRECORD )
+      if( options.RESRECORD ){
+        _GET_I_STA( options, NV_DATA_S(_Nx), _nq && _Nq? NV_DATA_S(_Nq): 0 );
         results_sta.push_back( Results( _t, _nx, _Ix, _nq, _Iq ) );
+      }
       for( _isen=0; _isen<_np; _isen++ ){
         if( _pos_ic
          && ( !_CC_SET_FSA( _pos_ic, _isen )
@@ -1807,8 +1809,10 @@ ODEBNDS_SUNDIALS<T,PMT,PVT>::bounds_FSA
        && ( (_Nq && !ODEBND_BASE<T,PMT,PVT>::_IC_PM_QUAD( options, NV_DATA_S( _Nq ) ) ) // quadrature reinitialization
          || !ODEBND_SUNDIALS<T,PMT,PVT>::_CC_CVODE_QUAD() ) )
         { _END_STA(); _END_SEN(); return FATAL; }
-      if( options.RESRECORD )
+      if( options.RESRECORD ){
+        _GET_PM_STA( options, NV_DATA_S(_Nx), _nq && _Nq? NV_DATA_S(_Nq): 0 );
         results_sta.push_back( Results( _t, _nx, _PMx, _nq, _PMq ) );
+      }
       for( _isen=0; _isen<_np; _isen++ ){
         if( _pos_ic
          && ( !_CC_SET_FSA( _pos_ic, _isen )

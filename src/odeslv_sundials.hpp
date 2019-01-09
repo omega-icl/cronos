@@ -549,7 +549,7 @@ ODESLV_SUNDIALS::_states
 
     // Display / return function values
     for( unsigned i=0; f && i<_nf; i++ ) f[i] = _Df[i];
-    if( options.DISPLAY >= 1 ) _print_interm( _nf, _Df, " f", os );
+    if( options.DISPLAY >= 1 ) _print_interm( _nf, _Df.data(), " f", os );
   }
   catch(...){
     _END_STA();

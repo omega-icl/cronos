@@ -28,7 +28,7 @@ int main()
 
   mc::ODEBND_SUNDIALS<I,TM,TV> LV;
   LV.set_dag( &IVP );
-  LV.set_time( 0., 60. );
+  LV.set_time( 0., 25. );
   LV.set_state( NX, X );
   LV.set_parameter( NP, P );
   LV.set_differential( NX, RHS );
@@ -50,8 +50,8 @@ int main()
   LV.record( ofileI );
 
   // Compute Polynomial Bounds
-  const unsigned int NTM = 5; // Order of Taylor model
-  TM TMenv( NP, NTM );    // Taylor model environment
+  const unsigned NTM = 5; // polynomial model order
+  TM TMenv( NP, NTM );    // polynomial model environment
   TV TMp[NP];
   TMp[0] = TV( &TMenv, 0, I(2.99,3.01) );
   TMp[1] = TV( &TMenv, 1, I(0.99,1.01) );

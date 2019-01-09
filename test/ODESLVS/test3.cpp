@@ -50,7 +50,8 @@ int main()
   mc::FFVar &R_f = P[0], &R_l = P[1], &R_th = P[2], &L_d = P[3], &L_f = P[4], &L_l = P[5], &L_p = P[6], &C_ad = P[7], &C_d = P[8], &C_p = P[9];
   
   mc::FFVar RHS[NX];  // Right-hand side function
-  RHS[0] = ( tau*(K*((mc::exp(2*Lambda*P_d)-1.)/(mc::exp(2*Lambda*P_d)+1.))-P_ad) )/(R_th*C_ad) + ( tau*U0*(U_f + U_p) )/(P0*C_ad);
+  //RHS[0] = ( tau*(K*((mc::exp(2*Lambda*P_d)-1.)/(mc::exp(2*Lambda*P_d)+1.))-P_ad) )/(R_th*C_ad) + ( tau*U0*(U_f + U_p) )/(P0*C_ad);
+  RHS[0] = ( tau*(K*tanh(Lambda*P_d)-P_ad) )/(R_th*C_ad) + ( tau*U0*(U_f + U_p) )/(P0*C_ad);
   RHS[1] = ( tau*U0*U_f )/(P0*C_d);
   RHS[2] = ( tau*U0*U_p )/(P0*C_p);
   RHS[3] = ( (tau*P0/U0)*( L_l*P_p-L_p*P_ad-(L_p+L_l)*P_d ) - tau*(L_l*R_f+L_p*(R_f+R_l))*U_f - tau*L_p*R_l*U_p ) / ( L_l*(L_d+L_f)+L_p*(L_d+L_f+L_l) );

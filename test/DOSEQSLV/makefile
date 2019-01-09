@@ -1,9 +1,8 @@
 # Third-Party Libraries -->> CHANGE ACCORDINGLY <<--
-#PATH_MC = $(HOME)/Programs/Devel/MC++/MC++_2.0
 PATH_MC = $(HOME)/Programs/Devel/MC++/MC++_2.1
 LIB_MC = -llapack -lblas
-#INC_MC = -I$(PATH_MC)/src/mc -I$(PATH_MC)/src/3rdparty/fadbad++ -I$(PATH_MC)/src/3rdparty/cpplapack/include
 INC_MC = -I$(PATH_MC)/src/mc -I$(PATH_MC)/src/3rdparty/fadbad++ -I$(PATH_MC)/src/3rdparty/cpplapack-2015.05.11-1/include
+FLAG_MC = -Wno-misleading-indentation -Wno-unknown-pragmas -DMC__USE_HSL
 
 PATH_SUNDIALS = /opt/sundials-2.7.0
 LIB_SUNDIALS = -L$(PATH_SUNDIALS)/lib -lsundials_cvodes -lsundials_nvecserial -llapack -lblas
@@ -17,14 +16,14 @@ INC_IPOPT = -I$(PATH_IPOPT)/include
 #LIB_IPOPT = -L$(PATH_IPOPT)/lib -lipopt -lcoinhsl -llapack -lblas -ldl
 #INC_IPOPT = -I$(PATH_IPOPT)/include
 
-FLAG_ALL = -g -Wall -std=c++11
-#FLAG_ALL = -g -Ofast -Wall -std=c++11
+#FLAG_ALL = -g -Wall -std=c++11 $(FLAG_MC)
+FLAG_ALL = -g -Ofast -Wall -std=c++11
 LIB_ALL  = $(LIB_MC) $(LIB_IPOPT) $(LIB_SUNDIALS)
 INC_ALL  = $(INC_MC) $(INC_IPOPT) $(INC_SUNDIALS)
 
 #####
 
-all: test1 test2 test3 test3b test4 test5
+all: test1 test2 test3 test3b test4 test5 test5b
 
 test% : test%.o
 	g++ -o $@ $< $(LIB_ALL)

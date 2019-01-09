@@ -676,7 +676,7 @@ ODESLVS_SUNDIALS::states_ASA
     if( options.DISPLAY >= 1 ){
       for( unsigned iq=0; iq<_np; iq++ ){
         std::ostringstream ofp; ofp << " fp[" << iq << "]";
-        _print_interm( _nf, _Dfp+iq*_nf, ofp.str(), os );
+        _print_interm( _nf, _Dfp.data()+iq*_nf, ofp.str(), os );
       }
     }
   }
@@ -997,10 +997,10 @@ ODESLVS_SUNDIALS::states_FSA
     for( unsigned i=0; f && i<_nf; i++ ) f[i] = _Df[i];
     for( unsigned i=0; fp && i<_nf*_np; i++ ) fp[i] = _Dfp[i];
     if( options.DISPLAY >= 1 ){
-      _print_interm( _nf, _Df, " f", os );
+      _print_interm( _nf, _Df.data(), " f", os );
       for( unsigned iq=0; iq<_np; iq++ ){
         std::ostringstream ofp; ofp << " fp[" << iq << "]";
-        _print_interm( _nf, _Dfp+iq*_nf, ofp.str(), os );
+        _print_interm( _nf, _Dfp.data()+iq*_nf, ofp.str(), os );
       }
     }
   }

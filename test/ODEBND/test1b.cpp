@@ -132,7 +132,7 @@ int main()
   LV.setup();
 
   std::cout << "\nNON_VALIDATED INTEGRATION - INNER-APPROXIMATION OF REACHABLE SET:\n\n";
-  LV.bounds( Ip, Ixk, If, NSAMP );
+  LV.bounds( NSAMP, Ip, Ixk, If );
 #if defined( SAVE_RESULTS )
   std::ofstream apprec( "test1_APPROX_STA.dat", std::ios_base::out );
   LV.record( apprec );

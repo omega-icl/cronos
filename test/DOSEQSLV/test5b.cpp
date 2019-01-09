@@ -56,8 +56,7 @@ int main()
 
   mc::FFVar &P_ad = X[0], &P_d = X[1], &P_p = X[2], &U_f = X[3], &U_p = X[4]; 
   mc::FFVar RHS[NX];        // Right-hand side function
-  //RHS[0] = TF * ( ( tau*(K*((mc::exp(2*Lambda*P_d)-1.)/(mc::exp(2*Lambda*P_d)+1.))-P_ad) )/(R_th*C_ad) + ( tau*U0*(U_f + U_p) )/(P0*C_ad) );
-  RHS[0] = TF * ( ( tau*(K*mc::tanh(Lambda*P_d)-P_ad) )/(R_th*C_ad) + ( tau*U0*(U_f + U_p) )/(P0*C_ad) );
+  RHS[0] = TF * ( ( tau*(K*tanh(Lambda*P_d)-P_ad) )/(R_th*C_ad) + ( tau*U0*(U_f + U_p) )/(P0*C_ad) );
   RHS[1] = TF * ( tau*U0*U_f ) / ( P0*C_d );
   RHS[2] = TF * ( tau*U0*U_p ) / ( P0*C_p );
   RHS[3] = TF * ( (tau*P0/U0)*( L_l*P_p-L_p*P_ad-(L_p+L_l)*P_d ) - tau*(L_l*R_f+L_p*(R_f+R_l))*U_f - tau*L_p*R_l*U_p )

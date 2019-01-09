@@ -56,7 +56,7 @@ int main()
     IC[2*k-2] = IC[2*k-1] = 0.;
 
   I Ip[NP], Ix0[NX], Ixf[NX]; // Parameter bounds
-  Ip[0] = I( 8., 16. );
+  Ip[0] = I( 8., 9. );
   Ip[1] = I( 1.48, 1.49 ) * 1e-5;
   Ip[2] = I( -1.11, -1.05 ) * 1e-3;
   Ip[3] = I( 3.28, 3.30 ) * 1e-3;
@@ -101,14 +101,13 @@ int main()
   OC.options.AEBND.PRECOND = mc::AEBND<I,PM,PV>::Options::PRECONDITIONING::INVMB;//INVMB;//INVBD;//NONE;
   OC.options.AEBND.BLKDEC  = mc::AEBND<I,PM,PV>::Options::DECOMPOSITION::RECUR;//DIAG;//NONE;
   OC.setup();
-/*
+
   std::cout << "\nNON_VALIDATED INTEGRATION - INNER-APPROXIMATION OF REACHABLE SET:\n\n";
   OC.bounds( NSAMP, Ip );
 #if defined( SAVE_RESULTS )
   std::ofstream apprec( "test6_APPROX_STA.dat", std::ios_base::out );
   OC.record( apprec );
 #endif
-*/
 
   std::cout << "\nCONTINUOUS SET-VALUED INTEGRATION - INTERVAL ENCLOSURE OF REACHABLE SET:\n\n";
   OC.bounds( Ip, Ixk );

@@ -2,7 +2,7 @@
 PATH_MC = $(HOME)/Programs/Devel/MC++/MC++_2.1
 LIB_MC = -llapack -lblas
 INC_MC = -I$(PATH_MC)/src/mc -I$(PATH_MC)/src/3rdparty/fadbad++ -I$(PATH_MC)/src/3rdparty/cpplapack-2015.05.11-1/include
-FLAGS_MC = -Wno-misleading-indentation -Wno-unknown-pragmas -DMC__HSL_USE
+FLAGS_MC = -Wno-misleading-indentation -Wno-unknown-pragmas -DMC__USE_HSL
 
 LIB_HSL = -lmc13 -lmc21 -lmc33 -lgfortran
 INC_HSL = 

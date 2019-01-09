@@ -1,7 +1,8 @@
 const unsigned int NPM   = 3;	// <- Order of polynomial expansion
 const unsigned int NSAMP = 4;	// <- Number of sampling points for inner approx.
-#define SAVE_RESULTS		// <- Saving the results to file
-#define USE_CMODEL		// <- whether to use Chebyshev models or Taylor models
+#define SAVE_RESULTS		    // <- Saving the results to file
+#define USE_CMODEL	            // <- whether to use Chebyshev models or Taylor models
+#define USE_VALIDATED           // <- whether to use the validated integrator for comparison
 
 #include "odebnd_sundials.hpp"
 #include "odebnd_val.hpp"
@@ -75,6 +76,7 @@ int main()
   PV *PMxk[NS+1], PMf[NF];
   for( unsigned k=0; k<=NS; k++ ) PMxk[k] = new PV[NX];
 
+#ifdef USE_VALIDATED
   /////////////////////////////////////////////////////////////////////////
   // Bound ODE trajectories - validated integrator
   mc::ODEBND_VAL<I,PM,PV> LV1;
@@ -101,6 +103,7 @@ int main()
 #if defined( SAVE_RESULTS )
   std::ofstream bnd1rec( "test2_VAL_STA.dat", std::ios_base::out );
   LV1.record( bnd1rec );
+#endif
 #endif
 
   /////////////////////////////////////////////////////////////////////////

@@ -131,15 +131,17 @@ private:
   std::tuple< std::vector<t_CTR>, std::vector<FFVar>, std::vector<FFVar> > _ctr;
 
   //! @brief list of operations for objective evaluation
-  std::list<const FFOp*> _op_f;
+  FFSubgraph _op_f;
   //! @brief list of operations for objective gradient evaluation
-  std::list<const FFOp*> _op_df;
+  FFSubgraph _op_df;
   //! @brief list of operations for constraint evaluation
-  std::list<const FFOp*> _op_g;
+  FFSubgraph _op_g;
   //! @brief list of operations for constraint gradient evaluation
-  std::list<const FFOp*> _op_dg;
+  FFSubgraph _op_dg;
   //! @brief list of operations for Lagragian Hessian evaluation
-  std::list<const FFOp*> _op_d2L;
+  FFSubgraph _op_d2L;
+  //! @brief Storage vector for function evaluation in double arithmetic
+  std::vector<Ipopt::Number> _dwk;
 
   //! @brief objective gradient
   const FFVar* _obj_grad;
@@ -171,20 +173,7 @@ private:
   } _data;
 
   //! @brief Structure holding solution information
-  struct SOLUTION{
-    SOLUTION(): n(0), p(0), upL(0), upU(0), m(0), g(0), ug(0) {}
-    ~SOLUTION() { delete[] p; delete[] upL; delete[] upU; delete[] g; delete[] ug; }
-    Ipopt::ApplicationReturnStatus status;
-    Ipopt::SolverReturn solverflag;
-    Ipopt::Index n;
-    Ipopt::Number*p;
-    Ipopt::Number*upL;
-    Ipopt::Number*upU;
-    Ipopt::Index m;
-    Ipopt::Number*g;
-    Ipopt::Number*ug;
-    Ipopt::Number f;
-  } _solution;
+  SOLUTION_NLP _solution;
 
   //! @brief Cleanup gradient/hessian storage
   void _cleanup()
@@ -311,8 +300,12 @@ public:
 
   //! @brief Solve NLP model -- return value is IPOPT status
   template <typename T>
-  Ipopt::ApplicationReturnStatus solve
+  int solve
     ( const T*P, const double*p0=0 );
+
+  //! @brief Test primal feasibility
+  bool test_primal_feasibility
+    ( const double*p, const double FEASTOL );
 
   //! @brief Get IPOPT internal scaling value
   double get_scaling()
@@ -327,7 +320,7 @@ public:
     }
 
   //! @brief Get IPOPT solution info
-  const SOLUTION& solution() const
+  const SOLUTION_NLP& solution() const
     {
       return _solution;
     }
@@ -539,7 +532,7 @@ NLPSLV_IPOPT::setup
 
 template <typename T>
 inline
-Ipopt::ApplicationReturnStatus
+int
 NLPSLV_IPOPT::solve
 ( const T*P, const double*p0 )
 {
@@ -651,6 +644,34 @@ NLPSLV_IPOPT::get_starting_point
 
 inline
 bool
+NLPSLV_IPOPT::test_primal_feasibility
+( const double*p, const double FEASTOL )
+{
+  _solution.resize( _nvar, _nctr );
+  for( unsigned i=0; i<_nvar; i++ ) _solution.p[i] = p[i];
+  if( !eval_f( _solution.n, _solution.p, true, _solution.f )
+   || !eval_g( _solution.n, _solution.p, true, _solution.m, _solution.g ) )
+  return false;
+
+  double maxinfeas=0.;
+  auto itc = std::get<0>(_ctr).begin();
+  for( unsigned ic=0; itc!=std::get<0>(_ctr).end(); ++itc, ic++ ){
+    switch( (*itc) ){
+      case EQ: maxinfeas = std::fabs(_solution.g[ic]); break;
+      case LE: maxinfeas = _solution.g[ic];            break;
+      case GE: maxinfeas = -_solution.g[ic];           break;
+    }
+#ifdef MC__NLPSLV_IPOPT_DEBUG
+    std::cout << "g[" << j << "] = " << _solution.g[ic] << "  (" << maxinfeas << ")\n";
+#endif
+    if( maxinfeas > FEASTOL ) return false;
+  }
+
+  return true;
+}
+
+inline
+bool
 NLPSLV_IPOPT::eval_f
 ( Ipopt::Index n, const Ipopt::Number* x, bool new_x,
   Ipopt::Number& f )
@@ -663,7 +684,7 @@ NLPSLV_IPOPT::eval_f
 #endif
   // evaluate objective
   try{
-    _dag->eval( _op_f, 1, std::get<1>(_obj).data(), &f, n, _var.data(), x );
+    _dag->eval( _op_f, _dwk, 1, std::get<1>(_obj).data(), &f, n, _var.data(), x );
   }
   catch(...){
     return false;
@@ -688,7 +709,7 @@ NLPSLV_IPOPT::eval_grad_f
 #endif
   // evaluate objective gradient
   try{
-    _dag->eval( _op_df, n, _obj_grad, df, n, _var.data(), x );
+    _dag->eval( _op_df, _dwk, n, _obj_grad, df, n, _var.data(), x );
 #ifdef MC__NLPSLV_IPOPT_DEBUG
     for( Ipopt::Index i=0; i<n; i++ )
       std::cout << "  df[" << i << "] = " << df[i] << std::endl;
@@ -712,7 +733,7 @@ NLPSLV_IPOPT::eval_g
 #endif
   // evaluate constraints
   try{
-    _dag->eval( _op_g, m, std::get<1>(_ctr).data(), g, n, _var.data(), x );
+    _dag->eval( _op_g, _dwk, m, std::get<1>(_ctr).data(), g, n, _var.data(), x );
 #ifdef MC__NLPSLV_IPOPT_DEBUG
     for( Ipopt::Index ic=0; ic<m; ic++ )
       std::cout << "  g[" << ic << "] = " << g[ic] << std::endl;
@@ -752,7 +773,7 @@ NLPSLV_IPOPT::eval_jac_g
 
   // evaluate constraint gradient
   try{
-    _dag->eval( _op_dg, nele_jac, std::get<3>(_ctr_grad), dg, n, _var.data(), x );
+    _dag->eval( _op_dg, _dwk, nele_jac, std::get<3>(_ctr_grad), dg, n, _var.data(), x );
 #ifdef MC__NLPSLV_IPOPT_DEBUG
     for( Ipopt::Index ie=0; ie<nele_jac; ++ie ){
        std::cout << "  dg[" << std::get<1>(_ctr_grad)[ie]
@@ -804,7 +825,7 @@ NLPSLV_IPOPT::eval_h
     nvar.push_back(n); pvar.push_back(_var.data());              vvar.push_back(x);
     nvar.push_back(m); pvar.push_back(std::get<2>(_ctr).data()); vvar.push_back(lambda);
     nvar.push_back(1); pvar.push_back(std::get<2>(_obj).data()); vvar.push_back(&obj_factor);
-    _dag->eval( _op_d2L, nele_hess, std::get<3>(_lagr_hess), d2L, nvar, pvar, vvar );
+    _dag->eval( _op_d2L, _dwk, nele_hess, std::get<3>(_lagr_hess), d2L, nvar, pvar, vvar );
 #ifdef MC__NLPSLV_IPOPT_DEBUG
     for( Ipopt::Index ie=0; ie<nele_hess; ++ie ){
        std::cout << "  d2L[" << std::get<1>(_lagr_hess)[ie]
@@ -830,29 +851,13 @@ NLPSLV_IPOPT::finalize_solution
 #ifdef MC__NLPSLV_IPOPT_TRACE
     std::cout << "  NLPSLV_IPOPT::finalize_solution\n";
 #endif
-  _solution.solverflag = status;
+  _solution.status = status;
 
   // Successful (or near-successful) completion
   //if( status == Ipopt::SUCCESS || status == Ipopt::STOP_AT_ACCEPTABLE_POINT
   // || status == Ipopt::STOP_AT_TINY_STEP ){
     // resize solution arrays
-    if( _solution.n != n ){
-      if( _solution.n ){
-        delete[] _solution.p; delete[] _solution.upL; delete[] _solution.upU;
-      }
-      _solution.n = n;
-      _solution.p = new Ipopt::Number[n];
-      _solution.upL = new Ipopt::Number[n];
-      _solution.upU = new Ipopt::Number[n];
-    }
-    if( _solution.m != m ){
-      if( _solution.m ){
-        delete[] _solution.g; delete[] _solution.ug;
-      }
-      _solution.m = m;
-      _solution.g = new Ipopt::Number[m];
-      _solution.ug = new Ipopt::Number[m];
-    }
+    _solution.resize( n, m );
     // copy solution values into _solution
     _solution.f = f;
     for( Ipopt::Index i=0; i<n; i++ ){

@@ -1,4 +1,4 @@
-const unsigned int NPM   = 3;	// <- Order of poynomial expansion
+const unsigned int NPM   = 4;	// <- Order of poynomial expansion
 const unsigned int NSAMP = 2;	// <- Number of sampling points for inner approx.
 #define SAVE_RESULTS		    // <- Whether to save bounds to file
 #define USE_CMODEL		        // <- whether to use Chebyshev models or Taylor models
@@ -48,16 +48,16 @@ int main()
   IC[1] = X10;
 
   I Ip[NP];
-  //Ip[0] = I( 2., 6. );
-  //Ip[1] = I( -1., 1. );
-  //for( unsigned int is=0; is<NS; is++ ) Ip[2+is]  = I( -0.5, 0.5 );
-  Ip[0] = I( 2.3828175413204792, 2.4008477663885901 );
-  Ip[1] = I( 0.9904726225727921, 1. );
-  Ip[2] = I( 1.3653398239103813, 1.5 );
-  Ip[3] = I( 1.4238268878303090, 1.5 );
-  Ip[4] = I( 1.4157608376380206, 1.5 );
-  Ip[5] = I( 0.8211900796950281, 0.9317881555536508 );
-  Ip[6] = I( -0.5, -0.476635168577946 );
+  Ip[0] = I( 2., 6. );
+  Ip[1] = I( -1., 1. );
+  for( unsigned int is=0; is<NS; is++ ) Ip[2+is]  = I( -0.5, 0.5 );
+//  Ip[0] = I( 2.3828175413204792, 2.4008477663885901 );
+//  Ip[1] = I( 0.9904726225727921, 1. );
+//  Ip[2] = I( 1.3653398239103813, 1.5 );
+//  Ip[3] = I( 1.4238268878303090, 1.5 );
+//  Ip[4] = I( 1.4157608376380206, 1.5 );
+//  Ip[5] = I( 0.8211900796950281, 0.9317881555536508 );
+//  Ip[6] = I( -0.5, -0.476635168577946 );
 
   PM PMEnv( NP, NPM );
   PV PMp[NP];
@@ -95,20 +95,20 @@ int main()
   std::ofstream apprec( "test5_APPROX_STA.dat", std::ios_base::out );
   OC.record( apprec );
 #endif
-/*
-  std::cout << "\nCONTINUOUS SET-VALUED INTEGRATION - INTERVAL ENCLOSURE OF REACHABLE SET:\n\n";
-  OC.bounds( Ip );
-#if defined( SAVE_RESULTS )
-  std::ofstream bnd2recI( "test5_DINEQI_STA.dat", std::ios_base::out );
-  OC.record( bnd2recI );
-#endif
-*/
+
+//  std::cout << "\nCONTINUOUS SET-VALUED INTEGRATION - INTERVAL ENCLOSURE OF REACHABLE SET:\n\n";
+//  OC.bounds( Ip );
+//#if defined( SAVE_RESULTS )
+//  std::ofstream bnd2recI( "test5_DINEQI_STA.dat", std::ios_base::out );
+//  OC.record( bnd2recI );
+//#endif
+
   std::cout << "\nCONTINUOUS SET-VALUED INTEGRATION - POLYNOMIAL MODEL ENCLOSURE OF REACHABLE SET:\n\n";
   OC.bounds( PMp, PMx.data() );
 
-  double p0[NP] = { 2.400848e+00, 1.000000e+00, 1.500000e+00, 1.500000e+00, 1.500000e+00, 8.716292e-01, -5.000000e-01 };
-  for( unsigned i=0; i<NX; i++ )
-    std::cout << "PMx[" << i << "] @p =" << PMx.back()[i].P(p0) + PMx.back()[i].R() << std::endl;
+//  double p0[NP] = { 2.400848e+00, 1.000000e+00, 1.500000e+00, 1.500000e+00, 1.500000e+00, 8.716292e-01, -5.000000e-01 };
+//  for( unsigned i=0; i<NX; i++ )
+//    std::cout << "PMx[" << i << "] @p =" << PMx.back()[i].P(p0) + PMx.back()[i].R() << std::endl;
 
 #if defined( SAVE_RESULTS )
   std::ofstream bnd2recPM( "test5_DINEQPM_STA.dat", std::ios_base::out );

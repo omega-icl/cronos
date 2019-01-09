@@ -1,10 +1,13 @@
 const unsigned int NPM   = 5;	// <- Order of poynomial expansion
-#define USE_PROFIL		    // <- whether to use sparse Chebyshev models
+#undef  USE_PROFIL		    // <- whether to use sparse Chebyshev models
 #undef  USE_SPARSE		    // <- whether to use sparse Chebyshev models
-#define MC__AEBND_SHOW_INTER_FAIL
+#undef MC__AEBND_SHOW_INTER_FAIL
+#undef MC__AEBND_SHOW_PRECONDITIONING
+#undef MC__AEBND_DEBUG
 
 #include <fstream>
 #include "odebnd_expand.hpp"
+#include "odebnd_sundials.hpp"
 
 #ifdef USE_PROFIL
   #include "mcprofil.hpp"
@@ -31,21 +34,6 @@ const unsigned int NPM   = 5;	// <- Order of poynomial expansion
 
 int main()
 {
-//  mc::BASE_RK RKscheme;
-//  RKscheme.set( 2 );
-//  RKscheme.display();
-//  RKscheme.set( 3 );
-//  RKscheme.display();
-//  RKscheme.set( 4 );
-//  RKscheme.display();
-//  RKscheme.set( 5 );
-//  RKscheme.display();
-//  RKscheme.set( 6 );
-//  RKscheme.display();
-//  RKscheme.set( 8 );
-//  RKscheme.display();
-//  { int dum; std::cout << "PAUSED-- "; std::cin >> dum; }
-
   mc::FFGraph IVP;  // DAG describing the problem
 
   const unsigned int NP = 1;  // Parameter dimension
@@ -65,16 +53,19 @@ int main()
   IC[0] = 1.2;// + 0.1*P[0];
   IC[1] = 1.1;// + P[0];
 
+  /////////////////////////////////////////////////////////////////////////////
+  ///// DISCRETIZED SET PROPAGATION
+
   mc::ODEBND_EXPAND<I,PMI,PVI> LV;
-  LV.options.INTMETH   = mc::ODEBND_EXPAND<I,PMI,PVI>::Options::METHOD::TS;//RK;//TS
+  LV.options.INTMETH   = mc::ODEBND_EXPAND<I,PMI,PVI>::Options::METHOD::RK;//TS
   LV.options.TORD      = 4;
-  LV.options.H0        = 0.2;
+  LV.options.H0        = 0.1;
   LV.options.LBLK      =
   LV.options.DBLK      = 10;
   LV.options.DISPLAY   = 1;
   LV.options.RESRECORD = true;
   LV.options.ODESLVS.RESRECORD = 1000;
-  LV.options.AEBND.MAXIT   = 100;
+  LV.options.AEBND.MAXIT   = 10;
   LV.options.AEBND.DISPLAY = 0;
   LV.options.AEBND.RTOL    =
   LV.options.AEBND.ATOL    = 1e-10;
@@ -85,7 +76,7 @@ int main()
 
   LV.set_dag( &IVP );
   LV.set_time( 0., 25. );
-  //LV.set_time( 0., 5. );
+  //LV.set_time( 0., 0.1 );
   LV.set_state( NX, X );
   LV.set_parameter( NP, P );
   LV.set_differential( NX, RHS );
@@ -96,12 +87,15 @@ int main()
   // Compute Interval Bounds
   I Ip[NP];
   Ip[0] = 0.05 * I(-1.,1);
-  I Ix0[NX] = { I(0.,5.), I(0.,5.) }, Ixf[NX] = { I(0.,5.), I(0.,5.) };
+  I Ix0[NX] = { I(0.5,1.5), I(0.5,1.5) }, Ixf[NX] = { I(0.5,1.5), I(0.5,1.5) };
+  //I Ix0[NX] = { I(0.,5.), I(0.,5.) }, Ixf[NX] = { I(0.,5.), I(0.,5.) };
   I* Ixk[2] = { Ix0, Ixf };
 
   LV.bounds( Ip, Ixk );
   std::ofstream ofileI( "test0b_EXPANDI_STA.dat", std::ios_base::out );
   LV.record( ofileI );
+  ofileI.close();
+  //return 0;
 
   // Compute Polynomial Bounds
 #ifdef USE_SPARSE
@@ -109,7 +103,6 @@ int main()
 #else
   PMI PMenv( NP, NPM );   // Polynomial model environment
 #endif
-  //PMI PMenv( NPM );   // Polynomial model environment
   PVI PMp[NP];
   PMp[0] = PVI( &PMenv, 0, Ip[0] );
   //PVI PMx0[NX] = { I(0.6,1.4), I(0.6,1.4) }, PMxf[NX] = { I(0.6,1.4), I(0.6,1.4) };
@@ -120,7 +113,7 @@ int main()
   LV.bounds( PMp, PMxk );
   std::ofstream ofilePM( "test0b_EXPANDPM_STA.dat", std::ios_base::out );
   LV.record( ofilePM );
-
+  ofilePM.close();
 
   // Compute Approximate Bounds (Sampling)
   const unsigned int NSAMP = 50; // Number of sample points
@@ -134,6 +127,31 @@ int main()
 
   //LV.hausdorff( 1, tk, Ip, Hxk, 0, NSAMP );
   //LV.hausdorff( 1, tk, TMp, Hxk, 0, NSAMP );
+
+
+  /////////////////////////////////////////////////////////////////////////////
+  ///// CONTINUOUS-TIME SET PROPAGATION
+
+  mc::ODEBND_SUNDIALS<I,PMI,PVI> LV2;
+  LV2.set( LV );
+
+  LV2.options.RESRECORD = 1000;
+  LV2.options.ORDMIT    = -2;
+  LV2.options.DMAX      = 1e2;
+  LV2.options.NMAX      = 10000;
+
+  // Compute Interval Bounds
+  LV2.bounds( Ip );
+  ofileI.open( "test0b_DINEQI_STA.dat", std::ios_base::out );
+  LV2.record( ofileI );
+  ofileI.close();
+
+  // Compute Polynomial Bounds
+  LV2.bounds( PMp );
+  ofilePM.open( "test0b_DINEQPM_STA.dat", std::ios_base::out );
+  LV2.record( ofilePM );
+  ofilePM.close();
+
 
   return 0;
 }

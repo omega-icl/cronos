@@ -237,21 +237,9 @@ private:
     std::map<int,bool>* fstruct;
   } _eval;
 
+
   //! @brief Structure holding solution information
-  struct SOLUTION{
-    SOLUTION(): n(0), p(0), upL(0), upU(0), m(0), g(0), ug(0) {}
-    ~SOLUTION() { delete[] p; delete[] upL; delete[] upU; delete[] g; delete[] ug; }
-    Ipopt::ApplicationReturnStatus status;
-    Ipopt::SolverReturn solverflag;
-    Ipopt::Index n;
-    Ipopt::Number*p;
-    Ipopt::Number*upL;
-    Ipopt::Number*upU;
-    Ipopt::Index m;
-    Ipopt::Number*g;
-    Ipopt::Number*ug;
-    Ipopt::Number f;
-  } _solution;
+  SOLUTION_DO _solution;
 
   //! @brief IVP solution and sensitivity
   ODESLVS_SUNDIALS _ODESLVS;
@@ -371,8 +359,16 @@ public:
 
   //! @brief Solve DO model -- return value is IPOPT status
   template <typename T>
-  Ipopt::ApplicationReturnStatus solve
+  int solve
     ( const T*P, const double*p0=0 );
+
+  //! @brief Test primal feasibility of parameters <a>p</a>
+  bool primal_feasible
+    ( const double*p, const double FEASTOL );
+
+  //! @brief Test primal feasibility of current solution point
+  bool primal_feasible
+    ( const double FEASTOL );
 
   //! @brief Get IPOPT internal scaling value
   double get_scaling()
@@ -387,7 +383,7 @@ public:
     }
 
   //! @brief Get IPOPT solution info
-  const SOLUTION& solution() const
+  const SOLUTION_DO& solution() const
     {
       return _solution;
     }
@@ -501,14 +497,14 @@ private:
   bool _update_functions
     ( const Ipopt::Number *p, const bool sens );
 
-  //! @brief list of operations for parameter-dependent functions
-  std::list<const FFOp*> _opFCTPAR;
+  //! @brief subgraph of parameter-dependent functions
+  FFSubgraph _opFCTPAR;
 
   //! @brief const pointers to parameter-dependent function derivatives
   const FFVar* _pDFCTPAR;
 
-  //! @brief list of operations for parameter-dependent function derivatives
-  std::list<const FFOp*> _opDFCTPAR;
+  //! @brief subgraph of parameter-dependent function derivatives
+  FFSubgraph _opDFCTPAR;
 
   //! @brief values of parameters participating in parametric IVP
   std::vector<double> _valSTADEP;
@@ -621,7 +617,7 @@ DOSEQSLV_IPOPT::setup
   }
   _opFCTPAR  = _pDAG->subgraph( _vFCTPAR.size(), _vFCTPAR.data() );
   _opDFCTPAR = _pDAG->subgraph( _vFCTPAR.size()*_np, _pDFCTPAR );
-  _wkFCTPAR.resize( _opFCTPAR.size()>_opDFCTPAR.size()? _opFCTPAR.size(): _opDFCTPAR.size() );
+  _wkFCTPAR.resize( _opFCTPAR.l_op.size()>_opDFCTPAR.l_op.size()? _opFCTPAR.l_op.size(): _opDFCTPAR.l_op.size() );
   _valFCTSTA.resize( _ndxFCTSTA.size() );
   _valDFCTSTA.resize( _vFCTDEP.size()*_ndxFCTSTA.size() );
   _valFCTPAR.resize( _vFCTPAR.size() );
@@ -636,7 +632,7 @@ DOSEQSLV_IPOPT::setup
 
 template <typename T>
 inline
-Ipopt::ApplicationReturnStatus
+int
 DOSEQSLV_IPOPT::solve
 ( const T*P, const double*p0 )
 {
@@ -654,6 +650,41 @@ DOSEQSLV_IPOPT::solve
     _solution.status = IpoptApp->OptimizeTNLP( this );
 
   return _solution.status;
+}
+
+inline
+bool
+DOSEQSLV_IPOPT::primal_feasible
+( const double*p, const double FEASTOL )
+{
+  _solution.p.assign( p, p+_np );
+  return primal_feasible( FEASTOL );
+}
+
+inline
+bool
+DOSEQSLV_IPOPT::primal_feasible
+( const double FEASTOL )
+{
+  if( !eval_f( _solution.p.size(), _solution.p.data(), true, _solution.f )
+   || !eval_g( _solution.p.size(), _solution.p.data(), false, _solution.g.size(), _solution.g.data() ) )
+  return false;
+
+  double maxinfeas=0.;
+  auto itc = std::get<0>(_ctr).begin();
+  for( unsigned ic=0; itc!=std::get<0>(_ctr).end(); ++itc, ic++ ){
+    switch( (*itc) ){
+      case EQ: maxinfeas = std::fabs(_solution.g[ic]); break;
+      case LE: maxinfeas = _solution.g[ic];            break;
+      case GE: maxinfeas = -_solution.g[ic];           break;
+    }
+#ifdef MC__DOSEQSLV_IPOPT_DEBUG
+    std::cout << "g[" << j << "] = " << _solution.g[ic] << "  (" << maxinfeas << ")\n";
+#endif
+    if( maxinfeas > FEASTOL ) return false;
+  }
+
+  return true;
 }
 
 inline
@@ -947,49 +978,25 @@ DOSEQSLV_IPOPT::finalize_solution
 #ifdef MC__DOSEQSLV_IPOPT_TRACE
     std::cout << "  DOSEQSLV_IPOPT::finalize_solution\n";
 #endif
-  _solution.solverflag = status;
+  _solution.status = status;
 
   // Successful (or near-successful) completion
   //if( status == Ipopt::SUCCESS || status == Ipopt::STOP_AT_ACCEPTABLE_POINT
   // || status == Ipopt::STOP_AT_TINY_STEP ){
-    // resize solution arrays
-    if( _solution.n != n ){
-      if( _solution.n ){
-        delete[] _solution.p; delete[] _solution.upL; delete[] _solution.upU;
-      }
-      _solution.n = n;
-      _solution.p = new Ipopt::Number[n];
-      _solution.upL = new Ipopt::Number[n];
-      _solution.upU = new Ipopt::Number[n];
-    }
-    if( _solution.m != m ){
-      if( _solution.m ){
-        delete[] _solution.g; delete[] _solution.ug;
-      }
-      _solution.m = m;
-      _solution.g = new Ipopt::Number[m];
-      _solution.ug = new Ipopt::Number[m];
-    }
-    // copy solution values into _solution
-    _solution.f = f;
-    for( Ipopt::Index i=0; i<n; i++ ){
-      _solution.p[i] = p[i]; _solution.upL[i] = upL[i]; _solution.upU[i] = upU[i];
-    }
-    for( Ipopt::Index j=0; j<m; j++ ){
-      _solution.g[j] = g[j]; _solution.ug[j] = ug[j];
-    }
+    _solution.p.assign( p, p+n );
+    _solution.upL.assign( upL, upL+n );
+    _solution.upU.assign( upU, upU+n );
+    _solution.g.assign( g, g+m );
+    _solution.ug.assign( ug, ug+m );
   //}
 
   // Failure
   //else{
-  //  if( _solution.n ){
-  //    delete[] _solution.p; delete[] _solution.upL; delete[] _solution.upU;
-  //    _solution.n = 0;
-  //  }
-  //  if( _solution.m ){
-  //    delete[] _solution.g; delete[] _solution.ug;
-  //    _solution.m = 0;
-  //  }
+  //  _solution.p.clear();
+  //  _solution.upL.clear();
+  //  _solution.upU.clear();
+  //  _solution.g.clear();
+  //  _solution.ug.clear();
   //}
   return;
 }

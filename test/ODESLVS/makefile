@@ -1,7 +1,8 @@
 # Third-Party Libraries -->> CHANGE ACCORDINGLY <<--
-PATH_MC = $(HOME)/Programs/Devel/MC++/MC++_2.0
+PATH_MC = $(HOME)/Programs/Devel/MC++/MC++_2.1
 LIB_MC = -llapack -lblas
-INC_MC = -I$(PATH_MC)/include -I$(PATH_MC)/src/3rdparty/fadbad++ -I$(PATH_MC)/src/3rdparty/cpplapack/include
+INC_MC = -I$(PATH_MC)/src/mc -I$(PATH_MC)/src/3rdparty/fadbad++ -I$(PATH_MC)/src/3rdparty/cpplapack-2015.05.11-1/include
+FLAG_MC = -Wno-misleading-indentation -Wno-unknown-pragmas
 
 PATH_SUNDIALS = /opt/sundials-2.7.0
 LIB_SUNDIALS = -L$(PATH_SUNDIALS)/lib -lsundials_cvodes -lsundials_nvecserial \
@@ -13,13 +14,13 @@ LIB_GSL = -lgsl -lgslcblas -lm
 INC_GSL = 
 
 #FLAG_ALL = -g -Wall -std=c++11 $(FLAG_FILIB)
-FLAG_ALL = -g -Ofast -Wall -std=c++11 $(FLAG_FILIB)
+FLAG_ALL = -g -Ofast -Wall -std=c++11 $(FLAG_FILIB) $(FLAG_MC)
 LIB_ALL  = $(LIB_MC) $(LIB_GSL) $(LIB_SUNDIALS) $(LIB_LAPACK)
 INC_ALL  = $(INC_MC) $(INC_GSL) $(INC_SUNDIALS) $(INC_LAPACK)
 
 #####
 
-all: test1 test2 test3
+all: test1 test2 test3 test4
 
 test% : test%.o
 	g++ -o $@ $< $(LIB_ALL)

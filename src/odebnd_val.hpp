@@ -1,4 +1,4 @@
-// Copyright (C) 2012-2017 Benoit Chachuat, Imperial College London.
+// Copyright (C) 2019 Benoit Chachuat, Imperial College London.
 // All Rights Reserved.
 // This code is published under the Eclipse Public License.
 
@@ -30,7 +30,7 @@ namespace mc
 //! mc::ODEBND_VAL is a C++ class that computes enclosures of the
 //! reachable set of parametric ordinary differential equations
 //! (ODEs) using MC++. It implements a validated method based on Taylor
-//! series expansion in time of the ODE solutions, whereby polynomial
+//! series expansion in time of the ODE solutions. Polynomial
 //! models with interval or ellipsoidal remainders are used to enable
 //! high-order convergence. The use of ellipsoidal remainders enables
 //! stability of the enclosures for asymptotically stable ODE systems
@@ -105,8 +105,8 @@ private:
   std::vector<PVT> _PMWK;
 
 
-  //! @brief list of operations in RHS Taylor coefficients
-  std::list<const FFOp*> _opTRHS;
+  //! @brief subgraph of RHS Taylor coefficients
+  FFSubgraph _opTRHS;
 
   //! @brief const pointer to RHS Taylor coefficients in DAG
   const FFVar* _pTRHS;
@@ -115,8 +115,8 @@ private:
   PVT *_PMTRHS;
 
 
-  //! @brief list of operations in RHS Taylor coefficient derivatives
-  std::list<const FFOp*> _opFTRHS;
+  //! @brief subgraph of RHS Taylor coefficient derivatives
+  FFSubgraph _opFTRHS;
 
   //! @brief const pointer to RHS Taylor coefficient derivatives in DAG
   const FFVar* _pFTRHS;
@@ -128,8 +128,8 @@ private:
   PVT *_PMFTRHS;
 
 
-  //! @brief list of operations in RHS highest-order Taylor coefficient
-  std::list<const FFOp*> _opTRHSval;
+  //! @brief subgraph of RHS highest-order Taylor coefficient
+  FFSubgraph _opTRHSval;
 
   //! @brief pointer to T bounds of RHS highest-order Taylor coefficient
   T *_ITRHSval;
@@ -138,15 +138,15 @@ private:
   PVT *_PMTRHSval;
 
 
-  //! @brief list of operations in initial conditions
-  std::list<const FFOp*> _opIC;
+  //! @brief subgraph of IC functions
+  FFSubgraph _opIC;
 
   //! @brief const pointer to IC function in DAG
   const FFVar* _pIC;
 
 
-  //! @brief list of operations in invariants
-  std::list<const FFOp*> _opINV;
+  //! @brief subgraph of invariant functions
+  FFSubgraph _opINV;
 
   //! @brief const pointer to invariants in DAG
   const FFVar* _pINV;
@@ -155,8 +155,8 @@ private:
   PVT *_PMINV;
 
 
-  //! @brief list of operations in invariant derivatives
-  std::list<const FFOp*> _opFINV;
+  //! @brief subgraph of invariant derivatives
+  FFSubgraph _opFINV;
 
   //! @brief const pointer to invariant derivatives in DAG
   const FFVar* _pFINV;
@@ -168,10 +168,10 @@ private:
   PVT *_PMFINV;
 
   //! @brief current time
-  double _t;
+  //double _t;
 
   //! @brief current stage
-  unsigned _istg;
+  //unsigned _istg;
 
   //! @brief stepsize
   double _h;

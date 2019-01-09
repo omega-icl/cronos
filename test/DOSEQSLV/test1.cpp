@@ -10,7 +10,7 @@
 //     s.t.   x1(tf) = x1f
 //            x2(tf) = x2f                 _
 //             dx1dt = x2                   |  t in (0,tf]
-//             dx2dt = (u-x1-2*x2)         _|
+//             dx2dt = (u·x1-2*x2)         _|
 //             x1(0) = x10, x2(0) = x20
 //            umin <= u  <= umax
 //           tfmin <= tf <= tfmax
@@ -103,7 +103,7 @@ int main()
   // Optimal response trajectories
   OC->options.ODESLVS.DISPLAY   = 1;
   OC->options.ODESLVS.RESRECORD = 20;
-  OC->states( OC->solution().p );
+  OC->states( OC->solution().p.data() );
   std::ofstream direcSTA( "test1_STA.dat", std::ios_base::out );
   OC->record( direcSTA );
   direcSTA.close();

@@ -68,14 +68,14 @@ class ODESLV_BASE:
   /** @} */
 
  protected:
-  //! @brief list of operations in RHS evaluation
-  std::list<const FFOp*> _opRHS;
+  //! @brief Sugraph of ODE RHS function
+  FFSubgraph _opRHS;
 
-  //! @brief list of operations in RHS Jacobian
-  std::list<const FFOp*> _opJAC;
+  //! @brief Subgraph of ODE RHS Jacobian
+  FFSubgraph _opJAC;
 
-  //! @brief list of operations in quadrature evaluation
-  std::list<const FFOp*> _opQUAD;
+  //! @brief Subgraph of quadrature RHS function
+  FFSubgraph _opQUAD;
 
   //! @brief const pointer to RHS function in current stage of ODE system
   const FFVar* _pRHS;
@@ -95,31 +95,31 @@ class ODESLV_BASE:
   //! @brief number of variables for DAG evaluation (without quadratures)
   unsigned _nVAR0;
 
-  //! @brief pointer to variables for DAG evaluation
+  //! @brief array of variables for DAG evaluation
   FFVar* _pVAR;
 
-  //! @brief pointer of variable values for DAG evaluation
+  //! @brief array of variable values for DAG evaluation
   double *_DVAR;
 
-  //! @brief pointer to state time **DO NOT FREE**
+  //! @brief pointer to time value **DO NOT FREE**
   double *_Dt;
 
-  //! @brief pointer to state interval bounds **DO NOT FREE**
+  //! @brief pointer to state values **DO NOT FREE**
   double *_Dx;
 
-  //! @brief pointer to parameter interval bounds **DO NOT FREE**
+  //! @brief pointer to parameter values **DO NOT FREE**
   double *_Dp;
 
-  //! @brief quadrature values **DO NOT FREE**
+  //! @brief pointer to quadrature values **DO NOT FREE**
   double *_Dq;
 
-  //! @brief function values
-  double *_Df;
+  //! @brief vector to hold function values
+  std::vector<double> _Df;
 
-  //! @brief preallocated array for holding Jacobian evaluation results
-  double* _DJAC;
+  //! @brief vector to hold Jacobian evaluation results
+  std::vector<double> _DJAC;
 
-  //! @brief preallocated array for DAG evaluation
+  //! @brief storage vector for DAG evaluation
   std::vector<double> _DWRK;
 
   //! @brief Function converting integrator array to internal format
@@ -191,7 +191,7 @@ inline
 ODESLV_BASE::ODESLV_BASE
 ()
 : BASE_DE(), _pRHS(0), _pJAC(0,0,0,0), _pQUAD(0), _pIC(0), _nVAR(0), _nVAR0(0),
-  _pVAR(0), _DVAR(0), _Dt(0), _Dx(0), _Dp(0), _Dq(0), _Df(0), _DJAC(0)
+  _pVAR(0), _DVAR(0), _Dt(0), _Dx(0), _Dp(0), _Dq(0)
 {}
 
 inline
@@ -202,8 +202,6 @@ ODESLV_BASE::~ODESLV_BASE
   delete[] std::get<1>(_pJAC);  std::get<1>(_pJAC) = 0;
   delete[] std::get<2>(_pJAC);  std::get<2>(_pJAC) = 0;
   delete[] std::get<3>(_pJAC);  std::get<3>(_pJAC) = 0;
-  delete[] _Df;
-  delete[] _DJAC;
   delete[] _pVAR;
   delete[] _DVAR;   // **DO NOT FREE _Dt, _Dx, _Dp, _Dq**
 }
@@ -237,7 +235,7 @@ ODESLV_BASE::_INI_D_STA
   _Dq = _Dt + 1;
   for( unsigned ip=0; ip<_np; ip++ ) _Dp[ip] = p[ip];
 
-  delete[] _Df; _Df = _nf? new double[_nf]: 0;
+  _Df.resize( _nf );
 
   return true;
 }
@@ -317,18 +315,18 @@ ODESLV_BASE::_RHS_D_SET
 {
   unsigned opmax = 0;
 
-  _opRHS.clear();
+  //_opRHS.clear();
   _opRHS  = _pDAG->subgraph( _nx, _pRHS );
-  if( _opRHS.size() > opmax )  opmax = _opRHS.size();
+  if( _opRHS.l_op.size() > opmax )  opmax = _opRHS.l_op.size();
 
-  _opQUAD.clear();
+  //_opQUAD.clear();
   if( _pQUAD ) _opQUAD = _pDAG->subgraph( _nq, _pQUAD );
-  if( _opQUAD.size() > opmax ) opmax = _opQUAD.size();
+  if( _opQUAD.l_op.size() > opmax ) opmax = _opQUAD.l_op.size();
 
-  _opJAC.clear();
+  //_opJAC.clear();
   _opJAC = _pDAG->subgraph( std::get<0>(_pJAC), std::get<3>(_pJAC) );
-  delete[] _DJAC; _DJAC = new double[ std::get<0>(_pJAC) ];
-  if( _opJAC.size() > opmax )  opmax = _opJAC.size();
+  _DJAC.resize( std::get<0>(_pJAC) );
+  if( _opJAC.l_op.size() > opmax )  opmax = _opJAC.l_op.size();
 
   _DWRK.reserve( opmax );
   //std::cout << "size for: " << opmax << std::endl;
@@ -362,7 +360,7 @@ ODESLV_BASE::_JAC_D_STA
   //*_Dt = t; // current time
   //_vec2D( x, _nx, _Dx ); // current state
   //std::cout << "need for: " << _opJAC.size() << std::endl;
-  _pDAG->eval( _opJAC, _DWRK, std::get<0>(_pJAC), std::get<3>(_pJAC), _DJAC, _nVAR0, _pVAR, _DVAR );
+  _pDAG->eval( _opJAC, _DWRK, std::get<0>(_pJAC), std::get<3>(_pJAC), _DJAC.data(), _nVAR0, _pVAR, _DVAR );
   for( unsigned ie=0; ie<std::get<0>(_pJAC); ++ie ){
     jac[std::get<2>(_pJAC)[ie]][std::get<1>(_pJAC)[ie]] = _DJAC[ie];
 #ifdef MC__ODESLV_BASE_DEBUG
@@ -380,7 +378,7 @@ ODESLV_BASE::_FCT_D_STA
   if( !_nf ) return true;
   *_Dt = t; // current time
   const FFVar* pFCT = _vFCT.at( iFCT );
-  _pDAG->eval( _nf, pFCT, _Df, _nVAR, _pVAR, _DVAR, iFCT?true:false );
+  _pDAG->eval( _nf, pFCT, _Df.data(), _nVAR, _pVAR, _DVAR, iFCT?true:false );
   return true;
 }
 

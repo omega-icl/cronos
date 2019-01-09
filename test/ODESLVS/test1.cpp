@@ -39,11 +39,11 @@ int main()
 */
   mc::FFVar QUAD[NQ];  // Quadrature function
   QUAD[0] = X[1];
-
-  //mc::FFVar FCT[NF];  // State functions
-  //FCT[0] = X[0] * X[1];
-  ////FCT[1] = P[0] * pow( X[0], 2 );
-
+/*
+  mc::FFVar FCT[NF];  // State functions
+  FCT[0] = X[0] * X[1];
+  //FCT[1] = P[0] * pow( X[0], 2 );
+*/
   mc::FFVar FCT[NF*NS];  // State functions
   for( unsigned k=0; k<NF*NS; k++ ) FCT[k] = 0.;
   if( NS > 1 ) FCT[((NS-1)/NF)*NF+0] = X[0] + 0.1*P[0];
@@ -79,12 +79,6 @@ int main()
   LV.set_function( NS, NF, FCT );
 
   double p[NP] = { 2.95 };  // Parameter values
-  //double *xk[NS+1], f[NF], *xpk[NS+1], *lk[NS+1], fp[NF*NP];
-  //for( unsigned k=0; k<=NS; k++ ){
-  //  xk[k]  = new double[NX+NQ];
-  //  xpk[k] = new double[(NX+NQ)*NP];
-  //  lk[k]  = new double[(NX+NP)*NF];
-  //}
 
   std::ofstream direcSTA, direcFSA[NP], direcASA[NF];
   char fname[50];
@@ -118,13 +112,6 @@ int main()
   }
   LV.record( direcSTA, direcASA );
 #endif
-
-  // cleanup
-  //for( unsigned k=0; k<=NS; k++ ){
-  //  delete[] xk[k];
-  //  delete[] xpk[k];
-  //  delete[] lk[k];
-  //}
 
   return 0;
 }

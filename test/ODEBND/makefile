@@ -1,13 +1,14 @@
 # Third-Party Libraries -->> CHANGE ACCORDINGLY <<--
-PATH_MC = /home/bchachua/Programs/Devel/MC++/MC++_2.0
+PATH_MC = $(HOME)/Programs/Devel/MC++/MC++_2.1
 LIB_MC = -llapack -lblas
-INC_MC = -I$(PATH_MC)/include -I$(PATH_MC)/src/3rdparty/fadbad++ -I$(PATH_MC)/src/3rdparty/cpplapack/include
+INC_MC = -I$(PATH_MC)/src/mc -I$(PATH_MC)/src/3rdparty/fadbad++ -I$(PATH_MC)/src/3rdparty/cpplapack-2015.05.11-1/include
+FLAG_MC = -Wno-misleading-indentation -Wno-unknown-pragmas -DMC__USE_HSL
+
+LIB_HSL = -lmc13 -lmc21 -lmc33 -lgfortran
+INC_HSL = 
 
 LIB_GSL = -lgsl -lgslcblas -lm
 INC_GSL = 
-
-LIB_HSL = -lmc13 -lmc21
-INC_HSL = 
 
 PATH_SUNDIALS = /opt/sundials-2.7.0
 #PATH_SUNDIALS = /usr/local
@@ -25,10 +26,10 @@ LIB_FILIB  = -L$(PATH_FILIB)/lib -lprim
 INC_FILIB  = -I$(PATH_FILIB)/include/ -I$(PATH_FILIB)/include/interval
 FLAG_FILIB = -frounding-math -ffloat-store
 
-#FLAG_ALL = -g -Wall -Wno-misleading-indentation -std=c++11 $(FLAG_FILIB)
-FLAG_ALL = -g -Ofast -Wall -Wno-misleading-indentation -std=c++11 $(FLAG_FILIB)
-LIB_ALL  = $(LIB_MC) $(LIB_PROFIL) $(LIB_FILIB) $(LIB_GSL) $(LIB_HSL) $(LIB_SUNDIALS) $(LIB_LAPACK)
-INC_ALL  = $(INC_MC) $(INC_PROFIL) $(INC_FILIB) $(INC_GSL) $(INC_HSL) $(INC_SUNDIALS) $(INC_LAPACK)
+FLAG_ALL = -g -Wall -std=c++11 $(FLAG_FILIB) $(FLAG_MC)
+#FLAG_ALL = -g -Ofast -Wall -std=c++11 $(FLAG_FILIB) $(FLAG_MC)
+LIB_ALL  = $(LIB_MC) $(LIB_PROFIL) $(LIB_FILIB) $(LIB_HSL) $(LIB_GSL) $(LIB_SUNDIALS) $(LIB_LAPACK)
+INC_ALL  = $(INC_MC) $(INC_PROFIL) $(INC_FILIB) $(INC_HSL) $(INC_GSL) $(INC_SUNDIALS) $(INC_LAPACK)
 
 #####
 

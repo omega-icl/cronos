@@ -2,8 +2,8 @@
 // All Rights Reserved.
 // This code is published under the Eclipse Public License.
 
-#ifndef MC__BASE_NLP_HPP
-#define MC__BASE_NLP_HPP
+#ifndef MC__BASE_DO_HPP
+#define MC__BASE_DO_HPP
 
 #include "base_opt.hpp"
 #include "base_de.hpp"
@@ -361,6 +361,37 @@ BASE_DO::set_function
 
   return true;
 }
+
+//! @brief C++ structure for holding the solution of dynamic programs
+////////////////////////////////////////////////////////////////////////
+//! mc::SOLUTION_DO is a C++ structure for holding the solution of 
+//! dynamic programs, including optimal point, KKT multiplers, cost
+//! and constraint functions.
+////////////////////////////////////////////////////////////////////////
+struct SOLUTION_DO
+{
+  SOLUTION_DO
+    ()
+    {}
+
+  ~SOLUTION_DO
+    ()
+    {}
+
+  SOLUTION_DO
+    ( const SOLUTION_DO &sol )
+    : status( sol.status ), p( sol.p ), upL( sol.upL ), upU( sol.upU ),
+      g( sol.g ), ug( sol.ug ), f( sol.f )
+    {}
+
+  int status;
+  std::vector<double> p;
+  std::vector<double> upL;
+  std::vector<double> upU;
+  std::vector<double> g;
+  std::vector<double> ug;
+  double f;
+};
 
 } // end namescape mc
 

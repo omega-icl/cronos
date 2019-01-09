@@ -41,8 +41,8 @@ int main()
   NLP->options.GRADIENT = mc::NLPSLV_IPOPT::Options::BACKWARD;
   NLP->options.HESSIAN  = mc::NLPSLV_IPOPT::Options::LBFGS;
   NLP->setup();
-  //Ipopt::ApplicationReturnStatus status = NLP->solve( Ip, p0 );
-  Ipopt::ApplicationReturnStatus status = NLP->solve( Ip );
+  //int status = NLP->solve( Ip, p0 );
+  int status = NLP->solve( Ip );
 
   if( status == Ipopt::Solve_Succeeded ){
     std::cout << "NLP (LOCAL) SOLUTION: " << std::endl;

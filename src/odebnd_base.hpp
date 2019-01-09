@@ -1,4 +1,4 @@
-// Copyright (C) 2015 Benoit Chachuat, Imperial College London.
+// Copyright (C) 2019 Benoit Chachuat, Imperial College London.
 // All Rights Reserved.
 // This code is published under the Eclipse Public License.
 
@@ -86,23 +86,23 @@ class ODEBND_BASE:
   };
 
  protected:
-  //! @brief list of operations in RHS evaluation
-  std::list<const FFOp*> _opRHS;
+  //! @brief subgraph of RHS functions
+  FFSubgraph _opRHS;
 
-  //! @brief array of list of operations in individual RHS evaluations
-  std::list<const FFOp*> *_opRHSi;
+  //! @brief vector of subgraphs of each RHS function
+  std::vector<FFSubgraph> _opRHSi;
 
-  //! @brief list of operations in RHS Jacobian
-  std::list<const FFOp*> _opJAC;
+  //! @brief subgraph of RHS Jacobian
+  FFSubgraph _opJAC;
 
-  //! @brief list of operations in quadrature evaluation
-  std::list<const FFOp*> _opQUAD;
+  //! @brief subgraph of quadrature functions
+  FFSubgraph _opQUAD;
 
-  //! @brief list of operations in IC evalution
-  std::list<const FFOp*> _opIC;
+  //! @brief subgraph of IC functions
+  FFSubgraph _opIC;
 
-  //! @brief list of operations in IC Jacobian
-  std::list<const FFOp*> _opDIC;
+  //! @brief subgraph of IC Jacobian
+  FFSubgraph _opDIC;
 
   //! @brief storage vector for DAG evaluation in T arithmetic
   std::vector<T> _IWK;
@@ -574,7 +574,7 @@ class ODEBND_BASE:
 
   //! @brief Static function to calculate the quadratures in polynomial model arithmetic
   static void _QUAD_PM
-    ( FFGraph*DAG, std::list<const FFOp*>&opQUAD, std::vector<PVT>&PMQUAD,
+    ( FFGraph*DAG, FFSubgraph&opQUAD, std::vector<PVT>&PMQUAD,
       const unsigned nq, const FFVar*pQUAD, const unsigned nVAR,
       const FFVar*pVAR, PVT*PMVAR, PVT*PMqdot, const bool append=false );
 
@@ -585,6 +585,11 @@ class ODEBND_BASE:
   //! @brief Function to calculate the functions at intermediate/end point
   bool _FCT_PM_STA
     ( const unsigned pos_fct, const double t );
+
+  //! @brief Computes bounds for sampled parameter set
+  template <typename ODESLV> inline bool _bounds
+    ( const std::list<const double*>&Lp, T**Ixk, T*If, ODESLV&traj,
+      std::vector<Results>&results, std::ostream&os );
 
   //! @brief Computes inner bounds approximation using parameter sampling
   template <typename ODESLV> inline bool _bounds
@@ -659,7 +664,6 @@ ODEBND_BASE<T,PMT,PVT>::ODEBND_BASE
   _npar(0), _nVAR(0), _nVAR0(0), _pVAR(0)
 {
   // Initalize state/parameter arrays
-  _opRHSi = 0;
   _IVAR = _It = _Ip = _Ix = _Ixdot =
   _Iq = _Iqdot = _If = 0;
   _PMVAR = _PMt = _PMp = _PMx = _PMxdot =
@@ -687,7 +691,6 @@ ODEBND_BASE<T,PMT,PVT>::~ODEBND_BASE
 ()
 {
   /* DO NOT FREE _pRHS, _pQUAD, _pIC, _pFCT */
-  delete[] _opRHSi;
   delete[] _pJAC;
   delete[] _pDIC;
   delete[] _pVAR;
@@ -1300,10 +1303,10 @@ ODEBND_BASE<T,PMT,PVT>::_RHS_I_SET
 {
   if( !_RHS_SET( iRHS, iQUAD ) ) return false;
 
-  delete[] _opRHSi; _opRHSi = 0;
+  _opRHSi.clear();
   switch( options.WRAPMIT){
   case OPT::DINEQ:
-    _opRHSi = new std::list<const FFOp*>[_nx];
+    _opRHSi.resize( _nx );
     for( unsigned ix=0; ix<_nx; ix++ )
       if( _pRHS ) _opRHSi[ix] = _pDAG->subgraph( 1, _pRHS+ix );
     break;   
@@ -1334,7 +1337,7 @@ ODEBND_BASE<T,PMT,PVT>::_RHS_I_STA
     return true;
    
   case OPT::DINEQ:
-    if( !_opRHSi ) return false;
+    if( _opRHSi.empty() ) return false;
     _vec2I( x, _nx, _Ix );   // set current state bounds
     *_It = t; // set current time
     for( unsigned ix=0; ix<_nx; ix++ ){
@@ -2561,7 +2564,7 @@ ODEBND_BASE<T,PMT,PVT>::_RHS_PM_QUAD
 template <typename T, typename PMT, typename PVT>
 inline void
 ODEBND_BASE<T,PMT,PVT>::_QUAD_PM
-( FFGraph*DAG, std::list<const FFOp*>&opQUAD, std::vector<PVT>&PMQUAD,
+( FFGraph*DAG, FFSubgraph&opQUAD, std::vector<PVT>&PMQUAD,
   const unsigned nq, const FFVar*pQUAD, const unsigned nVAR,
   const FFVar*pVAR, PVT*PMVAR, PVT*PMqdot, const bool append )
 {
@@ -2601,12 +2604,12 @@ ODEBND_BASE<T,PMT,PVT>::_RHS_PM_SET
 {
   if( !_RHS_SET( iRHS, iQUAD ) ) return false;
 
-  delete[] _opRHSi; _opRHSi = 0;
+  _opRHSi.clear();
   delete[] _pJAC;   _pJAC = 0; _opJAC.clear();
 
   switch( options.WRAPMIT){
   case OPT::DINEQ:
-    _opRHSi = new std::list<const FFOp*>[_nx];
+    _opRHSi.resize( _nx );
     for( unsigned ix=0; ix<_nx; ix++ )
       if( _pRHS ) _opRHSi[ix] = _pDAG->subgraph( 1, _pRHS+ix );
     break;
@@ -2620,6 +2623,64 @@ ODEBND_BASE<T,PMT,PVT>::_RHS_PM_SET
     break;
   }
 
+  return true;
+}
+
+template <typename T, typename PMT, typename PVT>
+template <typename ODESLV> inline bool
+ODEBND_BASE<T,PMT,PVT>::_bounds
+( const std::list<const double*>&Lp, T**Ixk, T*If, ODESLV&traj,
+  std::vector<Results>&results, std::ostream&os )
+{
+  if( Lp.empty() ) return false;
+  int DISPLAY_SAVE = traj.options.DISPLAY;
+  traj.options.DISPLAY = 0;
+
+  // Initialization of state and function results
+  double **xk = Ixk? new double*[_nsmax+1]: 0;
+  for( unsigned is=0; Ixk && is<=_nsmax; is++ ){
+    if( !Ixk[is] ) Ixk[is] = new T[_nx+_nq];
+    xk[is] = new double[_nx+_nq];
+  }
+  double *f = If? new double[_nf]: 0;
+
+  // Loop over all sampled parameter values
+  bool first = true;
+  for( auto itp=Lp.begin(); itp!=Lp.end(); ++itp, first=false ){
+    if( traj.states( *itp, xk, f, os ) != NORMAL ){
+      delete[] f;
+      for( unsigned is=0; is<=_nsmax; is++ ) delete[] xk[is]; delete[] xk;
+      traj.options.DISPLAY = DISPLAY_SAVE;
+      return false;
+    }
+
+    // Update state and function bounds with current trajectory
+    for( unsigned is=0; Ixk && is<=_nsmax; is++ )
+      for( unsigned ix=0; ix<_nx+_nq; ix++ )
+        Ixk[is][ix] = first? xk[is][ix]: Op<T>::hull( xk[is][ix], Ixk[is][ix] );
+    for( unsigned ifn=0; If && ifn<_nf; ifn++ )
+      If[ifn] = first? f[ifn]: Op<T>::hull( f[ifn], If[ifn] );
+
+    // Update result vector with current trajectory
+    if( first ){
+      results.clear();
+      auto it=traj.results_sta.begin();
+      for( ; traj.options.RESRECORD && it!=traj.results_sta.end(); ++it )
+        results.push_back( Results( it->t, it->nx, it->X ) );
+    }
+    else{
+      auto it=traj.results_sta.begin();
+      for( unsigned k=0; traj.options.RESRECORD && it!=traj.results_sta.end(); ++it, k++ )
+        for( unsigned i=0; i<it->nx; i++ )
+          results[k].X[i] = Op<T>::hull( it->X[i], results[k].X[i] );
+    }
+  }
+
+  // Clean-up
+  delete[] f;
+  for( unsigned is=0; xk && is<=_nsmax; is++ ) delete[] xk[is]; delete[] xk;
+  traj.options.DISPLAY = DISPLAY_SAVE;
+  
   return true;
 }
 

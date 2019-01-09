@@ -17,7 +17,7 @@ class BASE_OPT
 public:
 
   //! @brief Infinity
-  static double INF;
+  double INF;
 
   //! @brief Enumeration type for objective function
   enum t_OBJ{
@@ -33,7 +33,7 @@ public:
   };
 
   //! @brief Class constructor
-  BASE_OPT()
+  BASE_OPT(): INF(1e20)
     {}
 
   //! @brief Class destructor
@@ -46,7 +46,7 @@ protected:
   BASE_OPT& operator=(const BASE_OPT&);
 };
 
-double BASE_OPT::INF = 1e20;
+//inline double BASE_OPT::INF = 1e20;
 
 } // end namescape mc
 

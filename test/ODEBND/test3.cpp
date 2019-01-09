@@ -1,9 +1,9 @@
-const unsigned NPM   = 8;	// <- Order of polynomial expansion
+const unsigned NPM   = 5;	// <- Order of polynomial expansion
 const unsigned NSAMP = 10;	// <- Number of sampling points for inner approx.
 const double   REDUC = 1.4;	// <- Reduction ratio for convergence analysis
 #define SAVE_RESULTS		// <- Whether to save bounds to file
 #undef  TEST_CONVERGENCE	// <- Whether to test Hausdorff convergence of bounds
-#define USE_CMODEL		// <- whether to use Chebyshev models or Taylor models
+#define USE_CMODEL		    // <- whether to use Chebyshev models or Taylor models
 
 #include "odebnd_sundials.hpp"
 
@@ -84,7 +84,7 @@ int main()
   }
   FCT[(NS-1)*NF+0] = Q[0];
 
-  I Ip[NP]  = { I(0.95,1.05) };
+  I Ip[NP]  = { I(0.98,1.02) };
 
   PM PMEnv( NP, NPM );
   PV PMp[NP];

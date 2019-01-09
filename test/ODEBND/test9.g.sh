@@ -5,8 +5,6 @@ gnuplot -persist <<-EOFMarker
 
 NP = 2  # Number of parameters
 NX = 2  # Number of states
-NQ = 0  # Number of state quadratures
-NF = 1  # Number of state functions
 
 unset key
 #set terminal png size 2000,1500 enhanced font "Helvetica,30"
@@ -27,26 +25,10 @@ do for [i = 1:NX]{
        sprintf("%s_DINEQI_STA.dat","$DATA") u 1:ub w lines lt rgb "blue", \
        sprintf("%s_DINEQPM_STA.dat","$DATA") u 1:lb w lines lt rgb "red", \
        sprintf("%s_DINEQPM_STA.dat","$DATA") u 1:ub w lines lt rgb "red", \
-       sprintf("%s_EXPANDI_STA.dat","$DATA") u 1:lb w lines lt rgb "green", \
-       sprintf("%s_EXPANDI_STA.dat","$DATA") u 1:ub w lines lt rgb "green", \
-       sprintf("%s_EXPANDPM_STA.dat","$DATA") u 1:lb w lines lt rgb "orange", \
-       sprintf("%s_EXPANDPM_STA.dat","$DATA") u 1:ub w lines lt rgb "orange"
-}
-do for [i = 1:NQ]{
-  set xlabel "t"
-  set ylabel sprintf("q%d",i)
-  set yrange[-1:2]
-  lb = 2*NX+2*i 
-  ub = 2*NX+2*i+1
-  plot sprintf("%s_APPROX_STA.dat","$DATA") u 1:lb:ub w filledcu lt rgb "cyan", \
-       sprintf("%s_DINEQI_STA.dat","$DATA") u 1:lb w lines lt rgb "blue", \
-       sprintf("%s_DINEQI_STA.dat","$DATA") u 1:ub w lines lt rgb "blue", \
-       sprintf("%s_DINEQPM_STA.dat","$DATA") u 1:lb w lines lt rgb "red", \
-       sprintf("%s_DINEQPM_STA.dat","$DATA") u 1:ub w lines lt rgb "red", \
-       sprintf("%s_EXPANDI_STA.dat","$DATA") u 1:lb w lines lt rgb "green", \
-       sprintf("%s_EXPANDI_STA.dat","$DATA") u 1:ub w lines lt rgb "green", \
-       sprintf("%s_EXPANDPM_STA.dat","$DATA") u 1:lb w lines lt rgb "orange", \
-       sprintf("%s_EXPANDPM_STA.dat","$DATA") u 1:ub w lines lt rgb "orange"
+       sprintf("%s_EXPANDI_STA.dat","$DATA") u 1:lb w lines lt rgb "blue" dt 3, \
+       sprintf("%s_EXPANDI_STA.dat","$DATA") u 1:ub w lines lt rgb "blue" dt 3, \
+       sprintf("%s_EXPANDPM_STA.dat","$DATA") u 1:lb w lines lt rgb "red" dt 3, \
+       sprintf("%s_EXPANDPM_STA.dat","$DATA") u 1:ub w lines lt rgb "red" dt 3
 }
 unset multiplot
 

@@ -25,7 +25,11 @@ do for [i = 1:NX]{
        sprintf("%s_EXPANDI_STA.dat","$DATA") u 1:lb w lines lt rgb "blue", \
        sprintf("%s_EXPANDI_STA.dat","$DATA") u 1:ub w lines lt rgb "blue", \
        sprintf("%s_EXPANDPM_STA.dat","$DATA") u 1:lb w lines lt rgb "red", \
-       sprintf("%s_EXPANDPM_STA.dat","$DATA") u 1:ub w lines lt rgb "red"
+       sprintf("%s_EXPANDPM_STA.dat","$DATA") u 1:ub w lines lt rgb "red", \
+       sprintf("%s_DINEQI_STA.dat","$DATA") u 1:lb w lines lt rgb "blue" dt 3, \
+       sprintf("%s_DINEQI_STA.dat","$DATA") u 1:ub w lines lt rgb "blue" dt 3, \
+       sprintf("%s_DINEQPM_STA.dat","$DATA") u 1:lb w lines lt rgb "red" dt 3, \
+       sprintf("%s_DINEQPM_STA.dat","$DATA") u 1:ub w lines lt rgb "red" dt 3
 }
 do for [i = 1:NQ]{
   set xlabel "t"
@@ -36,7 +40,11 @@ do for [i = 1:NQ]{
        sprintf("%s_EXPANDI_STA.dat","$DATA") u 1:lb w lines lt rgb "blue", \
        sprintf("%s_EXPANDI_STA.dat","$DATA") u 1:ub w lines lt rgb "blue", \
        sprintf("%s_EXPANDPM_STA.dat","$DATA") u 1:lb w lines lt rgb "red", \
-       sprintf("%s_EXPANDPM_STA.dat","$DATA") u 1:ub w lines lt rgb "red"
+       sprintf("%s_EXPANDPM_STA.dat","$DATA") u 1:ub w lines lt rgb "red", \
+       sprintf("%s_DINEQI_STA.dat","$DATA") u 1:lb w lines lt rgb "blue" dt 3, \
+       sprintf("%s_DINEQI_STA.dat","$DATA") u 1:ub w lines lt rgb "blue" dt 3, \
+       sprintf("%s_DINEQPM_STA.dat","$DATA") u 1:lb w lines lt rgb "red" dt 3, \
+       sprintf("%s_DINEQPM_STA.dat","$DATA") u 1:ub w lines lt rgb "red" dt 3
 }
 unset multiplot
 

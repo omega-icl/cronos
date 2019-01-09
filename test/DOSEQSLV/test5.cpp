@@ -101,7 +101,7 @@ int main()
 		
     cout << "L_f = " << L_f << endl;	
 		
-    RHS[0] = TF * ( ( tau*(K*((mc::exp(2*Lambda*P_d)-1.)/(mc::exp(2*Lambda*P_d)+1.))-P_ad) )/(R_th*C_ad) + ( tau*U0*(U_f + U_p) )/(P0*C_ad) );
+    RHS[0] = TF * ( ( tau*(K*tanh(Lambda*P_d)-P_ad) )/(R_th*C_ad) + ( tau*U0*(U_f + U_p) )/(P0*C_ad) );
     RHS[1] = TF * ( ( tau*U0*U_f )/(P0*C_d) );
     RHS[2] = TF * ( ( tau*U0*U_p )/(P0*C_p) );
     RHS[3] = TF * ( ( (tau*P0/U0)*( L_l*P_p-L_p*P_ad-(L_p+L_l)*P_d ) - tau*(L_l*R_f+L_p*(R_f+R_l))*U_f - tau*L_p*R_l*U_p ) / ( L_l*(L_d+L_f)+L_p*(L_d+L_f+L_l) ) );
@@ -232,20 +232,17 @@ int main()
   ores.close();
 #endif
 
+//    mc::ODESLV_SUNDIALS IVP;
+//    IVP.options = OC->options.ODESLVS;
+//    IVP.set_dag( &NIFTE );
+//    IVP.set_time( 0., 1. );
+//    IVP.set_parameter( NP, P );
+//    IVP.set_state( NX, X );
+//    IVP.set_differential( NX, RHS );
+//    IVP.set_quadrature( NQ, QUAD, Q );
+//    IVP.set_initial( NX, IC );
+//    IVP.states( OC->solution().p );
 
-
-    mc::ODESLV_SUNDIALS IVP;
-    IVP.options = OC->options.ODESLVS;
-    IVP.set_dag( &NIFTE );
-    IVP.set_time( 0., 1. );
-    IVP.set_parameter( NP, P );
-    IVP.set_state( NX, X );
-    IVP.set_differential( NX, RHS );
-    IVP.set_quadrature( NQ, QUAD, Q );
-    IVP.set_initial( NX, IC );
-    IVP.states( OC->solution().p );
-
-  
   return 0;
 }
 

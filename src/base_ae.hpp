@@ -31,6 +31,21 @@ protected:
   //! @brief equation system
   std::vector<FFVar> _sys;
 
+  //! @brief variable lower bound multipliers
+  std::vector<FFVar> _varlm;
+
+  //! @brief variable upper bound multipliers
+  std::vector<FFVar> _varum;
+
+  //! @brief dependent lower bound multipliers
+  std::vector<FFVar> _deplm;
+
+  //! @brief dependent upper bound multipliers
+  std::vector<FFVar> _depum;
+
+  //! @brief equation multipliers
+  std::vector<FFVar> _sysm;
+
   //! @brief number of AE block
   unsigned _noblk;
 
@@ -95,8 +110,8 @@ public:
 
   //! @brief Set pointer to DAG
   void set_dag
-    ( FFGraph*pDAG )
-    { _dag = pDAG; }
+    ( FFGraph*dag )
+    { _dag = dag; }
 
   //! @brief Get decision variables
   const std::vector<FFVar>& var() const
@@ -105,22 +120,35 @@ public:
   //! @brief Set decision variables
   void set_var
     ( const std::vector<FFVar>&var )
-    { _var = var; }
+    { _var = var;
+      _varlm.clear(); _varum.clear();
+      for( unsigned i=0; i<_var.size(); i++ ){
+        _varlm.push_back( FFVar( _dag ) );
+        _varum.push_back( FFVar( _dag ) );
+      }
+    }
 
   //! @brief Set decision variables
   void set_var
     ( const unsigned nvar, const FFVar*var )
-    { _var.assign( var, var+nvar ); }
+    { _var.assign( var, var+nvar );
+      for( unsigned i=0; i<_var.size(); i++ ){
+        _varlm.push_back( FFVar( _dag ) );
+        _varum.push_back( FFVar( _dag ) );
+      }
+    }
 
   //! @brief Reset decision variables
   void reset_var
     ()
-    { _var.clear(); }
+    { _var.clear(); _varlm.clear(); _varum.clear(); }
 
   //! @brief Add decision variable
   void add_var
     ( const FFVar&var )
-    { _var.push_back( var ); }
+    { _var.push_back( var );
+      _varlm.push_back( FFVar( _dag ) );
+      _varum.push_back( FFVar( _dag ) ); }
 
   //! @brief Get dependent variables
   const std::vector<FFVar>& dep() const
@@ -133,37 +161,54 @@ public:
   //! @brief Set dependent variables
   void set_dep
     ( const std::vector<FFVar>&dep, const std::vector<FFVar>&sys )
-    { assert( dep.size()==sys.size() ); _dep = dep; _sys = sys; }
+    { assert( dep.size()==sys.size() ); _dep = dep; _sys = sys;
+      for( unsigned i=0; i<_dep.size(); i++ ){
+        _deplm.push_back( FFVar( _dag ) );
+        _depum.push_back( FFVar( _dag ) );
+        _sysm.push_back( FFVar( _dag ) );
+      }
+    }
 
   //! @brief Set dependent variables
   void set_dep
     ( const unsigned ndep, const FFVar*dep, const FFVar*eq )
-    { _dep.assign( dep, dep+ndep ); _sys.assign( eq, eq+ndep ); }
+    { _dep.assign( dep, dep+ndep ); _sys.assign( eq, eq+ndep );
+      for( unsigned i=0; i<_dep.size(); i++ ){
+        _deplm.push_back( FFVar( _dag ) );
+        _depum.push_back( FFVar( _dag ) );
+        _sysm.push_back( FFVar( _dag ) );
+      }
+    }
 
   //! @brief Reset dependent variables
   void reset_dep
     ()
-    { _dep.clear(); }
+    { _dep.clear(); _deplm.clear(); _depum.clear(); }
 
-  //! @brief Add decision variable
+  //! @brief Add dependent variable
   void add_dep
     ( const FFVar&dep )
-    { _dep.push_back( dep ); }
+    { _dep.push_back( dep );
+      _deplm.push_back( FFVar( _dag ) );
+      _depum.push_back( FFVar( _dag ) ); }
 
-  //! @brief Reset dependent variables
+  //! @brief Reset algebraic equations
   void reset_sys
     ()
-    { _sys.clear(); }
+    { _sys.clear(); _sysm.clear(); }
 
-  //! @brief Add decision variable
+  //! @brief Add algebraic equation
   void add_sys
     ( const FFVar&eq )
-    { _sys.push_back( eq ); }
+    { _sys.push_back( eq );
+      _sysm.push_back( FFVar( _dag ) ); }
 
   //! @brief Copy equations
   void set
     ( const BASE_AE&aes )
-    { _dag = aes._dag; _var = aes._var; _dep = aes._dep; _sys = aes._sys; };
+    { _dag = aes._dag; _var = aes._var; _dep = aes._dep; _sys = aes._sys; 
+      _varlm = aes._varlm; _varum = aes._varum; _deplm = aes._deplm;
+      _depum = aes._depum; _sysm = aes._sysm; }
 
   //! @brief Number of blocks
   unsigned int noblk
@@ -225,6 +270,32 @@ public:
   /** @} */
 
 protected:
+//  //! @brief Get pointer to lower bound multipliers
+//  const FFVar* lowerboundmultiplier() const
+//    { return _lbm.data(); }
+
+//  //! @brief Get pointer to upper bound multipliers
+//  const FFVar* upperboundmultiplier() const
+//    { return _ubm.data(); }
+
+//  //! @brief Set bound multipliers
+//  void set_boundmultiplier
+//    ()
+//    { for( unsigned i=_lbm.size(); i<_var.size()+_dep.size(); i++ ){
+//        _lbm.push_back( FFVar(_dag) );
+//        _ubm.push_back( FFVar(_dag) );
+//      } }
+
+//  //! @brief Get pointer to equation multipliers
+//  const FFVar* equationmultiplier() const
+//    { return _sysm.data(); }
+
+//  //! @brief Set equation multipliers
+//  void set_equationmultiplier
+//    ()
+//    { for( unsigned i=_sysm.size(); i<_sys.size(); i++ )
+//        _sysm.push_back( FFVar(_dag) ); }
+
   //! @brief Private methods to block default compiler methods
   BASE_AE(const BASE_AE&);
   BASE_AE& operator=(const BASE_AE&);
@@ -260,9 +331,9 @@ BASE_AE::set_block
     IOR.data(), IB.data(), NB, disp?true:false, os );
   if( _singsys ) return reset_block();
 
-  // Permute order of equation system AND variables in vector _pAE and _pVAR,
+  // Permute order of equation system AND variables in vectors sys and var,
   // now arranged in upper-triangular block form
-  // Keep track of forward and reverse permutations in _bVAR and _bVARrev
+  // Keep track of forward and reverse permutations in _fpdep and _rpdep
   std::vector<FFVar> sys(ndep), var(ndep);
   _fpdep.resize(ndep); _rpdep.resize(ndep);
   for( unsigned int i=0; i<ndep; i++ ){

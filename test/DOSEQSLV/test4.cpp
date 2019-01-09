@@ -85,7 +85,7 @@ int main()
   OC->options.ODESLVS.RTOL      = OC->options.ODESLVS.RTOLB = OC->options.ODESLVS.RTOLS = 1e-9;
 
   OC->setup();
-  Ipopt::ApplicationReturnStatus status = OC->solve( Ip, p0 );
+  int status = OC->solve( Ip, p0 );
 
   //if( status == Ipopt::Solve_Succeeded ){
     std::cout << "OC (LOCAL) SOLUTION: " << std::endl;

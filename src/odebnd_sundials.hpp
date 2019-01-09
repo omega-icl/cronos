@@ -1,4 +1,4 @@
-// Copyright (C) 2015 Benoit Chachuat, Imperial College London.
+// Copyright (C) 2019 Benoit Chachuat, Imperial College London.
 // All Rights Reserved.
 // This code is published under the Eclipse Public License.
 
@@ -241,6 +241,10 @@ public:
  //! @brief Compute approximate interval enclosure of reachable set of parametric ODEs using parameter sampling
   STATUS bounds
     ( const unsigned nsamp, const T*Ip, T**Ixk=0, T*If=0, std::ostream&os=std::cout );
+
+ //! @brief Compute interval enclosure of reachable set of parametric ODEs for a list of sampled parameter values
+  STATUS bounds
+    ( const std::list<const double*>&Lp, T**Ixk=0, T*If=0, std::ostream&os=std::cout );
 
   //! @brief Record results in file <a>bndrec</a>, with accuracy of <a>iprec</a> digits
   void record
@@ -1145,6 +1149,58 @@ ODEBND_SUNDIALS<T,PMT,PVT>::bounds
   //const unsigned SAVE_RESRECORD = pODESLVS.options.RESRECORD;
   //pODESLVS.options.RESRECORD = options.RESRECORD;
   if( !_bounds( Ip, Ixk_, If_, pODESLVS, nsamp, results_sta, os ) )
+    flag = FAILURE;
+  //pODESLVS.options.RESRECORD = SAVE_RESRECORD;
+
+  // Display results
+  if( options.DISPLAY >= 1 ){
+    for( unsigned is=0; is<=_nsmax; is++ ){
+      _print_interm( _dT[is], _nx, Ixk_[is], " x", os );
+      _print_interm( _nq, Ixk_[is]+_nx, " q", os );
+    }
+    _print_interm( _nf, If_, " f", os );
+  }
+
+  // Clean-up
+  for( unsigned is=0; is<=_nsmax; ++is )
+    if( !Ixk ) delete[] Ixk_[is];
+  if( !Ixk ) delete[] Ixk_;
+  if( !If )  delete[] If_;
+  
+  return flag;
+}
+
+//! @fn template <typename T, typename PMT, typename PVT> inline typename ODEBND_SUNDIALS<T,PMT,PVT>::STATUS ODEBND_SUNDIALS<T,PMT,PVT>::bounds(
+//! const unsigned nsamp, const T*Ip, T**Ixk=0, T*If=0, std::ostream&os=std::cout )
+//!
+//! This function computes projections of an inner-approximation enclosure of
+//! the reachable set of the parametric ODEs using sampling and continuous-time
+//! integration:
+//!   - <a>nsamp</a> [input] number of samples for each parameter
+//!   - <a>Lp</a>    [input] list of sampled parameter values
+//!   - <a>Ixk</a>   [output] approximate interval state enclosures at stage times
+//!   - <a>If</a>    [output] approximate state-dependent function enclosures
+//!   - <a>os</a>    [input] output stream
+//! .
+//! The return value is the status.
+template <typename T, typename PMT, typename PVT>
+inline typename ODEBND_SUNDIALS<T,PMT,PVT>::STATUS
+ODEBND_SUNDIALS<T,PMT,PVT>::bounds
+( const std::list<const double*>&Lp, T**Ixk, T*If, std::ostream&os )
+{
+  // Local result arrays
+  T** Ixk_ = Ixk? Ixk: new T*[_nsmax+1];
+  for( unsigned is=0; is<=_nsmax; ++is )
+    if( !Ixk ) Ixk_[is] = 0;
+  T* If_  = If? If: new T[_nf];
+
+  // Sample inner approximation
+  STATUS flag = NORMAL;
+  pODESLVS.set( *this );
+  pODESLVS.options = options.ODESLVS;
+  //const unsigned SAVE_RESRECORD = pODESLVS.options.RESRECORD;
+  //pODESLVS.options.RESRECORD = options.RESRECORD;
+  if( !_bounds( Lp, Ixk_, If_, pODESLVS, results_sta, os ) )
     flag = FAILURE;
   //pODESLVS.options.RESRECORD = SAVE_RESRECORD;
 

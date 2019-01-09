@@ -42,10 +42,10 @@ private:
   unsigned _ndep;
 
   //! @brief list of operations in each AE block
-  std::vector< std::list<const FFOp*> > _opsys;
+  std::vector< FFSubgraph > _sgsys;
 
   //! @brief list of operations in each AE block Jacobian
-  std::vector< std::list<const FFOp*> > _opjac;
+  std::vector< FFSubgraph > _sgjac;
 
   //! @brief maximum number of operations among any AE block evaluation
   unsigned _maxop;
@@ -247,11 +247,30 @@ public:
   //! @brief Compute symbolic solution (DAG) of parametric AEs
   STATUS solve
     ( FFVar*X, std::ostream&os=std::cout );
+
+  //! @brief Whether the blocks contain a unique solution branch
+  std::vector<bool>& uniblk
+    () const
+    { return _uniblk; }
+
+  //! @brief Whether the blocks contain a unique solution branch
+  bool uniblk
+    ( const unsigned ib ) const
+    { return _uniblk.at( ib ); }
   /** @} */
 
 private:
   //! @brief Flag for setup function
   bool _issetup;
+
+  //! @brief Lower-bound crossing by dependent branch
+  std::vector<int> _xlodep;
+
+  //! @brief Upper-bound crossing by dependent branch
+  std::vector<int> _xupdep;
+
+  //! @brief Solution uniqueness in AE blocks
+  std::vector<bool> _uniblk;
 
   //! @brief Linearity of problem blocks w.r.t. the block variables
   std::vector<bool> _linblk;
@@ -305,6 +324,14 @@ private:
   //! @brief Test convergence for polynomial models
   bool _cvgtest
     ( const unsigned nx, const PVT*x, const PVT*x0 ) const;
+
+  //! @brief Test for a slution branch crossing interval bounds - return value is whether a solution branch may cross any dependent lower or upper bound (true) or not (false)
+  bool _crosstest
+    ( const unsigned nx, const T*x, const T*x0, int*xlodep, int*xupdep ) const;
+
+  //! @brief Test for a solution branch crossing polynomial models - return value is whether a solution branch may cross any dependent lower or upper bound (true) or not (false)
+  bool _crosstest
+    ( const unsigned nx, const PVT*x, const PVT*x0, int*xlodep, int*xupdep ) const;
 
   //! @brief Cancel remainder term in polynomial models
   T _cancelrem
@@ -446,8 +473,6 @@ AEBND<T,PMT,PVT>::setup
 {
   _issetup = false;
 
-  // Check problem size
-
   // Perform block decomposition
   if( !set_block( options.DISPLAY, os ) ) return FAILURE;
   if( BASE_AE::_singsys ) return SINGULAR;
@@ -456,7 +481,7 @@ AEBND<T,PMT,PVT>::setup
   _ndep = BASE_AE::_dep.size();
   _nvar = _ndep + BASE_AE::_var.size();
   if( _var.size() < _nvar ){
-    _var.resize(_nvar);
+    _var.resize( _nvar );
     _Ivar.clear();  _Iref.clear();
     _PMvar.clear(); _PMref.clear(); 
   }
@@ -468,7 +493,7 @@ AEBND<T,PMT,PVT>::setup
   for( auto iv=BASE_AE::_var.begin(); iv!=BASE_AE::_var.end(); ++iv, ivar++ )
     _var[ivar] = *iv;
 
-  // Set whole-system preconditioning matrix
+  // (Re)size whole-system preconditioning matrix
   _Y.resize( _ndep, _ndep );
 
   _issetup = true;
@@ -503,7 +528,7 @@ AEBND<T,PMT,PVT>::_init
   _fpdep = BASE_AE::_fpdep;
   _rpdep = BASE_AE::_rpdep;
 
-  _opsys.resize(_noblk);
+  _sgsys.resize(_noblk);
   auto it = _jac.begin();
   for( ; it != _jac.end(); ++it ){
     if( !std::get<0>(*it) ) continue;
@@ -512,7 +537,7 @@ AEBND<T,PMT,PVT>::_init
     delete[] std::get<3>(*it);
   }
   _jac.resize(_noblk);
-  _opjac.resize(_noblk);
+  _sgjac.resize(_noblk);
 
   _ldblk.resize(_noblk);
   _nblkmax = _ldblkmax = _maxop = 0;
@@ -526,15 +551,21 @@ AEBND<T,PMT,PVT>::_init
     if( _nblkmax < _nblk[ib] ) _nblkmax = _nblk[ib];
 
     // Initialize block operations and Jacobian
-    //_opsys[ib] = _dag->subgraph( _ldblk[ib], _sys.data()+_pblk[ib] );
-    _opsys[ib] = _dag->subgraph( _nblk[ib], _sys.data()+_pblk[ib] );
+    _sgsys[ib] = _dag->subgraph( _nblk[ib], _sys.data()+_pblk[ib] );
     _jac[ib] = _dag->SFAD( _nblk[ib], _sys.data()+_pblk[ib],
                            _ldblk[ib], _var.data()+_pblk[ib] ); 
-    _opjac[ib] = _dag->subgraph( std::get<0>(_jac[ib]), std::get<3>(_jac[ib]) );
-
-    if( _maxop < _opsys[ib].size() ) _maxop = _opsys[ib].size();
-    if( _maxop < _opjac[ib].size() ) _maxop = _opjac[ib].size();
+    _sgjac[ib] = _dag->subgraph( std::get<0>(_jac[ib]), std::get<3>(_jac[ib]) );
+    if( _maxop < _sgsys[ib].l_op.size() ) _maxop = _sgsys[ib].l_op.size();
+    if( _maxop < _sgjac[ib].l_op.size() ) _maxop = _sgjac[ib].l_op.size();
   }
+
+  // Initializing bound-crossing by dependent branch to true
+  _xlodep.assign( _ndep, true );
+  _xupdep.assign( _ndep, true );
+  _uniblk.assign( _noblk, false );
+
+  // Initialize preconditionning matrix to zero
+  _Y.zero();
 
   return true;
 }
@@ -564,9 +595,6 @@ AEBND<T,PMT,PVT>::_init
   // Populate parameters in variable arrays
   for( unsigned i=0; i<np; i++ )
     _Ivar[_ndep+i] = _Iref[_ndep+i] = Ip[i];
-
-  // Initialize preconditionning matrix to zero
-  _Y.zero();
 
   return _issetup;
 }
@@ -601,9 +629,6 @@ AEBND<T,PMT,PVT>::_init
     _PMvar[_ndep+i] = _PMref[_ndep+i] = PMp[i];
   }
 
-  // Initialize preconditionning matrix to zero
-  _Y.zero();
-
   return _issetup;
 }
 
@@ -623,6 +648,52 @@ AEBND<T,PMT,PVT>::_cvgtest
   return Op<T>::diam(x.R()) <= options.ATOL? true: false;
 }
 
+//template <typename T, typename PMT, typename PVT>
+//inline bool
+//AEBND<T,PMT,PVT>::_cvgtest
+//( const unsigned nx, const T*x, const T*x0 ) const
+//{
+//  // Relative tolerance uses the largest improvement divided by interval width in any direction
+//  // Absolute tolerance uses the largest improvement in any direction
+//  double rtol = 0., atol = 0.;
+//  for( unsigned i=0; i<nx; i++ ){	
+//    double diamxi = Op<T>::diam(x[i]);
+//    if( diamxi > 0. ){
+//      rtol = std::max(rtol, std::fabs(Op<T>::l(x[i]) - Op<T>::l(x0[i]))/diamxi);
+//      rtol = std::max(rtol, std::fabs(Op<T>::u(x0[i]) - Op<T>::u(x[i]))/diamxi);
+//      atol = std::max(atol, std::fabs(Op<T>::l(x[i]) - Op<T>::l(x0[i])));
+//      atol = std::max(atol, std::fabs(Op<T>::u(x0[i]) - Op<T>::u(x[i])));
+//    }
+//  }
+//#ifdef MC__AEBND_DEBUG
+//  std::cout << "RTOL =" << rtol  << "  ATOL =" << atol << std::endl;
+//#endif
+//  return rtol <= options.RTOL || atol <= options.ATOL? true: false;
+//}
+
+template <typename T, typename PMT, typename PVT>
+inline bool
+AEBND<T,PMT,PVT>::_crosstest
+( const unsigned nx, const T*x, const T*x0, int*xlodep, int*xupdep ) const
+{
+  // when applying a parametric intevval Newton-type method, if any improvement ia observed
+  // on any of the bounds, it is known that a solution curve does not cross that bound
+  // see: Stuber, M. (2013), PhD Thesis, Corollary 3.4.3.
+  bool cross = false;
+  for( unsigned i=0; i<nx; i++ ){	
+    if( xlodep[i] && Op<T>::l(x[i]) > Op<T>::l(x0[i]) ) xlodep[i] = false;
+    if( xupdep[i] && Op<T>::u(x[i]) < Op<T>::u(x0[i]) ) xupdep[i] = false;
+#ifdef MC__AEBND_DEBUG
+    std::cout << "(" << (xlodep[i]?"T":"F") << "," << (xupdep[i]?"T":"F") << ") ";
+#endif
+    cross = xlodep[i] || xupdep[i];
+  }
+#ifdef MC__AEBND_DEBUG
+  std::cout << std::endl;
+#endif
+  return cross;
+}
+
 template <typename T, typename PMT, typename PVT>
 inline bool
 AEBND<T,PMT,PVT>::_cvgtest
@@ -632,18 +703,63 @@ AEBND<T,PMT,PVT>::_cvgtest
   // Absolute tolerance uses the largest improvement in any direction
   double rtol = 0., atol = 0.;
   for( unsigned i=0; i<nx; i++ ){	
-    double diamxi = Op<T>::diam(x[i]);
+    double diamxi = Op<T>::diam(x[i]), diamx0i = Op<T>::diam(x0[i]);
     if( diamxi > 0. ){
-      rtol = std::max(rtol, std::fabs(Op<T>::l(x[i]) - Op<T>::l(x0[i]))/diamxi);
-      rtol = std::max(rtol, std::fabs(Op<T>::u(x0[i]) - Op<T>::u(x[i]))/diamxi);
-      atol = std::max(atol, std::fabs(Op<T>::l(x[i]) - Op<T>::l(x0[i])));
-      atol = std::max(atol, std::fabs(Op<T>::u(x0[i]) - Op<T>::u(x[i])));
+      rtol = std::max( rtol, std::fabs( diamx0i - diamxi ) / diamxi );
+      atol = std::max( atol, std::fabs( diamx0i - diamxi ) );
     }
   }
 #ifdef MC__AEBND_DEBUG
   std::cout << "RTOL =" << rtol  << "  ATOL =" << atol << std::endl;
 #endif
   return rtol <= options.RTOL || atol <= options.ATOL? true: false;
+}
+
+//template <typename T, typename PMT, typename PVT>
+//inline bool
+//AEBND<T,PMT,PVT>::_cvgtest
+//( const unsigned nx, const PVT*x, const PVT*x0 ) const
+//{
+//  if( options.PMNOREM ) return false;
+//  // Relative tolerance uses the largest improvement divided by interval width in any direction
+//  // Absolute tolerance uses the largest improvement in any direction
+//  double rtol = 0., atol = 0.;
+//  std::cout << "diam(R)" << std::scientific << std::setprecision(3);
+//  for( unsigned i=0; i<nx; i++ ){	
+//    double diamxi = Op<T>::diam(x[i].R());
+//    if( diamxi > 0. ){
+//      rtol = std::max(rtol, std::fabs(Op<T>::l(x[i].R()) - Op<T>::l(x0[i].R()))/diamxi);
+//      rtol = std::max(rtol, std::fabs(Op<T>::u(x0[i].R()) - Op<T>::u(x[i].R()))/diamxi);
+//      atol = std::max(atol, std::fabs(Op<T>::l(x[i].R()) - Op<T>::l(x0[i].R())));
+//      atol = std::max(atol, std::fabs(Op<T>::u(x0[i].R()) - Op<T>::u(x[i].R())));
+//    }
+//    std::cout << "  " << Op<T>::diam(x[i].R());
+//  }
+//  std::cout << std::endl;
+//#ifdef MC__AEBND_DEBUG
+//  std::cout << "RTOL =" << rtol  << "  ATOL =" << atol << std::endl;
+//#endif
+//  return rtol <= options.RTOL || atol <= options.ATOL? true: false;
+//}
+
+template <typename T, typename PMT, typename PVT>
+inline bool
+AEBND<T,PMT,PVT>::_crosstest
+( const unsigned nx, const PVT*x, const PVT*x0, int*xlodep, int*xupdep ) const
+{
+  // when applying a parametric intevval Newton-type method, if any improvement ia observed
+  // on any of the bounds, it is known that a solution curve does not cross that bound
+  // see: Stuber, M. (2013), PhD Thesis, Corollary 3.4.3.
+  bool cross = false;
+  for( unsigned i=0; i<nx; i++ ){	
+    if( xlodep[i] && Op<T>::l(x[i].R()) > Op<T>::l(x0[i].R()) ) xlodep[i] = false;
+    if( xupdep[i] && Op<T>::u(x[i].R()) < Op<T>::u(x0[i].R()) ) xupdep[i] = false;
+#ifdef MC__AEBND_DEBUG
+    std::cout << "(" << (xlodep[i]?"T":"F") << "," << (xupdep[i]?"T":"F") << ") ";
+#endif
+    cross = xlodep[i] || xupdep[i];
+  }
+  return cross;
 }
 
 template <typename T, typename PMT, typename PVT>
@@ -655,15 +771,16 @@ AEBND<T,PMT,PVT>::_cvgtest
   // Relative tolerance uses the largest improvement divided by interval width in any direction
   // Absolute tolerance uses the largest improvement in any direction
   double rtol = 0., atol = 0.;
+  //std::cout << "diam(R)" << std::scientific << std::setprecision(3);
   for( unsigned i=0; i<nx; i++ ){	
-    double diamxi = Op<T>::diam(x[i].R());
+    double diamxi = Op<T>::diam(x[i].R()), diamx0i = Op<T>::diam(x0[i].R());
     if( diamxi > 0. ){
-      rtol = std::max(rtol, std::fabs(Op<T>::l(x[i].R()) - Op<T>::l(x0[i].R()))/diamxi);
-      rtol = std::max(rtol, std::fabs(Op<T>::u(x0[i].R()) - Op<T>::u(x[i].R()))/diamxi);
-      atol = std::max(atol, std::fabs(Op<T>::l(x[i].R()) - Op<T>::l(x0[i].R())));
-      atol = std::max(atol, std::fabs(Op<T>::u(x0[i].R()) - Op<T>::u(x[i].R())));
+      rtol = std::max( rtol, std::fabs( diamx0i - diamxi ) / diamxi );
+      atol = std::max( atol, std::fabs( diamx0i - diamxi ) );
     }
+    //std::cout << "  " << diamxi;
   }
+  //std::cout << std::endl;
 #ifdef MC__AEBND_DEBUG
   std::cout << "RTOL =" << rtol  << "  ATOL =" << atol << std::endl;
 #endif
@@ -767,7 +884,7 @@ AEBND<T,PMT,PVT>::_precondlin
       o_f.close();
 #endif
       _stats_ae.evaljac -= cpuclock();
-      _dag->eval( _opjac[ib], wkjacf, neJAC, pJAC, vJAC, _nvar-_pblk[ib],
+      _dag->eval( _sgjac[ib], wkjacf, neJAC, pJAC, vJAC, _nvar-_pblk[ib],
                   _var.data()+_pblk[ib], jacvar+_pblk[ib] );
       _stats_ae.evaljac += cpuclock();
 #ifdef MC__AEBND_DEBUG
@@ -901,19 +1018,17 @@ AEBND<T,PMT,PVT>::_precondlin
     if( f ){
       //setting b = -Y*f(x)
       _stats_ae.evalrhs -= cpuclock();
-      //_dag->eval( _opsys[ib], wkf, _ldblk[ib], _sys.data()+_pblk[ib], f+_pblk[ib],
-      //            _nvar-_pblk[ib], _var.data()+_pblk[ib], ref+_pblk[ib] );
-      _dag->eval( _opsys[ib], wkf, _nblk[ib], _sys.data()+_pblk[ib], f+_pblk[ib],
+      _dag->eval( _sgsys[ib], wkf, _nblk[ib], _sys.data()+_pblk[ib], f+_pblk[ib],
                   _nvar-_pblk[ib], _var.data()+_pblk[ib], ref+_pblk[ib] );
       // Update function value for previous block (if any)
       if( ib && _nblk[ib] < _ldblk[ib] )
-        _dag->eval( _opsys[ib-1], wkf, _nblk[ib-1], _sys.data()+_pblk[ib-1], f+_pblk[ib-1],
+        _dag->eval( _sgsys[ib-1], wkf, _nblk[ib-1], _sys.data()+_pblk[ib-1], f+_pblk[ib-1],
                     _nvar-_pblk[ib-1], _var.data()+_pblk[ib-1], ref+_pblk[ib-1] );
       _stats_ae.evalrhs += cpuclock();
 #ifdef MC__AEBND_DEBUG
-      _dag->output( _opsys[ib] );
+      _dag->output( _sgsys[ib] );
       //std::cout << "Intermediates in Block #" << ib+1 << ":\n";
-      //for (unsigned i=0; i<_opsys[ib].size(); i++ ) std::cout << opf[i] << std::endl;
+      //for (unsigned i=0; i<_sgsys[ib].size(); i++ ) std::cout << opf[i] << std::endl;
       std::cout << "reference in Block #" << ib+1 << ":\n";
       for (unsigned i=0; i<_nvar-_pblk[ib]; i++ )
         std::cout << _var[_pblk[ib]+i] << " = " << ref[_pblk[ib]+i] << std::endl;
@@ -1040,11 +1155,21 @@ AEBND<T,PMT,PVT>::_gs
           os << _var[_pblk[ib]+i] << " = " << varblk[i] << std::endl;
       }
 
+      // Update solution branch uniqueness
+      if( ( _nblk[ib] == 1 && ( Op<U>::l(G[_ndx(0,0,_ldblk[ib])]) > 0
+                             || Op<U>::u(G[_ndx(0,0,_ldblk[ib])]) < 0 ) )
+        || !_crosstest( _nblk[ib], varblk, varblk0.data(), _xlodep.data(), _xupdep.data() ) )
+        _uniblk[ib] = true;
+
       // Check convergence
       if( _cvgtest( _nblk[ib], varblk, varblk0.data() ) ) break;
     }
     catch(...){ return FAILURE; }
   }
+
+#ifdef MC__AEBND_DEBUG
+      std::cout << "Unique Solution in Block #" << ib << (_uniblk[ib]?": T\n":": F\n");
+#endif
 
   return NORMAL;
 }

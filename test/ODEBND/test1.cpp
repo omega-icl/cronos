@@ -3,9 +3,12 @@ const unsigned int NSAMP = 50;	// <- Number of sampling points for inner approx.
 #define SAVE_RESULTS		    // <- Whether to save bounds to file
 #undef  TEST_CONVERGENCE	    // <- Whether to test Hausdorff convergence of bounds
 #define USE_CMODEL		        // <- whether to use Chebyshev models or Taylor models
+#define USE_VALIDATED           // <- whether to use the validated integrator for comparison
 
 #include "odebnd_sundials.hpp"
-#include "odebnd_val.hpp"
+#ifdef USE_VALIDATED
+  #include "odebnd_val.hpp"
+#endif
 
 #include "interval.hpp"
 typedef mc::Interval I;
@@ -89,7 +92,7 @@ int main()
   }
   PV PMf[NF];
 
-
+#ifdef USE_VALIDATED
   /////////////////////////////////////////////////////////////////////////
   // Bound ODE trajectories - validated integrator
   mc::ODEBND_VAL<I,PM,PV> LV1;
@@ -131,10 +134,10 @@ int main()
     std::cout << mc::Op<I>::diam( PMp0[0].B() ) << "  " << Hxk[NS][0] << std::endl;
   }
 #endif
-
+#endif
 
   /////////////////////////////////////////////////////////////////////////
-  // ODE trajectories bounding
+  // ODE trajectories bounding - differential inequalities
 
   mc::ODEBND_SUNDIALS<I,PM,PV> LV2;
   LV2.set_dag( &IVP );
@@ -154,10 +157,11 @@ int main()
   LV2.options.NMAX      = 3000;
   LV2.options.DISPLAY   = 1;
 #if defined( SAVE_RESULTS )
-  LV2.options.RESRECORD = 100;
+  LV2.options.RESRECORD = 500;
 #endif
 
   std::cout << "\nNON_VALIDATED INTEGRATION - INNER-APPROXIMATION OF REACHABLE SET:\n\n";
+  LV2.options.ODESLVS   = LV2.options;
   LV2.bounds( NSAMP, Ip, Ixk, If );
 #if defined( SAVE_RESULTS )
   std::ofstream apprec( "test1_APPROX_STA.dat", std::ios_base::out );

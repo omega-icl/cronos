@@ -148,7 +148,7 @@ int main()
   OC2.options.TORD      = 4;
   OC2.options.H0        = 0.02;
   OC2.options.LBLK      =
-  OC2.options.DBLK      = 2/NS;
+  OC2.options.DBLK      = 50/NS;
   OC2.options.DISPLAY   = 1;
   OC2.options.RESRECORD = true;
   OC2.options.ODESLVS.RESRECORD = 100;
@@ -157,7 +157,7 @@ int main()
   OC2.options.AEBND.RTOL    =
   OC2.options.AEBND.ATOL    = 1e-10;
   OC2.options.AEBND.INTERBND = true;
-  OC2.options.AEBND.BOUNDER = mc::AEBND<I,PM,PV>::Options::ALGORITHM::GS;//KRAW;//AUTO;
+  OC2.options.AEBND.BOUNDER = mc::AEBND<I,PM,PV>::Options::ALGORITHM::GE;//KRAW;//AUTO;
   OC2.options.AEBND.PRECOND = mc::AEBND<I,PM,PV>::Options::PRECONDITIONING::INVMB;//INVBD;//NONE;
   OC2.options.AEBND.BLKDEC  = mc::AEBND<I,PM,PV>::Options::DECOMPOSITION::RECUR;//DIAG;//NONE;
   OC2.setup();

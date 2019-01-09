@@ -90,7 +90,7 @@ int main()
   // Optimal response trajectories
   OC->options.ODESLVS.DISPLAY   = 1;
   OC->options.ODESLVS.RESRECORD = 20;
-  OC->states( OC->solution().p );
+  OC->states( OC->solution().p.data() );
   std::ofstream direcSTA( "test3_STA.dat", std::ios_base::out );
   OC->record( direcSTA );
   direcSTA.close();

@@ -53,6 +53,9 @@ int main()
     for( unsigned ix=0; ix<NX; ix++ )
       std::cout << "  x*(" << ix << ") = " << NLP->solution().p[NP+ix]
                 << std::endl;
+    std::cout << "FEASIBLE:   " << NLP->is_feasible( 1e-7 ) << std::endl;
+    std::cout << "STATIONARY: " << NLP->is_stationary( 1e-7 ) << std::endl;
+
   }
 
   return 0;

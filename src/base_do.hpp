@@ -8,7 +8,7 @@
 #include "base_opt.hpp"
 #include "base_de.hpp"
 
-//#undef MC__BASE_DO__DEBUG
+#undef MC__BASE_DO__DEBUG
 
 namespace mc
 {
@@ -56,40 +56,49 @@ public:
   //! @brief Class destructor
   virtual ~BASE_DO()
     {}
-  //! @brief Get constraints
-  const std::tuple< std::vector<t_CTR>, std::vector< std::map<unsigned,FFVar> >, std::vector<FFVar> >& ctr
-    () const
+  //! @brief Get constraint functions
+  const std::tuple< std::vector<t_CTR>, std::vector< std::map<unsigned,FFVar> >,
+                    std::vector<FFVar>, std::vector<bool> >& ctr
+    ()
+    const
     { return _ctr; }
 
-  //! @brief Reset constraints
-  void reset_ctr()
-    { std::get<0>(_ctr).clear(); std::get<1>(_ctr).clear(); std::get<2>(_ctr).clear(); }
+  //! @brief Reset constraint functions
+  void reset_ctr
+    ()
+    { std::get<0>(_ctr).clear(); std::get<1>(_ctr).clear(); std::get<2>(_ctr).clear();
+      std::get<3>(_ctr).clear(); }
 
-  //! @brief Add constraint
+  //! @brief Add constraint function
   void add_ctr
-    ( const t_CTR type, const std::map<unsigned,FFVar>&ctrmap )
+    ( const t_CTR type, const std::map<unsigned,FFVar>&ctrmap, const bool is_redundant=false )
     { std::get<0>(_ctr).push_back( type );
       std::get<1>(_ctr).push_back( ctrmap );
-      std::get<2>(_ctr).push_back( FFVar( ctrmap.begin()->second.dag() ) ); }
+      std::get<2>(_ctr).push_back( FFVar( ctrmap.begin()->second.dag() ) );
+      std::get<3>(_ctr).push_back( is_redundant ); }
   void add_ctr
-    ( const t_CTR type, const std::pair<unsigned,FFVar>&ctr )
+    ( const t_CTR type, const std::pair<unsigned,FFVar>&ctr, const bool is_redundant=false )
     { std::get<0>(_ctr).push_back( type );
       std::map<unsigned,FFVar> ctrmap; ctrmap.insert( ctr );
       std::get<1>(_ctr).push_back( ctrmap );
-      std::get<2>(_ctr).push_back( FFVar( ctr.second.dag() ) ); }
+      std::get<2>(_ctr).push_back( FFVar( ctr.second.dag() ) );
+      std::get<3>(_ctr).push_back( is_redundant ); }
   void add_ctr
-    ( const t_CTR type, const FFVar&ctr )
+    ( const t_CTR type, const FFVar&ctr, const bool is_redundant=false )
     { std::get<0>(_ctr).push_back( type );
       std::map<unsigned,FFVar> ctrmap; ctrmap.insert( std::make_pair(0,ctr) );
       std::get<1>(_ctr).push_back( ctrmap );
-      std::get<2>(_ctr).push_back( FFVar( ctr.dag() ) ); }
+      std::get<2>(_ctr).push_back( FFVar( ctr.dag() ) );
+      std::get<3>(_ctr).push_back( is_redundant ); }
 
-  //! @brief Get objective
-  const std::tuple< std::vector<t_OBJ>, std::vector< std::map<unsigned,FFVar> >, std::vector<FFVar> >& obj
-    () const
+  //! @brief Get objective function
+  const std::tuple< std::vector<t_OBJ>, std::vector< std::map<unsigned,FFVar> >,
+                    std::vector<FFVar> >& obj
+    ()
+    const
     { return _obj; }
 
-  //! @brief Set objective
+  //! @brief Set objective function
   void set_obj
     ( const t_OBJ type, const std::map<unsigned,FFVar>&objmap )
     { std::get<0>(_obj).clear(); std::get<0>(_obj).push_back( type );
@@ -118,11 +127,32 @@ public:
     ();
 
 protected:
-  //! @brief constraints (type, constraint variable, constraint multiplier)
-  std::tuple< std::vector<t_CTR>, std::vector< std::map<unsigned,FFVar> >, std::vector<FFVar> > _ctr;
+  //! @brief constraints (types, constraint variables, constraint multipliers, redundancy status)
+  std::tuple< std::vector<t_CTR>, std::vector< std::map<unsigned,FFVar> >, std::vector<FFVar>,
+              std::vector<bool> > _ctr;
 
   //! @brief objective (type, cost variable, cost multiplier)
-  std::tuple< std::vector<t_OBJ>, std::vector< std::map<unsigned,FFVar> >, std::vector<FFVar> > _obj;
+  std::tuple< std::vector<t_OBJ>, std::vector< std::map<unsigned,FFVar> >,
+              std::vector<FFVar> > _obj;
+
+  //! @brief constraints (types, NCO variables), including dependent equations
+  std::tuple< std::vector<t_CTR>, std::vector<FFVar> > _nco;
+
+  //! @brief Get 1st-order necessary conditions for optimality (NCO)
+  const std::tuple< std::vector<t_CTR>, std::vector<FFVar> >& nco
+    ()
+    const
+    { return _nco; }
+
+  //! @brief Reset NCO
+  void reset_nco
+    ()
+    { std::get<0>(_nco).clear(); std::get<1>(_nco).clear(); }
+
+  //! @brief Define NCO based on cost/constraint functions
+  template<typename T>
+  void set_nco
+    ( const T*P, const unsigned*tvar );
 
   //! @brief Define state functions based on cost/constraint functions
   bool set_function
@@ -135,32 +165,38 @@ protected:
   //! @brief number of time stages
   unsigned _ns;
 
-  //! @brief vector of functionals
-  std::vector<FFVar> _fct;
-
-  //! @brief depency map for state-dependent functions
-  t_DepVar _mapFCTSTA;
-
-  //! @brief indices of state-dependent functions
-  std::set<unsigned> _ndxFCTSTA;
-
-  //! @brief vector of const pointers to state-dependent functions (assumes additive contributions) in each stage of IVP-DAE system
-  std::vector<FFVar> _vFCTSTA;
+  //! @brief vector of function
+  std::vector<FFVar> _vec_FCT_AGGR;
 
   //! @brief vector of parameter-dependent functions (no state dependency)
-  std::vector<FFVar> _vFCTPAR;
+  std::vector<FFVar> _vec_FCT_PAR;
+
+  //! @brief indices of state-dependent functions
+  std::set<unsigned> _set_FCT_IVP;
+
+  //! @brief vector of state-dependent functions (assumes additive contributions) in each stage of IVP-DAE system
+  std::vector<FFVar> _vec_FCT_IVP_STG;
+
+  //! @brief vector of variables mapping state-dependent functions
+  std::vector<FFVar> _vec_VAR_FCT_IVP;
+
+  //! @brief vector of variables mapping state-dependent function derivatives
+  std::vector<FFVar> _vec_VAR_DFCT_IVP;
 
   //! @brief indices of parameters participating in state-dependent functions
-  std::set<unsigned> _ndxFCTDEP;
+  std::set<unsigned> _set_PAR_FCT_IVP;
 
   //! @brief parameters participating in state-dependent functions
-  std::vector<FFVar> _vFCTDEP;
+  std::vector<FFVar> _vec_PAR_FCT_IVP;
 
   //! @brief indices of parameters participating in parametric IVP
-  std::set<unsigned> _ndxSTADEP;
+  std::set<unsigned> _set_PAR_STA;
 
   //! @brief parameters participating in parametric IVP
-  std::vector<FFVar> _vSTADEP;
+  std::vector<FFVar> _vec_PAR_STA;
+
+  //! @brief depency map for state-dependent functions
+  t_DepVar _map_STA_FCT_IVP;
 
 private:
   //! @brief Return number of time stages in cost/constraint functions
@@ -173,7 +209,7 @@ private:
   //! @brief Build-up state function
   void _build_function
     ( const unsigned is, std::map<unsigned,FFVar>::iterator&jt,
-      const unsigned ic );
+      const unsigned ifct );
 
   //! @brief Private using directive to block method
   using BASE_DE::set_function;
@@ -187,7 +223,9 @@ inline bool
 BASE_DO::_set_ns
 ()
 {
-  _ns = std::get<1>(_obj)[0].rbegin()->first+1;
+  // #stages in cost
+  _ns = ( std::get<1>(_obj).empty()? 0: std::get<1>(_obj)[0].rbegin()->first+1 );
+  // #stages in constraints
   auto it = std::get<1>(_ctr).begin();
   for( ; it!=std::get<1>(_ctr).end(); ++it ){
     const unsigned is = it->rbegin()->first+1;
@@ -201,8 +239,8 @@ BASE_DO::state_depend
 ( const unsigned ifct )
 {
   assert( ifct < _nf );
-  for( auto it=_mapFCTSTA.begin(); it!=_mapFCTSTA.end(); ++it )
-    if( _fct[ifct].dep().dep( it->second.id().second ).first )
+  for( auto it=_map_STA_FCT_IVP.begin(); it!=_map_STA_FCT_IVP.end(); ++it )
+    if( _vec_FCT_AGGR[ifct].dep().dep( it->second.id().second ).first )
       return true;
   return false;
 }
@@ -212,56 +250,62 @@ BASE_DO::set_depend
 ()
 {
   if( !set_function() || !BASE_DE::set_depend( _ns ) ) return false;
-  _ndxFCTSTA.clear();
-  for( unsigned ic=0; ic<_nf; ic++ ){
+  _set_FCT_IVP.clear();
+  for( unsigned ifct=0; ifct<_nf; ifct++ ){
 #ifdef MC__BASE_DO__DEBUG
-    std::cout << "FCT[" << ic << "]: " << state_depend(ic) << std::endl;
+    std::cout << "FCT[" << ifct << "]: " << state_depend(ifct) << std::endl;
 #endif
-    if( state_depend( ic ) ) _ndxFCTSTA.insert( ic );
+    if( state_depend( ifct ) ) _set_FCT_IVP.insert( ifct );
   }
-
-  // Function dependencies
-  _vFCTSTA.resize( _ns*_ndxFCTSTA.size() );
-  _vFCTPAR.clear();
-  _ndxFCTDEP.clear();
-  for( unsigned ic=0, icsta=0; ic<_nf; ic++ ){
-    auto itc = _ndxFCTSTA.find( ic );
-    // State-dependent functions
-    if( itc != _ndxFCTSTA.end() ){
-      for( unsigned is=0; is<_ns; is++ )
-        _vFCTSTA[is*_ndxFCTSTA.size()+icsta] = _vFCT[is][ic];
-      icsta++;
-      // Append parametric dependencies
-      for( unsigned ip=0; ip<_np; ip++ ){
-        bool dep = _depF[ic].dep( _pP[ip].id().second ).first;
-        if( dep ) _ndxFCTDEP.insert( ip );
-      }
-    }
-    // Parameter-dependent functions
-    else{
-      _vFCTPAR.push_back( _fct[ic] );
-    }
-  }
-
-  // Parameters participating in state-dependent functions
-  _vFCTDEP.clear();
-  for( auto itp=_ndxFCTDEP.begin(); itp!=_ndxFCTDEP.end(); ++itp )
-    _vFCTDEP.push_back( _pP[*itp] );
 
   // Parametric dependencies in IVP
-  _ndxSTADEP.clear();
-  for( auto it=_mapFCTSTA.begin(); it!=_mapFCTSTA.end(); ++it )
+  _set_PAR_STA.clear();
+  for( auto it=_map_STA_FCT_IVP.begin(); it!=_map_STA_FCT_IVP.end(); ++it )
     for( unsigned ip=0; ip<_np; ip++ ){
       bool dep = it->first.second < _nx?
                  _depX[_nx*it->first.first+it->first.second].dep( _pP[ip].id().second ).first:
                  _depQ[_nq*it->first.first+it->first.second-_nx].dep( _pP[ip].id().second ).first;
-      if( dep ) _ndxSTADEP.insert( ip );
+      if( dep ) _set_PAR_STA.insert( ip );
     }
 
   // Parameters participating in IVP
-  _vSTADEP.clear();
-  for( auto itp=_ndxSTADEP.begin(); itp!=_ndxSTADEP.end(); ++itp )
-    _vSTADEP.push_back( _pP[*itp] );
+  _vec_PAR_STA.clear();
+  for( auto itp=_set_PAR_STA.begin(); itp!=_set_PAR_STA.end(); ++itp )
+    _vec_PAR_STA.push_back( _pP[*itp] );
+
+  // Create vectors of functions with function "variables"
+  _vec_VAR_FCT_IVP = _vec_FCT_AGGR;
+  unsigned ifct = 0;
+  for( auto it=_set_FCT_IVP.begin(); it!=_set_FCT_IVP.end(); ++it, ifct++ )
+    _vec_VAR_FCT_IVP[*it] = FFVar( _pDAG );
+
+  // Function dependencies
+  _vec_FCT_IVP_STG.resize( _ns*_set_FCT_IVP.size() );
+  _vec_FCT_PAR.clear();
+  _set_PAR_FCT_IVP = _set_PAR_STA;//.clear();
+  for( unsigned ifct=0, ista=0; ifct<_nf; ifct++ ){
+    auto itc = _set_FCT_IVP.find( ifct );
+    // State-dependent functions
+    if( itc != _set_FCT_IVP.end() ){
+      for( unsigned is=0; is<_ns; is++ )
+        _vec_FCT_IVP_STG[is*_set_FCT_IVP.size()+ista] = _vFCT[is][ifct];
+      ista++;
+      // Append parametric dependencies
+      for( unsigned ip=0; ip<_np; ip++ ){
+        bool dep = _depF[ifct].dep( _pP[ip].id().second ).first;
+        if( dep ) _set_PAR_FCT_IVP.insert( ip );
+      }
+    }
+    // Parameter-dependent functions
+    else{
+      _vec_FCT_PAR.push_back( _vec_FCT_AGGR[ifct] );
+    }
+  }
+
+  // Parameters participating in state-dependent functions
+  _vec_PAR_FCT_IVP.clear();
+  for( auto itp=_set_PAR_FCT_IVP.begin(); itp!=_set_PAR_FCT_IVP.end(); ++itp )
+    _vec_PAR_FCT_IVP.push_back( _pP[*itp] );
 
   return true;
 }
@@ -269,7 +313,7 @@ BASE_DO::set_depend
 inline void
 BASE_DO::_build_function
 ( const unsigned is, std::map<unsigned,FFVar>::iterator&jt,
-  const unsigned ic )
+  const unsigned ifct )
 {
   // Detect state/quadrature dependencies
   std::vector<FFVar> termsta, termdep;
@@ -282,20 +326,20 @@ BASE_DO::_build_function
     const unsigned ixq = ( jx!=_ndxX.end()? jx->second: _nx+jq->second );
     const FFVar&pXQ = ( jx!=_ndxX.end()? _pX[jx->second]: _pQ[jq->second] );
     auto ndxq = std::make_pair(is,ixq); 
-    if( _mapFCTSTA.find( ndxq ) == _mapFCTSTA.end() )
-      _mapFCTSTA[ndxq] = FFVar( _pDAG );
+    if( _map_STA_FCT_IVP.find( ndxq ) == _map_STA_FCT_IVP.end() )
+      _map_STA_FCT_IVP[ndxq] = FFVar( _pDAG );
     termsta.push_back( pXQ );
-    termdep.push_back( _mapFCTSTA[ndxq] );
+    termdep.push_back( _map_STA_FCT_IVP[ndxq] );
   }
-  // Append objective term to _fct[ic]
+  // Append objective term to _vec_FCT_AGGR[ifct]
   if( termdep.size() ){
     const mc::FFVar* term = _pDAG->compose( 1, &jt->second, termdep.size(),
                                             termsta.data(), termdep.data() );
-    _fct[ic] += term[0];
+    _vec_FCT_AGGR[ifct] += term[0];
     delete[] term;
   }
   else{
-    _fct[ic] += jt->second;
+    _vec_FCT_AGGR[ifct] += jt->second;
   }
 }
 
@@ -305,53 +349,57 @@ BASE_DO::set_function
 {
   // Resize function vector
   if( !_set_ns() ) return false;
-  _nf = 1 + std::get<0>(_ctr).size();
+  _nf = std::get<0>(_obj).size() + std::get<0>(_ctr).size();
   _pFCT.resize( _ns*_nf );
-  _fct.assign( _nf, FFVar(0) );
-  _mapFCTSTA.clear();
+  _vec_FCT_AGGR.assign( _nf, FFVar(0) );
+  _map_STA_FCT_IVP.clear();
 
   // Append cost contributions
-  unsigned is = 0;
-  auto jt = std::get<1>(_obj)[0].begin();
-  for( ; jt!=std::get<1>(_obj)[0].end(); ++jt ){
-    for( ; is<jt->first; ++is ) _pFCT[_nf*is] = 0;
-    _pFCT[_nf*jt->first] = jt->second;
-    _build_function( is, jt, 0 );
-    ++is;
-  }
-  for( ; is<_ns; ++is ) _pFCT[_nf*is] = 0;
-#ifdef MC__BASE_DO__DEBUG
-  std::cout << "_fct[0] <-- " << _fct[0].dep() << std::endl;
-  //_pDAG->output( _pDAG->subgraph( 1, &_fct[0] ) );
-  //{ int dum; std::cout << "PAUSED "; std::cin >> dum; }
-#endif
-
-  // Append constraint contributions
-  auto it = std::get<1>(_ctr).begin();
-  for( unsigned ic=1; it!=std::get<1>(_ctr).end(); ++it, ++ic ){
+  unsigned ifct = 0;
+  auto itobj = std::get<1>(_obj).begin();
+  for( ; itobj!=std::get<1>(_obj).end(); ++itobj, ++ifct ){
     unsigned is = 0;
-    auto jt = it->begin();
-    for( ; jt!=it->end(); ++jt ){
-      for( ; is<jt->first; ++is ) _pFCT[_nf*is+ic] = 0;
-      _pFCT[_nf*jt->first+ic] = jt->second;
-      _build_function( is, jt, ic );
+    auto jt = itobj->begin();
+    for( ; jt!=itobj->end(); ++jt ){
+      for( ; is<jt->first; ++is ) _pFCT[_nf*is+ifct] = 0;
+      _pFCT[_nf*jt->first+ifct] = jt->second;
+      _build_function( is, jt, ifct );
       ++is;
     }
-    for( ; is<_ns; ++is ) _pFCT[_nf*is+ic] = 0;
+    for( ; is<_ns; ++is ) _pFCT[_nf*is+ifct] = 0;
 #ifdef MC__BASE_DO__DEBUG
-    std::cout << "_fct[" << ic << "] <-- " << _fct[ic].dep() << std::endl;
-    //_pDAG->output( _pDAG->subgraph( 1, &_fct[ic] ) );
+    std::cout << "_vec_FCT_AGGR[" << ifct << "] <-- " << _vec_FCT_AGGR[ifct].dep() << std::endl;
+    //_pDAG->output( _pDAG->subgraph( 1, &_vec_FCT_AGGR[ifct] ) );
+    //{ int dum; std::cout << "PAUSED "; std::cin >> dum; }
+#endif
+  }
+
+  // Append constraint contributions
+  auto itctr = std::get<1>(_ctr).begin();
+  for( ; itctr!=std::get<1>(_ctr).end(); ++itctr, ++ifct ){
+    unsigned is = 0;
+    auto jt = itctr->begin();
+    for( ; jt!=itctr->end(); ++jt ){
+      for( ; is<jt->first; ++is ) _pFCT[_nf*is+ifct] = 0;
+      _pFCT[_nf*jt->first+ifct] = jt->second;
+      _build_function( is, jt, ifct );
+      ++is;
+    }
+    for( ; is<_ns; ++is ) _pFCT[_nf*is+ifct] = 0;
+#ifdef MC__BASE_DO__DEBUG
+    std::cout << "_vec_FCT_AGGR[" << ifct << "] <-- " << _vec_FCT_AGGR[ifct].dep() << std::endl;
+    //_pDAG->output( _pDAG->subgraph( 1, &_vec_FCT_AGGR[ifct] ) );
     //{ int dum; std::cout << "PAUSED "; std::cin >> dum; }
 #endif
   }
 
 #ifdef MC__BASE_DO__DEBUG
-  for( auto itv=_mapFCTSTA.begin(); itv!=_mapFCTSTA.end(); ++itv )
-    std::cout << "_mapFCTSTA[" << itv->first.first << "," << itv->first.second << "] = "
+  for( auto itv=_map_STA_FCT_IVP.begin(); itv!=_map_STA_FCT_IVP.end(); ++itv )
+    std::cout << "_map_STA_FCT_IVP[" << itv->first.first << "," << itv->first.second << "] = "
               << itv->second << std::endl;
   for( unsigned is=0; is<_ns; is++ )
-    for( unsigned ic=0; ic<_nf; ic++ )
-      std::cout << "FCT[" << is << "][" << ic << "] = " << _pFCT[_nf*is+ic] << std::endl;
+    for( unsigned ifct=0; ifct<_nf; ifct++ )
+      std::cout << "FCT[" << is << "][" << ifct << "] = " << _pFCT[_nf*is+ifct] << std::endl;
   int dum;  std::cin >> dum; 
 #endif
 
@@ -362,36 +410,102 @@ BASE_DO::set_function
   return true;
 }
 
-//! @brief C++ structure for holding the solution of dynamic programs
-////////////////////////////////////////////////////////////////////////
-//! mc::SOLUTION_DO is a C++ structure for holding the solution of 
-//! dynamic programs, including optimal point, KKT multiplers, cost
-//! and constraint functions.
-////////////////////////////////////////////////////////////////////////
-struct SOLUTION_DO
+template<typename T>
+inline void
+BASE_DO::set_nco
+( const T*P, const unsigned*tvar )
 {
-  SOLUTION_DO
-    ()
-    {}
+  reset_nco();
+  BASE_DE::set_boundmultiplier();
+  const unsigned nc = std::get<0>(_ctr).size();
 
-  ~SOLUTION_DO
-    ()
-    {}
+  // Create vectors of functions and state-dependent function derivatives
+  _vec_VAR_DFCT_IVP.resize( _set_FCT_IVP.size()*_vec_PAR_FCT_IVP.size() );
+  unsigned ifct = 0;
+  for( auto it=_set_FCT_IVP.begin(); it!=_set_FCT_IVP.end(); ++it, ifct++ )
+    for( unsigned ip=0; ip<_vec_PAR_FCT_IVP.size(); ++ip )
+      _vec_VAR_DFCT_IVP[ifct+ip*_set_FCT_IVP.size()] = FFVar( _pDAG );
 
-  SOLUTION_DO
-    ( const SOLUTION_DO &sol )
-    : status( sol.status ), p( sol.p ), upL( sol.upL ), upU( sol.upU ),
-      g( sol.g ), ug( sol.ug ), f( sol.f )
-    {}
+  // Expressions of Lagrangian function and multiplier scaling
+  FFVar lagr = 0., scal = -1.;
+  switch( std::get<0>(_obj)[0] ){
+   case BASE_OPT::MIN:
+    lagr += std::get<2>(_obj)[0] * _vec_VAR_FCT_IVP[0];
+    scal += std::get<2>(_obj)[0];
+    break;
+   case BASE_OPT::MAX:
+    lagr -= std::get<2>(_obj)[0] * _vec_VAR_FCT_IVP[0];
+    scal += std::get<2>(_obj)[0];
+    break;
+  }
+  for( unsigned ip=0; ip<_np; ip++ ){
+    if( tvar && tvar[ip] ) continue;
+    lagr += ( _pMU[ip] - _pML[ip] ) * _pP[ip];
+    scal += _pMU[ip] + _pML[ip];
+  }
+  for( unsigned ic=0; ic<nc; ++ic ){
+    switch( std::get<0>(_ctr)[ic] ){
+     case BASE_OPT::EQ:
+      lagr += std::get<2>(_ctr)[ic] * _vec_VAR_FCT_IVP[ic+1];
+      scal += sqr( std::get<2>(_ctr)[ic] );
+      break;
+     case BASE_OPT::LE:
+      lagr += std::get<2>(_ctr)[ic] * _vec_VAR_FCT_IVP[ic+1];
+      scal += std::get<2>(_ctr)[ic];
+      break;
+     case BASE_OPT::GE:
+      lagr -= std::get<2>(_ctr)[ic] * _vec_VAR_FCT_IVP[ic+1];
+      scal += std::get<2>(_ctr)[ic];
+      break;
+    }
+  }
+  std::get<0>(_nco).push_back( BASE_OPT::EQ );
+  std::get<1>(_nco).push_back( scal );
+  //std::cout << "scaling:";
+  //_pDAG->output( _pDAG->subgraph( 1, &scal ) );
 
-  int status;
-  std::vector<double> p;
-  std::vector<double> upL;
-  std::vector<double> upU;
-  std::vector<double> g;
-  std::vector<double> ug;
-  double f;
-};
+  // Lagrangian stationarity conditions
+  std::vector<FFVar> vPF, dPF;
+  //auto itsen = _mapFCTSEN.begin();
+  for( unsigned ip=0; ip<_np; ip++ ){
+    if( tvar && tvar[ip] ) continue;
+    vPF.clear(); vPF.push_back( _pP[ip] );
+    dPF.clear(); dPF.push_back( 1. );
+    unsigned ifct = 0;
+    for( auto it=_set_FCT_IVP.begin(); it!=_set_FCT_IVP.end(); ++it, ifct++ ){
+      vPF.push_back( _vec_VAR_FCT_IVP[*it] ); 
+      dPF.push_back( _vec_VAR_DFCT_IVP[ifct+ip*_set_FCT_IVP.size()] );
+    }
+    const FFVar* dlagr = _pDAG->FAD( 1, &lagr, vPF.size(), vPF.data(), dPF.data() );
+    std::get<0>(_nco).push_back( BASE_OPT::EQ );
+    std::get<1>(_nco).push_back( *dlagr );
+#ifdef MC__BASE_DO__DEBUG
+    std::cout << "dLagr/d" << _pP[ip] << ":";
+    _pDAG->output( _pDAG->subgraph( 1, dlagr ) );
+#endif
+    delete[] dlagr;
+  }
+
+  for( unsigned ip=0; ip<_np; ip++ ){
+    if( tvar && tvar[ip] ) continue;
+    std::get<0>(_nco).push_back( BASE_OPT::EQ );
+    std::get<1>(_nco).push_back( ( _pP[ip] - Op<T>::u(P[ip]) ) * _pMU[ip] );
+    std::get<0>(_nco).push_back( BASE_OPT::EQ );
+    std::get<1>(_nco).push_back( ( _pP[ip] - Op<T>::l(P[ip]) ) * _pML[ip] );
+  }
+
+  for( unsigned ic=0; ic<nc; ++ic ){
+    switch( std::get<0>(_ctr)[ic] ){
+     case BASE_OPT::EQ:
+      break;
+     case BASE_OPT::LE:
+     case BASE_OPT::GE:
+      std::get<0>(_nco).push_back( BASE_OPT::EQ );
+      std::get<1>(_nco).push_back( _vec_VAR_FCT_IVP[ic+1] * std::get<2>(_ctr)[ic] );
+      break;
+    }
+  }
+}
 
 } // end namescape mc
 

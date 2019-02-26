@@ -87,7 +87,18 @@ int main()
   OC->options.ODESLVS.RTOL = OC->options.ODESLVS.RTOLB = OC->options.ODESLVS.RTOLS = 1e-9;
 
   OC->setup();
-  OC->solve( Ip, p0 );
+  int status = OC->solve( Ip, p0 );
+
+  if( status == Ipopt::Solve_Succeeded ){
+    std::cout << "(LOCAL) SOLUTION: " << std::endl;
+    std::cout << "  f* = " << OC->solution().f << std::endl;
+    for( unsigned ip=0; ip<NP; ip++ )
+      std::cout << "  p*(" << ip << ") = " << OC->solution().p[ip]
+                << std::endl;
+    std::cout << "FEASIBLE:   " << OC->is_feasible( 1e-6 ) << std::endl;
+    std::cout << "STATIONARY: " << OC->is_stationary( 1e-6 ) << std::endl;
+
+  }
 
   // Piecewise constant optimal control profile
   std::ofstream direcCON( "test1_CON.dat", std::ios_base::out );

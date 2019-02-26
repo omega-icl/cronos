@@ -68,9 +68,9 @@ The return value is of the enumeration type <A href="http://www.coin-or.org/Doxy
 
   if( status == Ipopt::Solve_Succeeded ){
     std::cout << "NLP (LOCAL) SOLUTION: " << std::endl;
-    std::cout << "  f* = " << pNLP->get_objective() << std::endl;
-    for( unsigned ip=0; ip<NP; ip++ )
-      std::cout << "  p*(" << ip << ") = " << pNLP->get_variable(ip) << std::endl;
+    std::cout << "  f* = " << pNLP->solution().f << std::endl;
+    for( unsigned int ip=0; ip<NP; ip++ )
+      std::cout << "  p*(" << ip << ") = " << pNLP->solution().p[ip] << std::endl;
   }
 \endcode
 
@@ -94,7 +94,12 @@ Regarding options, the output level, maximum number of iterations, tolerance, ma
 #include "coin/IpTNLP.hpp"
 #include "coin/IpIpoptApplication.hpp"
 
+#include "mclapack.hpp"
 #include "base_nlp.hpp"
+
+#ifdef MC__USE_SOBOL
+  #include "sobol.hpp"
+#endif
 
 #undef MC__NLPSLV_IPOPT_DEBUG
 #undef MC__NLPSLV_IPOPT_TRACE
@@ -173,7 +178,7 @@ private:
   } _data;
 
   //! @brief Structure holding solution information
-  SOLUTION_NLP _solution;
+  SOLUTION_OPT _solution;
 
   //! @brief Cleanup gradient/hessian storage
   void _cleanup()
@@ -205,7 +210,7 @@ public:
   {
     //! @brief Constructor
     Options():
-      CVTOL(1e-7), PRIMALTOL(1e-8), DUALTOL(1e-4), COMPLTOL(1e-7),
+      CVTOL(1e-7), PRIMALTOL(1e-8), DUALTOL(1e-5), COMPLTOL(1e-7),
       MAXITER(100), MAXCPU(1e6), GRADIENT(FORWARD), HESSIAN(LBFGS),
       LINSLV(MA57), TESTDER(false), DISPLAY(0)
       {} 
@@ -303,9 +308,29 @@ public:
   int solve
     ( const T*P, const double*p0=0 );
 
+#ifdef MC__USE_SOBOL
+  //! @brief Solve NLP model using multistart search -- return value is IPOPT status
+  template <typename T>
+  int solve
+    ( const unsigned NSAM, const T*P, const bool*logscal=0, const bool DISP=true );
+#endif
+
   //! @brief Test primal feasibility
-  bool test_primal_feasibility
-    ( const double*p, const double FEASTOL );
+  bool is_feasible
+    ( const double*p, const double CTRTOL );
+
+  //! @brief Test primal feasibility of current solution point
+  bool is_feasible
+    ( const double CTRTOL );
+
+  //! @brief Test dual feasibility
+  bool is_stationary
+    ( const double*p, const double*ug, const double*upL, const double*upU,
+      const double GRADTOL );
+
+  //! @brief Test dual feasibility of current solution point
+  bool is_stationary
+    ( const double GRADTOL );//, const double NUMTOL=1e-8 );
 
   //! @brief Get IPOPT internal scaling value
   double get_scaling()
@@ -320,7 +345,7 @@ public:
     }
 
   //! @brief Get IPOPT solution info
-  const SOLUTION_NLP& solution() const
+  const SOLUTION_OPT& solution() const
     {
       return _solution;
     }
@@ -392,6 +417,12 @@ private:
   //! @brief Set IPOPT options
   void set_options
     ( Ipopt::SmartPtr<Ipopt::IpoptApplication>&IpoptApp );
+
+#ifdef MC__USE_SOBOL
+  //! @brief Get next Sobol sampling point
+  void _get_sobol
+    ( const unsigned nr, double*r, long long int*pseed, const bool disp=false );
+#endif
 
   //! @brief Private methods to block default compiler methods
   NLPSLV_IPOPT(const NLPSLV_IPOPT&);
@@ -552,6 +583,229 @@ NLPSLV_IPOPT::solve
   return _solution.status;
 }
 
+#ifdef MC__USE_SOBOL
+inline
+void
+NLPSLV_IPOPT::_get_sobol
+( const unsigned nr, double*r, long long int*pseed, const bool disp )
+{
+  //if( disp ) std::cout << std::setw(6) << *pseed << "  ";
+  i8_sobol( nr, pseed, r );
+  if( disp ){
+    //std::cout << std::setw(6) << *pseed << "  ";
+    for( unsigned j=0; j<nr; j++ ){
+      std::cout << std::setw(6) << r[j] << "  ";
+    }
+    std::cout << std::endl;
+  }
+}
+
+template <typename T>
+inline
+int
+NLPSLV_IPOPT::solve
+( const unsigned NSAM, const T*P, const bool*logscal, const bool DISP )
+{
+  long long SEED = 1;
+  std::vector<double> vSAM(_nvar), p0(_nvar);
+
+  bool found = false;
+  SOLUTION_OPT best;
+
+  Ipopt::SmartPtr<Ipopt::IpoptApplication> IpoptApp = new Ipopt::IpoptApplication();
+  set_options( IpoptApp );
+  if( DISP ) std::cout << "Multistart: ";
+
+  for(unsigned k=0; k<NSAM; k++){
+    // Sample variable domain
+    _get_sobol( _nvar, vSAM.data(), &SEED );
+    for( unsigned i=0; i<_nvar; i++ ){
+      if( !logscal || !logscal[i] || Op<T>::l(P[i]) <= 0. )
+        p0[i] = Op<T>::l(P[i]) + Op<T>::diam(P[i]) * vSAM[i];
+      else
+        p0[i] = std::exp( Op<T>::l(Op<T>::log(P[i])) + Op<T>::diam(Op<T>::log(P[i])) * vSAM[i] );
+      //std::cout << "  " << p0[i];
+    }
+    //std::cout << std::endl;
+
+    // Solve NLP
+    _data.set( _nvar, p0.data(), P );
+    _solution.status = IpoptApp->Initialize();
+    if( _solution.status != Ipopt::Solve_Succeeded ) continue;
+    _solution.status = IpoptApp->OptimizeTNLP( this );
+
+    // Test feasibility and improvement
+    if( !is_feasible( 1.1*options.PRIMALTOL ) ){
+      if( DISP ) std::cout << "·";
+      continue;
+    }
+    if( DISP ) std::cout << "*";
+    if( !found ){
+      best = _solution;
+      found = true;
+      continue;
+    }
+    switch( std::get<0>(_obj)[0] ){
+      case MIN:
+        if( _solution.f < best.f ) best = _solution;
+        break;
+      case MAX:
+        if( _solution.f > best.f ) best = _solution;
+        break;
+    }
+  }
+  if( DISP ) std::cout << std::endl;
+
+  _solution = best;
+  return _solution.status;
+}
+#endif
+
+inline
+bool
+NLPSLV_IPOPT::is_feasible
+( const double*p, const double CTRTOL )
+{
+  _solution.p.assign( p, p+_nvar );
+  return is_feasible( CTRTOL );
+}
+
+inline
+bool
+NLPSLV_IPOPT::is_feasible
+( const double CTRTOL )
+{
+  if( !eval_f( _solution.p.size(), _solution.p.data(), true, _solution.f )
+   || !eval_g( _solution.p.size(), _solution.p.data(), false, _solution.g.size(), _solution.g.data() ) )
+  return false;
+
+  double maxinfeas=0.;
+  auto itc = std::get<0>(_ctr).begin();
+  for( unsigned ic=0; itc!=std::get<0>(_ctr).end(); ++itc, ic++ ){
+    switch( (*itc) ){
+      case EQ: maxinfeas = std::fabs(_solution.g[ic]); break;
+      case LE: maxinfeas = _solution.g[ic];            break;
+      case GE: maxinfeas = -_solution.g[ic];           break;
+    }
+#ifdef MC__DOSEQSLV_IPOPT_DEBUG
+    std::cout << "g[" << ic << "] = " << _solution.g[ic] << "  (" << maxinfeas << ")\n";
+#endif
+    if( maxinfeas > CTRTOL ) return false;
+  }
+
+  return true;
+}
+
+inline
+bool
+NLPSLV_IPOPT::is_stationary
+( const double*p, const double*ug, const double*upL, const double*upU,
+  const double GRADTOL )
+{
+  _solution.p.assign( p, p+_nvar );
+  _solution.ug.assign( ug, ug+_nctr );
+  _solution.upL.assign( upL, upL+_nvar );
+  _solution.upU.assign( upU, upU+_nvar );
+  return is_stationary( GRADTOL );
+}
+
+inline
+bool
+NLPSLV_IPOPT::is_stationary
+( const double GRADTOL )
+{
+  CPPL::dcovector grad_f( _solution.p.size() ), jac_g( std::get<0>(_ctr_grad) );
+  if( !eval_grad_f( _solution.p.size(), _solution.p.data(), true, grad_f.array )
+   || !eval_jac_g( _solution.p.size(), _solution.p.data(), false, _solution.g.size(),
+                   std::get<0>(_ctr_grad), 0, 0, jac_g.array ) )
+  return false;
+
+#ifdef MC__NLPSLV_IPOPT_DEBUG
+  for( unsigned ip=0; ip<_solution.p.size(); ip++ )
+    std::cout << ip << ": " << grad_f(ip) << std::endl;
+#endif
+  CPPL::dcovector mul_g( _solution.g.size() );
+  CPPL::dgsmatrix sjac_g( _solution.p.size(), _solution.g.size(), std::get<0>(_ctr_grad) );
+  for( unsigned ie=0; ie<std::get<0>(_ctr_grad); ie++ )
+    sjac_g.put( std::get<2>(_ctr_grad)[ie], std::get<1>(_ctr_grad)[ie], jac_g(ie) );
+#ifdef MC__NLPSLV_IPOPT_DEBUG
+  std::cout << std::endl << sjac_g.to_dgematrix();
+#endif
+
+  CPPL::dcovector grad_L = grad_f; //_scaling * grad_f;
+  for( unsigned ig=0; ig<_solution.g.size(); ig++ ){
+#ifdef MC__NLPSLV_IPOPT_DEBUG
+    std::cout << ig << ": " << _solution.ug[ ig ] << std::endl;
+#endif
+    mul_g(ig) = _solution.ug[ig];
+  }
+  grad_L += sjac_g * mul_g;
+
+  for( unsigned ip=0; ip<_solution.p.size(); ip++ ){
+#ifdef MC__NLPSLV_IPOPT_DEBUG
+    std::cout << ip << ": " << _solution.upL[ ip ] << "  " << _solution.upU[ ip ] << "  "
+              << grad_L(ip) << std::endl;
+#endif
+    grad_L(ip) += _solution.upU[ ip ] - _solution.upL[ ip ];
+    if( std::fabs( grad_L(ip) ) > GRADTOL ) return false;
+  }
+  return true;
+}
+
+//inline
+//bool
+//NLPSLV_IPOPT::is_stationary
+//( const double GRADTOL, const double NUMTOL )
+//{
+//  CPPL::dcovector grad_f( _solution.p.size() ), jac_g( std::get<0>(_ctr_grad) );
+//  if( !eval_grad_f( _solution.p.size(), _solution.p.data(), true, grad_f.array )
+//   || !eval_jac_g( _solution.p.size(), _solution.p.data(), false, _solution.g.size(),
+//                   std::get<0>(_ctr_grad), 0, 0, jac_g.array ) )
+//  return false;
+
+//#ifdef MC__NLPSLV_IPOPT_DEBUG
+//  for( unsigned ip=0; ip<_solution.p.size(); ip++ )
+//    std::cout << ip << ": " << grad_f(ip) << std::endl;
+//#endif
+//  CPPL::dgsmatrix sjac_g( _solution.g.size()+_solution.p.size(), _solution.p.size(), std::get<0>(_ctr_grad) );
+//  for( unsigned ie=0; ie<std::get<0>(_ctr_grad); ie++ ){
+//#ifdef MC__NLPSLV_IPOPT_DEBUG
+//    std::cout << std::get<1>(_ctr_grad)[ie] << ": " << _solution.ug[ std::get<1>(_ctr_grad)[ie] ] << std::endl;
+//#endif
+//    if( std::fabs( _solution.ug[ std::get<1>(_ctr_grad)[ie] ] ) < NUMTOL ) continue;
+//    sjac_g.put( std::get<1>(_ctr_grad)[ie], std::get<2>(_ctr_grad)[ie], jac_g(ie) );
+//  }
+//  for( unsigned ip=0; ip<_solution.p.size(); ip++ ){
+//#ifdef MC__NLPSLV_IPOPT_DEBUG
+//    std::cout << ip << ": " << _solution.upL[ ip ] << "  " << _solution.upU[ ip ] << std::endl;
+//#endif
+//    if( std::fabs( _solution.upL[ ip ] ) < NUMTOL
+//     && std::fabs( _solution.upU[ ip ] ) < NUMTOL ) continue;
+//    sjac_g.put( _solution.g.size()+ip, ip, 1 );
+//  }
+//#ifdef MC__NLPSLV_IPOPT_DEBUG
+//  std::cout << std::endl << sjac_g.to_dgematrix();
+//#endif
+
+//  CPPL::dcovector S;
+//  CPPL::dgematrix U, VT, G = sjac_g.to_dgematrix();
+//  G.dgesvd( S, U, VT );
+//  unsigned nulldim = 0;
+//  for( ; nulldim<_solution.p.size(); nulldim++ )
+//    if( std::fabs( S(_solution.p.size()-nulldim-1) ) > NUMTOL ) break;
+//  // Point is fully detemrined by constraints
+//  if( !nulldim ) return true;
+//  // Project cost gradient on constraint null space
+//  CPPL::dgematrix proj( nulldim, _solution.p.size() );
+//  for( unsigned i=0; i<nulldim; i++ )
+//    for( unsigned j=0; j<_solution.p.size(); j++ )
+//      proj(j,i) = VT(_solution.p.size()-i-1,j);
+//#ifdef MC__NLPSLV_IPOPT_DEBUG
+//  std::cout << proj * grad_f;
+//#endif
+//  return( CPPL::nrm2( proj * grad_f ) > GRADTOL ? false: true );
+//}
+
 inline
 bool
 NLPSLV_IPOPT::get_nlp_info
@@ -639,34 +893,6 @@ NLPSLV_IPOPT::get_starting_point
     std::cout << "  x_0[" << ip << "] = " << x[ip] << std::endl;
 #endif
   }
-  return true;
-}
-
-inline
-bool
-NLPSLV_IPOPT::test_primal_feasibility
-( const double*p, const double FEASTOL )
-{
-  _solution.resize( _nvar, _nctr );
-  for( unsigned i=0; i<_nvar; i++ ) _solution.p[i] = p[i];
-  if( !eval_f( _solution.n, _solution.p, true, _solution.f )
-   || !eval_g( _solution.n, _solution.p, true, _solution.m, _solution.g ) )
-  return false;
-
-  double maxinfeas=0.;
-  auto itc = std::get<0>(_ctr).begin();
-  for( unsigned ic=0; itc!=std::get<0>(_ctr).end(); ++itc, ic++ ){
-    switch( (*itc) ){
-      case EQ: maxinfeas = std::fabs(_solution.g[ic]); break;
-      case LE: maxinfeas = _solution.g[ic];            break;
-      case GE: maxinfeas = -_solution.g[ic];           break;
-    }
-#ifdef MC__NLPSLV_IPOPT_DEBUG
-    std::cout << "g[" << j << "] = " << _solution.g[ic] << "  (" << maxinfeas << ")\n";
-#endif
-    if( maxinfeas > FEASTOL ) return false;
-  }
-
   return true;
 }
 
@@ -849,43 +1075,28 @@ NLPSLV_IPOPT::finalize_solution
   const Ipopt::IpoptData* ip_data, Ipopt::IpoptCalculatedQuantities* ip_cq )
 {
 #ifdef MC__NLPSLV_IPOPT_TRACE
-    std::cout << "  NLPSLV_IPOPT::finalize_solution\n";
+    std::cout << "  DOSEQSLV_IPOPT::finalize_solution\n";
 #endif
   _solution.status = status;
 
   // Successful (or near-successful) completion
   //if( status == Ipopt::SUCCESS || status == Ipopt::STOP_AT_ACCEPTABLE_POINT
   // || status == Ipopt::STOP_AT_TINY_STEP ){
-    // resize solution arrays
-    _solution.resize( n, m );
-    // copy solution values into _solution
     _solution.f = f;
-    for( Ipopt::Index i=0; i<n; i++ ){
-      _solution.p[i] = p[i]; _solution.upL[i] = upL[i]; _solution.upU[i] = upU[i];
-#ifdef MC__NLPSLV_IPOPT_DEBUG
-      std::cout << std::scientific << std::setprecision(14)
-                << "  p[" << i << "] = " << p[i] << std::endl;
-#endif
-    }
-    for( Ipopt::Index j=0; j<m; j++ ){
-      _solution.g[j] = g[j]; _solution.ug[j] = ug[j];
-#ifdef MC__NLPSLV_IPOPT_DEBUG
-      std::cout << std::scientific << std::setprecision(14)
-                << "  g[" << j << "] = " << g[j] << std::endl;
-#endif
-    }
+    _solution.p.assign( p, p+n );
+    _solution.upL.assign( upL, upL+n );
+    _solution.upU.assign( upU, upU+n );
+    _solution.g.assign( g, g+m );
+    _solution.ug.assign( ug, ug+m );
   //}
 
   // Failure
   //else{
-  //  if( _solution.n ){
-  //    delete[] _solution.p; delete[] _solution.upL; delete[] _solution.upU;
-  //    _solution.n = 0;
-  //  }
-  //  if( _solution.m ){
-  //    delete[] _solution.g; delete[] _solution.ug;
-  //    _solution.m = 0;
-  //  }
+  //  _solution.p.clear();
+  //  _solution.upL.clear();
+  //  _solution.upU.clear();
+  //  _solution.g.clear();
+  //  _solution.ug.clear();
   //}
   return;
 }

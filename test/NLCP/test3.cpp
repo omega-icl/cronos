@@ -1,13 +1,14 @@
 #define SAVE_RESULTS    // whether or not to save results to file
 #define USE_PROFIL	    // specify to use PROFIL for interval arithmetic
 #undef  USE_FILIB	    // specify to use FILIB++ for interval arithmetic
-#undef  DEBUG		    // whether to output debug information
 #define USE_DEPS	    // whether to use dependents
+
 #define MC__USE_CPLEX   // whether to use CPLEX or GUROBI
-#undef  MC__CSEARCH_SHOW_DEPS
 #undef  MC__CSEARCH_SHOW_BOXES
-#undef  MC__CSEARCH_SHOW_OUTER
 #undef  MC__CSEARCH_SHOW_REDUC
+#undef  MC__CSEARCH_SHOW_INCLUSION
+#undef  MC__CSEARCH_PAUSE_INFEASIBLE
+
 ////////////////////////////////////////////////////////////////////////////////
 
 #include <fstream>
@@ -55,29 +56,30 @@ int main()
   CP.set_dep( NC, P+NP-NC, C );
 #endif
 
-  CP.options.MIPFILE     = "test3.lp";
+  CP.options.MIPFILE     = ""; //"test3.lp";
   CP.options.DISPLAY     = 2;
-  CP.options.MIPDISPLAY  = 0;
   CP.options.MAXITER     = 500;
+  CP.options.BLKDECUSE   = true;
   CP.options.NODEMEAS    = mc::SBP<I>::Options::RELMAXLEN;
   CP.options.CVTOL       = 1e-2;
-  CP.options.FEASTOL     = 1e-7;
-  CP.options.PREPROC     = false;
-  CP.options.BLKDECUSE   = true;
+  CP.options.FEASTOL     = 1e-9;
   CP.options.BRANCHVAR   = mc::SBP<I>::Options::RGREL;
+#ifndef USE_DEPS
+  CP.options.VARMEAS     = mc::NLCP<I>::Options::ALL;
+#else
+  CP.options.VARMEAS     = mc::NLCP<I>::Options::DEP;
+#endif
   CP.options.STGBCHDEPTH = 0;
   CP.options.STGBCHRTOL  = 1e-2;
   CP.options.DOMREDMAX   = 10;
-  CP.options.DOMREDTHRES = 1e-1;
-  CP.options.DOMREDBKOFF = 1e-7;
+  CP.options.DOMREDTHRES = 5e-2;
   CP.options.RELMETH     = mc::NLCP<I>::Options::CHEB;
+  CP.options.NCOCUTS     = false;
   CP.options.CMODPROP    = 2;
-  CP.options.CMODRED     = mc::NLCP<I>::Options::APPEND;
-  CP.options.CMODDEPS    = 0;
+  CP.options.CMODRED     = mc::NLCP<I>::Options::NONE;
+  CP.options.CMODDEPS    = 5;
   CP.options.CMODATOL    = 1e-8;
-  CP.options.CMODRTOL    = 1e-2;
-  //CP.options.CMODJOINT   = false;
-  CP.options.CMODWARMS   = false;//true;
+  CP.options.CMODRTOL    = CP.options.CVTOL;
 
   CP.options.AEBND.ATOL    = 
   CP.options.AEBND.RTOL    = 1e-10;
@@ -85,23 +87,19 @@ int main()
   std::cout << CP;
 
   const I Ip[NP] = { I(0.9,1.), I(0.,1.), I(0.,1.) };
-  //const I Ip[NP] = { I(0.98,0.99), I(0.4,0.45), I(0.15,0.175) };
-  //const I Ip[NP] = { I(0.955,0.965), I(0.,1.), I(0.,1.) };
-  //const I Ip[NP] = { I(0.97125,0.973125), I(2.219548e-02,2.648165e-02), I(6.895857e-01,6.908187e-01) };
-  //const I Ip[NP] = { I(0.973125,0.975), I(2.219548e-02,2.648165e-02), I(6.895857e-01,6.908187e-01) };
-  //const I Ip[NP] = { I(0.97125,0.975), I(2.219548e-02,2.648165e-02), I(6.895857e-01,6.908187e-01) };
-  //const I Ip[NP] = { I(0.9568750000000000,0.9575000000000022), I(0.2475799124616923,0.2513474082103622), I(0.3750000000000006,0.5000000000000015) };
-  //const I Ip[NP] = { I(0.9565481122333667,0.9572803057349571), I(0.2412232579691729,0.2500216520239230), I(0.4999999999999996,0.5131037860573259) };
 
-
-  CP.setup();
+  CP.setup( Ip );
   CP.solve( Ip );
   CP.stats.display();
 
+  auto L_clus = CP.clusters();
+  std::cout << "No clusters: " << L_clus.size() << std::endl;
+  for( auto it=L_clus.begin(); it!=L_clus.end(); ++it ) delete[] *it;
+
 #if defined(SAVE_RESULTS )
-  std::ofstream K_un( "test3.out", std::ios_base::out );
-  CP.output_nodes( K_un ); //, true );
-  K_un.close();
+  std::ofstream K_bnd( "test3_bnd.out", std::ios_base::out );
+  CP.output_nodes( K_bnd );
+  K_bnd.close();
 #endif
 
   return 0;

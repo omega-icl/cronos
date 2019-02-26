@@ -1,10 +1,13 @@
 #define SAVE_RESULTS    // whether or not to save results to file
-#define USE_PROFIL	    // specify to use PROFIL for interval arithmetic
-#undef USE_FILIB	    // specify to use FILIB++ for interval arithmetic
-#undef DEBUG            // whether to output debug information
+#define USE_PROFIL	// specify to use PROFIL for interval arithmetic
+#undef  USE_FILIB	// specify to use FILIB++ for interval arithmetic
+
 #define MC__USE_CPLEX   // whether to use CPLEX or GUROBI
-#undef MC__CSEARCH_SHOW_BOXES
-#undef MC__CSEARCH_SHOW_REDUC
+#define  MC__CSEARCH_SHOW_BOXES
+#undef  MC__CSEARCH_SHOW_REDUC
+#define  MC__CSEARCH_SHOW_INCLUSION
+#undef  MC__CSEARCH_PAUSE_INFEASIBLE
+
 ////////////////////////////////////////////////////////////////////////////////
 
 #include <fstream>
@@ -57,26 +60,31 @@ int main()
   for( unsigned ic=0; ic<NC; ic++ )
     CP.add_ctr( mc::BASE_OPT::EQ, C[ic] );
 
-  //CP.options.MIPFILE     = "test1.lp";
+  CP.options.MIPFILE     = ""; //"test1.lp";
   CP.options.DISPLAY     = 2;
   CP.options.MAXITER     = 100;
-  CP.options.CVTOL       = 1e-6;
+  CP.options.BLKDECUSE   = false;//true;
+  CP.options.NODEMEAS    = mc::SBP<I>::Options::RELMAXLEN;
+  CP.options.CVTOL       = 1e-4;
+  CP.options.FEASTOL     = 1e-9;
   CP.options.BRANCHVAR   = mc::SBP<I>::Options::RGREL;
-  CP.options.NODEMEAS    = mc::SBP<I>::Options::RELMEANLEN;
-  CP.options.DOMREDMAX   = 10;
-  CP.options.DOMREDTHRES = 1e-1;
-  CP.options.DOMREDBKOFF = 1e-7;
-  CP.options.RELMETH     = mc::NLCP<I>::Options::CHEB;
-  CP.options.CMODPROP    = 2;
+  CP.options.VARMEAS     = mc::NLCP<I>::Options::ALL;//INDEP;//ALL;
   CP.options.STGBCHDEPTH = 0;
   CP.options.STGBCHRTOL  = 1e-2;
-  CP.options.BLKDECUSE   = true;
+  CP.options.DOMREDMAX   = 10;
+  CP.options.DOMREDTHRES = 5e-2;
+  CP.options.DOMREDBKOFF = 1e-7;
+  CP.options.RELMETH     = mc::NLCP<I>::Options::CHEB;
+  CP.options.NCOCUTS     = false;
+  CP.options.CMODPROP    = 2;
+  CP.options.CMODDEPS    = 0;
+  CP.options.AEBND.DISPLAY = 0;
   std::cout << CP;
 
+  // Describe the feasible set
   const I Ip[NP] = { I(-1.,1.), I(-1.,1.), I(-1.,1.), I(-1.,1.),
                      I(-1.,1.), I(-1.,1.), I(-1.,1.), I(-1.,1.) };
-
-  CP.setup();
+  CP.setup( Ip );
   CP.solve( Ip );
   CP.stats.display();
 
@@ -85,14 +93,18 @@ int main()
   for( auto it=L_clus.begin(); it!=L_clus.end(); ++it ) delete[] *it;
 
 #if defined(SAVE_RESULTS )
-  std::ofstream K_un( "test1.out", std::ios_base::out );
-  CP.output_nodes( K_un ); //, true );
-  K_un.close();
-
-  std::ofstream K_cl( "test1b.out", std::ios_base::out );
-  CP.output_clusters( K_cl ); //, true );
-  K_cl.close();
+  std::ofstream K_bnd( "test1_bnd.out", std::ios_base::out );
+  CP.output_nodes( K_bnd ); //, true );
+  K_bnd.close();
+  std::ofstream K_clus( "test1_clus.out", std::ios_base::out );
+  CP.output_clusters( K_clus ); //, true );
+  K_clus.close();
 #endif
+
+//  CP.options.BLKDECUSE   = true;
+//  CP.setup( Ip );
+//  CP.solve( Ip );
+//  CP.stats.display();
 
   return 0;
 }

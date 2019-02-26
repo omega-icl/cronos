@@ -4,6 +4,7 @@
 #undef  DEBUG            // whether to output debug information
 #define MC__USE_CPLEX   // whether to use CPLEX or GUROBI
 #undef  MC__CSEARCH_SHOW_BOXES
+#undef  MC__CSEARCH_SHOW_INCLUSION
 ////////////////////////////////////////////////////////////////////////////////
 
 #include <fstream>
@@ -43,11 +44,12 @@ int main()
 
   CP.options.MIPFILE     = "test0.lp";
   CP.options.DISPLAY     = 2;
-  CP.options.MAXITER     = 96;
+  CP.options.MAXITER     = 100;
   CP.options.NODEMEAS    = mc::SBP<I>::Options::RELMAXLEN;
   CP.options.CVTOL       = 1e-2;
   CP.options.FEASTOL     = 1e-7;
   CP.options.BRANCHVAR   = mc::SBP<I>::Options::RGREL;
+  CP.options.VARMEAS     = mc::NLCP<I>::Options::DEP;
   CP.options.STGBCHDEPTH = 0;
   CP.options.STGBCHRTOL  = 1e-2;
   CP.options.DOMREDMAX   = 10;
@@ -55,19 +57,19 @@ int main()
   CP.options.DOMREDBKOFF = 1e-7;
   CP.options.RELMETH     = mc::NLCP<I>::Options::CHEB;
   CP.options.CMODPROP    = 2;
-  CP.options.CMODDEPS    = 3;
+  CP.options.CMODDEPS    = 5;
   CP.options.CMODATOL    = 1e-5;
   CP.options.CMODRTOL    = 2e-2;
-  CP.options.CMODWARMS   = false;
+  //CP.options.CMODWARMS   = false;
   CP.options.CMODRED     = mc::NLCP<I>::Options::APPEND;
-  CP.options.AEBND.ATOL    = 
-  CP.options.AEBND.RTOL    = 1e-10;
+  //CP.options.AEBND.ATOL    = 
+  //CP.options.AEBND.RTOL    = 1e-10;
   CP.options.AEBND.DISPLAY = 0;
   std::cout << CP;
 
   const I Ip[NP] = { I(-5.,5.), I(-5.,5.) };
 
-  CP.setup();
+  CP.setup( Ip );
   CP.solve( Ip );
   CP.stats.display();
 

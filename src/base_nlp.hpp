@@ -206,49 +206,6 @@ BASE_NLP
   }
 }
 
-//! @brief C++ structure for holding the solution of nonlinear programs
-////////////////////////////////////////////////////////////////////////
-//! mc::SOLUTION_NLP is a C++ structure for holding the solution of 
-//! nonlinear programs, including optimal point, KKT multiplers, cots
-//! and constraint functions.
-////////////////////////////////////////////////////////////////////////
-struct SOLUTION_NLP
-{
-  SOLUTION_NLP
-    ()
-    : n(0), p(0), upL(0), upU(0), m(0), g(0), ug(0)
-    {}
-  ~SOLUTION_NLP
-    ()
-    { delete[] p; delete[] upL; delete[] upU; delete[] g; delete[] ug; }
-  void resize
-    ( int _n, int _m )
-    {
-      if( n != _n ){
-        if( n ){ delete[] p; delete[] upL; delete[] upU; }
-        n = _n;
-        p = new double[n];
-        upL = new double[n];
-        upU = new double[n];
-      }
-      if( m != _m ){
-        if( m ){ delete[] g; delete[] ug; }
-        m = _m;
-        g = new double[m];
-        ug = new double[m];
-      }
-    }
-  int status;
-  int n;
-  double*p;
-  double*upL;
-  double*upU;
-  int m;
-  double*g;
-  double*ug;
-  double f;
-};
-
 } // end namescape mc
 
 #endif

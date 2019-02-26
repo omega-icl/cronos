@@ -1,4 +1,4 @@
-// Copyright (C) 2012-2017 Benoit Chachuat, Imperial College London.
+// Copyright (C) 2019 Benoit Chachuat, Imperial College London.
 // All Rights Reserved.
 // This code is published under the Eclipse Public License.
 
@@ -159,6 +159,10 @@ OC (LOCAL) SOLUTION:
 #include "odeslvs_sundials.hpp"
 #include "interval.hpp"
 
+#ifdef MC__USE_SOBOL
+  #include "sobol.hpp"
+#endif
+
 #undef  MC__DOSEQSLV_IPOPT_DEBUG
 #undef  MC__DOSEQSLV_IPOPT_TRACE
 
@@ -226,7 +230,7 @@ private:
         //xpk = new double*[ ns+1 ];
         //for( unsigned is=0; is<=ns; is++ ) xpk[is] = 0;//new double[ nx*np ];
         fp = new double[ nf*np ];
-        fstruct = new std::map<int,bool>[ nf ];
+        fstruct = new std::map<int,int>[ nf ];
       }
     unsigned ns;
     double *f;
@@ -234,12 +238,12 @@ private:
     double *fp;
     //double **xpk;
     bool sens;
-    std::map<int,bool>* fstruct;
+    std::map<int,int>* fstruct;
   } _eval;
 
 
   //! @brief Structure holding solution information
-  SOLUTION_DO _solution;
+  SOLUTION_OPT _solution;
 
   //! @brief IVP solution and sensitivity
   ODESLVS_SUNDIALS _ODESLVS;
@@ -264,7 +268,7 @@ public:
       CVTOL(1e-8), PRIMALTOL(1e-8), DUALTOL(1e-4), COMPLTOL(1e-7),
       MAXITER(100), MAXCPU(1e6), GRADIENT(FORWARD), HESSIAN(LBFGS),
       LINSLV(MA57), TESTDER(false), DISPLAY(0), ODESLVS()
-      { ODESLVS.DISPLAY = 0; ODESLVS.RESRECORD = 0; }
+      { ODESLVS.DISPLAY = -1; ODESLVS.RESRECORD = 0; }
     //! @brief Assignment operator
     Options& operator= ( Options&options ){
         CVTOL     = options.CVTOL;
@@ -362,13 +366,29 @@ public:
   int solve
     ( const T*P, const double*p0=0 );
 
+#ifdef MC__USE_SOBOL
+  //! @brief Solve NLP model using multistart search -- return value is IPOPT status
+  template <typename T>
+  int solve
+    ( const unsigned NSAM, const T*P, const bool*logscal=0, const bool DISP=true );
+#endif
+
   //! @brief Test primal feasibility of parameters <a>p</a>
-  bool primal_feasible
-    ( const double*p, const double FEASTOL );
+  bool is_feasible
+    ( const double*p, const double CTRTOL );
 
   //! @brief Test primal feasibility of current solution point
-  bool primal_feasible
-    ( const double FEASTOL );
+  bool is_feasible
+    ( const double CTRTOL );
+
+  //! @brief Test dual feasibility
+  bool is_stationary
+    ( const double*p, const double*ug, const double*upL, const double*upU,
+      const double GRADTOL );
+
+  //! @brief Test dual feasibility of current solution point
+  bool is_stationary
+    ( const double GRADTOL );//, const double NUMTOL=1e-8 );
 
   //! @brief Get IPOPT internal scaling value
   double get_scaling()
@@ -383,7 +403,7 @@ public:
     }
 
   //! @brief Get IPOPT solution info
-  const SOLUTION_DO& solution() const
+  const SOLUTION_OPT& solution() const
     {
       return _solution;
     }
@@ -397,7 +417,7 @@ public:
   BASE_DE::STATUS states
     ( const double*p, double**xk=0, double*f=0, std::ostream&os=std::cout )
     { _valSTADEP.clear();
-      for( auto it=_ndxFCTDEP.begin(); it!=_ndxFCTDEP.end(); ++it )
+      for( auto it=_set_PAR_FCT_IVP.begin(); it!=_set_PAR_FCT_IVP.end(); ++it )
         _valSTADEP.push_back( p[*it] );
       _ODESLVS.options = options.ODESLVS;
       return _ODESLVS.states( _valSTADEP.data(), xk, f, os ); }
@@ -406,7 +426,7 @@ public:
   BASE_DE::STATUS states_FSA
     ( const double*p, double**xk=0, double*f=0, double**xpk=0, double*fp=0, std::ostream&os=std::cout )
     { _valSTADEP.clear();
-      for( auto it=_ndxFCTDEP.begin(); it!=_ndxFCTDEP.end(); ++it )
+      for( auto it=_set_PAR_FCT_IVP.begin(); it!=_set_PAR_FCT_IVP.end(); ++it )
         _valSTADEP.push_back( p[*it] );
       _ODESLVS.options = options.ODESLVS;
       return _ODESLVS.states_FSA( _valSTADEP.data(), xk, f, xpk, fp, os ); }
@@ -415,7 +435,7 @@ public:
   BASE_DE::STATUS states_ASA
     ( const double*p, double**xk=0, double*f=0, double**lk=0, double*fp=0, std::ostream&os=std::cout )
     { _valSTADEP.clear();
-      for( auto it=_ndxFCTDEP.begin(); it!=_ndxFCTDEP.end(); ++it )
+      for( auto it=_set_PAR_FCT_IVP.begin(); it!=_set_PAR_FCT_IVP.end(); ++it )
         _valSTADEP.push_back( p[*it] );
       _ODESLVS.options = options.ODESLVS;
       return _ODESLVS.states_ASA( _valSTADEP.data(), xk, f, lk, fp, os ); }
@@ -492,6 +512,12 @@ private:
   //! @brief Set IPOPT options
   void set_options
     ( Ipopt::SmartPtr<Ipopt::IpoptApplication>&IpoptApp );
+
+#ifdef MC__USE_SOBOL
+  //! @brief Get next Sobol sampling point
+  void _get_sobol
+    ( const unsigned nr, double*r, long long int*pseed, const bool disp=false );
+#endif
 
   //! @brief Method to update function values and gradients
   bool _update_functions
@@ -602,26 +628,26 @@ DOSEQSLV_IPOPT::setup
   // Setup parametric IVP solver
   _ODESLVS.set( *this );
   _ODESLVS.set_time( _ns, _dT.data(), _pT );
-  _ODESLVS.set_parameter( _vFCTDEP.size(), _vFCTDEP.data() );
-  _ODESLVS.set_function( _ns, _ndxFCTSTA.size(), _vFCTSTA.data() );
+  _ODESLVS.set_parameter( _vec_PAR_FCT_IVP.size(), _vec_PAR_FCT_IVP.data() );
+  _ODESLVS.set_function( _ns, _set_FCT_IVP.size(), _vec_FCT_IVP_STG.data() );
 
   // setup derivatives of parameter-dependent functions
   delete[] _pDFCTPAR;
   switch( options.GRADIENT ){
     case Options::FORWARD:  // Forward AD
-      _pDFCTPAR = _pDAG->FAD( _vFCTPAR.size(), _vFCTPAR.data(), _np, _pP ); 
+      _pDFCTPAR = _pDAG->FAD( _vec_FCT_PAR.size(), _vec_FCT_PAR.data(), _np, _pP ); 
       break;
     case Options::BACKWARD: // Backward AD
-      _pDFCTPAR = _pDAG->BAD( _vFCTPAR.size(), _vFCTPAR.data(), _np, _pP ); 
+      _pDFCTPAR = _pDAG->BAD( _vec_FCT_PAR.size(), _vec_FCT_PAR.data(), _np, _pP ); 
       break;
   }
-  _opFCTPAR  = _pDAG->subgraph( _vFCTPAR.size(), _vFCTPAR.data() );
-  _opDFCTPAR = _pDAG->subgraph( _vFCTPAR.size()*_np, _pDFCTPAR );
+  _opFCTPAR  = _pDAG->subgraph( _vec_FCT_PAR.size(), _vec_FCT_PAR.data() );
+  _opDFCTPAR = _pDAG->subgraph( _vec_FCT_PAR.size()*_np, _pDFCTPAR );
   _wkFCTPAR.resize( _opFCTPAR.l_op.size()>_opDFCTPAR.l_op.size()? _opFCTPAR.l_op.size(): _opDFCTPAR.l_op.size() );
-  _valFCTSTA.resize( _ndxFCTSTA.size() );
-  _valDFCTSTA.resize( _vFCTDEP.size()*_ndxFCTSTA.size() );
-  _valFCTPAR.resize( _vFCTPAR.size() );
-  _valDFCTPAR.resize( _np*_vFCTPAR.size() );
+  _valFCTSTA.resize( _set_FCT_IVP.size() );
+  _valDFCTSTA.resize( _vec_PAR_FCT_IVP.size()*_set_FCT_IVP.size() );
+  _valFCTPAR.resize( _vec_FCT_PAR.size() );
+  _valDFCTPAR.resize( _np*_vec_FCT_PAR.size() );
 
 #ifdef MC__DOSEQSLV_IPOPT_DEBUG
   {int dum; std::cin >> dum;}
@@ -652,19 +678,97 @@ DOSEQSLV_IPOPT::solve
   return _solution.status;
 }
 
+#ifdef MC__USE_SOBOL
+inline
+void
+DOSEQSLV_IPOPT::_get_sobol
+( const unsigned nr, double*r, long long int*pseed, const bool disp )
+{
+  //if( disp ) std::cout << std::setw(6) << *pseed << "  ";
+  i8_sobol( nr, pseed, r );
+  if( disp ){
+    //std::cout << std::setw(6) << *pseed << "  ";
+    for( unsigned j=0; j<nr; j++ ){
+      std::cout << std::setw(6) << r[j] << "  ";
+    }
+    std::cout << std::endl;
+  }
+}
+
+template <typename T>
+inline
+int
+DOSEQSLV_IPOPT::solve
+( const unsigned NSAM, const T*P, const bool*logscal, const bool DISP )
+{
+  long long SEED = 1;
+  std::vector<double> vSAM(_np), p0(_np);
+
+  bool found = false;
+  SOLUTION_OPT best;
+
+  Ipopt::SmartPtr<Ipopt::IpoptApplication> IpoptApp = new Ipopt::IpoptApplication();
+  set_options( IpoptApp );
+  if( DISP ) std::cout << "Multistart: ";
+
+  for(unsigned k=0; k<NSAM; k++){
+    // Sample variable domain
+    _get_sobol( _np, vSAM.data(), &SEED );
+    for( unsigned i=0; i<_np; i++ ){
+      if( !logscal || !logscal[i] || Op<T>::l(P[i]) <= 0. )
+        p0[i] = Op<T>::l(P[i]) + Op<T>::diam(P[i]) * vSAM[i];
+      else
+        p0[i] = std::exp( Op<T>::l(Op<T>::log(P[i])) + Op<T>::diam(Op<T>::log(P[i])) * vSAM[i] );
+      //std::cout << "  " << p0[i];
+    }
+    //std::cout << std::endl;
+
+    // Solve NLP
+    _data.set( _np, p0.data(), P );
+    _solution.status = IpoptApp->Initialize();
+    if( _solution.status != Ipopt::Solve_Succeeded ) continue;
+    _solution.status = IpoptApp->OptimizeTNLP( this );
+
+    // Test feasibility and improvement
+    if( !is_feasible( 1.1*options.PRIMALTOL ) ){
+      if( DISP ) std::cout << "·";
+      continue;
+    }
+    if( DISP ) std::cout << "*";
+    if( !found ){
+      best = _solution;
+      found = true;
+      continue;
+    }
+    switch( std::get<0>(_obj)[0] ){
+      case MIN:
+        if( _solution.f < best.f ) best = _solution;
+        break;
+      case MAX:
+        if( _solution.f > best.f ) best = _solution;
+        break;
+    }
+  }
+  if( DISP ) std::cout << std::endl;
+
+  _solution = best;
+  return _solution.status;
+}
+#endif
+
 inline
 bool
-DOSEQSLV_IPOPT::primal_feasible
-( const double*p, const double FEASTOL )
+DOSEQSLV_IPOPT::is_feasible
+( const double*p, const double CTRTOL )
 {
   _solution.p.assign( p, p+_np );
-  return primal_feasible( FEASTOL );
+  return is_feasible( CTRTOL );
 }
 
 inline
 bool
-DOSEQSLV_IPOPT::primal_feasible
-( const double FEASTOL )
+DOSEQSLV_IPOPT::is_feasible
+( const double CTRTOL )
 {
   if( !eval_f( _solution.p.size(), _solution.p.data(), true, _solution.f )
    || !eval_g( _solution.p.size(), _solution.p.data(), false, _solution.g.size(), _solution.g.data() ) )
@@ -681,9 +785,72 @@ DOSEQSLV_IPOPT::primal_feasible
 #ifdef MC__DOSEQSLV_IPOPT_DEBUG
     std::cout << "g[" << j << "] = " << _solution.g[ic] << "  (" << maxinfeas << ")\n";
 #endif
-    if( maxinfeas > FEASTOL ) return false;
+    if( maxinfeas > CTRTOL ) return false;
   }
 
+  return true;
+}
+
+inline
+bool
+DOSEQSLV_IPOPT::is_stationary
+( const double*p, const double*ug, const double*upL, const double*upU,
+  const double GRADTOL )
+{
+  _solution.p.assign( p, p+_np );
+  _solution.ug.assign( ug, ug+_nf-1 );
+  _solution.upL.assign( upL, upL+_np );
+  _solution.upU.assign( upU, upU+_np );
+  return is_stationary( GRADTOL );
+}
+
+inline
+bool
+DOSEQSLV_IPOPT::is_stationary
+( const double GRADTOL )
+{
+  unsigned nnz_jac_g = 0;
+  for( unsigned int ic=1; ic<_nf; ic++ )
+    nnz_jac_g += _eval.fstruct[ic].size();
+  CPPL::dcovector grad_f( _solution.p.size() ), jac_g( nnz_jac_g );
+  if( !eval_grad_f( _solution.p.size(), _solution.p.data(), true, grad_f.array )
+   || !eval_jac_g( _solution.p.size(), _solution.p.data(), false, _solution.g.size(),
+                   nnz_jac_g, 0, 0, jac_g.array ) )
+  return false;
+
+#ifdef MC__DOSEQSLV_IPOPT_DEBUG
+  for( unsigned ip=0; ip<_solution.p.size(); ip++ )
+    std::cout << ip << ": " << grad_f(ip) << std::endl;
+#endif
+  CPPL::dcovector mul_g( _solution.g.size() );
+  CPPL::dgsmatrix sjac_g( _solution.p.size(), _solution.g.size(), nnz_jac_g );
+  unsigned ie = 0;
+  for( unsigned ic=1; ic<_nf; ic++ ){
+    auto it = _eval.fstruct[ic].begin();
+    for( ; it != _eval.fstruct[ic].end(); ++it, ie++ )
+      sjac_g.put( it->first, ic-1, jac_g(ie) );
+  }
+#ifdef MC__DOSEQSLV_IPOPT_DEBUG
+  std::cout << std::endl << sjac_g.to_dgematrix();
+#endif
+
+  CPPL::dcovector grad_L = grad_f; //_scaling * grad_f;
+  for( unsigned ig=0; ig<_solution.g.size(); ig++ ){
+#ifdef MC__DOSEQSLV_IPOPT_DEBUG
+    std::cout << ig << ": " << _solution.ug[ ig ] << std::endl;
+#endif
+    mul_g(ig) = _solution.ug[ig];
+  }
+  grad_L += sjac_g * mul_g;
+
+  for( unsigned ip=0; ip<_solution.p.size(); ip++ ){
+#ifdef MC__DOSEQSLV_IPOPT_DEBUG
+    std::cout << ip << ": " << _solution.upL[ ip ] << "  " << _solution.upU[ ip ] << "  "
+              << grad_L(ip) << std::endl;
+#endif
+    grad_L(ip) += _solution.upU[ ip ] - _solution.upL[ ip ];
+    if( std::fabs( grad_L(ip) ) > GRADTOL ) return false;
+  }
   return true;
 }
 
@@ -706,7 +873,7 @@ DOSEQSLV_IPOPT::get_nlp_info
   // use the C style indexing (0-based)
   index_style = Ipopt::TNLP::C_STYLE;
 
-#ifdef MC__NLPSLV_IPOPT_DEBUG
+#ifdef MC__DOSEQSLV_IPOPT_DEBUG
   std::cout << "n:" << n << std::endl;
   std::cout << "m:" << m << std::endl;
   std::cout << "nnz_jac_g:" << nnz_jac_g << std::endl;
@@ -795,9 +962,9 @@ DOSEQSLV_IPOPT::_update_functions
 
   // Values and derivatives of parameter-dependent functions
   try{
-    _pDAG->eval( _opFCTPAR, _wkFCTPAR, _vFCTPAR.size(), _vFCTPAR.data(), _valFCTPAR.data(), _np, _pP, p );
+    _pDAG->eval( _opFCTPAR, _wkFCTPAR, _vec_FCT_PAR.size(), _vec_FCT_PAR.data(), _valFCTPAR.data(), _np, _pP, p );
     if( sens )
-      _pDAG->eval( _opDFCTPAR, _wkFCTPAR, _vFCTPAR.size()*_np, _pDFCTPAR, _valDFCTPAR.data(), _np, _pP, p );
+      _pDAG->eval( _opDFCTPAR, _wkFCTPAR, _vec_FCT_PAR.size()*_np, _pDFCTPAR, _valDFCTPAR.data(), _np, _pP, p );
   }
   catch(...){
     return false;
@@ -805,7 +972,7 @@ DOSEQSLV_IPOPT::_update_functions
 
   // Values and derivatives of state-dependent functions
   _valSTADEP.clear();
-  for( auto it=_ndxFCTDEP.begin(); it!=_ndxFCTDEP.end(); ++it )
+  for( auto it=_set_PAR_FCT_IVP.begin(); it!=_set_PAR_FCT_IVP.end(); ++it )
     _valSTADEP.push_back( p[*it] );
 
   STATUS flag = FATAL;
@@ -827,18 +994,18 @@ DOSEQSLV_IPOPT::_update_functions
   _eval.sens = sens;
   for( unsigned ic=0, icsta=0, icpar=0; ic<_nf; ic++ ){
     // Parameter-dependent functions
-    if( _ndxFCTSTA.find( ic ) == _ndxFCTSTA.end() ){
+    if( _set_FCT_IVP.find( ic ) == _set_FCT_IVP.end() ){
       _eval.f[ic] = _valFCTPAR[icpar];
       for( unsigned ip=0; sens && ip<_np; ip++ )
-        _eval.fp[ic+ip*_nf] = _valDFCTPAR[icpar+ip*_vFCTPAR.size()];
+        _eval.fp[ic+ip*_nf] = _valDFCTPAR[icpar+ip*_vec_FCT_PAR.size()];
       icpar++;
     }
     // State-dependent functions
     else{
       _eval.f[ic] = _valFCTSTA[icsta];
       for( unsigned ip=0, ipsta=0; sens && ip<_np; ip++ ){
-        if( _ndxFCTDEP.find( ip ) != _ndxFCTDEP.end() ){
-          _eval.fp[ic+ip*_nf] = _valDFCTSTA[icsta+ipsta*_ndxFCTSTA.size()];
+        if( _set_PAR_FCT_IVP.find( ip ) != _set_PAR_FCT_IVP.end() ){
+          _eval.fp[ic+ip*_nf] = _valDFCTSTA[icsta+ipsta*_set_FCT_IVP.size()];
           ipsta++;
           continue;
         }
@@ -857,6 +1024,8 @@ DOSEQSLV_IPOPT::eval_f
 ( Ipopt::Index n, const Ipopt::Number* p, bool new_p,
   Ipopt::Number& f )
 {
+
+
 #ifdef MC__DOSEQSLV_IPOPT_TRACE
     std::cout << "  DOSEQSLV_IPOPT::eval_f  " << new_p << std::endl;
 #endif
@@ -920,7 +1089,7 @@ DOSEQSLV_IPOPT::eval_jac_g
   if( !gp ){
     unsigned ie = 0;
     for( unsigned ic=1; ic<_nf; ic++ ){
-      std::map<int,bool>::const_iterator it = _eval.fstruct[ic].begin();
+      auto it = _eval.fstruct[ic].begin();
       for( ; it != _eval.fstruct[ic].end(); ++it, ie++ ){
         iRow[ie] = ic-1;
         jCol[ie] = it->first;
@@ -937,7 +1106,7 @@ DOSEQSLV_IPOPT::eval_jac_g
   if( (new_p || !_eval.sens) && !_update_functions( p, true ) ) return false;
   unsigned ie = 0;
   for( unsigned ic=1; ic<_nf; ic++ ){
-    std::map<int,bool>::const_iterator it = _eval.fstruct[ic].begin();
+    auto it = _eval.fstruct[ic].begin();
     for( ; it != _eval.fstruct[ic].end(); ++it, ie++ ){
       gp[ie] = _eval.fp[ic+it->first*_nf]; 
 #ifdef MC__DOSEQSLV_IPOPT_DEBUG
@@ -983,6 +1152,7 @@ DOSEQSLV_IPOPT::finalize_solution
   // Successful (or near-successful) completion
   //if( status == Ipopt::SUCCESS || status == Ipopt::STOP_AT_ACCEPTABLE_POINT
   // || status == Ipopt::STOP_AT_TINY_STEP ){
+    _solution.f = f;
     _solution.p.assign( p, p+n );
     _solution.upL.assign( upL, upL+n );
     _solution.upU.assign( upU, upU+n );

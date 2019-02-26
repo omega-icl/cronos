@@ -1,13 +1,14 @@
 #define SAVE_RESULTS    // whether or not to save results to file
-#define USE_PROFIL	    // specify to use PROFIL for interval arithmetic
-#undef USE_FILIB	    // specify to use FILIB++ for interval arithmetic
-#undef  USE_DEPs        // whether to use dependents
+#define USE_PROFIL	// specify to use PROFIL for interval arithmetic
+#undef  USE_FILIB	// specify to use FILIB++ for interval arithmetic
+#define USE_DEPS	// whether to use dependents
+
 #define MC__USE_CPLEX   // whether to use CPLEX or GUROBI
-#undef MC__CSEARCH_SHOW_BOXES
-#undef MC__CSEARCH_SHOW_DEPS
-#undef MC__CSEARCH_SHOW_REDUC
-#undef MC__CSEARCH_SHOW_OUTER
-#undef MC__SBP_SHOW_SCOREBRANCHING
+#undef  MC__CSEARCH_SHOW_BOXES
+#undef  MC__CSEARCH_SHOW_REDUC
+#undef  MC__CSEARCH_SHOW_INCLUSION
+#undef  MC__CSEARCH_PAUSE_INFEASIBLE
+
 ////////////////////////////////////////////////////////////////////////////////
 
 #include <fstream>
@@ -74,29 +75,30 @@ int main()
   CP.set_dep( NF, P+NP-NF, F );
 #endif
 
-  CP.options.MIPFILE     = "";//"test6.lp";
+  CP.options.MIPFILE     = ""; //"test6.lp";
   CP.options.DISPLAY     = 2;
-  CP.options.MIPDISPLAY  = 0;
-  CP.options.MAXITER     = 0;
+  CP.options.MAXITER     = 1000;
+  CP.options.BLKDECUSE   = true;//false;//
   CP.options.NODEMEAS    = mc::SBP<I>::Options::RELMAXLEN;
-  CP.options.VARMEAS     = mc::NLCP<I>::Options::DEP;
-  CP.options.CVTOL       = 1e-3;
-  CP.options.FEASTOL     = 1e-6;
-  CP.options.PREPROC     = true;
-  CP.options.BLKDECUSE   = true;
+  CP.options.CVTOL       = 1e-2;
+  CP.options.FEASTOL     = 1e-9;
   CP.options.BRANCHVAR   = mc::SBP<I>::Options::RGREL;
+#ifndef USE_DEPS
+  CP.options.VARMEAS     = mc::NLCP<I>::Options::ALL;
+#else 
+  CP.options.VARMEAS     = mc::NLCP<I>::Options::DEP;
+#endif
   CP.options.STGBCHDEPTH = 0;
   CP.options.STGBCHRTOL  = 1e-2;
   CP.options.DOMREDMAX   = 10;
-  CP.options.DOMREDTHRES = 1e-1;
-  CP.options.DOMREDBKOFF = 1e-6;
+  CP.options.DOMREDTHRES = 5e-2;
   CP.options.RELMETH     = mc::NLCP<I>::Options::CHEB;
   CP.options.CMODPROP    = 2;
-  CP.options.CMODRED     = mc::NLCP<I>::Options::APPEND;
-  CP.options.CMODDEPS    = 2;
+  CP.options.CMODRED     = mc::NLCP<I>::Options::NONE;//APPEND;
+  CP.options.CMODDEPS    = 5;
   CP.options.CMODATOL    = 1e-8;
-  CP.options.CMODRTOL    = 1e-2;
-  CP.options.CMODWARMS   = false;//true;
+  CP.options.CMODRTOL    = CP.options.CVTOL;
+
   CP.options.AEBND.ATOL    = 
   CP.options.AEBND.RTOL    = 1e-8;
   CP.options.AEBND.DISPLAY = 0;
@@ -106,6 +108,7 @@ int main()
   //const I Ip[NP] = { I(.85,.9), I(0.,0.6), I(0.4,0.8), I(0.,5.), I(0.,40.), I(40.,50.), I(30.,55.) };
   //const I Ip[NP] = { I(0.5,1.2), I(0.,0.6), I(0.,0.8), I(0.,5.), I(0.,80.), I(40.,50.), I(0.,60.) };
   const I Ip[NP] = { I(1e-2,1.5), I(0.,0.6), I(0.,0.8), I(0.,5.), I(0.,80.), I(40.,50.), I(0.,60.) };
+  //const I Ip[NP] = { I(0.4,0.6), I(0.,0.6), I(0.,0.8), I(0.,5.), I(0.,80.), I(40.,50.), I(0.,60.) };
   //const I Ip[NP] = { I(0.4756250000000050,0.5221875000000074),
   //                   I(0.0000000000000000,0.0000000000000001),
   //                   I(0.5512859583286112,0.5750890733044568),
@@ -115,40 +118,9 @@ int main()
   //                   I(49.5210620393331097,51.9928120454771446) };
 
   try{  
-    CP.setup();
+    CP.setup( Ip );
     CP.solve( Ip );
     CP.stats.display();
-  }
-  catch(...){
-    std::cout << "Exception during optimization" << std::endl;
-  }
-
-#if defined(SAVE_RESULTS )
-  std::ofstream K_un( "test6.out", std::ios_base::out );
-  CP.output_nodes( K_un );
-  K_un.close();
-#endif
-
-  return 0;
-
-  // Steady-State Bifurcation condition
-  const mc::FFVar* jacF = DAG.FAD( NF, F, NP-1, P+1, false ); // Row-wise
-  CP.add_ctr( mc::BASE_OPT::EQ, DAG.det( NF, jacF ) );
-
-  try{  
-    CP.options.CVTOL       = 1e-3;
-    CP.setup();
-    CP.solve( Ip );
-    CP.stats.display();
-  }
-#ifdef MC__USE_CPLEX
-  catch(IloException& e){
-    std::cout << "Error code = " << e.getMessage() << std::endl;
-#else
-  catch(GRBException& e){
-    std::cout << "Error code = " << e.getErrorCode() << std::endl;
-    std::cout << e.getMessage() << std::endl;
-#endif
   }
   catch(...){
     std::cout << "Exception during optimization" << std::endl;
@@ -159,14 +131,49 @@ int main()
   for( auto it=L_clus.begin(); it!=L_clus.end(); ++it ) delete[] *it;
 
 #if defined(SAVE_RESULTS )
-  std::ofstream K_bi( "test6b.out", std::ios_base::out );
-  CP.output_nodes( K_bi ); //, true );
-  K_bi.close();
-
-  std::ofstream K_cl( "test6c.out", std::ios_base::out );
-  CP.output_clusters( K_cl ); //, true );
-  K_cl.close();
+  std::ofstream K_un( "test6_bnd.out", std::ios_base::out );
+  CP.output_nodes( K_un );
+  K_un.close();
 #endif
+
+  return 0;
+
+//  // Steady-State Bifurcation condition
+//  const mc::FFVar* jacF = DAG.FAD( NF, F, NP-1, P+1, false ); // Row-wise
+//  CP.add_ctr( mc::BASE_OPT::EQ, DAG.det( NF, jacF ) );
+
+//  try{  
+//    CP.options.CVTOL       = 1e-3;
+//    CP.setup();
+//    CP.solve( Ip );
+//    CP.stats.display();
+//  }
+//#ifdef MC__USE_CPLEX
+//  catch(IloException& e){
+//    std::cout << "Error code = " << e.getMessage() << std::endl;
+//#else
+//  catch(GRBException& e){
+//    std::cout << "Error code = " << e.getErrorCode() << std::endl;
+//    std::cout << e.getMessage() << std::endl;
+//#endif
+//  }
+//  catch(...){
+//    std::cout << "Exception during optimization" << std::endl;
+//  }
+
+//  auto L_clus = CP.clusters();
+//  std::cout << "No clusters: " << L_clus.size() << std::endl;
+//  for( auto it=L_clus.begin(); it!=L_clus.end(); ++it ) delete[] *it;
+
+//#if defined(SAVE_RESULTS )
+//  std::ofstream K_bi( "test6b.out", std::ios_base::out );
+//  CP.output_nodes( K_bi ); //, true );
+//  K_bi.close();
+
+//  std::ofstream K_cl( "test6c.out", std::ios_base::out );
+//  CP.output_clusters( K_cl ); //, true );
+//  K_cl.close();
+//#endif
 
   return 0;
 }

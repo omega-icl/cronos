@@ -5,6 +5,8 @@
 #ifndef MC__BASE_OPT_HPP
 #define MC__BASE_OPT_HPP
 
+#include <vector>
+
 namespace mc
 {
 //! @brief C++ base class for definition of optimization problems
@@ -47,6 +49,40 @@ protected:
 };
 
 //inline double BASE_OPT::INF = 1e20;
+
+//! @brief C++ structure for holding the solution of optimization models
+////////////////////////////////////////////////////////////////////////
+//! mc::SOLUTION_OPT is a C++ structure for holding the solution of 
+//! optimization models, including variables, cost and constraint
+//! functions and multiplers.
+////////////////////////////////////////////////////////////////////////
+struct SOLUTION_OPT
+{
+  SOLUTION_OPT
+    ()
+    {}
+
+  ~SOLUTION_OPT
+    ()
+    {}
+
+  SOLUTION_OPT
+    ( const SOLUTION_OPT &sol )
+    : status( sol.status ), p( sol.p ), upL( sol.upL ), upU( sol.upU ),
+      g( sol.g ), ug( sol.ug ), f( sol.f )
+    {}
+
+  void reset()
+    { p.clear(); upL.clear(); upU.clear(); g.clear(); ug.clear(); f = NAN; }
+
+  int status;
+  std::vector<double> p;
+  std::vector<double> upL;
+  std::vector<double> upU;
+  std::vector<double> g;
+  std::vector<double> ug;
+  double f;
+};
 
 } // end namescape mc
 

@@ -1,13 +1,12 @@
 # Third-Party Libraries -->> CHANGE ACCORDINGLY <<--
-PATH_MC = $(HOME)/Programs/Devel/MC++/MC++_2.0
-LIB_MC = -llapack -lblas
-INC_MC = -I$(PATH_MC)/include -I$(PATH_MC)/src/3rdparty/fadbad++ -I$(PATH_MC)/src/3rdparty/cpplapack/include
+#PROF = -pg
+OPTI = -Ofast
+#OPTI = -O2
 
-LIB_GSL = -lgsl -lgslcblas -lm
-INC_GSL = 
-
-LIB_HSL = -lmc13 -lmc21 -lmc33 -lgfortran
-INC_HSL = 
+PATH_MC = $(HOME)/Programs/Devel/MC++/MC++_2.1
+LIB_MC = -llapack -lblas -lmc13 -lmc21 -lmc33 -lgfortran
+INC_MC = -I$(PATH_MC)/src/mc -I$(PATH_MC)/src/3rdparty/fadbad++ -I$(PATH_MC)/src/3rdparty/cpplapack-2015.05.11-1/include
+FLAGS_MC = -Wno-misleading-indentation -Wno-unknown-pragmas -DMC__USE_HSL
 
 PATH_PROFIL = /home/bchachua/Programs/ThirdParty/Profil-2.0.8
 LIB_PROFIL  = -L$(PATH_PROFIL)/lib -lProfilPackages -lProfil -lBias -llr
@@ -22,37 +21,27 @@ PATH_IPOPT   = /opt/CoinIpopt
 PATH_COINHSL = /opt/coinhsl
 LIB_IPOPT = -L$(PATH_IPOPT)/lib -L$(PATH_COINHSL)/lib -lipopt -lcoinhsl -llapack -lblas -lgfortran -lm -lquadmath -lblas -lgfortran -lm -lquadmath -lm -ldl -lcoinmumps -lblas -lgfortran -lm -lquadmath -lgfortran -lm -lquadmath -lcoinmetis
 INC_IPOPT = -I$(PATH_IPOPT)/include
-#PATH_IPOPT = /opt/Ipopt-3.10.2
-#LIB_IPOPT = -L$(PATH_IPOPT)/lib -lipopt -lcoinhsl -llapack -lblas -ldl
-#INC_IPOPT = -I$(PATH_IPOPT)/include
 
 PATH_CPLEX   = /opt/ibm/ILOG/CPLEX_Studio1263/cplex
 PATH_CONCERT = /opt/ibm/ILOG/CPLEX_Studio1263/concert
-LIB_CPLEX    = -L$(PATH_CPLEX)/lib/x86-64_linux/static_pic -lilocplex -lcplex \
+LIB_MIP      = -L$(PATH_CPLEX)/lib/x86-64_linux/static_pic -lilocplex -lcplex \
                -L$(PATH_CONCERT)/lib/x86-64_linux/static_pic -lconcert \
-	       -lm -pthread
-INC_CPLEX    = -I$(PATH_CPLEX)/include -I$(PATH_CONCERT)/include
-FLAGS_CPLEX  = -m64 -fPIC -fexceptions -DIL_STD -Wno-ignored-attributes -Wno-deprecated-declarations
-#FLAGS_CPLEX  = -m64 -fPIC -fexceptions -DNDEBUG -DIL_STD
+               -lm -pthread
+INC_MIP      = -I$(PATH_CPLEX)/include -I$(PATH_CONCERT)/include
+FLAGS_MIP    = -DMC__USE_CPLEX -m64 -fPIC -fexceptions -DIL_STD -Wno-ignored-attributes
 
-PATH_GUROBI = $(GUROBI_HOME)
-LIB_GUROBI  = -L$(PATH_GUROBI)/lib -lgurobi_c++ -lgurobi65 -pthread
-INC_GUROBI  = -I$(PATH_GUROBI)/include
+#PATH_GUROBI = $(GUROBI_HOME)
+#LIB_MIP     = -L$(PATH_GUROBI)/lib -lgurobi_g++5.2 -lgurobi75 -pthread
+#INC_MIP     = -I$(PATH_GUROBI)/include
+#FLAGS_MIP   = -DMC__USE_GUROBI
 
-#LIB_SDPA   = -lsdpa -ldmumps_seq
-#INC_SDPA   = 
-
-#PROF = -pg
-OPTI = -Ofast
-#OPTI = -O2
-
-FLAG_ALL = -g $(OPTI) -Wall -std=c++11 $(FLAG_FILIB) $(FLAGS_CPLEX)
-LIB_ALL  = $(LIB_MC) $(LIB_PROFIL) $(LIB_FILIB) $(LIB_HSL) $(LIB_GSL) $(LIB_LAPACK) $(LIB_GUROBI) $(LIB_CPLEX) $(LIB_IPOPT)
-INC_ALL  = $(INC_MC) $(INC_PROFIL) $(INC_FILIB) $(INC_HSL) $(INC_GSL) $(INC_LAPACK) $(INC_GUROBI) $(INC_CPLEX) $(INC_IPOPT)
+FLAG_ALL = -g $(OPTI) -Wall -std=c++11 $(FLAGS_FILIB) $(FLAGS_MC) $(FLAGS_MIP)
+LIB_ALL  = $(LIB_MC) $(LIB_PROFIL) $(LIB_FILIB) $(LIB_MIP) $(LIB_IPOPT)
+INC_ALL  = $(INC_MC) $(INC_PROFIL) $(INC_FILIB) $(INC_MIP) $(INC_IPOPT)
 
 #####
 
-all: test0 test1 test2 test3 test4 test5 test6 test7 test8
+all: test0 test1 test2 test3 test4 test5 test6 test7 test8 test9
 
 test% : test%.o
 	g++ $(PROF) -o $@ $< $(LIB_ALL)
@@ -76,4 +65,4 @@ gensvg :
 #####
 
 clean :
-	rm -f test? test?b test?c *.o *~ *.eps *.lp *.out
+	rm -f test? test?? *.o *~ *.eps *.lp *.out *.log

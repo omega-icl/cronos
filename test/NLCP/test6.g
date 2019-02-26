@@ -1,4 +1,4 @@
-file = 'test6.out'
+file = 'test6_bnd.out'
 
 #set size ratio 1
 unset key
@@ -40,7 +40,7 @@ plot file u (($1+$2)/2.):(($13+$14)/2.):1:2:13:14 w boxxy lt 1 lc 1, \
        '' u (($1+$2)/2.):(($13+$14)/2.) w d
 
 unset multiplot
-set term wxt
+
 !ps2eps -B -f -l test6.eps
 !mv test6.eps.eps test6.eps
 !gv test6.eps

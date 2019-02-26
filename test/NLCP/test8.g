@@ -41,7 +41,6 @@ do for [i = 1:NS]{
 unset multiplot
 ################################################################################
 
-set term wxt
 !ps2eps -B -f -l test8.eps
 !mv test8.eps.eps test8.eps
 !gv test8.eps

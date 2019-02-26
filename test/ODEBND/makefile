@@ -26,20 +26,20 @@ LIB_FILIB  = -L$(PATH_FILIB)/lib -lprim
 INC_FILIB  = -I$(PATH_FILIB)/include/ -I$(PATH_FILIB)/include/interval
 FLAG_FILIB = -frounding-math -ffloat-store
 
-FLAG_ALL = -g -Wall -std=c++11 $(FLAG_FILIB) $(FLAG_MC)
-#FLAG_ALL = -g -Ofast -Wall -std=c++11 $(FLAG_FILIB) $(FLAG_MC)
+FLAG_ALL = -g -Wall -std=c++1z $(FLAG_FILIB) $(FLAG_MC)
+#FLAG_ALL = -g -Ofast -Wall -std=c++1z $(FLAG_FILIB) $(FLAG_MC)
 LIB_ALL  = $(LIB_MC) $(LIB_PROFIL) $(LIB_FILIB) $(LIB_HSL) $(LIB_GSL) $(LIB_SUNDIALS) $(LIB_LAPACK)
 INC_ALL  = $(INC_MC) $(INC_PROFIL) $(INC_FILIB) $(INC_HSL) $(INC_GSL) $(INC_SUNDIALS) $(INC_LAPACK)
 
 #####
 
-all: test0 test1 test2 test3 test4
+all: test0 test1 test2 test3 test4 test5 test6 test7 test8
 
 test% : test%.o
-	g++ -o $@ $< $(LIB_ALL)
+	g++-7 -o $@ $< $(LIB_ALL)
 
 test%.o: test%.cpp
-	g++ -c $(FLAG_ALL) -I../../src $(INC_ALL) -o $@ $<
+	g++-7 -c $(FLAG_ALL) -I../../src $(INC_ALL) -o $@ $<
 
 #####
 

@@ -111,7 +111,7 @@ int main()
 
   NLP->options.DISPLAY = 5;
   NLP->options.MAXITER = 100;
-  NLP->options.CVTOL = 1e-9;
+  NLP->options.CVTOL = NLP->options.PRIMALTOL = NLP->options.DUALTOL = NLP->options.COMPLTOL = 1e-7;
   NLP->options.GRADIENT = mc::NLPSLV_IPOPT::Options::FORWARD;//BACKWARD;
   NLP->options.HESSIAN  = mc::NLPSLV_IPOPT::Options::LBFGS;
   NLP->setup();
@@ -136,6 +136,9 @@ int main()
     for( unsigned int ip=0; ip<NP; ip++ )
       std::cout << "  p*(" << ip << ") = " << NLP->solution().p[ip]
                 << std::endl;
+    std::cout << "FEASIBLE:   " << NLP->is_feasible( 1e-5 ) << std::endl;
+    std::cout << "STATIONARY: " << NLP->is_stationary( 1e-5 ) << std::endl;
+
   }
 
   return 0;

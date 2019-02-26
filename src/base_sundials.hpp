@@ -1,4 +1,4 @@
-// Copyright (C) 2015 Benoit Chachuat, Imperial College London.
+// Copyright (C) 2019 Benoit Chachuat, Imperial College London.
 // All Rights Reserved.
 // This code is published under the Eclipse Public License.
 
@@ -211,7 +211,8 @@ protected:
   BASE_SUNDIALS& operator=(const BASE_SUNDIALS&);
 };
 
-inline void
+inline
+void
 BASE_SUNDIALS::_init_stats
 ( Stats&stats )
 {
@@ -222,7 +223,8 @@ BASE_SUNDIALS::_init_stats
   stats.cputime = - time.tv_sec - time.tv_usec*1e-6;
 }
 
-inline void
+inline
+void
 BASE_SUNDIALS::_final_stats
 ( Stats&stats )
 {
@@ -232,7 +234,8 @@ BASE_SUNDIALS::_final_stats
   stats.cputime += time.tv_sec + time.tv_usec*1e-6;
 }
 
-inline void
+inline
+void
 BASE_SUNDIALS::_print_stats
 ( const Stats&stats, std::ostream&os )
 {
@@ -248,7 +251,8 @@ BASE_SUNDIALS::_print_stats
   return;
 }
 
-inline bool
+inline
+bool
 BASE_SUNDIALS::_check_cv_flag
 ( void *flagvalue, std::string funcname, int opt )
 {
@@ -275,7 +279,8 @@ BASE_SUNDIALS::_check_cv_flag
   return(false);
 }
 
-inline void
+inline
+void
 BASE_SUNDIALS::_print_stats_cvode
 ( void *cvode_mem, bool sens, std::ostream&os )
 {

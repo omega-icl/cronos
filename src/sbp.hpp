@@ -1,4 +1,3 @@
-// Copyright (C) 2012-2016 Benoit Chachuat, Imperial College London.
 // All Rights Reserved.
 // This code is published under the Eclipse Public License.
 
@@ -98,7 +97,7 @@ public:
       BRANCHING_VARIABLE_CRITERION(RGREL), BRANCHING_USERFUNCTION(0),
       STRONG_BRANCHING_MAXDEPTH(0), STRONG_BRANCHING_RELTOL(1e-3),
       STRONG_BRANCHING_ABSTOL(1e-3), SCORE_BRANCHING_USE(false),
-      SCORE_BRANCHING_RELTOL(1e-1), SCORE_BRANCHING_ABSTOL(1e-2),
+      SCORE_BRANCHING_RELTOL(machprec()), SCORE_BRANCHING_ABSTOL(machprec()),
       SCORE_BRANCHING_MAXSIZE(0), DISPLAY(2), OUTPUT_ROTATED(false),
       MAX_CPUTIME(1e6), MAX_NODES(0)
       {}
@@ -161,6 +160,7 @@ public:
     //! @brief Enumeration type for SBP exception handling
     enum TYPE{
       BRANCH=0,		//!< Error due to an empty set of branching variables 
+      SCORE,        //!< Error due to a missing score of branching variables
       INTERN=-3,	//!< SBP internal error
       UNDEF=-33		//!< Error due to calling a function/feature not yet implemented in SBP
     };
@@ -174,6 +174,8 @@ public:
         switch( _ierr ){
         case BRANCH:
           return "SBP Error: empty set of branching variables";
+        case SCORE:
+          return "SBP Error: missing scores for branching variables";
         case INTERN:
           return "SBP Internal Error";
         case UNDEF: default:
@@ -198,9 +200,13 @@ public:
     ( const unsigned ip ) const
     { assert( ip < _np ); return _P_root[ip]; }
 
-  //! @brief Apply set-inversion algorithm - on return, measure of set-boundary approximations 
+  //! @brief Apply branch-and-prune algorithm; set <tt>resume=true</tt> to carry on with a previous simulation, i.e. after increasing the maximal number of iterations or the time limit. The return value is a measure of the set-boundary enclosure.
   double solve
     ( std::ostream&os=std::cout, const bool resume=false );
+
+  //! @brief Apply branch-and-prune algorithm, starting from the nodes in the multiset <a>stack</a>. The return value is a measure of the set-boundary enclosure.
+  double solve
+    ( const t_Nodes&stack, std::ostream&os=std::cout );
 
   //! @brief Cluster boxes in set-boundary approximation - on return, list of box enclosures for clusters
   std::list<T*> clusters
@@ -332,6 +338,10 @@ private:
   //! @brief Determine whether a termination criterion is met
   bool _terminate() const;
 
+  //! @brief Apply branch-and-prune algorithm.
+  double _solve
+    ( std::ostream&os );
+
   //! @brief Default set of branching variables
   void _branching_variable_set
     ( const NODE*pNode );
@@ -387,10 +397,10 @@ private:
     ( const NODE*Node1, const NODE*Node2, const double rtol, const double atol ) const;
 };
 
-//! @brief C++ base class for set-inversion nodes
+//! @brief C++ base class for branch-and-prune nodes
 ////////////////////////////////////////////////////////////////////////
 //! mc::SBPNode is a C++ base class for defining nodes in the
-//! set-inversion algorithm.
+//! branch-and-prune algorithm.
 ////////////////////////////////////////////////////////////////////////
 template <typename T>
 class SBPNode
@@ -745,10 +755,65 @@ SBP<T,NODE,LT_NODE>::solve
     //for( unsigned i=0; i<_np; i++ ) _P_root[i] = rootNode->P()[i];
     //_P_root = rootNode->P();
     //_root_measure = measure( _P_root );
-    _open_measure = measure( rootNode );
-    _open_nodes.insert( rootNode );
+    if( _status == OUTER ){
+      _open_measure = 0.;
+    }
+    else if( _status == INNER ){
+      _inner_nodes.insert( rootNode );
+    }
+    else{
+      _open_measure = measure( rootNode );
+      _open_nodes.insert( rootNode );
+    }
   }
 
+  return _solve( os );
+}
+
+template <typename T, typename NODE, typename LT_NODE>
+inline double
+SBP<T,NODE,LT_NODE>::solve
+( const t_Nodes&stack, std::ostream&os )
+{
+  // Display header
+  _display_init();
+  _display( os );
+
+  _restart();
+  for( auto&& pNode : stack ){ 
+    NODE* rootNode = new NODE( this, pNode->P() );
+    _status = rootNode->assess();
+    switch( _status ){
+     case OUTER:
+      delete rootNode;
+      break;
+     case INNER:
+      _inner_nodes.insert( rootNode );
+      break;
+     case UNDETERMINED:
+     case FAILURE:
+      _open_nodes.insert( rootNode );
+      break;
+     case ABORT: default:
+      delete rootNode;
+      break;
+    }
+
+    if( _status == ABORT ){
+      _display_final( cpuclock() );
+      _display( os ); 
+      return _open_measure;
+    }
+  }
+
+  return _solve( os );
+}
+
+template <typename T, typename NODE, typename LT_NODE>
+inline double
+SBP<T,NODE,LT_NODE>::_solve
+( std::ostream&os )
+{
   // Run iterative set-inversion algorithm
   for( ; !_open_nodes.empty()
          && cpuclock()-_tstart < options.MAX_CPUTIME
@@ -766,36 +831,7 @@ SBP<T,NODE,LT_NODE>::solve
     _display_add( pNode->measure() );
     _display_add( (unsigned)_open_nodes.size() );
     _display_add( pNode->iter() );
-/*
-    switch( pNode->status() ){
-     case OUTER:
-      _open_nodes.erase( _open_nodes.begin() );
-      delete pNode;
-      _display_add( cpuclock()-_tstart );
-      _display_add( "OUTER" );
-      _display( os );
-      continue;
-     case INNER:
-      _open_nodes.erase( _open_nodes.begin() );
-      _inner_nodes.insert( pNode );
-      //delete pNode;
-      _display_add( cpuclock()-_tstart );
-      _display_add( "INNER" );
-      _display( os );
-      continue;
-     case ABORT: default:
-      _open_nodes.erase( _open_nodes.begin() );
-      delete pNode;
-      _display_add( cpuclock()-_tstart );
-      _display_add( "ABORT" );
-      _display( os );
-      continue;
-     case UNDETERMINED:
-     case FAILURE:
-      _open_nodes.erase( _open_nodes.begin() );
-      break;
-    }
-*/
+
     // Branch node domain
     std::pair<NODE*,NODE*> pNewNodes = _branch_node( pNode );
     if( !pNewNodes.first || !pNewNodes.second || _status == ABORT ){
@@ -826,13 +862,14 @@ SBP<T,NODE,LT_NODE>::solve
      case FAILURE:
       _open_nodes.insert( pNewNodes.first );
       if( pNewNodes.first->converged() ){ obranch << " L:CVG"; break; }     
-      obranch << " L:BND (" << std::scientific << std::setprecision(3) << pNewNodes.first->measure() << ")";
+      obranch << ( _status==UNDETERMINED?" L:UND (":" L:ERR (" )
+              << std::scientific << std::setprecision(3) << pNewNodes.first->measure() << ")";
       break;
 
      case ABORT: default:
       delete pNewNodes.first;
       delete pNewNodes.second;
-      obranch << " L:ABORT";
+      obranch << " L:FATAL";
       break;
     }
 
@@ -862,13 +899,14 @@ SBP<T,NODE,LT_NODE>::solve
      case FAILURE:
       _open_nodes.insert( pNewNodes.second );
       if( pNewNodes.second->converged() ){ obranch << " R:CVG"; break; }     
-      obranch << " R:BND (" << std::scientific << std::setprecision(3) << pNewNodes.second->measure() << ")";
+      obranch << ( _status==UNDETERMINED?" R:UND (":" R:ERR (" )
+              << std::scientific << std::setprecision(3) << pNewNodes.second->measure() << ")";
       break;
 
      case ABORT: default:
       delete pNewNodes.first;
       delete pNewNodes.second;
-      obranch << " R:ABORT";
+      obranch << " R:FATAL";
       break;
     }
     _display_add( cpuclock()-_tstart );
@@ -987,11 +1025,12 @@ SBP<T,NODE,LT_NODE>::_branching_variable_set
   std::set<unsigned> ssel;
   if( psel ) ssel = psel( pNode );
   for( unsigned ip=0; ip<_np; ip++ ){
-    // Allow branching on var #ip if part of the user selection (if any)
-    if( psel && ssel.find(ip) == ssel.end() ) continue;
-    // Allow branching on var #ip if not excluded (_exclude_vars)
-    // or not a dependent in current node (_pNode->depend())
-    if( _exclude_vars.find(ip) != _exclude_vars.end()
+    // Do not branch on var #ip if:
+    //  - not part of the user selection in <a>ssel</a>; or
+    //  - part of the exlcuded variables in <a>_exclude_vars)</a>; or
+    //  - part of the dependent varriables in <a>_pNode->depend()</a>
+    if( ( psel && ssel.find(ip) == ssel.end() )
+     || _exclude_vars.find(ip) != _exclude_vars.end()
      || pNode->depend().find(ip) != pNode->depend().end() )
       continue;
     // Add variable index to branching set
@@ -1001,7 +1040,7 @@ SBP<T,NODE,LT_NODE>::_branching_variable_set
   // Preselect variables based on scores
   _branching_score_subset( pNode );
 
-  // Interrupt if branch set is empty - internal error...
+  // Branch set may not be empty!
   if( _branch_set.empty() ) throw Exceptions( Exceptions::BRANCH );
 }
 
@@ -1019,9 +1058,9 @@ SBP<T,NODE,LT_NODE>::_branching_score_subset
       { return el1.second < el2.second; }
   };
   std::multiset< std::pair<unsigned,double>, lt_scores > allscores;
-  for( auto it = _branch_set.begin(); it != _branch_set.end(); ++it ){
-    auto its = pNode->scores().find( *it );
-    if( its == pNode->scores().end() ) continue;
+  for( auto&& var : _branch_set ){
+    auto its = pNode->scores().find( var );
+    if( its == pNode->scores().end() )  throw Exceptions( Exceptions::SCORE );//continue;
     allscores.insert( *its );
 #ifdef DEBUG__SBP_SCOREBRANCHING
     std::cout << "Score variable #" << its->first << ": " << its->second << std::endl;

@@ -42,7 +42,7 @@ int main()
 ////////////////////////////////////////////////////////////////////////
 {
   mc::FFGraph DAG;
-  const unsigned NK = 3, N = NK+NT; mc::FFVar k[N];
+  const unsigned NK = 3, N = NK+2*NT; mc::FFVar k[N];
   for( unsigned i=0; i<N; i++ ) k[i].set( &DAG );
 
   mc::NLGO<I> NLP;
@@ -72,9 +72,11 @@ int main()
 
   mc::FFVar OBJ=0.;
   for( unsigned i=0; i<NT; i++ ){
-    NLP.add_ctr( mc::BASE_OPT::GE, k[NK+i] - mc::sqr( Pmod( k, q_1200, Im_1200[i] ) - Pm_1200[i]*(1.+ePm) ) );
-    NLP.add_ctr( mc::BASE_OPT::GE, k[NK+i] - mc::sqr( Pmod( k, q_1200, Im_1200[i] ) - Pm_1200[i]*(1.-ePm) ) );
-    OBJ += k[NK+i];
+//    NLP.add_ctr( mc::BASE_OPT::GE, k[NK+i] - mc::sqr( Pmod( k, q_1200, Im_1200[i] ) - Pm_1200[i]*(1.+ePm) ) );
+//    NLP.add_ctr( mc::BASE_OPT::GE, k[NK+i] - mc::sqr( Pmod( k, q_1200, Im_1200[i] ) - Pm_1200[i]*(1.-ePm) ) );
+    NLP.add_ctr( mc::BASE_OPT::EQ, k[NK+i] - mc::sqr( Pmod( k, q_1200, Im_1200[i] ) - Pm_1200[i] ) );
+    NLP.add_ctr( mc::BASE_OPT::EQ, k[NK+NT+i] - mc::sqr( Pmod( k, q_50, Im_50[i] ) - Pm_50[i] ) );
+    OBJ += k[NK+i] + k[NK+NT+i];
   }
   NLP.set_obj( mc::BASE_OPT::MIN, OBJ );
 
@@ -86,7 +88,7 @@ int main()
 
   I Ik[N];
   Ik[0] = I(0.,0.02); Ik[1] = I(0.,1.); Ik[2] = I(0.,1.);
-  for( unsigned i=0; i<NT; i++ ) Ik[NK+i] = I(0.,1.e2);
+  for( unsigned i=0; i<2*NT; i++ ) Ik[NK+i] = I(0.,1.e2);
 
   double k0[N];
   k0[0] = 0.0160; k0[1] = 0.492; k0[2] = 0.469;
@@ -107,8 +109,9 @@ int main()
   NLP.options.NLPSLV.DISPLAY = 0;
   NLP.options.CSALGO  = mc::NLGO<I>::Options::BB;
   NLP.options.RELMETH = mc::NLGO<I>::Options::CHEB;
-  //NLP.options.CMODPROP = 1;
-  NLP.solve( Ik, 0, k0 );
+  NLP.options.CMODPROP = 5;
 
+  NLP.solve( Ik, 0, k0 );
+  NLP.stats.display();
   return 0;
 }

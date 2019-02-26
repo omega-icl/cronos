@@ -55,6 +55,8 @@ int main()
     for( unsigned int ip=0; ip<NP; ip++ )
       std::cout << "  p*(" << ip << ") = " << NLP->solution().p[ip]
                 << std::endl;
+    std::cout << "FEASIBLE:   " << NLP->is_feasible( 1e-5 ) << std::endl;
+    std::cout << "STATIONARY: " << NLP->is_stationary( 1e-5 ) << std::endl;
   }
 
   return 0;

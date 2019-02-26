@@ -1,4 +1,5 @@
-file  = 'test4.out'
+file1  = 'test4_bnd.out'
+file2  = 'test4_inn.out'
 NP = 4
 
 set term post eps enh color 8
@@ -16,12 +17,12 @@ do for [i = 1:NP-1]{
   do for [j = i+1:NP]{
     set xlabel sprintf("p%d",i)
     set ylabel sprintf("p%d",j)
-    plot file u ((column(2*i-1)+column(2*i))/2.):((column(2*j-1)+column(2*j))/2.):(column(2*i-1)):(column(2*i)):(column(2*j-1)):(column(2*j)) w boxxy lt 1 lc 2
+    plot file1 u ((column(2*i-1)+column(2*i))/2.):((column(2*j-1)+column(2*j))/2.):(column(2*i-1)):(column(2*i)):(column(2*j-1)):(column(2*j)) w boxxy lt 1 lc 2, \
+         file2 u ((column(2*i-1)+column(2*i))/2.):((column(2*j-1)+column(2*j))/2.):(column(2*i-1)):(column(2*i)):(column(2*j-1)):(column(2*j)) w boxxy lt 1 lc 1
   }
 }
 unset multiplot
 
-set term wxt
 !ps2eps -B -f -l test4.eps
 !mv test4.eps.eps test4.eps
 !gv test4.eps

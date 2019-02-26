@@ -6,7 +6,6 @@
 //- [OK]    Implement SBB method
 //- [OK]    Enable use of polynomial models in relaxations
 //- [OK]    Enable multiple rounds of PWR refinement
-//- [OK]    Support MINLP
 //- [NO]    Exclude linear variables from bound contraction
 //- [TO DO] Enable KKT cuts and reduction constraints
 //- [TO DO] Make it possible to add/remove a constraint from the model?
@@ -20,6 +19,7 @@
 #include "sbb.hpp"
 #include "sbp.hpp"
 #include "lprelax_base.hpp"
+#include "base_nlp.hpp"
 #include "scmodel.hpp"
 
 #undef MC__NLGO_DEBUG
@@ -92,6 +92,8 @@ protected:
   std::vector< std::list<const FFOp*> > _op_g;
   //! @brief list of operations for Lagragian gradient evaluation
   std::list<const FFOp*> _op_dL;
+  //! @brief Storage vector for function evaluation in double arithmetic
+  //std::vector< double > _wk_D;
 
   //! @brief set of variables excluded from branching
   std::set<unsigned> _var_excl;
@@ -103,7 +105,7 @@ protected:
   //! @brief Polyhedral image environment
   using LPRELAX_BASE<T>::_POLenv;
   //! @brief Storage vector for function evaluation in polyhedral relaxation arithmetic
-  std::vector< PolVar<T> > _op_POLfg;
+  std::vector< PolVar<T> > _wk_POL;
   //! @brief Polyhedral image decision variables
   std::vector< PolVar<T> > _POLvar;
   //! @brief Polyhedral image objective auxiliary
@@ -126,7 +128,7 @@ protected:
   //! @brief Chebyshev constraint variables
   std::vector< SCVar<T> > _CMctr;
   //! @brief Storage vector for function evaluation in Chebyshev arithmetic
-  std::vector< SCVar<T> > _op_CMfg;
+  std::vector< SCVar<T> > _wk_CM;
 
   //! @brief Chebyshev reduced-space [-1,1] scaled model environment
   SCModel<T>* _CMrenv;
@@ -314,16 +316,26 @@ protected:
     () = 0;
   //! @brief Get local optimum
   virtual const double* _get_SLVLOC
-    ( const double*p ) = 0;
+    ( const SOLUTION_NLP&locopt ) = 0;
 
-  //! @brief Append scores for Chebyshev-derived cuts
-  void _add_chebscores
-    ( std::map<unsigned,double>&scores, const FFVar&FV,
-      const SCVar<T>&SCV, const double weight, const bool linexcl=false ) const;
-  //! @brief Set up scores for Chebyshev-derived cuts
-  template <typename OPT>
-  void _set_chebscores
-    ( const OPT&options, std::map<unsigned,double>&scores, const bool feastest=false );
+  //! @brief Set branching scores for current node
+  virtual void _set_branching_scores
+    ( std::map<unsigned,double>&scores ) = 0;
+//  //! @brief Append branching scores based on Chebyshev model enclosures
+//  void _add_chebscores
+//    ( std::map<unsigned,double>&scores, const FFVar&FV,
+//      const SCVar<T>&SCV, const double weight, const bool linexcl=false ) const;
+//  //! @brief Set up branching scores based on Chebyshev model enclosures
+//  template <typename OPT>
+//  void _set_chebscores
+//    ( const OPT&options, std::map<unsigned,double>&scores, const bool feastest=false );
+//  //! @brief Set up branching scores based on block structure
+//  template <typename OPT>
+//  void _set_blkscores
+//    ( const OPT&options, std::map<unsigned,double>&scores );
+//  //! @brief Set up branching scores based on block structure
+//  virtual void _get_blkscores
+//    ( std::map<unsigned,double>&scores ) = 0;
 
   //! @brief Solve LP model
   using LPRELAX_BASE<T>::_solve_LPmodel;
@@ -365,9 +377,9 @@ protected:
     ( SLVLOC&locopt, const OPT&options, STAT&stats, const std::vector<T>&P,
       std::vector<double>&p, double&f );
   //! @brief Subproblem for feasibility test
-  template <typename OPT>
+  template <typename SLVLOC, typename OPT>
   typename SBB<T>::STATUS _subproblem_feasibility
-    ( const OPT&options, const double*p, double&f );
+    ( SLVLOC&locopt, const OPT&options, const double*p, double&f );
   //! @brief Subproblem for relaxation
   template <typename OPT, typename STAT>
   typename SBB<T>::STATUS _subproblem_relaxed
@@ -376,9 +388,9 @@ protected:
   //! @brief Update incumbent
   void _update_incumbent
     ( const double*p, const double&f );
-  //! @brief Update incumbent
-  bool _check_feasibility
-    ( const double*p, const double FEASTOL );
+//  //! @brief Update incumbent
+//  bool _check_feasibility
+//    ( const double*p, const double FEASTOL );
 
   //! @brief User-function to subproblem assessment in SBP
   template <typename OPT, typename STAT>
@@ -445,33 +457,27 @@ CSEARCH_BASE<T>::_setup
   if( std::get<0>(_obj).size() )
     _op_f = _dag->subgraph( 1, std::get<1>(_obj).data() );
   _op_g.resize( _nctr );
-  unsigned nfgop = _op_f.size();
   for( unsigned i=0; i<_nctr; i++ ){
     _op_g[i] = _dag->subgraph( 1, std::get<1>(_ctr).data()+i );
-    if( nfgop <  _op_g[i].size() ) nfgop = _op_g[i].size();
   }
-  _op_CMfg.resize(nfgop);
-  _op_POLfg.resize(nfgop);
 
   // identify linear objective/constraint functions
   _fct_lin.clear();
-  if( options.CMODRED != OPT::SUBSTITUTE ){
-    if( std::get<0>(_obj).size() ){
-      FFDep fdep = std::get<1>(_obj)[0].dep();
-      auto it = fdep.dep().cbegin();
-      bool islin = true;
-      for( ; islin && it != fdep.dep().cend(); ++it )
-        if( !it->second ) islin = false;
-      if( islin ) _fct_lin.insert( &std::get<1>(_obj)[0] );
-    }
-    for( unsigned j=0; j<_nctr; j++ ){
-      FFDep gdep = std::get<1>(_ctr)[j].dep();
-      auto it = gdep.dep().cbegin();
-      bool islin = true;
-      for( ; islin && it != gdep.dep().cend(); ++it )
-        if( !it->second ) islin = false;
-      if( islin ) _fct_lin.insert( &std::get<1>(_ctr)[j] );
-    }
+  if( std::get<0>(_obj).size() ){
+    FFDep fdep = std::get<1>(_obj)[0].dep();
+    auto it = fdep.dep().cbegin();
+    bool islin = true;
+    for( ; islin && it != fdep.dep().cend(); ++it )
+      if( it->second != FFDep::L ) islin = false;
+    if( islin ) _fct_lin.insert( &std::get<1>(_obj)[0] );
+  }
+  for( unsigned j=0; j<_nctr; j++ ){
+    FFDep gdep = std::get<1>(_ctr)[j].dep();
+    auto it = gdep.dep().cbegin();
+    bool islin = true;
+    for( ; islin && it != gdep.dep().cend(); ++it )
+      if( it->second != FFDep::L ) islin = false;
+    if( islin ) _fct_lin.insert( &std::get<1>(_ctr)[j] );
   }
 
   if( options.DISPLAY ){
@@ -481,17 +487,6 @@ CSEARCH_BASE<T>::_setup
 
   // Initialize local solution
   _set_SLVLOC();
-
-/*
-  // setup Lagrangian gradient evaluation
-  _cleanup();
-  FFVar lagr = std::get<1>(_obj)[0] * std::get<2>(_obj)[0];
-  for( unsigned ic=0; ic<_nctr; ic++ )
-    lagr += std::get<1>(_ctr)[ic] * std::get<2>(_ctr)[ic];
-  //_lagr_grad = _dag->FAD( 1, &lagr, _nvar, _var.data() );
-  _lagr_grad = _dag->BAD( 1, &lagr, _nvar, _var.data() );
-  _op_dL = _dag->subgraph( _nvar, _lagr_grad );
-*/
 }
 
 template <typename T>
@@ -548,26 +543,26 @@ CSEARCH_BASE<T>::_solve_init_inc
   // Check feasibility of user-supplied point
   double f_loc;
   if( p0 ){
-    if( _subproblem_feasibility( options, p0, f_loc ) == SBB<T>::NORMAL )
+    if( _subproblem_feasibility( locopt, options, p0, f_loc ) == SBB<T>::NORMAL )
       _update_incumbent( p0, f_loc );
   }
 
   // Find local solution
   _local( locopt, stats, P, p0 );
-  const double* p_loc = _get_SLVLOC( locopt->solution().p );
+  const double* p_loc = _get_SLVLOC( locopt->solution() );
 
   // Rounding solution point to nearest integer in case of MIP
   if( isMIP
-   && _subproblem_feasibility( options, p_loc, f_loc ) == SBB<T>::NORMAL ){
+   && _subproblem_feasibility( locopt, options, p_loc, f_loc ) == SBB<T>::NORMAL ){
     std::vector<T> Pround(_nvar);
     for( unsigned ivar=0; ivar<_nvar; ivar++ )
       Pround[ivar] = tvar[ivar]? std::round( p_loc[ivar] ): P[ivar];
     _local( locopt, stats, Pround.data(), p_loc );
-    p_loc = _get_SLVLOC( locopt->solution().p );
+    p_loc = _get_SLVLOC( locopt->solution() );
   }
 
   // Update incumbent
-  if( _subproblem_feasibility( options, p_loc, f_loc ) == SBB<T>::NORMAL )
+  if( _subproblem_feasibility( locopt, options, p_loc, f_loc ) == SBB<T>::NORMAL )
     _update_incumbent( p_loc, f_loc );
 }
 
@@ -591,7 +586,7 @@ CSEARCH_BASE<T>::_solve_sbp
     // Set variable types and exclusions from B&P
     //_var_excl.insert( _var_lin.begin(), _var_lin.end() ); // excluded branching variables
     for( unsigned i=0; i<_nvar; i++ )
-      if( Op<T>::diam( P[i] ) <= options.BRANCHDMIN ) _var_excl.insert( i );
+      if( Op<T>::diam( P[i] ) <= options.DOMREDMIG ) _var_excl.insert( i );
     SBP<T>::variables( _nvar, P.data(), _var_excl );
   }
 
@@ -602,7 +597,7 @@ CSEARCH_BASE<T>::_solve_sbp
 
   // Call B&P solver
   _set_SBPoptions( options );
-  double open = SBP<T>::solve( os );
+  double open = SBP<T>::solve( os, P0? false: true );
 
   stats.tALL += cpuclock();
   return open;
@@ -627,7 +622,7 @@ CSEARCH_BASE<T>::_solve_sbb
   _set_SBBoptions( options );
   _var_excl.insert( _var_lin.begin(), _var_lin.end() ); // excluded branching variables
   for( unsigned i=0; i<_nvar; i++ )
-    if( Op<T>::diam( P[i] ) <= options.BRANCHDMIN ) _var_excl.insert( i );
+    if( Op<T>::diam( P[i] ) <= options.DOMREDMIG ) _var_excl.insert( i );
   SBB<T>::variables( _nvar, P.data(), _var_excl );
 
   // Run SBB solver
@@ -708,10 +703,10 @@ CSEARCH_BASE<T>::_solve_pwl
       P_loc[ivar] = (tvar && tvar[ivar])? p_rel[ivar]: P[ivar];
     }
     locopt->solve( P_loc.data(), p_rel.data() );
-    p_loc = _get_SLVLOC( locopt->solution().p );
+    p_loc = _get_SLVLOC( locopt->solution() );
 
     // Update incumbent
-    if( _subproblem_feasibility( options, p_loc, f_loc ) == SBB<T>::NORMAL )
+    if( _subproblem_feasibility( locopt, options, p_loc, f_loc ) == SBB<T>::NORMAL )
       _update_incumbent( p_loc, f_loc );
 
     // Test termination criteria
@@ -793,6 +788,7 @@ CSEARCH_BASE<T>::_relax
   if( reset ){
     _set_depbnd( stats, P );
     _set_depcheb( options, stats );
+    //_tighten_depbnd( stats, P );
     _set_polrelax( options, stats, P, tvar, feastest );
   }
   //else{
@@ -849,29 +845,14 @@ CSEARCH_BASE<T>::_contract
   std::multimap<double,std::pair<unsigned,bool>> vardomred, vardomredupd;
   std::pair<unsigned,bool> varini;
   for( unsigned ip=0; ip<_nvar; ip++ ){
-    // do not contract dependent variables if substitution is used
-    if( !_ignore_deps && options.CMODRED == OPT::SUBSTITUTE && options.CMODDEPS
-     && _var_fperm[ip] >= _nrvar && _CMndxdep.find( ip ) != _CMndxdep.end() ) continue;
-
     // do not contract variables whose domain is less than DOMREDMIG
     if( Op<T>::diam( P[ip] ) < options.DOMREDMIG ) continue;
 
     varini.first = ip;
     varini.second = false; // lower bound
     double dist = 1.;
-    /*if( !reset ){
-      dist = ( std::fabs( get_variable( _var[ip] ) - Op<T>::l( P[ip] ) ) )
-             / Op<T>::diam( P[ip] ); // consider relative distance to bound
-      if( dist <= options.DOMREDTHRES ) continue;
-
-    }*/
     vardomred.insert( std::pair<double,std::pair<unsigned,bool>>(dist,varini) );
-    varini.second = true; // upper bound
-    /*if( !reset ){
-      dist = ( std::fabs( get_variable( _var[ip] ) - Op<T>::u( P[ip] ) ) )
-             / Op<T>::diam( P[ip] ); // consider relative distance to bound
-      if( dist <= options.DOMREDTHRES ) continue;
-    }*/
+    varini.second = true;  // upper bound
     vardomred.insert( std::pair<double,std::pair<unsigned,bool>>(dist,varini) );
   }
 
@@ -883,7 +864,12 @@ CSEARCH_BASE<T>::_contract
     const bool uplo = (*itv).second.second;
     double pL = Op<T>::l( P[ip] ), pU = Op<T>::u( P[ip] );
     _contract( options, stats, P, ip, uplo, tvar, inc, feastest );
-    if( get_status() != LPRELAX_BASE<T>::LP_OPTIMAL ) return get_status();
+    if( get_status() != LPRELAX_BASE<T>::LP_OPTIMAL ){
+#ifdef MC__CSEARCH_PAUSE_INFEASIBLE
+      int dum; std::cout << "Infeasible problem - PAUSED"; std::cin >> dum;
+#endif
+      return get_status();
+    }
     switch( (int)uplo ){
      case false: // lower bound
       pL = get_objective();
@@ -949,7 +935,11 @@ CSEARCH_BASE<T>::_contract
   std::vector<T> P1;
   for( nred=0; nred < options.DOMREDMAX; nred++ ){
     P1.assign( P, P+_nvar );
-    if( nred ) _update_polrelax( options, stats, P, tvar, feastest );
+    if( nred ){
+      _update_depcheb( options, stats, P );
+      //_rescale_depcheb( options, stats, P );
+      _update_polrelax( options, stats, P, tvar, feastest );
+    }
     _contract( options, stats, P, tvar, inc, feastest );
     if( get_status() != LPRELAX_BASE<T>::LP_OPTIMAL ) return get_status();
     double vred = _reducrel( _nvar, P, P1.data(), P0.data() );
@@ -993,7 +983,8 @@ CSEARCH_BASE<T>::_subproblems
       case MIN: status = _subproblem_local( locopt, options, stats, node->P(), p, f ); break;
       case MAX: status = _subproblem_relaxed( options, stats, node->P(), p, f, INC );
         if( !node->strongbranch() ){
-          _set_chebscores( options, node->scores(), false );
+          _set_branching_scores( node->scores() );
+          //_set_chebscores( options, node->scores(), false );
           node->depend() = _ndxdep;
         } break;
     }
@@ -1009,7 +1000,8 @@ CSEARCH_BASE<T>::_subproblems
       case MAX: status = _subproblem_local( locopt, options, stats, node->P(), p, f ); break;
       case MIN: status = _subproblem_relaxed( options, stats, node->P(), p, f, INC );
         if( !node->strongbranch() ){
-          _set_chebscores( options, node->scores(), false );
+          _set_branching_scores( node->scores() );
+          //_set_chebscores( options, node->scores(), false );
           node->depend() = _ndxdep;
         } break;
     }
@@ -1020,7 +1012,7 @@ CSEARCH_BASE<T>::_subproblems
 
   // FEASIBILITY TEST
   case SBB<T>::FEASTEST:
-    status = _subproblem_feasibility( options, _get_SLVLOC( p.data() ), f ); break;
+    status = _subproblem_feasibility( locopt, options, p.data(), f ); break;
 
   // PRE/POST-PROCESSING
   case SBB<T>::PREPROC:
@@ -1037,42 +1029,6 @@ CSEARCH_BASE<T>::_subproblems
   }
 
   return status;
-}
-
-template <typename T>
-template <typename SLVLOC, typename OPT, typename STAT>
-inline typename SBB<T>::STATUS
-CSEARCH_BASE<T>::_subproblem_local
-( SLVLOC&locopt, const OPT&options, STAT&stats,
-  const std::vector<T>&P, std::vector<double>&p, double&f )
-{
-  stats.tLOCSOL -= cpuclock();
-  stats.nLOCSOL++;
-
-#if defined (MC__CSEARCH_SHOW_BOXES)
-  std::cout << "\nLocal Box:\n";
-  for( unsigned i=0; i<_nvar; i++ )
-    //if( _exclude_vars.find(i) == _exclude_vars.end() )
-      std::cout << "P[" << i << "] = " << P[i] << std::endl;
-#endif
-
-  // Solve local optimization model
-  // Set integer variable bounds fixed to relaxed solution if MIP
-  std::vector<T> P_loc;
-  unsigned *tvar = !_tvar.empty()? _tvar.data(): 0;
-  for( unsigned ivar=0; ivar<_nvar; ivar++ )
-    P_loc.push_back( (tvar && tvar[ivar])? p[ivar]: P[ivar] );
-  locopt->solve( P_loc.data(), p.data() );
-  const double* p_loc = _get_SLVLOC( locopt->solution().p );
-
-  // Update incumbent on return
-  for( unsigned ivar=0; ivar<_nvar; ivar++ )
-    p[ivar] = p_loc[ivar];
-  auto flag = _subproblem_feasibility( options, p.data(), f );
-
-  stats.tLOCSOL += cpuclock(); 
-  // returning INFEASIBLE may cause B&B to fathom...
-  return flag == SBB<T>::NORMAL? SBB<T>::NORMAL: SBB<T>::FAILURE;
 }
 
 template <typename T>
@@ -1187,38 +1143,83 @@ CSEARCH_BASE<T>::_subproblem_relaxed
 }
 
 template <typename T>
-template <typename OPT>
+template <typename SLVLOC, typename OPT, typename STAT>
 inline typename SBB<T>::STATUS
-CSEARCH_BASE<T>::_subproblem_feasibility
-( const OPT&options, const double*p, double&f )
+CSEARCH_BASE<T>::_subproblem_local
+( SLVLOC&locopt, const OPT&options, STAT&stats,
+  const std::vector<T>&P, std::vector<double>&p, double&f )
 {
-  // Compute objective function value
-  _dag->eval( _op_f, 1, std::get<1>(_obj).data(), &f, _nvar, _var.data(), p );
+  stats.tLOCSOL -= cpuclock();
+  stats.nLOCSOL++;
 
-  // Check current point feasibility
-  return _check_feasibility( p, options.FEASTOL )? SBB<T>::NORMAL: SBB<T>::INFEASIBLE;
+#if defined (MC__CSEARCH_SHOW_BOXES)
+  std::cout << "\nLocal Box:\n";
+  for( unsigned i=0; i<_nvar; i++ )
+    //if( _exclude_vars.find(i) == _exclude_vars.end() )
+      std::cout << "P[" << i << "] = " << P[i] << std::endl;
+#endif
+
+  // Solve local optimization model
+  // Set integer variable bounds fixed to relaxed solution if MIP
+  std::vector<T> P_loc;
+  unsigned *tvar = !_tvar.empty()? _tvar.data(): 0;
+  for( unsigned ivar=0; ivar<_nvar; ivar++ )
+    P_loc.push_back( (tvar && tvar[ivar])? p[ivar]: P[ivar] );
+  locopt->solve( P_loc.data(), p.data() );
+  const double* p_loc = _get_SLVLOC( locopt->solution() );
+
+  // Update incumbent on return
+  for( unsigned ivar=0; ivar<_nvar; ivar++ )
+    p[ivar] = p_loc[ivar];
+  auto flag = _subproblem_feasibility( locopt, options, p.data(), f );
+
+  stats.tLOCSOL += cpuclock(); 
+  // returning INFEASIBLE will cause B&B to fathom...
+  return flag == SBB<T>::NORMAL? SBB<T>::NORMAL: SBB<T>::FAILURE;
 }
 
 template <typename T>
-inline bool
-CSEARCH_BASE<T>::_check_feasibility
-( const double*p, const double FEASTOL )
+template <typename SLVLOC,typename OPT>
+inline typename SBB<T>::STATUS
+CSEARCH_BASE<T>::_subproblem_feasibility
+( SLVLOC&locopt, const OPT&options, const double*p, double&f )
 {
-  // Check current point feasibility
-  auto itc=std::get<0>(_ctr).begin();
-  double gj, maxinfeas=0.;
-  for( unsigned j=0; itc!=std::get<0>(_ctr).end(); ++itc, j++ ){
-    _dag->eval( _op_g[j], 1, std::get<1>(_ctr).data()+j, &gj, _nvar, _var.data(), p );
-    switch( (*itc) ){
-      case EQ: maxinfeas = std::fabs(gj); break;
-      case LE: maxinfeas = gj;            break;
-      case GE: maxinfeas = -gj;           break;
-    }
-    //std::cout << "ctr#" << j << ": " << gj << "  (" << maxinfeas << ")\n";
-    if( maxinfeas > FEASTOL ) return false;
-  }
-  return true;
+  if( !locopt->test_feasibility( p,options.FEASTOL ) )
+    return SBB<T>::INFEASIBLE;
+  f = locopt->solution().f;
+  return SBB<T>::NORMAL;
+
+//  // Compute objective function value
+//  _dag->eval( _op_f, _wk_D, 1, std::get<1>(_obj).data(), &f, _nvar, _var.data(), p );
+
+//  // Check current point feasibility
+//  return _check_feasibility( p, options.FEASTOL )? SBB<T>::NORMAL: SBB<T>::INFEASIBLE;
 }
+
+//template <typename T>
+//inline bool
+//CSEARCH_BASE<T>::_check_feasibility
+//( const double*p, const double FEASTOL )
+//{
+//  //return false;
+
+//  // Check current point feasibility
+//  auto itc=std::get<0>(_ctr).begin();
+//  auto itr=std::get<3>(_ctr).begin();
+//  double gj, maxinfeas=0.;
+//  for( unsigned j=0; itc!=std::get<0>(_ctr).end(); ++itc, ++itr, j++ ){
+//    if( *itr ) continue; // Do not check redundant constraints for feasibility
+//    _dag->eval( _op_g[j], _wk_D, 1, std::get<1>(_ctr).data()+j, &gj, _nvar, _var.data(), p );
+//    switch( (*itc) ){
+//      case EQ: maxinfeas = std::fabs(gj); break;
+//      case LE: maxinfeas = gj;            break;
+//      case GE: maxinfeas = -gj;           break;
+//    }
+//    //std::cout << "ctr#" << j << ": " << gj << "  (" << maxinfeas << ")\n";
+//    if( maxinfeas > FEASTOL ) return false;
+//  }
+//  return true;
+//}
 
 template <typename T>
 inline void
@@ -1264,7 +1265,9 @@ CSEARCH_BASE<T>::_assess
   }
 
   // Update scores and dependents
-  _set_chebscores( options, node->scores(), false );
+  //_set_chebscores( options, node->scores(), false );
+  //_set_blkscores( options, node->scores() );
+  _set_branching_scores( node->scores() );
   node->depend() = _ndxdep;
 
 #if defined (MC__CSEARCH_SHOW_OUTER)
@@ -1287,9 +1290,8 @@ CSEARCH_BASE<T>::_subproblem_assess
 #if defined (MC__CSEARCH_SHOW_BOXES)
   std::cout << "\nInitial Box:\n";
   for( unsigned i=0; i<_nvar; i++ )
-    //if( _exclude_vars.find(i) == _exclude_vars.end() )
-      //std::cout << P[i] << std::endl;
-      std::cout << "I(" << Op<T>::l(P[i]) << "," << Op<T>::u(P[i]) << ")," << std::endl;
+    //if( _exclude_vars.find(i) == _exclude_vars.end() ) continue;
+    std::cout << P[i] << std::endl;
 #endif
   unsigned *tvar = !_tvar.empty()? _tvar.data(): 0;
   std::vector<T> P0 = P;
@@ -1319,8 +1321,9 @@ CSEARCH_BASE<T>::_subproblem_assess
   for( unsigned nred=0; nred < options.DOMREDMAX; nred++ ){
     P1 = P;
     if( nred ){
-      //_update_depcheb( options, stats, P.data() );
-      _rescale_depcheb( options, stats, P.data() );
+      _update_depbnd( stats, P.data() );
+      _update_depcheb( options, stats, P.data() );
+      //_rescale_depcheb( options, stats, P.data() );
       _update_polrelax( options, stats, P.data(), tvar );
     }
     // Apply domain reduction
@@ -1345,7 +1348,7 @@ CSEARCH_BASE<T>::_subproblem_assess
 #if defined (MC__CSEARCH_SHOW_BOXES)
   std::cout << "\nReduced Box:\n";
   for( unsigned i=0; i<_nvar; i++ )
-    //if( _exclude_vars.find(i) == _exclude_vars.end() )
+    //if( _exclude_vars.find(i) == _exclude_vars.end() ) continue;
     std::cout << P[i] << std::endl;
 #endif
 
@@ -1398,13 +1401,13 @@ CSEARCH_BASE<T>::_check_inclusion
   bool flag1 = true, flag2 = true;
   auto itc = std::get<0>(_ctr).begin();
   for( unsigned j=0; flag2 && itc!=std::get<0>(_ctr).end(); ++itc, j++ ){
-#if defined (MC__NLCP_SHOW_INCLUSIONS)
+#if defined (MC__CSEARCH_SHOW_INCLUSION)
     std::cout << "C" << j << ":" << C[j];
     std::cout << "C" << j << " L:" << Op<BND>::l(C[j])
                           << " U:" << Op<BND>::u(C[j]) << std::endl;
 #endif
     switch( (*itc) ){
-      case EQ: //flag1 = false;
+      case EQ: flag1 = false;
                if( Op<BND>::u(C[j]) < -options.FEASTOL
                 || Op<BND>::l(C[j]) >  options.FEASTOL )
                  flag2 = false;
@@ -1515,26 +1518,8 @@ CSEARCH_BASE<T>::_set_polrelax
     }
 
     // Set/update Chebyshev variables
-    for( unsigned ip=0; ip<_nvar; ip++ ){
-      if( _ignore_deps || !options.CMODDEPS || options.CMODRED != OPT::SUBSTITUTE
-       || _var_fperm[ip] < _nrvar || _CMndxdep.find( ip ) == _CMndxdep.end() )
-        _CMvar[ip].set( _CMenv, ip, P[ip] );
-      else{ // Converged dependent to be substituted
-#ifdef MC__NLGO_DEBUG_CHEBDEPS
-        std::cout << "P[" << ip << "] =" << P[ip] << std::endl;
-        std::cout << "CMrdep[" << _var_fperm[ip]-_nrvar << "] ="
-                  << _CMrdep[_var_fperm[ip]-_nrvar];
-#endif
-        _CMvar[ip].set( _CMenv );
-        _CMvar[ip].set( _CMrdep[_var_fperm[ip]-_nrvar].C(), true );
-        SCVar<T> CMred( _CMenv, ip, _CMvar[ip].R() );
-        _CMvar[ip].R() = 0.; _CMvar[ip] += CMred;
-#ifdef MC__NLGO_DEBUG_CHEBDEPS
-        std::cout << "CMvar[" << ip << "] =" << _CMvar[ip];
-        {int dum; std::cout << "PAUSED"; std::cin >> dum;}
-#endif
-      }
-    }
+    for( unsigned ip=0; ip<_nvar; ip++ )
+      _CMvar[ip].set( _CMenv, ip, P[ip] );
 
     // Set polyhedral main scaled variables and size Chebyshev basis
     _POLscalvar.clear();
@@ -1584,26 +1569,13 @@ CSEARCH_BASE<T>::_update_polrelax
 
   if( options.RELMETH==OPT::CHEB || options.RELMETH==OPT::HYBRID ){
     // Update Chebyshev variables
-    for( unsigned ip=0; ip<_nvar; ip++ ){
-      if( _ignore_deps || !options.CMODDEPS || options.CMODRED != OPT::SUBSTITUTE
-       || _var_fperm[ip] < _nrvar || _CMndxdep.find( ip ) == _CMndxdep.end() )
-        _CMvar[ip].set( _CMenv, ip, P[ip] );
-      else{ // Converged dependent
+    for( unsigned ip=0; ip<_nvar; ip++ )
+      _CMvar[ip].set( _CMenv, ip, P[ip] );
 #ifdef MC__NLGO_DEBUG_CHEBDEPS
-        std::cout << "P[" << ip << "] =" << P[ip] << std::endl;
-        std::cout << "CMrdep[" << _var_fperm[ip]-_nrvar << "] ="
-                  << _CMrdep[_var_fperm[ip]-_nrvar];
+    std::cout << "CMenv:" << *_CMenv << std::endl;
+    std::cout << "CMrenv:" << *_CMrenv << std::endl;
+    { int dum; std::cout << "PAUSED"; std::cin >> dum; }
 #endif
-        _CMvar[ip].set( _CMenv );
-        _CMvar[ip].set( _CMrdep[_var_fperm[ip]-_nrvar].C(), true );
-        SCVar<T> CMred( _CMenv, ip, _CMvar[ip].R() );
-        _CMvar[ip].R() = 0.; _CMvar[ip] += CMred;
-#ifdef MC__NLGO_DEBUG_CHEBDEPS
-        std::cout << "CMvar[" << ip << "] =" << _CMvar[ip];
-        {int dum; std::cout << "PAUSED"; std::cin >> dum;}
-#endif
-      }
-    }
 
     // Add Chebyshev-derived polyhedral cuts
     _set_chebcuts( options, feastest );
@@ -1630,7 +1602,7 @@ CSEARCH_BASE<T>::_set_lincuts
   for( unsigned j=0; ito!=std::get<0>(_obj).end() && j<1; ++ito, j++ ){
     if( feastest || _fct_lin.find(std::get<1>(_obj).data()) == _fct_lin.end() ) continue;
     try{
-      _dag->eval( _op_f, _op_POLfg.data(), 1, std::get<1>(_obj).data(), &_POLobj, _nvar, _var.data(), _POLvar.data() );
+      _dag->eval( _op_f, _wk_POL, 1, std::get<1>(_obj).data(), &_POLobj, _nvar, _var.data(), _POLvar.data() );
       _POLenv.generate_cuts( 1, &_POLobj, false );
       switch( std::get<0>(_obj)[0] ){
         case MIN: _POLenv.add_cut( PolCut<T>::GE, 0., _POLobjaux, 1., _POLobj, -1. ); break;
@@ -1648,9 +1620,10 @@ CSEARCH_BASE<T>::_set_lincuts
   for( unsigned j=0; itc!=std::get<0>(_ctr).end(); ++itc, j++ ){
     if( _fct_lin.find(std::get<1>(_ctr).data()+j) == _fct_lin.end() ) continue;
     try{
-      _dag->eval( _op_g[j], _op_POLfg.data(), 1, std::get<1>(_ctr).data()+j, _POLctr.data()+j, _nvar, _var.data(), _POLvar.data() );
+      _dag->eval( _op_g[j], _wk_POL, 1, std::get<1>(_ctr).data()+j, _POLctr.data()+j, _nvar, _var.data(), _POLvar.data() );
       _POLenv.generate_cuts( 1, _POLctr.data()+j, false );
       switch( (*itc) ){
+//        case EQ: _POLenv.add_cut( PolCut<T>::EQ, 0., _POLctr[j], 1. ); break;
         case EQ: if( !feastest ){ _POLenv.add_cut( PolCut<T>::EQ, 0., _POLctr[j], 1. ); break; }
                  else             _POLenv.add_cut( PolCut<T>::GE, 0., _POLctr[j], 1., _POLobjaux,  1. ); // no break
         case LE: if( !feastest ){ _POLenv.add_cut( PolCut<T>::LE, 0., _POLctr[j], 1. ); break; }
@@ -1666,6 +1639,7 @@ CSEARCH_BASE<T>::_set_lincuts
   }
 #ifdef MC__CSEARCH_DEBUG
   std::cout << _POLenv;
+  { int dum; std::cout << "PAUSED --"; std::cin >> dum; } 
 #endif
 }
 
@@ -1682,7 +1656,7 @@ CSEARCH_BASE<T>::_set_poacuts
     if( feastest || _fct_lin.find(std::get<1>(_obj).data()) != _fct_lin.end() ) continue;
     try{
       //std::cout << "objective" << std::endl;
-      _dag->eval( _op_f, _op_POLfg.data(), 1, std::get<1>(_obj).data(), &_POLobj, _nvar, _var.data(), _POLvar.data() );
+      _dag->eval( _op_f, _wk_POL, 1, std::get<1>(_obj).data(), &_POLobj, _nvar, _var.data(), _POLvar.data() );
       _POLenv.generate_cuts( 1, &_POLobj, false );
       switch( std::get<0>(_obj)[0] ){
         case MIN: _POLenv.add_cut( PolCut<T>::GE, 0., _POLobjaux, 1., _POLobj, -1. ); break;
@@ -1702,7 +1676,7 @@ CSEARCH_BASE<T>::_set_poacuts
     try{
       //std::cout << "constraint #" << j << std::endl;
       //_dag->output( _op_g[j] );
-      _dag->eval( _op_g[j], _op_POLfg.data(), 1, std::get<1>(_ctr).data()+j, _POLctr.data()+j, _nvar, _var.data(), _POLvar.data() );
+      _dag->eval( _op_g[j], _wk_POL, 1, std::get<1>(_ctr).data()+j, _POLctr.data()+j, _nvar, _var.data(), _POLvar.data() );
       _POLenv.generate_cuts( 1, _POLctr.data()+j, false );
       switch( (*itc) ){
         case EQ: if( !feastest ){ _POLenv.add_cut( PolCut<T>::EQ, 0., _POLctr[j], 1. ); break; }
@@ -1740,7 +1714,12 @@ CSEARCH_BASE<T>::_set_chebcuts
   // if( _var_lin.find( ip ) != _var_lin.end() ) continue; // only nonlinearly participating variables
   auto itv = _POLscalvar.begin();
   for( unsigned i=0; itv!=_POLscalvar.end(); ++itv, i++ ){
-    _POLenv.add_cut( PolCut<T>::EQ, _CMenv->refvar()[i], _POLvar[i], 1., *itv, -_CMenv->scalvar()[i] );
+    if( _CMenv->scalvar()[i] > options.CMODEL.MIN_FACTOR )
+      _POLenv.add_cut( PolCut<T>::EQ, _CMenv->refvar()[i], _POLvar[i], 1., *itv, -_CMenv->scalvar()[i] );
+    //else{
+    //  _POLenv.add_cut( PolCut<T>::GE, _CMenv->refvar()[i]-_CMenv->scalvar()[i], _POLvar[i], 1. );
+    //  _POLenv.add_cut( PolCut<T>::LE, _CMenv->refvar()[i]+_CMenv->scalvar()[i], _POLvar[i], 1. );
+    //}
 #ifdef MC__NLGO_CHEBCUTS_DEBUG
       std::cout << "Variable #" << i << ": " << _CMvar[i];
 #endif
@@ -1750,13 +1729,15 @@ CSEARCH_BASE<T>::_set_chebcuts
   auto ito = std::get<0>(_obj).begin();
   for( unsigned j=0; ito!=std::get<0>(_obj).end() && j<1; ++ito, j++ ){
     if( feastest || _fct_lin.find(std::get<1>(_obj).data()) != _fct_lin.end() ) continue; // only nonlinear objectives
+    T Iobj(-SBB<T>::INF,SBB<T>::INF);
     try{
       // Polynomial model evaluation
-      _dag->eval( _op_f, _op_CMfg.data(), 1, std::get<1>(_obj).data(), &_CMobj,
+      _dag->eval( _op_f, _wk_CM, 1, std::get<1>(_obj).data(), &_CMobj,
                   _nvar, _var.data(), _CMvar.data() );
 #ifdef MC__NLGO_CHEBCUTS_DEBUG
+      std::cout << "Objective remainder: " << _CMobj.R() << std::endl;
       std::cout << _CMobj;
-      if(_p_inc.data()) std::cout << _CMobj.P(_p_inc.data())+_CMobj.R() << std::endl;
+      //if(_p_inc.data()) std::cout << _CMobj.P(_p_inc.data())+_CMobj.R() << std::endl;
 #endif
       // Test for too large Chebyshev bounds or NaN
       if( !(Op<SCVar<T>>::diam(_CMobj) <= options.CMODDMAX) ) throw(0);
@@ -1767,11 +1748,19 @@ CSEARCH_BASE<T>::_set_chebcuts
       for( auto it=first_CMobj; it!=last_CMobj; ++it )
         _basis.insert( std::make_pair( it->first, FFVar() ) );
     }
+    catch( int ecode ){
+#ifdef MC__NLGO_CHEBCUTS_DEBUG
+      std::cout << "Objective: " << "cut too weak!\n";
+#endif
+      Op<T>::inter( Iobj, Iobj, _CMobj.B() );
+      _CMobj = Iobj;
+    }
     catch(...){
 #ifdef MC__NLGO_CHEBCUTS_DEBUG
       std::cout << "Objective: " << "cut failed!\n";
 #endif
-      _CMobj = T(-SBB<T>::INF,SBB<T>::INF);
+      //Op<T>::inter( Iobj, Iobj, _CMobj.B() );
+      _CMobj = Iobj;
       // No cut added for objective in case evaluation failed
     }
   }
@@ -1781,12 +1770,15 @@ CSEARCH_BASE<T>::_set_chebcuts
   auto itc = std::get<0>(_ctr).begin();
   for( unsigned j=0; itc!=std::get<0>(_ctr).end(); ++itc, j++ ){
     if( _fct_lin.find(std::get<1>(_ctr).data()+j) != _fct_lin.end() ) continue;
+    T Ictr(-SBB<T>::INF,SBB<T>::INF);
     try{
       // Polynomial model evaluation
-      _dag->eval( _op_g[j], _op_CMfg.data(), 1, std::get<1>(_ctr).data()+j, _CMctr.data()+j,
+#ifdef MC__NLGO_CHEBCUTS_DEBUG
+      _dag->output( _op_g[j] );
+#endif
+      _dag->eval( _op_g[j], _wk_CM, 1, std::get<1>(_ctr).data()+j, _CMctr.data()+j,
                   _nvar, _var.data(), _CMvar.data() );
 #ifdef MC__NLGO_CHEBCUTS_DEBUG
-      //_dag->output( _op_g[j] );
       std::cout << "\nConstraint #" << j << ": " << _CMctr[j];
       //if(_p_inc.data()) std::cout << "optim: " << _CMctr[j].P(_p_inc.data())+_CMctr[j].R() << std::endl;
       //{ int dum; std::cout << "PAUSED"; std::cin >> dum; }
@@ -1799,41 +1791,56 @@ CSEARCH_BASE<T>::_set_chebcuts
       auto last_CMctr  = _CMctr[j].coefmon().lower_bound( std::make_pair( basisord+1, std::map<unsigned,unsigned>() ) );
       for( auto it=first_CMctr; it!=last_CMctr; ++it )
         _basis.insert( std::make_pair( it->first, FFVar() ) );
+   }
+    catch( int ecode ){
+#ifdef MC__NLGO_CHEBCUTS_DEBUG
+      std::cout << "Constraint #" << j << ": " << "cut too weak!\n";
+#endif
+      Op<T>::inter( Ictr, Ictr, _CMctr[j].B() );
+      _CMctr[j] = Ictr;
     }
     catch(...){
 #ifdef MC__NLGO_CHEBCUTS_DEBUG
       std::cout << "Constraint #" << j << ": " << "cut failed!\n";
 #endif
-      _CMctr[j] = T(-SBB<T>::INF,SBB<T>::INF);
+      //Op<T>::inter( Ictr, Ictr, _CMctr[j].B() );
+      _CMctr[j] = Ictr;
       // No cut added for constraint #j in case evaluation failed
     }
-
-#ifdef MC__NLGO_CHEBSCORES_DEBUG
-    std::map<unsigned,double> scores;
-    _get_chebscores( std::get<1>(_ctr)[j], _CMctr[j], scores );
-    std::cout << "Constraint #" << j << ":\n";
-    for( auto it=scores.cbegin(); it!=scores.cend(); ++it )
-      std::cout << std::right << std::setw(4) << it->first << " " << it->second << std::endl; 
-    { int dum; std::cout << "PAUSED"; std::cin >> dum; }
-#endif
   }
 
   // Keep track of participating monomials in Chebyshev model for dependents
   for( auto it=_CMndxdep.begin(); options.CMODDEPS && options.CMODRED == OPT::APPEND && it!=_CMndxdep.end(); ++it ){
-    // Keep track of participating Chebyshev monomials into '_basis'
     const unsigned irdep = _var_fperm[*it]-_nrvar;
-    auto first_CMrdep = _CMrdep[irdep].coefmon().lower_bound( std::make_pair( 1, std::map<unsigned,unsigned>() ) );
-    auto last_CMrdep  = _CMrdep[irdep].coefmon().lower_bound( std::make_pair( basisord+1, std::map<unsigned,unsigned>() ) );
-    for( auto jt=first_CMrdep; jt!=last_CMrdep; ++jt ){
-      t_expmon expmon_CMrdep;
-      expmon_CMrdep.first = jt->first.first;
-      // Match indices between the full and reduced Chebyshev models
-      for( auto ie = jt->first.second.begin(); ie!=jt->first.second.end(); ++ie )
-        expmon_CMrdep.second.insert( std::make_pair( _var_rperm[ie->first], ie->second ) );
-      _basis.insert( std::make_pair( expmon_CMrdep, FFVar() ) );
+    T Irdep(-SBB<T>::INF,SBB<T>::INF);
+    try{
+      // Test for too large Chebyshev bounds or NaN
+      if( !(Op<SCVar<T>>::diam(_CMrdep[irdep]) <= options.CMODDMAX) ) throw(0);
+      // Keep track of participating Chebyshev monomials into '_basis'
+      auto first_CMrdep = _CMrdep[irdep].coefmon().lower_bound( std::make_pair( 1, std::map<unsigned,unsigned>() ) );
+      auto last_CMrdep  = _CMrdep[irdep].coefmon().lower_bound( std::make_pair( basisord+1, std::map<unsigned,unsigned>() ) );
+      for( auto jt=first_CMrdep; jt!=last_CMrdep; ++jt ){
+        t_expmon expmon_CMrdep;
+        expmon_CMrdep.first = jt->first.first;
+        // Match indices between the full and reduced Chebyshev models
+        for( auto ie = jt->first.second.begin(); ie!=jt->first.second.end(); ++ie )
+          expmon_CMrdep.second.insert( std::make_pair( _var_rperm[ie->first], ie->second ) );
+        _basis.insert( std::make_pair( expmon_CMrdep, FFVar() ) );
+      }
     }
+    catch(...){
+#ifdef MC__NLGO_CHEBCUTS_DEBUG
+      std::cout << "Dependent #" << irdep << ": " << "cut failed!\n";
+#endif
+      Op<T>::inter( Irdep, Irdep, _CMrdep[irdep].B() );
+      _CMrdep[irdep] = Irdep; // <- more efficient to interesect with dependent bounds?
+      // No cut added for constraint #j in case evaluation failed
+    }
+
   }
 
+  // Populate '_basis' with references to the Chebyshev monomials in the DAG
+  _CMenv->get_bndmon( _basis, _scalvar.data(), true );
 #ifdef MC__NLGO_CHEBCUTS_DEBUG
   std::cout << "\nBASIS:\n";
   for( auto it=_basis.begin(); it!=_basis.end(); ++it ){
@@ -1842,13 +1849,13 @@ CSEARCH_BASE<T>::_set_chebcuts
       std::cout << "T" << ie->second << "[" << ie->first << "] ";
     std::cout << std::endl;
   }
+  std::list<const mc::FFOp*> op_basis  = _dag->subgraph( _basis );
+  _dag->output( op_basis );
+  { int dum; std::cin >> dum; }
 #endif
 
-  // Populate '_basis' with references to the Chebyshev monomials in the DAG
-  _CMenv->get_bndmon( _basis, _scalvar.data(), true );
-
   // Populate '_POLbasis' with references to the Chebyshev monomials in the polyhedral relaxation
-  _dag->eval( _basis, _POLbasis, _scalvar.size(), _scalvar.data(), _POLscalvar.data() );
+  _dag->eval( _wk_POL, _basis, _POLbasis, _scalvar.size(), _scalvar.data(), _POLscalvar.data() );
 
   // Append cuts for the Chebyshev monomials in the polyhedral relaxation
   _POLenv.generate_cuts( _POLbasis, false );
@@ -1862,7 +1869,8 @@ CSEARCH_BASE<T>::_set_chebcuts
 
     // Constant, variable and bound on objective model
     T Robj = _CMobj.bndord( basisord+1 ) + _CMobj.remainder();
-    const double a0 = _CMobj.coefmon().begin()->first.first? 0.: _CMobj.coefmon().begin()->second;
+    const double a0 = (_CMobj.coefmon().empty() || _CMobj.coefmon().begin()->first.first)?
+                      0.: _CMobj.coefmon().begin()->second;
     auto first_CMobj = _CMobj.coefmon().lower_bound( std::make_pair( 1, std::map<unsigned,unsigned>() ) );
     auto last_CMobj  = _CMobj.coefmon().lower_bound( std::make_pair( basisord+1, std::map<unsigned,unsigned>() ) );
     t_coefmon Cobj; Cobj.insert( first_CMobj, last_CMobj );
@@ -1887,18 +1895,19 @@ CSEARCH_BASE<T>::_set_chebcuts
 
     // Constant, variable and bound on constraint model
     T Rctr = _CMctr[j].bndord( basisord+1 ) + _CMctr[j].remainder();
-    const double a0 = _CMctr[j].coefmon().begin()->first.first? 0.: _CMctr[j].coefmon().begin()->second;
+    const double a0 = (_CMctr[j].coefmon().empty() || _CMctr[j].coefmon().begin()->first.first)?
+                      0.: _CMctr[j].coefmon().begin()->second;
     auto first_CMctr = _CMctr[j].coefmon().lower_bound( std::make_pair( 1, std::map<unsigned,unsigned>() ) );
     auto last_CMctr  = _CMctr[j].coefmon().lower_bound( std::make_pair( basisord+1, std::map<unsigned,unsigned>() ) );
     t_coefmon Cctr; Cctr.insert( first_CMctr, last_CMctr );
 
-    // Linear constraint sparse cut
+    // Nonlinear constraint sparse cut
     switch( (*itc) ){
-      case EQ: if( !feastest ){ _POLenv.add_cut( PolCut<T>::GE, -Op<T>::u(Rctr)-a0, _POLbasis, Cctr ); }// no break
+      case EQ: if( !feastest ){ if( !Cctr.empty() ) _POLenv.add_cut( PolCut<T>::GE, -Op<T>::u(Rctr)-a0, _POLbasis, Cctr ); }// no break
                else { _POLenv.add_cut( PolCut<T>::GE, -Op<T>::u(Rctr)-a0, _POLbasis, Cctr, _POLobjaux,  1. ); }// no break
-      case LE: if( !feastest ){ _POLenv.add_cut( PolCut<T>::LE, -Op<T>::l(Rctr)-a0, _POLbasis, Cctr ); break; }
+      case LE: if( !feastest ){ if( !Cctr.empty() ) _POLenv.add_cut( PolCut<T>::LE, -Op<T>::l(Rctr)-a0, _POLbasis, Cctr ); break; }
                else { _POLenv.add_cut( PolCut<T>::LE, -Op<T>::l(Rctr)-a0, _POLbasis, Cctr, _POLobjaux, -1. ); break; }
-      case GE: if( !feastest ){ _POLenv.add_cut( PolCut<T>::GE, -Op<T>::u(Rctr)-a0, _POLbasis, Cctr ); break; }
+      case GE: if( !feastest ){ if( !Cctr.empty() ) _POLenv.add_cut( PolCut<T>::GE, -Op<T>::u(Rctr)-a0, _POLbasis, Cctr ); break; }
                else { _POLenv.add_cut( PolCut<T>::GE, -Op<T>::u(Rctr)-a0, _POLbasis, Cctr, _POLobjaux,  1. ); break; }
     }
   }
@@ -1907,8 +1916,12 @@ CSEARCH_BASE<T>::_set_chebcuts
   for( auto it=_CMndxdep.begin(); options.CMODDEPS && options.CMODRED == OPT::APPEND && it!=_CMndxdep.end(); ++it ){
     // Constant, variable and bound on constraint model
     const unsigned irdep = _var_fperm[*it]-_nrvar;
+#ifdef MC__NLGO_CHEBCUTS_DEBUG
+    std::cout << "\nDependent #" << irdep << ": " << _CMrdep[irdep];
+#endif
     T Rrdep = _CMrdep[irdep].bndord( basisord+1 ) + _CMrdep[irdep].remainder();
-    const double a0 = _CMrdep[irdep].coefmon().begin()->first.first? 0.: _CMrdep[irdep].coefmon().begin()->second;
+    const double a0 = (_CMrdep[irdep].coefmon().empty() || _CMrdep[irdep].coefmon().begin()->first.first)?
+                      0.: _CMrdep[irdep].coefmon().begin()->second;
     auto first_CMrdep = _CMrdep[irdep].coefmon().lower_bound( std::make_pair( 1, std::map<unsigned,unsigned>() ) );
     auto last_CMrdep  = _CMrdep[irdep].coefmon().lower_bound( std::make_pair( basisord+1, std::map<unsigned,unsigned>() ) );
     t_coefmon Crdep; //Crdep.insert( first_CMrdep, last_CMrdep );
@@ -1921,95 +1934,112 @@ CSEARCH_BASE<T>::_set_chebcuts
       Crdep.insert( std::make_pair( expmon_CMrdep, jt->second ) );
     }
 
-    // Linear constraint sparse cut
-    _POLenv.add_cut( PolCut<T>::GE, -Op<T>::u(Rrdep)-a0, _POLbasis, Crdep, _POLvar[*it],  -1. );
-    _POLenv.add_cut( PolCut<T>::LE, -Op<T>::l(Rrdep)-a0, _POLbasis, Crdep, _POLvar[*it],  -1. );
+    // Dependent sparse cut
+    if( !feastest ){
+      _POLenv.add_cut( PolCut<T>::GE, -Op<T>::u(Rrdep)-a0, _POLbasis, Crdep, _POLvar[*it],  -1. );
+      _POLenv.add_cut( PolCut<T>::LE, -Op<T>::l(Rrdep)-a0, _POLbasis, Crdep, _POLvar[*it],  -1. );
+    }
+    else{
+      _POLenv.add_cut( PolCut<T>::GE, -Op<T>::u(Rrdep)-a0, _POLbasis, Crdep, _POLvar[*it],  -1., _POLobjaux,  1. );
+      _POLenv.add_cut( PolCut<T>::LE, -Op<T>::l(Rrdep)-a0, _POLbasis, Crdep, _POLvar[*it],  -1., _POLobjaux, -1. );
+    }
   }
 
 #ifdef MC__NLGO_CHEBCUTS_DEBUG
+  std::cout << _POLenv;
   { int dum; std::cin >> dum; }
-  //std::cout << _POLenv;
 #endif
 }
 
-template <typename T>
-inline void
-CSEARCH_BASE<T>::_add_chebscores
-( std::map<unsigned,double>&scores, const FFVar&FV,
-  const SCVar<T>&SCV, const double weight, const bool linexcl )
-const
-{
-  if( weight <= 0. ) return;
+//template <typename T>
+//inline void
+//CSEARCH_BASE<T>::_add_chebscores
+//( std::map<unsigned,double>&scores, const FFVar&FV,
+//  const SCVar<T>&SCV, const double weight, const bool linexcl )
+//const
+//{
+//  if( weight <= 0. ) return;
 
-  // Contribution of polynomial model remainder
-  double rem = Op<T>::diam(SCV.R()), bnd = Op<T>::diam(SCV.B());
-  //double contrib = rem * std::fabs( weight ) / FV.dep().dep().size();
-  double contrib = rem < SBB<T>::INF? rem / bnd: 1.;
-  contrib *= std::fabs( weight ) / FV.dep().dep().size();
-  for( unsigned i=0; i<_nvar; i++ ){
-    auto ft = FV.dep().dep().find( _var[i].id().second );
-    if( ft == FV.dep().dep().end() || (linexcl && ft->second) ) continue;
-    auto its = scores.insert( std::make_pair( i, contrib ) );
-    if( !its.second ) its.first->second += contrib;
-    //if( !its.second && its.first->second < contrib )
-    //  its.first->second = contrib;
+//  // Contribution of polynomial model remainder
+//  double rem = Op<T>::diam(SCV.R()), bnd = Op<T>::diam(SCV.B());
+//  //double contrib = rem * std::fabs( weight ) / FV.dep().dep().size();
+//  double contrib = rem < SBB<T>::INF? rem / bnd: 1.;
+//  contrib *= std::fabs( weight ) / FV.dep().dep().size();
+//  for( unsigned i=0; i<_nvar; i++ ){
+//    auto ft = FV.dep().dep().find( _var[i].id().second );
+//    if( ft == FV.dep().dep().end() || (linexcl && ft->second) ) continue;
+//    auto its = scores.insert( std::make_pair( i, contrib ) );
+//    if( !its.second ) its.first->second += contrib;
+//    //if( !its.second && its.first->second < contrib )
+//    //  its.first->second = contrib;
 
-  }
-  //if( rem >= SBB<T>::INF ) return;
+//  }
+//  //if( rem >= SBB<T>::INF ) return;
 
-  // Polynomial model nonlinear dependencies contribution
-  auto kt = SCV.coefmon().lower_bound( std::make_pair( 2 ,std::map<unsigned,unsigned>() ) );
-  for( ; kt != SCV.coefmon().cend(); ++kt ){
-    //contrib = std::fabs( weight * kt->second );
-    contrib = std::fabs( weight * kt->second ) / bnd;
-    for( auto ie=kt->first.second.begin(); ie!=kt->first.second.end(); ++ie ){
-      auto its = scores.insert( std::make_pair( ie->first, contrib ) );
-      if( !its.second ) its.first->second += contrib;
-      //if( !its.second && its.first->second < contrib )
-      //  its.first->second = contrib;
-    }
-  }
-}
+//  // Polynomial model nonlinear dependencies contribution
+//  auto kt = SCV.coefmon().lower_bound( std::make_pair( 2 ,std::map<unsigned,unsigned>() ) );
+//  for( ; kt != SCV.coefmon().cend(); ++kt ){
+//    //contrib = std::fabs( weight * kt->second );
+//    contrib = std::fabs( weight * kt->second ) / bnd;
+//    for( auto ie=kt->first.second.begin(); ie!=kt->first.second.end(); ++ie ){
+//      auto its = scores.insert( std::make_pair( ie->first, contrib ) );
+//      if( !its.second ) its.first->second += contrib;
+//      //if( !its.second && its.first->second < contrib )
+//      //  its.first->second = contrib;
+//    }
+//  }
+//}
 
-template <typename T>
-template <typename OPT>
-inline void
-CSEARCH_BASE<T>::_set_chebscores
-( const OPT&options, std::map<unsigned,double>&scores,
-  const bool feastest )
-{
-  scores.clear();
-  if( !options.SCOBCHUSE ) return;
-  if( options.RELMETH != OPT::CHEB && options.RELMETH != OPT::HYBRID ) return;
+//template <typename T>
+//template <typename OPT>
+//inline void
+//CSEARCH_BASE<T>::_set_blkscores
+//( const OPT&options, std::map<unsigned,double>&scores )
+//{
+//  scores.clear();
+//  if( !options.SCOBCHUSE ) return;
+//  _get_blkscores( scores );
+//}
 
-  // Append scores based on Chebyshev model for (nonlinear) objective
-  auto ito = std::get<0>(_obj).begin();
-  for( unsigned j=0; ito!=std::get<0>(_obj).end() && j<1; ++ito, j++ ){
-    if( feastest || _fct_lin.find(std::get<1>(_obj).data()) != _fct_lin.end() ) continue; // only nonlinear objectives
-    _add_chebscores( scores, std::get<1>(_obj)[0], _CMobj, 1. );
-  }
+//template <typename T>
+//template <typename OPT>
+//inline void
+//CSEARCH_BASE<T>::_set_chebscores
+//( const OPT&options, std::map<unsigned,double>&scores,
+//  const bool feastest )
+//{
+//  scores.clear();
+//  if( !options.SCOBCHUSE ) return;
+//  if( options.RELMETH != OPT::CHEB && options.RELMETH != OPT::HYBRID ) return;
 
-  // Append scores based on Chebyshev model for (nonlinear) constraints
-  auto itc = std::get<0>(_ctr).begin();
-  for( unsigned j=0; itc!=std::get<0>(_ctr).end(); ++itc, j++ ){
-    if( _fct_lin.find(std::get<1>(_ctr).data()+j) != _fct_lin.end()
-     || std::get<3>(_ctr)[j] ) continue;
-    switch( (*itc) ){ // only score equality and active inequality constraints
-      case LE: if( Op<SCVar<T>>::u(_CMctr[j]) < 0. ) continue;
-               break;
-      case GE: if( Op<SCVar<T>>::l(_CMctr[j]) > 0. ) continue;
-               break;
-      default: break;
-    }
-    _add_chebscores( scores, std::get<1>(_ctr)[j], _CMctr[j], 1. );
-  }
+//  // Append scores based on Chebyshev model for (nonlinear) objective
+//  auto ito = std::get<0>(_obj).begin();
+//  for( unsigned j=0; ito!=std::get<0>(_obj).end() && j<1; ++ito, j++ ){
+//    if( feastest || _fct_lin.find(std::get<1>(_obj).data()) != _fct_lin.end() ) continue; // only nonlinear objectives
+//    _add_chebscores( scores, std::get<1>(_obj)[0], _CMobj, 1. );
+//  }
 
-#ifdef MC__CSEARCH_SHOW_SCORES
-  for( auto it=scores.cbegin(); it!=scores.cend(); ++it )
-    std::cout << std::right << std::setw(4) << it->first << " " << it->second << std::endl; 
-  { int dum; std::cout << "PAUSED"; std::cin >> dum; }
-#endif
-}
+//  // Append scores based on Chebyshev model for (nonlinear) constraints
+//  auto itc = std::get<0>(_ctr).begin();
+//  for( unsigned j=0; itc!=std::get<0>(_ctr).end(); ++itc, j++ ){
+//    if( _fct_lin.find(std::get<1>(_ctr).data()+j) != _fct_lin.end()
+//     || std::get<3>(_ctr)[j] ) continue;
+//    switch( (*itc) ){ // only score equality and active inequality constraints
+//      case LE: if( Op<SCVar<T>>::u(_CMctr[j]) < 0. ) continue;
+//               break;
+//      case GE: if( Op<SCVar<T>>::l(_CMctr[j]) > 0. ) continue;
+//               break;
+//      default: break;
+//    }
+//    _add_chebscores( scores, std::get<1>(_ctr)[j], _CMctr[j], 1. );
+//  }
+
+//#ifdef MC__CSEARCH_SHOW_SCORES
+//  for( auto it=scores.cbegin(); it!=scores.cend(); ++it )
+//    std::cout << std::right << std::setw(4) << it->first << " " << it->second << std::endl; 
+//  { int dum; std::cout << "PAUSED"; std::cin >> dum; }
+//#endif
+//}
 
 template <typename T>
 template <typename OPT, typename STAT>
@@ -2105,7 +2135,7 @@ CSEARCH_BASE<T>::_rescale_depcheb
   for( unsigned iv=0; iv<_nrvar; ++iv ){
     for( auto it=_CMndxdep.begin(); it!=_CMndxdep.end(); ++it ){
       const unsigned ip = _var_fperm[*it]-_nrvar;
-      _CMrdep[ip].scale( iv, P[_var_rperm[iv]] ).simplify();
+      _CMrdep[ip].scale( iv, P[_var_rperm[iv]] ); //.simplify();
 #ifdef MC__CSEARCH_DEBUG_DEPCHEB
       if( iv+1 == _nrvar )
         std::cout << "CMrdep[" << ip << "] =" << _CMrdep[ip];
@@ -2191,19 +2221,19 @@ CSEARCH_BASE<T>::_tighten_depbnd
     }
   }
 
-  // Update dependent bounds based on implicit Chebyshev model contractor
-  for( auto it=_CMndxdep.begin(); it!=_CMndxdep.end(); ++it ){
-    const unsigned idep = _var_fperm[*it]-_nrvar;
-    if( !Op<T>::inter( P[*it], P[*it], _CMrdep[idep].B() ) ){
-  //for( unsigned i=0; _CMrdep.size() && i<_nrdep; i++ ){   // <- maybe not necessary?
-    //if( !Op<T>::inter( P[_var_rperm[_nrvar+i]], P[_var_rperm[_nrvar+i]], _CMrdep[i].B() ) ){
-      //P[_nrvar+i] = _CMrdep[i].B(); // we may need to revisit this (e.g., AEBND failure?)
-#ifdef MC__NLGO_DEBUG_CHEBDEPS
-      std::cout << "PM intersection with dependent #" << idep << " failed!\n";
-#endif
-      continue;
-    }
-  }
+//  // Update dependent bounds based on implicit Chebyshev model contractor
+//  for( auto it=_CMndxdep.begin(); it!=_CMndxdep.end(); ++it ){
+//    const unsigned idep = _var_fperm[*it]-_nrvar;
+//    if( !Op<T>::inter( P[*it], P[*it], _CMrdep[idep].B() ) ){
+//  //for( unsigned i=0; _CMrdep.size() && i<_nrdep; i++ ){   // <- maybe not necessary?
+//    //if( !Op<T>::inter( P[_var_rperm[_nrvar+i]], P[_var_rperm[_nrvar+i]], _CMrdep[i].B() ) ){
+//      //P[_nrvar+i] = _CMrdep[i].B(); // we may need to revisit this (e.g., AEBND failure?)
+//#ifdef MC__NLGO_DEBUG_CHEBDEPS
+//      std::cout << "PM intersection with dependent #" << idep << " failed!\n";
+//#endif
+//      continue;
+//    }
+//  }
 
   stats.tDEPBND += cpuclock();
 }
@@ -2221,7 +2251,7 @@ CSEARCH_BASE<T>::_set_SBBoptions
   //SBB<T>::options.BRANCHING_BOUND_THRESHOLD    = options.BRANCHDMIN;
   SBB<T>::options.BRANCHING_VARIABLE_CRITERION = options.BRANCHVAR;
   SBB<T>::options.BRANCHING_USERFUNCTION       = options.BRANCHSEL;
-  SBB<T>::options.SCORE_BRANCHING_USE          = options.SCOBCHUSE;
+  SBB<T>::options.SCORE_BRANCHING_USE          = options.SCOBCHMETH;
   SBB<T>::options.SCORE_BRANCHING_MAXSIZE      = options.SCOBCHVMAX;
   SBB<T>::options.SCORE_BRANCHING_RELTOL       = options.SCOBCHRTOL;
   SBB<T>::options.SCORE_BRANCHING_ABSTOL       = options.SCOBCHATOL;
@@ -2244,7 +2274,7 @@ CSEARCH_BASE<T>::_set_SBPoptions
   SBP<T>::options.STOPPING_TOLERANCE           = options.CVTOL;
   SBP<T>::options.BRANCHING_VARIABLE_CRITERION = options.BRANCHVAR;
   SBP<T>::options.BRANCHING_USERFUNCTION       = options.BRANCHSEL;
-  SBP<T>::options.SCORE_BRANCHING_USE          = options.SCOBCHUSE;
+  SBP<T>::options.SCORE_BRANCHING_USE          = options.SCOBCHMETH;
   SBP<T>::options.SCORE_BRANCHING_MAXSIZE      = options.SCOBCHVMAX;
   SBP<T>::options.SCORE_BRANCHING_RELTOL       = options.SCOBCHRTOL;
   SBP<T>::options.SCORE_BRANCHING_ABSTOL       = options.SCOBCHATOL;

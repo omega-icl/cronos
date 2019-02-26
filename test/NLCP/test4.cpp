@@ -1,8 +1,13 @@
 #define SAVE_RESULTS    // whether or not to save results to file
-#define USE_PROFIL  	// specify to use PROFIL for interval arithmetic
-#undef USE_FILIB	    // specify to use FILIB++ for interval arithmetic
-#undef DEBUG            // whether to output debug information
+#define USE_PROFIL	    // specify to use PROFIL for interval arithmetic
+#undef  USE_FILIB	    // specify to use FILIB++ for interval arithmetic
+
 #define MC__USE_CPLEX   // whether to use CPLEX or GUROBI
+#undef  MC__CSEARCH_SHOW_BOXES
+#undef  MC__CSEARCH_SHOW_REDUC
+#undef  MC__CSEARCH_SHOW_INCLUSION
+#undef  MC__CSEARCH_PAUSE_INFEASIBLE
+
 ////////////////////////////////////////////////////////////////////////////////
 
 #include <fstream>
@@ -54,26 +59,26 @@ int main()
   //CP.options.MIPFILE     = "test4.lp";
   CP.options.DISPLAY     = 2;
   CP.options.MAXITER     = 1000;
-  CP.options.CVTOL       = 1e-6;
+  CP.options.CVTOL       = 1e-3;
   CP.options.BRANCHVAR   = mc::SBP<I>::Options::RGREL;
   CP.options.NODEMEAS    = mc::SBP<I>::Options::RELMAXLEN;
   CP.options.DOMREDMAX   = 10;
-  CP.options.DOMREDTHRES = 1e-1;
-  CP.options.DOMREDBKOFF = 1e-8;
+  CP.options.DOMREDTHRES = 5e-2;
   CP.options.RELMETH     = mc::NLCP<I>::Options::CHEB;
   CP.options.CMODPROP    = 3;
   std::cout << CP;
 
   const I Ip[NP] = { I(0.,1.), I(0.,1.), I(0.,1.), I(0.,1.) };
-
-  CP.setup();
+  CP.setup( Ip );
   CP.solve( Ip );
   CP.stats.display();
 
 #if defined(SAVE_RESULTS )
-  std::ofstream K_un( "test4.out", std::ios_base::out );
-  CP.output_nodes( K_un );
-  K_un.close();
+  std::ofstream K_bnd( "test4_bnd.out", std::ios_base::out );
+  std::ofstream K_inn( "test4_inn.out", std::ios_base::out );
+  CP.output_nodes( K_bnd, K_inn );
+  K_bnd.close();
+  K_inn.close();
 #endif
 
   return 0;

@@ -1,10 +1,22 @@
+#define USE_PROFIL
+#define MC__USE_CPLEX
+#define MC__CSEARCH_SHOW_DEPS
+#define MC__CSEARCH_SHOW_BOXES
+
 #include <fstream>
 #include <iomanip>
-
-#include "interval.hpp"
-typedef mc::Interval I;
-
-#define MC__USE_CPLEX
+#ifdef USE_PROFIL
+  #include "mcprofil.hpp"
+  typedef INTERVAL I;
+#else
+  #ifdef USE_FILIB
+    #include "mcfilib.hpp"
+    typedef filib::interval<double> I;
+  #else
+    #include "interval.hpp"
+    typedef mc::Interval I;
+  #endif
+#endif
 #include "nlgo.hpp"
 
 // EXAMPLE 7 IN RYOO & SAHINIDIS, C&CE, 1995
@@ -32,6 +44,7 @@ int main()
   NLP.options.RELMETH   = mc::NLGO<I>::Options::CHEB;//DRL;//HYBRID;
   NLP.options.BLKDECUSE = true; //false;
   NLP.options.CMODDEPS  = 0;
+  NLP.options.NCOCUTS   = true; //false;
 
   NLP.set_dag( &DAG );  // DAG
   NLP.set_var( NP, p ); // decision variables
@@ -42,8 +55,8 @@ int main()
   NLP.add_ctr( mc::BASE_NLP::EQ, p[6]+p[7]-p[5] );
   NLP.add_ctr( mc::BASE_NLP::LE, p[9]*p[2]+2*p[6]-2.5*p[4] );
   NLP.add_ctr( mc::BASE_NLP::LE, p[9]*p[3]+2*p[7]-1.5*p[8] );
-  NLP.add_ctr( mc::BASE_NLP::LE, 3*p[0]+p[1]-p[9]*p[2]-p[9]*p[3] );
-  //NLP.add_ctr( mc::BASE_NLP::LE, 3*p[0]+p[1]-p[9]*(p[2]+p[3]) );
+  //NLP.add_ctr( mc::BASE_NLP::LE, 3*p[0]+p[1]-p[9]*p[2]-p[9]*p[3] );
+  NLP.add_ctr( mc::BASE_NLP::LE, 3*p[0]+p[1]-p[9]*(p[2]+p[3]) );
 
   I Ip[NP] = { I(0,300), I(0,300), I(0,100), I(0,200), I(0,100), I(0,300),
                I(0,100), I(0,200), I(0,200), I(1,3) };
@@ -51,7 +64,7 @@ int main()
   //             I(0,75), I(33.33,100), I(150,200), I(1,2.25) };
   //double p0[NP] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 };
 
-  NLP.setup();
+  NLP.setup( Ip );
   //int status = NLP.relax( Ip );
   int status = NLP.solve( Ip );
   NLP.stats.display();

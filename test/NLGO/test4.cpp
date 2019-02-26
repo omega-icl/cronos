@@ -1,4 +1,4 @@
-//#define USE_PROFIL
+#define USE_PROFIL
 #define MC__USE_CPLEX
 #undef  MC__NLGO_CHEBSCORES_SHOW
 
@@ -58,7 +58,7 @@ int main()
   NLP.set_dag( &DAG );  // DAG
   NLP.set_var( NP, p ); // decision variables
   NLP.set_obj( mc::BASE_NLP::MIN, (p[0]*p[3])*(p[0]+p[1]+p[2])+p[2] );
-  NLP.add_ctr( mc::BASE_NLP::GE,  (p[0]*p[3])*p[1]*p[2]-25 );
+  NLP.add_ctr( mc::BASE_NLP::GE,  p[0]*p[1]*p[2]*p[3]-25 );
   NLP.add_ctr( mc::BASE_NLP::EQ,  sqr(p[0])+sqr(p[1])+sqr(p[2])+sqr(p[3])-40 );
   NLP.setup();
   //std::cout << NLP;
@@ -80,8 +80,10 @@ int main()
   NLP.solve( Ip );
   NLP.solve( Ip, Tp );
 */
+  NLP.options.MIPDISPLAY  = 0;
+  NLP.options.MIPFILE     = "test4.lp";
   NLP.options.RELMETH     = mc::NLGO<I>::Options::CHEB;
-  NLP.options.CMODPROP    = 2;
+  NLP.options.CMODPROP    = 4;
   NLP.options.SCOBCHUSE   = false;//true;
   NLP.options.SCOBCHRTOL  = 1e-1;
   NLP.options.STGBCHDEPTH = 0;
@@ -90,8 +92,8 @@ int main()
   NLP.solve( Ip );
   NLP.stats.display();
 
-  NLP.solve( Ip, Tp );
-  NLP.stats.display();
+//  NLP.solve( Ip, Tp );
+//  NLP.stats.display();
 
   //NLP.options.RELMETH = mc::NLGO<I>::Options::HYBRID;
   //NLP.options.MIPFILE = "test4.lp";

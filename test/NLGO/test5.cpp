@@ -78,8 +78,8 @@ int main()
   NLP.set_obj( mc::BASE_OPT::MIN, LSQ );
   // KKT cuts
   const mc::FFVar* dLSQdk = DAG.BAD( 1, &LSQ, NK, k );
-  for( unsigned i=0; i<NK; i++ )
-    NLP.add_ctr( mc::BASE_OPT::EQ, dLSQdk[i] );
+//  for( unsigned i=0; i<NK; i++ )
+//    NLP.add_ctr( mc::BASE_OPT::EQ, dLSQdk[i] );
   NLP.setup();
   std::cout << NLP;
 
@@ -110,7 +110,7 @@ int main()
   NLP.options.NLPSLV.DISPLAY = 0;
   NLP.options.CSALGO  = mc::NLGO<I>::Options::BB;
   NLP.options.RELMETH = mc::NLGO<I>::Options::CHEB;
-  //NLP.options.CMODPROP = 3;
+  NLP.options.CMODPROP = 3;
 
   NLP.solve( Ik, 0, k0 );
   NLP.stats.display();

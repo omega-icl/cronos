@@ -1,4 +1,4 @@
-// Copyright (C) 2015-2016 Benoit Chachuat, Imperial College London.
+// Copyright (C) 2015-2018 Benoit Chachuat, Imperial College London.
 // All Rights Reserved.
 // This code is published under the Eclipse Public License.
 
@@ -166,29 +166,28 @@ public:
 
   //! @brief Setup DAG for cost and constraint evaluation
   void setup
-    ()
-    { NLGO<T>::options = options;
-      return NLGO<T>::setup(); }
+    ( const T*P, const unsigned*tvar=0, std::ostream&os=std::cout );
+
+  //! @brief Solve bound contraction problems from relaxed constraints, starting with variable range <a>P</a>, for variable types <a>tvar</a> and using the options specified in <a>NLGO::Options::DOMREDMAX</a> and <a>NLGO::Options::DOMREDTHRES</a> -- returns updated variable bounds <a>P</a>, and number of iterative refinements <a>nred</a> 
+  typename LPRELAX_BASE<T>::LP_STATUS contract
+    ( T*P, unsigned&nred, const unsigned*tvar=0,
+      const bool reset=true, const bool feastest=false );
 
   //! @brief Run constraint projection algorithm -- return value is a measure of boundary volume
   double solve
-    ( const T*P, const unsigned*tvar=0, std::ostream&os=std::cout )
-    { if( !NLGO<T>::_issetup ) throw typename NLGO<T>::Exceptions( NLGO<T>::Exceptions::SETUP );
-      return CSEARCH_BASE<T>::_solve_sbp( options, stats, P, tvar, os ); }
+    ( const T*P, const unsigned*tvar=0, std::ostream&os=std::cout );
 
   //! @brief Resume constraint projection algorithm -- return value is a measure of boundary volume
   double solve
-    ( std::ostream&os=std::cout )
-    { if( !NLGO<T>::_issetup ) throw typename NLGO<T>::Exceptions( NLGO<T>::Exceptions::SETUP );
-      return CSEARCH_BASE<T>::_solve_sbp( options, stats, 0, 0, os ); }
+    ( std::ostream&os=std::cout );
 
   //! @brief Public members of SBP
+  typedef SBPNode<T> NODE;
   using SBP<T>::open_nodes;
   using SBP<T>::clusters;
   using SBP<T>::output_clusters;
   using SBP<T>::output_nodes;
   using NLGO<T>::stats;
-  typedef SBPNode<T> NODE;
 
 protected:
 
@@ -200,6 +199,8 @@ protected:
   using CSEARCH_BASE<T>::_CMndxdep;
   using CSEARCH_BASE<T>::_CMrdep;
   using NLGO<T>::_var_excl;
+  using NLGO<T>::_Ivar;
+  using NLGO<T>::_tvar;
 
   //! @brief Set local optimizer
   virtual void _set_SLVLOC
@@ -231,6 +232,45 @@ protected:
 };
 
 template <typename T>
+inline void
+NLCP<T>::setup
+( const T*P, const unsigned*tvar, std::ostream&os )
+{
+  NLGO<T>::options = options;
+  return NLGO<T>::setup( P, tvar, os );
+}
+
+template <typename T>
+inline typename LPRELAX_BASE<T>::LP_STATUS 
+NLCP<T>::contract
+( T*P, unsigned&nred, const unsigned*tvar,
+  const bool reset, const bool feastest )
+{
+  NLGO<T>::options = options;
+  return NLGO<T>::contract( P, nred, tvar, 0, reset, feastest );
+}
+
+template <typename T>
+inline double
+NLCP<T>::solve
+( const T*P, const unsigned*tvar, std::ostream&os )
+{
+  if( !NLGO<T>::_issetup || !NLGO<T>::_init( P, tvar ) )
+    throw typename NLGO<T>::Exceptions( NLGO<T>::Exceptions::SETUP );
+  return CSEARCH_BASE<T>::_solve_sbp( options, stats, _Ivar.data(), tvar?_tvar.data():0, os );
+}
+
+template <typename T>
+inline double
+NLCP<T>::solve
+( std::ostream&os )
+{
+  if( !NLGO<T>::_issetup )
+    throw typename NLGO<T>::Exceptions( NLGO<T>::Exceptions::SETUP );
+  return CSEARCH_BASE<T>::_solve_sbp( options, stats, 0, 0, os );
+}
+
+template <typename T>
 inline double
 NLCP<T>::volume
 ( const NODE*pNode, unsigned &dim, const bool rel ) const
@@ -240,6 +280,8 @@ NLCP<T>::volume
   auto sset = options.VARMEAS == Options::USER && options.BRANCHSEL?
               options.BRANCHSEL( pNode ): std::set<unsigned>();
   for( unsigned i=0; i<_nvar; i++ ){
+    if( Op<T>::diam(pNode->P0(i)) < options.DOMREDMIG )
+      continue; // Do not account for variables whose domain is too narrow
     switch( options.VARMEAS ){
     case Options::ALL: default:
       break;
@@ -282,6 +324,8 @@ NLCP<T>::maxwidth
   auto sset = options.VARMEAS == Options::USER && options.BRANCHSEL?
               options.BRANCHSEL( pNode ): std::set<unsigned>();
   for( unsigned i=0; i<_nvar; i++ ){
+    if( Op<T>::diam(pNode->P0(i)) < options.DOMREDMIG )
+      continue; // Do not account for variables whose domain is too narrow
     switch( options.VARMEAS ){
     case Options::ALL: default:
       break;
@@ -359,12 +403,20 @@ NLCP<T>::Options::display
                 << NLGO<T>::Options::CMODRTOL << std::endl;
             out << std::setw(60) << "  USE OF CHEBYSHEV-REDUCTION CONSTRAINTS";
             switch( NLGO<T>::Options::CMODRED ){
-             case NLGO<T>::Options::NONE:       out << "NONE" << std::endl; break;
-             case NLGO<T>::Options::SUBSTITUTE: out << "SUBSTITUTE" << std::endl; break;
-             case NLGO<T>::Options::APPEND:     out << "APPEND"     << std::endl; break;
+             case NLGO<T>::Options::NOREDUC: out << "NOREDUC" << std::endl; break;
+             case NLGO<T>::Options::APPEND:  out << "APPEND"  << std::endl; break;
             }
 //            out << std::setw(60) << "  SIMULTANEOUS REDUCED-SPACE CHEBYSHEV MODEL"
 //                << (REDALL?"Y\n":"N\n"); break;
+  }
+  out << std::setw(60) << "  APPEND NCO CUTS"
+      << (NLGO<T>::Options::NCOCUTS?"Y\n":"N\n");
+  if( NLGO<T>::Options::CMODCUTS ){
+    out << std::setw(60) << "  METHOD FOR NCO CUTS";
+    switch( NLGO<T>::Options::NCOMETH ){
+     case NLGO<T>::Options::FSA: out << "FORWARD SENS.\n";
+     case NLGO<T>::Options::ASA: out << "ADJOINT SENS.\n";
+    }
   }
 }
 

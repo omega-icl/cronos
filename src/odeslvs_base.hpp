@@ -1,3 +1,4 @@
+// Copyright (C) 2019 Benoit Chachuat, Imperial College London.
 // All Rights Reserved.
 // This code is published under the Eclipse Public License.
 
@@ -212,7 +213,7 @@ ODESLVS_BASE::~ODESLVS_BASE
   delete[] _pSAFCT;
 }
 
-inline bool
+bool
 ODESLVS_BASE::_INI_D_SEN
 ( const double*p, const unsigned nf, const unsigned nyq )
 {
@@ -246,7 +247,9 @@ ODESLVS_BASE::_INI_D_SEN
   return true;
 }
 
-template <typename REALTYPE> inline void
+template <typename REALTYPE>
+inline
+void
 ODESLVS_BASE::_GET_D_SEN
 ( const REALTYPE*y, const unsigned nyq, const REALTYPE*yq )
 {
@@ -254,7 +257,9 @@ ODESLVS_BASE::_GET_D_SEN
   if( yq ) _vec2D( yq, nyq, _Dyq );
 }
 
-template <typename REALTYPE> inline void
+template <typename REALTYPE>
+inline
+void
 ODESLVS_BASE::_GET_D_SEN
 ( const REALTYPE*x, const REALTYPE*y, const REALTYPE*q,
   const unsigned nyq, const REALTYPE*yq )
@@ -265,7 +270,7 @@ ODESLVS_BASE::_GET_D_SEN
   if( yq ) _vec2D( yq, nyq, _Dyq );
 }
 
-inline bool
+bool
 ODESLVS_BASE::_IC_SET_FSA
 ( const unsigned isen )
 {
@@ -275,7 +280,7 @@ ODESLVS_BASE::_IC_SET_FSA
   return true;
 }
 
-inline bool
+bool
 ODESLVS_BASE::_IC_SET_ASA
 ()
 {
@@ -290,7 +295,7 @@ ODESLVS_BASE::_IC_SET_ASA
   return true;
 }
 
-inline bool
+bool
 ODESLVS_BASE::_CC_SET_FSA
 ( const unsigned pos_ic, const unsigned isen )
 {
@@ -303,7 +308,7 @@ ODESLVS_BASE::_CC_SET_FSA
   return true;
 }
 
-inline bool
+bool
 ODESLVS_BASE::_CC_SET_ASA
 ( const unsigned pos_fct, const unsigned ifct )
 {
@@ -319,7 +324,7 @@ ODESLVS_BASE::_CC_SET_ASA
   return true;
 }
 
-inline bool
+bool
 ODESLVS_BASE::_TC_SET_ASA
 ( const unsigned pos_fct, const unsigned ifct )
 {
@@ -334,7 +339,7 @@ ODESLVS_BASE::_TC_SET_ASA
   return true;
 }
 
-inline bool
+bool
 ODESLVS_BASE::_RHS_SET_FSA
 ( const unsigned iRHS, const unsigned iQUAD )
 {
@@ -371,7 +376,7 @@ ODESLVS_BASE::_RHS_SET_FSA
   return true;
 }
 
-inline bool
+bool
 ODESLVS_BASE::_RHS_SET_ASA
 ( const unsigned iRHS, const unsigned iQUAD,
   const unsigned pos_fct, const bool neg )
@@ -417,7 +422,9 @@ ODESLVS_BASE::_RHS_SET_ASA
   return true;
 }
 
-template <typename REALTYPE> inline bool
+template <typename REALTYPE>
+inline
+bool
 ODESLVS_BASE::_TC_D_SEN
 ( const double t, const REALTYPE*x, REALTYPE*y )
 {
@@ -427,7 +434,9 @@ ODESLVS_BASE::_TC_D_SEN
   return true;
 }
 
-template <typename REALTYPE> inline bool
+template <typename REALTYPE>
+inline
+bool
 ODESLVS_BASE::_TC_D_QUAD_ASA
 ( REALTYPE*yq )
 {
@@ -435,7 +444,9 @@ ODESLVS_BASE::_TC_D_QUAD_ASA
   return true;
 }
 
-template <typename REALTYPE> inline bool
+template <typename REALTYPE>
+inline
+bool
 ODESLVS_BASE::_IC_D_SEN
 ( const double t, const REALTYPE*x, const REALTYPE*y )
 {
@@ -445,7 +456,9 @@ ODESLVS_BASE::_IC_D_SEN
   return true;
 }
 
-template <typename REALTYPE> inline bool
+template <typename REALTYPE>
+inline
+bool
 ODESLVS_BASE::_IC_D_QUAD_ASA
 ( REALTYPE*yq )
 {
@@ -455,7 +468,9 @@ ODESLVS_BASE::_IC_D_QUAD_ASA
   return true;
 }
 
-template <typename REALTYPE> inline bool
+template <typename REALTYPE>
+inline
+bool
 ODESLVS_BASE::_CC_D_SEN
 ( const double t, const REALTYPE*x, REALTYPE*y )
 {
@@ -466,7 +481,9 @@ ODESLVS_BASE::_CC_D_SEN
   return true;
 }
 
-template <typename REALTYPE> inline bool
+template <typename REALTYPE>
+inline
+bool
 ODESLVS_BASE::_CC_D_QUAD_ASA
 ( REALTYPE*yq )
 {
@@ -475,7 +492,7 @@ ODESLVS_BASE::_CC_D_QUAD_ASA
   return true;
 }
 
-inline bool
+bool
 ODESLVS_BASE::_RHS_D_SET
 ( const unsigned nf, const unsigned nyq )
 {
@@ -503,7 +520,9 @@ ODESLVS_BASE::_RHS_D_SET
   return true;
 }
 
-template <typename REALTYPE> inline bool
+template <typename REALTYPE>
+inline
+bool
 ODESLVS_BASE::_RHS_D_SEN
 ( double t, const REALTYPE* x, const REALTYPE* y, REALTYPE* ydot,
   const unsigned ifct )
@@ -520,7 +539,9 @@ ODESLVS_BASE::_RHS_D_SEN
   return true;
 }
 
-template <typename REALTYPE> inline bool
+template <typename REALTYPE>
+inline
+bool
 ODESLVS_BASE::_JAC_D_SEN
 ( double t, const REALTYPE* x, const REALTYPE* y, REALTYPE** jac )
 {
@@ -539,7 +560,9 @@ ODESLVS_BASE::_JAC_D_SEN
   return true;
 }
 
-template <typename REALTYPE> inline bool
+template <typename REALTYPE>
+inline
+bool
 ODESLVS_BASE::_RHS_D_QUAD
 ( const unsigned nyq, REALTYPE*yqdot, const unsigned ifct )
 {
@@ -549,7 +572,8 @@ ODESLVS_BASE::_RHS_D_QUAD
   return true;
 }
 
-inline bool
+inline
+bool
 ODESLVS_BASE::_FCT_D_SEN
 ( const unsigned iFCT, const unsigned isen, const double t )
 {

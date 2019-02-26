@@ -1,4 +1,4 @@
-// Copyright (C) 2016 Benoit Chachuat, Imperial College London.
+// Copyright (C) 2019 Benoit Chachuat, Imperial College London.
 // All Rights Reserved.
 // This code is published under the Eclipse Public License.
 
@@ -187,7 +187,31 @@ class ODESLV_BASE:
   ODESLV_BASE& operator=(const ODESLV_BASE&);
 };
 
+template <typename VRES> 
 inline
+void
+ODESLV_BASE::_record
+( std::ofstream&ofile, const VRES&res, const unsigned iprec )
+{
+  if( !ofile ) return;
+
+  // Specify format
+  ofile << std::right << std::scientific << std::setprecision(iprec);
+
+  // Record computed states at stage times
+  auto it = res.begin(), it0 = it;
+  for( ; it != res.end(); ++it ){
+    if( it != res.begin() && it->t == it0->t )
+      ofile << std::endl;
+    ofile << std::setw(iprec+9) << it->t;
+    for( unsigned ix=0; ix<it->nx; ix++ )
+      ofile << std::setw(iprec+9) << it->X[ix];
+    ofile << std::endl;
+    it0 = it;
+  }
+}
+
+inline 
 ODESLV_BASE::ODESLV_BASE
 ()
 : BASE_DE(), _pRHS(0), _pJAC(0,0,0,0), _pQUAD(0), _pIC(0), _nVAR(0), _nVAR0(0),
@@ -207,7 +231,8 @@ ODESLV_BASE::~ODESLV_BASE
 }
 
 template <typename REALTYPE>
-inline void
+inline
+void
 ODESLV_BASE::_vec2D
 ( const REALTYPE*vec, const unsigned n, double*d )
 {
@@ -215,7 +240,8 @@ ODESLV_BASE::_vec2D
   return;
 }
 
-inline bool
+inline
+bool
 ODESLV_BASE::_INI_D_STA
 ( const double*p )
 {
@@ -240,7 +266,9 @@ ODESLV_BASE::_INI_D_STA
   return true;
 }
 
-template <typename REALTYPE> inline void
+template <typename REALTYPE>
+inline
+void
 ODESLV_BASE::_GET_D_STA
 ( const REALTYPE*x, const REALTYPE*q )
 {
@@ -248,7 +276,8 @@ ODESLV_BASE::_GET_D_STA
   if( q ) _vec2D( q, _nq, _Dq );
 }
 
-inline bool
+inline
+bool
 ODESLV_BASE::_IC_D_SET
 ()
 {
@@ -257,7 +286,9 @@ ODESLV_BASE::_IC_D_SET
   return true;
 }
 
-template <typename REALTYPE> inline bool
+template <typename REALTYPE>
+inline
+bool
 ODESLV_BASE::_IC_D_STA
 ( const double t, REALTYPE*x )
 {
@@ -266,7 +297,9 @@ ODESLV_BASE::_IC_D_STA
   return true;
 }
 
-template <typename REALTYPE> inline bool
+template <typename REALTYPE>
+inline
+bool
 ODESLV_BASE::_IC_D_QUAD
 ( REALTYPE*q )
 {
@@ -274,7 +307,8 @@ ODESLV_BASE::_IC_D_QUAD
   return true;
 }
 
-inline bool
+inline
+bool
 ODESLV_BASE::_CC_D_SET
 ( const unsigned iIC )
 {
@@ -283,7 +317,9 @@ ODESLV_BASE::_CC_D_SET
   return true;
 }
 
-template <typename REALTYPE> inline bool
+template <typename REALTYPE>
+inline
+bool
 ODESLV_BASE::_CC_D_STA
 ( const double t, REALTYPE*x )
 {
@@ -293,7 +329,8 @@ ODESLV_BASE::_CC_D_STA
   return true;
 }
 
-inline bool
+inline
+bool
 ODESLV_BASE::_RHS_D_SET
 ( const unsigned iRHS, const unsigned iQUAD )
 {
@@ -309,7 +346,8 @@ ODESLV_BASE::_RHS_D_SET
   return _RHS_D_SET();
 }
 
-inline bool
+inline
+bool
 ODESLV_BASE::_RHS_D_SET
 ()
 {
@@ -333,7 +371,9 @@ ODESLV_BASE::_RHS_D_SET
   return true;
 }
 
-template <typename REALTYPE> inline bool
+template <typename REALTYPE>
+inline
+bool
 ODESLV_BASE::_RHS_D_STA
 ( double t, const REALTYPE*x, REALTYPE*xdot )
 {
@@ -344,7 +384,9 @@ ODESLV_BASE::_RHS_D_STA
   return true;
 }
 
-template <typename REALTYPE> inline bool
+template <typename REALTYPE>
+inline
+bool
 ODESLV_BASE::_RHS_D_QUAD
 ( double t, const REALTYPE*x, REALTYPE*qdot )
 {
@@ -353,7 +395,9 @@ ODESLV_BASE::_RHS_D_QUAD
   return true;
 }
 
-template <typename REALTYPE> inline bool
+template <typename REALTYPE>
+inline
+bool
 ODESLV_BASE::_JAC_D_STA
 ( double t, const REALTYPE*x, REALTYPE**jac )
 {
@@ -371,7 +415,8 @@ ODESLV_BASE::_JAC_D_STA
   return true;
 }
 
-inline bool
+inline
+bool
 ODESLV_BASE::_FCT_D_STA
 ( const unsigned iFCT, const double t )
 {
@@ -380,28 +425,6 @@ ODESLV_BASE::_FCT_D_STA
   const FFVar* pFCT = _vFCT.at( iFCT );
   _pDAG->eval( _nf, pFCT, _Df.data(), _nVAR, _pVAR, _DVAR, iFCT?true:false );
   return true;
-}
-
-template <typename VRES> inline void
-ODESLV_BASE::_record
-( std::ofstream&ofile, const VRES&res, const unsigned iprec )
-{
-  if( !ofile ) return;
-
-  // Specify format
-  ofile << std::right << std::scientific << std::setprecision(iprec);
-
-  // Record computed states at stage times
-  auto it = res.begin(), it0 = it;
-  for( ; it != res.end(); ++it ){
-    if( it != res.begin() && it->t == it0->t )
-      ofile << std::endl;
-    ofile << std::setw(iprec+9) << it->t;
-    for( unsigned ix=0; ix<it->nx; ix++ )
-      ofile << std::setw(iprec+9) << it->X[ix];
-    ofile << std::endl;
-    it0 = it;
-  }
 }
 
 } // end namescape mc

@@ -111,15 +111,14 @@ public:
   LPRELAX_BASE()
     {
 #ifdef MC__USE_CPLEX
-      _ILOenv = new IloEnv;
-      _ILOmodel = new IloModel(*_ILOenv);
-      _ILOcplex = new IloCplex(*_ILOenv);
-      _LPobj.first = false;
+      _ILOenv = 0;
+      _ILOmodel = 0;
+      _ILOcplex = 0;
 #else
       _GRBenv = new GRBEnv();
-      _GRBmodel = new GRBModel(*_GRBenv);
+      _GRBmodel = 0;
 #endif
-      _LPinc.first = false;
+      //_LPinc.first = false;
     }
 
   //! @brief Destructor
@@ -261,7 +260,12 @@ LPRELAX_BASE<T>::_solve_LPmodel
 ( const OPT&options, STAT&stats, const std::vector<FFVar>&var )
 {
   stats.tLPSOL -= cpuclock();
-  _set_LPoptions( options );
+  try{
+    _set_LPoptions( options );
+  }
+  catch(IloException& e){
+    throw std::runtime_error("Invalid options setup");
+  }
   _LPexcpt = false;
 #ifdef MC__USE_CPLEX
   if( options.MIPFILE != "" )
@@ -322,15 +326,18 @@ LPRELAX_BASE<T>::_set_LPoptions
   _ILOcplex->setParam( IloCplex::RootAlg, options.LPALGO );
   _ILOcplex->setParam( IloCplex::EpOpt,   options.LPOPTIMTOL );
   _ILOcplex->setParam( IloCplex::EpRHS,   options.LPFEASTOL );
+  _ILOcplex->setParam( IloCplex::EpGap,   options.MIPRELGAP );
+  _ILOcplex->setParam( IloCplex::EpAGap,  options.MIPABSGAP );
+  _ILOcplex->setParam( IloCplex::PreInd,  options.LPPRESOLVE?true:false );
 #else
   // Gurobi options
+  _GRBmodel->getEnv().set( GRB_IntParam_OutputFlag,        options.MIPDISPLAY );
   _GRBmodel->getEnv().set( GRB_IntParam_Method,            options.LPALGO );
-  _GRBmodel->getEnv().set( GRB_DoubleParam_FeasibilityTol, options.LPFEASTOL );
   _GRBmodel->getEnv().set( GRB_DoubleParam_OptimalityTol,  options.LPOPTIMTOL );
+  _GRBmodel->getEnv().set( GRB_DoubleParam_FeasibilityTol, options.LPFEASTOL );
   _GRBmodel->getEnv().set( GRB_DoubleParam_MIPGap,         options.MIPRELGAP );
   _GRBmodel->getEnv().set( GRB_DoubleParam_MIPGapAbs,      options.MIPABSGAP );
   _GRBmodel->getEnv().set( GRB_IntParam_Presolve,          options.LPPRESOLVE  );
-  _GRBmodel->getEnv().set( GRB_IntParam_OutputFlag,        options.MIPDISPLAY );
   _GRBmodel->getEnv().set( GRB_DoubleParam_PreSOS2BigM,    options.PRESOS2BIGM );
   _GRBmodel->getEnv().set( GRB_IntParam_DualReductions,    0 ); // In order to avoid INF_OR_UNBD status
 #endif
@@ -342,8 +349,7 @@ LPRELAX_BASE<T>::_reset_LPmodel
 {
 #ifdef MC__USE_CPLEX
   delete _ILOmodel; delete _ILOcplex;
-  _ILOenv->end();
-  delete _ILOenv;
+  if( _ILOenv ) _ILOenv->end(); delete _ILOenv;
   _ILOenv = new IloEnv;
   _ILOmodel = new IloModel( *_ILOenv );
   _ILOcplex = new IloCplex( *_ILOenv );
@@ -368,8 +374,12 @@ LPRELAX_BASE<T>::_set_LPcuts
 #ifndef MC__USE_CPLEX
   _GRBmodel->update();
 #endif
-  for( auto itc=_POLenv.Cuts().begin(); itc!=_POLenv.Cuts().end(); ++itc )
+  for( auto itc=_POLenv.Cuts().begin(); itc!=_POLenv.Cuts().end(); ++itc ){
+#ifdef MC__LPRELAX_BASE_DEBUG
+    std::cout << **itc << std::endl;
+#endif
     _set_LPcut( *itc );
+  }
 }
 
 template <typename T> inline void
@@ -574,6 +584,14 @@ template <typename T> inline void
 LPRELAX_BASE<T>::_set_LPcut
 ( const PolCut<T>*pCut )
 {
+  if( !pCut->nvar() ){
+//#ifdef MC__LPRELAX_BASE_DEBUG
+    std::cout << "Cut with no variables participating\n";
+    std::cout << *pCut << std::endl;
+//#endif
+    return;
+  }
+
 #ifdef MC__USE_CPLEX
   bool isSOS = ( pCut->type() == PolCut<T>::SOS1
               || pCut->type() == PolCut<T>::SOS2 );
@@ -611,9 +629,9 @@ LPRELAX_BASE<T>::_set_LPcut
     _LPcut.insert( std::make_pair( pCut, ctr ) );
   }
   catch(IloException& e){
-#ifdef MC__LPRELAX_BASE_DEBUG
+//#ifdef MC__LPRELAX_BASE_DEBUG
     std::cout << "IloException Caught - Error code = " << e.getMessage() << std::endl;
-#endif
+//#endif
   }
 
 #else

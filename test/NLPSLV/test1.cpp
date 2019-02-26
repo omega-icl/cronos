@@ -41,12 +41,17 @@ int main()
   NLP->setup();
   status = NLP->solve( Ip, p0 );
 
+  NLP->options.DISPLAY = 0;
+  status = NLP->solve( 50, Ip );
+
   if( status == Ipopt::Solve_Succeeded ){
     std::cout << "NLP (LOCAL) SOLUTION: " << std::endl;
     std::cout << "  f* = " << NLP->solution().f << std::endl;
     for( unsigned int ip=0; ip<NP; ip++ )
       std::cout << "  p*(" << ip << ") = " << NLP->solution().p[ip]
                 << std::endl;
+    std::cout << "FEASIBLE:   " << NLP->is_feasible( 1e-7 ) << std::endl;
+    std::cout << "STATIONARY: " << NLP->is_stationary( 1e-7 ) << std::endl;
   }
 
   return 0;

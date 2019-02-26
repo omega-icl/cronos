@@ -3,19 +3,24 @@
 #undef  USE_FILIB	    // specify to use FILIB++ for interval arithmetic
 #undef  USE_DEPS	    // whether to use dependents
 #define USE_RRLT	    // whether to use reduced RLT
-#define MC__USE_CPLEX   // whether to use CPLEX or GUROBI
+#undef  USE_DAGMANIP    // whether to use DAG manipulation
+
 #undef  MC__CSEARCH_SHOW_BOXES
 #undef  MC__CSEARCH_SHOW_DEPS
 #undef  MC__CSEARCH_SHOW_REDUC
 #undef  MC__CSEARCH_SHOW_OUTER
 #undef  MC__CSEARCH_SHOW_SCORES
-#undef DEBUG__SBP_SCOREBRANCHING
 ////////////////////////////////////////////////////////////////////////////////
 
 #include <iostream>
 #include <fstream>
 #include "nlcp.hpp"
-#include "rltred.hpp"
+#ifdef USE_RRLT
+  #include "rltred.hpp"
+#endif
+#ifdef USE_DAGMANIP
+  #include "sparseexpr.hpp"
+#endif
 
 #ifdef USE_PROFIL
   #include "mcprofil.hpp"
@@ -33,8 +38,8 @@ typedef mc::SCVar<I> CVI;
 typedef mc::SCModel<I> CMI;
 
 //No. stages, feed location, No. components 
-//const unsigned nc = 3, ns = 3, pf = 1;
-const unsigned nc = 3, ns = 5, pf = 3;
+const unsigned nc = 3, ns = 3, pf = 1;
+//const unsigned nc = 3, ns = 5, pf = 3;
 //const unsigned nc = 3, ns = 7, pf = 4;
 //const unsigned nc = 3, ns = 10, pf = 5;
 /*
@@ -262,6 +267,21 @@ int main()
   }
   //std::cout << DAG;
 
+#ifdef USE_DAGMANIP
+  mc::SparseEnv SPE( &DAG );
+  mc::SparseExpr SPP[NP];
+  for( unsigned i(0); i<NP; i++ ) SPP[i].set( &SPE, P[i] );
+  mc::SparseExpr SPF[NF];
+
+  mc::SparseEnv::options.LIFTDIV = true;
+  mc::SPolyExpr::options.BASIS = mc::SPolyExpr::Options::MONOM;//CHEB;
+  DAG.eval( NF, F, SPF, NP, P, SPP );
+  std::cout << SPE;
+  for( unsigned i(0); i<NF; i++ )
+    std::cout << std::endl << "SPF[" << i << "]:" << SPF[i];
+  return 0;
+#endif
+
 #ifdef USE_RRLT
   // Test for reduction constraints
   mc::RLTRED RRLT( &DAG );
@@ -355,7 +375,7 @@ int main()
     CP.add_ctr( mc::BASE_NLP::EQ, **it, true );
 #endif
 
-  CP.options.MAXITER     = 500;
+  CP.options.MAXITER     = 5000;
   CP.options.MAXCPU      = 1e6 ;
   CP.options.DISPLAY     = 2;
   CP.options.MIPDISPLAY  = 0;
@@ -364,11 +384,9 @@ int main()
   CP.options.VARMEAS     = mc::NLCP<I>::Options::DEP;
   CP.options.CVTOL       = 1e-2;
   CP.options.FEASTOL     = 1e-6;
-  CP.options.PREPROC     = true;
-  CP.options.BLKDECUSE   = true;
+  CP.options.DEPSUSE     = true;
   CP.options.BRANCHVAR   = mc::SBP<I>::Options::RGREL;
-  CP.options.SCOBCHUSE   = false;//true;//
-  CP.options.SCOBCHRTOL  = 1e-1;
+  CP.options.SCOBCHMETH  = mc::NLCP<I>::Options::BLKSCO;//CHEBSCO;//NOSCO;
   CP.options.STGBCHDEPTH = 0;
   CP.options.STGBCHDRMAX = 2;
   CP.options.STGBCHRTOL  = 5e-2;
@@ -376,18 +394,17 @@ int main()
   CP.options.DOMREDTHRES = 5e-2;
   CP.options.DOMREDBKOFF = 1e-7;
   CP.options.RELMETH     = mc::NLCP<I>::Options::CHEB;
-  CP.options.CMODPROP    = 3;
+  CP.options.CMODPROP    = 2;
   CP.options.CMODCUTS    = 2;
-  CP.options.CMODRED     = mc::NLCP<I>::Options::APPEND;
+  CP.options.CMODRED     = mc::NLCP<I>::Options::NOREDUC;
   CP.options.CMODDMAX    = 1e6;
   CP.options.CMODDEPS    = 0;
   CP.options.CMODATOL    = 1e-8;
   CP.options.CMODRTOL    = 1e-2;
-  CP.options.CMODWARMS   = false;//true;
   CP.options.AEBND.ATOL    = 
   CP.options.AEBND.RTOL    = 1e-8;
   CP.options.AEBND.DISPLAY = 0;
-  CP.options.AEBND.BLKDEC  = mc::AEBND<I,CMI,CVI>::Options::DECOMPOSITION::RECUR;
+  //CP.options.AEBND.BLKDEC  = mc::AEBND<I,CMI,CVI>::Options::DECOMPOSITION::RECUR;
   std::cout << CP;
 /*
   const I Ip_3stg[NP] = { I(4.518816e-01,4.534009e-01), I(8.516051e-01,8.523648e-01),
@@ -441,7 +458,7 @@ I(3.38874100000000e+02,3.39011800000000e+02)
  };
 */
 try{
-  CP.setup();
+  CP.setup( Ip );
   CP.solve( Ip );//_3stg );
   CP.stats.display();
 }

@@ -65,10 +65,10 @@ dispClean:
 #####
 
 cleandist: dispCleanInstall
-	cd $(thirdppath); make -f sobol.mk clean
-	rm -fi $(libobjs) $(libname)
-	cd $(incpath) ; rm -i $(incobjs)
-	cd $(libpath) ; rm -i $(libname)
+	-(cd $(thirdppath); make -f sobol.mk clean)
+	rm -f $(libobjs) $(libname)
+	-(cd $(incpath) ; rm -f $(incobjs))
+	-(cd $(libpath) ; rm -f $(libname))
 
 dispCleanInstall:
 	@echo

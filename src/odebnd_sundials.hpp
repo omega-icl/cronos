@@ -224,7 +224,7 @@ public:
 
   //! @brief Computes Hausdorff distance between interval enclosure and actual reachable set of parametric ODEs, using parameter sampling
   STATUS hausdorff
-    ( const unsigned nsamp, const T*Ip, double**Hxk=0, double*Hf=0, std::ostream&os=std::cout );
+    ( const int nsamp, const T*Ip, double**Hxk=0, double*Hf=0, std::ostream&os=std::cout );
 
   //! @brief Computes polynomial model enclosure of reachable set of parametric ODEs
   STATUS bounds
@@ -236,11 +236,11 @@ public:
 
   //! @brief Computes Hausdorff distance between polynomial model remainder enclosure and actual remainder function range, using parameter sampling
   STATUS hausdorff
-    ( const unsigned nsamp, const PVT*PMp, double**Hxk=0, double*Hf=0, std::ostream&os=std::cout );
+    ( const int nsamp, const PVT*PMp, double**Hxk=0, double*Hf=0, std::ostream&os=std::cout );
 
  //! @brief Compute approximate interval enclosure of reachable set of parametric ODEs using parameter sampling
   STATUS bounds
-    ( const unsigned nsamp, const T*Ip, T**Ixk=0, T*If=0, std::ostream&os=std::cout );
+    ( const int nsamp, const T*Ip, T**Ixk=0, T*If=0, std::ostream&os=std::cout );
 
  //! @brief Compute interval enclosure of reachable set of parametric ODEs for a list of sampled parameter values
   STATUS bounds
@@ -248,7 +248,7 @@ public:
 
   //! @brief Record results in file <a>bndrec</a>, with accuracy of <a>iprec</a> digits
   void record
-    ( std::ofstream&bndrec, const unsigned iprec=5 ) const
+    ( std::ofstream&bndrec, const unsigned iprec=7 ) const
     { return ODEBND_BASE<T,PMT,PVT>::_record( bndrec, results_sta, iprec ); }
   /** @} */
 
@@ -754,11 +754,13 @@ ODEBND_SUNDIALS<T,PMT,PVT>::bounds
 }
 
 //! @fn template <typename T, typename PMT, typename PVT> inline typename ODEBND_SUNDIALS<T,PMT,PVT>::STATUS ODEBND_SUNDIALS<T,PMT,PVT>::hausdorff(
-//! const unsigned nsamp, const T*Ip, double**Hxk, double*Hf, std::ostream&os )
+//! const int nsamp, const T*Ip, double**Hxk, double*Hf, std::ostream&os )
 //!
 //! This function computes the Hausdorff distance between the interval enclosure
 //! and the exact reachable set projected onto each variable:
-//!   - <a>nsamp</a> [input]  number of samples for each parameter
+//!   - <a>nsamp</a> [input]  number of samples for each parameter (>0: grid of
+//!                           nsamp in each dimension; <0: Sobol sampling of
+//!                           size -nsamp)
 //!   - <a>Ip</a>    [input]  interval parameter set
 //!   - <a>Hxk</a>   [output] Hausdorff distance between the interval enclosure
 //!                           and the exact reachable set projected onto each
@@ -772,9 +774,11 @@ ODEBND_SUNDIALS<T,PMT,PVT>::bounds
 template <typename T, typename PMT, typename PVT>
 inline typename ODEBND_SUNDIALS<T,PMT,PVT>::STATUS
 ODEBND_SUNDIALS<T,PMT,PVT>::hausdorff
-( const unsigned nsamp, const T*Ip, double**Hxk, double*Hf, std::ostream&os )
+( const int nsamp, const T*Ip, double**Hxk, double*Hf, std::ostream&os )
 {
-  return _hausdorff( Ip, Hxk, Hf, *this, nsamp, os )? NORMAL: FAILURE;
+  pODESLVS.set( *this );
+  pODESLVS.options = options.ODESLVS;
+  return _hausdorff( Ip, Hxk, Hf, *this, pODESLVS, nsamp, os )? NORMAL: FAILURE;
 }
 
 template <typename T, typename PMT, typename PVT> inline bool
@@ -1092,13 +1096,15 @@ ODEBND_SUNDIALS<T,PMT,PVT>::bounds
 }
 
 //! @fn template <typename T, typename PMT, typename PVT> inline typename ODEBND_SUNDIALS<T,PMT,PVT>::STATUS ODEBND_SUNDIALS<T,PMT,PVT>::hausdorff(
-//! const unsigned nsamp, const PVT*PMp, double**Hxk, double*Hf, std::ostream&os=std::cout )
+//! const int nsamp, const PVT*PMp, double**Hxk, double*Hf, std::ostream&os=std::cout )
 //!
 //! This function computes the Hausdorff distance between the polynomial model
 //! remainder and the actual (sampled) range of the remainder function
 //! in projection onto each variable and for each stage time
 //! remainder and the actual range of the remainder function:
-//!   - <a>nsamp</a> [input]  number of samples for each parameter
+//!   - <a>nsamp</a> [input]  number of samples for each parameter (>0: grid of
+//!                           nsamp in each dimension; <0: Sobol sampling of
+//!                           size -nsamp)
 //!   - <a>PMp</a>   [input]  polynomial model of parameter set
 //!   - <a>Hxk</a>   [output] Hausdorff distance between the polynomial model
 //!                           remainder and the actual (sampled) range of the
@@ -1110,31 +1116,32 @@ ODEBND_SUNDIALS<T,PMT,PVT>::bounds
 template <typename T, typename PMT, typename PVT>
 inline typename ODEBND_SUNDIALS<T,PMT,PVT>::STATUS
 ODEBND_SUNDIALS<T,PMT,PVT>::hausdorff
-( const unsigned nsamp, const PVT*PMp, double**Hxk, double*Hf, std::ostream&os )
+( const int nsamp, const PVT*PMp, double**Hxk, double*Hf, std::ostream&os )
 {
   pODESLVS.set( *this );
   pODESLVS.options = options.ODESLVS;
-  return _hausdorff( PMp, Hxk, Hf, *this, pODESLVS, nsamp, os )?
-         NORMAL: FAILURE;
+  return _hausdorff( PMp, Hxk, Hf, *this, pODESLVS, nsamp, os )? NORMAL: FAILURE;
 }
 
 //! @fn template <typename T, typename PMT, typename PVT> inline typename ODEBND_SUNDIALS<T,PMT,PVT>::STATUS ODEBND_SUNDIALS<T,PMT,PVT>::bounds(
-//! const unsigned nsamp, const T*Ip, T**Ixk=0, T*If=0, std::ostream&os=std::cout )
+//! const int nsamp, const T*Ip, T**Ixk=0, T*If=0, std::ostream&os=std::cout )
 //!
 //! This function computes projections of an inner-approximation enclosure of
 //! the reachable set of the parametric ODEs using sampling and continuous-time
 //! integration:
-//!   - <a>nsamp</a> [input] number of samples for each parameter
-//!   - <a>Ip</a>    [input] interval parameter set
+//!   - <a>nsamp</a> [input]  number of samples for each parameter (>0: grid of
+//!                           nsamp in each dimension; <0: Sobol sampling of
+//!                           size -nsamp)
+//!   - <a>Ip</a>    [input]  interval parameter set
 //!   - <a>Ixk</a>   [output] approximate interval state enclosures at stage times
 //!   - <a>If</a>    [output] approximate state-dependent function enclosures
-//!   - <a>os</a>    [input] output stream
+//!   - <a>os</a>    [input]  output stream
 //! .
 //! The return value is the status.
 template <typename T, typename PMT, typename PVT>
 inline typename ODEBND_SUNDIALS<T,PMT,PVT>::STATUS
 ODEBND_SUNDIALS<T,PMT,PVT>::bounds
-( const unsigned nsamp, const T*Ip, T**Ixk, T*If, std::ostream&os )
+( const int nsamp, const T*Ip, T**Ixk, T*If, std::ostream&os )
 {
   // Local result arrays
   T** Ixk_ = Ixk? Ixk: new T*[_nsmax+1];
@@ -1171,16 +1178,15 @@ ODEBND_SUNDIALS<T,PMT,PVT>::bounds
 }
 
 //! @fn template <typename T, typename PMT, typename PVT> inline typename ODEBND_SUNDIALS<T,PMT,PVT>::STATUS ODEBND_SUNDIALS<T,PMT,PVT>::bounds(
-//! const unsigned nsamp, const T*Ip, T**Ixk=0, T*If=0, std::ostream&os=std::cout )
+//! const std::list<const double*>&Lp, T**Ixk=0, T*If=0, std::ostream&os=std::cout )
 //!
 //! This function computes projections of an inner-approximation enclosure of
 //! the reachable set of the parametric ODEs using sampling and continuous-time
 //! integration:
-//!   - <a>nsamp</a> [input] number of samples for each parameter
-//!   - <a>Lp</a>    [input] list of sampled parameter values
+//!   - <a>Lp</a>    [input]  list of sampled parameter values
 //!   - <a>Ixk</a>   [output] approximate interval state enclosures at stage times
 //!   - <a>If</a>    [output] approximate state-dependent function enclosures
-//!   - <a>os</a>    [input] output stream
+//!   - <a>os</a>    [input]  output stream
 //! .
 //! The return value is the status.
 template <typename T, typename PMT, typename PVT>

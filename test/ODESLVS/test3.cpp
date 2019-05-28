@@ -1,7 +1,3 @@
-// NOTE: Segmentation fault if NS being too larg (possibly due to stack overflow)
-// In this code, seg fault is avoided by breaking the time horizon into 4 parts, with 100 stages in a single part, and merge the data manually afterwards
-
-///////////////--------- NIFTE - NTP model --------------
 #define SAVE_RESULTS		// <- Whether to save bounds to file
 
 #include "odeslv_sundials.hpp"
@@ -13,7 +9,7 @@ int main()
 {
 
   /////////////////////////////////////////////////////////////////////////
-  // Define NIFTE dynamics
+  // Define NIFTE dynamics - NTP model
 
   mc::FFGraph NIFTE;  // DAG describing the problem
 
@@ -50,7 +46,6 @@ int main()
   mc::FFVar &R_f = P[0], &R_l = P[1], &R_th = P[2], &L_d = P[3], &L_f = P[4], &L_l = P[5], &L_p = P[6], &C_ad = P[7], &C_d = P[8], &C_p = P[9];
   
   mc::FFVar RHS[NX];  // Right-hand side function
-  //RHS[0] = ( tau*(K*((mc::exp(2*Lambda*P_d)-1.)/(mc::exp(2*Lambda*P_d)+1.))-P_ad) )/(R_th*C_ad) + ( tau*U0*(U_f + U_p) )/(P0*C_ad);
   RHS[0] = ( tau*(K*tanh(Lambda*P_d)-P_ad) )/(R_th*C_ad) + ( tau*U0*(U_f + U_p) )/(P0*C_ad);
   RHS[1] = ( tau*U0*U_f )/(P0*C_d);
   RHS[2] = ( tau*U0*U_p )/(P0*C_p);
@@ -113,46 +108,6 @@ int main()
   IVP.record( direcSTA );
 #endif
 
-/*	
-	double dPad_dt[NS+1], Uad[NS+1], Ul[NS+1], Uth[NS+1], Pl[NS+1], Pf[NS+1], Pth[NS+1];
-
-	const double _R_th = 5.02e8, _C_ad = 1.76e-9, _R_f = 2.13e6, _R_l = 4.08e6;
-
-	for( unsigned k=0; k<=NS; k++ ){
-	  		
-		dPad_dt[k] = ( tau*(K*tanh(Lambda*xk[k][1])-xk[k][0]) )/(_R_th*_C_ad) + ( tau*U0*(xk[k][3] + xk[k][4]) )/(P0*_C_ad);  //undimensionalised
-		
-		Uad[k] = _C_ad * dPad_dt[k]*P0 / tau;	// Uad = Cad * dPad_d
-		
-		Ul[k] = -(xk[k][3] + xk[k][4])*U0;	//Ul = -(Up+Uf);
-		
-		Uth[k] = Uad[k] + Ul[k];	// Uth = Uad + Ul
-		
-		Pth[k] = _R_th * Uth[k];
-
-		Pl[k] = Ul[k]*_R_l;	// Pl = Rl * Ul
-		
-		Pf[k] = xk[k][3]*U0*_R_f;	// Pf = Rf * Uf
-		
-	}
-
-#ifdef SAVE_RESULTS
-  std::ofstream res( "test3_eff.out", std::ios_base::out );
-  res << std::scientific << std::setprecision(5) << std::right;
-  const unsigned IPREC = 9;
-  for (unsigned int k = 0; k < NS; k++){
-    res << std::scientific << std::setprecision(IPREC)
-        << std::setw(IPREC+9) << Pf[k+1]
-        << std::setw(IPREC+9) << f[NS-1-k]
-        << std::setw(IPREC+9) << Pl[k+1]
-        << std::setw(IPREC+9) << f[2*NS-1-k]
-        << std::setw(IPREC+9) << Pth[k+1]
-        << std::setw(IPREC+9) << f[3*NS-1-k]
-        << std::endl;
-	 }
-  res.close();
-#endif
-*/	
   // cleanup
   //for( unsigned k=0; k<=NS; k++ ){
   //  delete[] xk[k];

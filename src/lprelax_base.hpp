@@ -260,6 +260,7 @@ LPRELAX_BASE<T>::_solve_LPmodel
 ( const OPT&options, STAT&stats, const std::vector<FFVar>&var )
 {
   stats.tLPSOL -= cpuclock();
+#ifdef MC__USE_CPLEX
   try{
     _set_LPoptions( options );
   }
@@ -267,7 +268,6 @@ LPRELAX_BASE<T>::_solve_LPmodel
     throw std::runtime_error("Invalid options setup");
   }
   _LPexcpt = false;
-#ifdef MC__USE_CPLEX
   if( options.MIPFILE != "" )
     _ILOcplex->exportModel( options.MIPFILE.c_str() );
   //{ int dum; std::cout << "PAUSED"; std::cin >> dum; }
@@ -282,11 +282,12 @@ LPRELAX_BASE<T>::_solve_LPmodel
   }
   //_time += _cplex->getCplexTime();
 #else
-  _GRBmodel->update();
-  if( options.MIPFILE != "" )
-    _GRBmodel->write( options.MIPFILE );
-  fedisableexcept(FE_ALL_EXCEPT);
   try{
+    _set_LPoptions( options );
+    _GRBmodel->update();
+    if( options.MIPFILE != "" )
+      _GRBmodel->write( options.MIPFILE );
+    fedisableexcept(FE_ALL_EXCEPT);
     _GRBmodel->optimize();
   }
   catch(GRBException& e){
@@ -323,20 +324,23 @@ LPRELAX_BASE<T>::_set_LPoptions
   _ILOcplex->extract(*_ILOmodel);
   _ILOcplex->setWarning( options.MIPDISPLAY? std::cout: _ILOenv->getNullStream() );
   _ILOcplex->setOut( options.MIPDISPLAY? std::cout: _ILOenv->getNullStream() );
-  _ILOcplex->setParam( IloCplex::RootAlg, options.LPALGO );
-  _ILOcplex->setParam( IloCplex::EpOpt,   options.LPOPTIMTOL );
-  _ILOcplex->setParam( IloCplex::EpRHS,   options.LPFEASTOL );
-  _ILOcplex->setParam( IloCplex::EpGap,   options.MIPRELGAP );
-  _ILOcplex->setParam( IloCplex::EpAGap,  options.MIPABSGAP );
-  _ILOcplex->setParam( IloCplex::PreInd,  options.LPPRESOLVE?true:false );
+  _ILOcplex->setParam( IloCplex::Param::Tune::TimeLimit,  options.MAXCPU );
+  _ILOcplex->setParam( IloCplex::RootAlg,    options.LPALGO );
+  _ILOcplex->setParam( IloCplex::EpOpt,      options.LPOPTIMTOL );
+  _ILOcplex->setParam( IloCplex::EpRHS,      options.LPFEASTOL );
+  _ILOcplex->setParam( IloCplex::EpGap,      options.MIPRELGAP );
+  _ILOcplex->setParam( IloCplex::EpAGap,     options.MIPABSGAP );
+  _ILOcplex->setParam( IloCplex::PreInd,     options.LPPRESOLVE?true:false );
 #else
   // Gurobi options
   _GRBmodel->getEnv().set( GRB_IntParam_OutputFlag,        options.MIPDISPLAY );
+  _GRBmodel->getEnv().set( GRB_DoubleParam_TimeLimit,      options.MAXCPU );
   _GRBmodel->getEnv().set( GRB_IntParam_Method,            options.LPALGO );
   _GRBmodel->getEnv().set( GRB_DoubleParam_OptimalityTol,  options.LPOPTIMTOL );
   _GRBmodel->getEnv().set( GRB_DoubleParam_FeasibilityTol, options.LPFEASTOL );
   _GRBmodel->getEnv().set( GRB_DoubleParam_MIPGap,         options.MIPRELGAP );
   _GRBmodel->getEnv().set( GRB_DoubleParam_MIPGapAbs,      options.MIPABSGAP );
+  _GRBmodel->getEnv().set( GRB_DoubleParam_Heuristics,     options.MIPHEURISTICS );
   _GRBmodel->getEnv().set( GRB_IntParam_Presolve,          options.LPPRESOLVE  );
   _GRBmodel->getEnv().set( GRB_DoubleParam_PreSOS2BigM,    options.PRESOS2BIGM );
   _GRBmodel->getEnv().set( GRB_IntParam_DualReductions,    0 ); // In order to avoid INF_OR_UNBD status

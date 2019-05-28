@@ -61,7 +61,7 @@ int main()
   LV.options.TORD      = 4;
   LV.options.H0        = 0.1;
   LV.options.LBLK      =
-  LV.options.DBLK      = 10;
+  LV.options.DBLK      = 20;
   LV.options.DISPLAY   = 1;
   LV.options.RESRECORD = true;
   LV.options.ODESLVS.RESRECORD = 1000;
@@ -116,8 +116,8 @@ int main()
   ofilePM.close();
 
   // Compute Approximate Bounds (Sampling)
-  const unsigned int NSAMP = 50; // Number of sample points
-  LV.bounds( NSAMP, Ip );
+  const int NSAMP = 100; // Number of Sobol' sampling points
+  LV.bounds( -NSAMP, Ip );
   std::ofstream ofile0( "test0b_APPROX_STA.dat", std::ios_base::out );
   LV.record( ofile0 );
 

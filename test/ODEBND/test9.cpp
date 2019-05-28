@@ -1,6 +1,6 @@
 /// DENBIGH TEST PROBLEM
 const unsigned int NPM   = 4;	// <- Order of poynomial expansion
-const unsigned int NSAMP = 10;	// <- Number of sampling points for inner approx.
+const unsigned int NSAMP = 500;	// <- Number of sampling points for inner approx.
 #define SAVE_RESULTS		    // <- Whether to save bounds to file
 #define USE_CMODEL		        // <- whether to use Chebyshev models or Taylor models
 #define MC__AEBND_SHOW_INTER_FAIL
@@ -111,7 +111,7 @@ int main()
   OC.options.ODESLVS   = OC.options;
 
   std::cout << "\nNON_VALIDATED INTEGRATION - INNER-APPROXIMATION OF REACHABLE SET:\n\n";
-  OC.bounds( NSAMP, Ip );
+  OC.bounds( -NSAMP, Ip );
 #if defined( SAVE_RESULTS )
   std::ofstream apprec( "test9_APPROX_STA.dat", std::ios_base::out );
   OC.record( apprec );
@@ -148,12 +148,12 @@ int main()
   OC2.options.TORD      = 4;
   OC2.options.H0        = 0.02;
   OC2.options.LBLK      =
-  OC2.options.DBLK      = 50/NS;
+  OC2.options.DBLK      = 50;//50/NS;
   OC2.options.DISPLAY   = 1;
   OC2.options.RESRECORD = true;
   OC2.options.ODESLVS.RESRECORD = 100;
   OC2.options.AEBND.MAXIT   = 100;
-  OC2.options.AEBND.DISPLAY = 1;
+  OC2.options.AEBND.DISPLAY = 0;
   OC2.options.AEBND.RTOL    =
   OC2.options.AEBND.ATOL    = 1e-10;
   OC2.options.AEBND.INTERBND = true;

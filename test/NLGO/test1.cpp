@@ -1,5 +1,4 @@
-#define USE_PROFIL
-#define MC__USE_CPLEX
+//#define USE_PROFIL
 #define MC__CSEARCH_SHOW_DEPS
 #define MC__CSEARCH_SHOW_BOXES
 
@@ -39,20 +38,22 @@ int main()
   //NLP.options.POLIMG.DCDECOMP_SCALE = false;
   NLP.options.MIPFILE         = "test1.lp";
   NLP.options.MAXITER         = 10;
-  NLP.options.BLKDECUSE       = true; //false;
+  NLP.options.DEPSUSE         = false;//true; //false;
   NLP.options.CMODDEPS        = 0;
-  NLP.options.NCOCUTS         = true; //false;
+  NLP.options.NCOCUTS         = false;//true; //false;
   NLP.options.AEBND.DISPLAY   = 0;
   NLP.options.PREPROC         = true;
   NLP.options.DISPLAY         = 2;
-  NLP.options.MIPDISPLAY      = 0;
+  NLP.options.MIPDISPLAY      = 11;
   NLP.options.NLPSLV.DISPLAY  = 0;
 
   I Ip[NP] = { I(0.,6.), I(1.,4.) };
   NLP.setup( Ip );
-
-  int status = NLP.solve( Ip );
-  NLP.stats.display();
+  
+  int status = NLP.relax( Ip );
+  std::cout << "relaxed objective: " << NLP.get_objective() << std::endl;
+  //int status = NLP.solve( Ip );
+  //NLP.stats.display();
 
   return status;
 }

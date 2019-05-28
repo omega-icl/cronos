@@ -8,7 +8,7 @@ include $(PATH_CRONOS)/src/makeoptions.mk
 
 #####
 
-all: test1 test2 test3 test4
+all: test1 test2 test3
 
 test% : test%.o
 	$(CPP) $< $(LIB_CRONOS) $(LIB_DEP) -o $@

@@ -6,6 +6,7 @@
 #define MC__BASE_OPT_HPP
 
 #include <vector>
+#include <cmath>
 
 namespace mc
 {

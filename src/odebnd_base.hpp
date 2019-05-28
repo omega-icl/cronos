@@ -19,6 +19,10 @@
 #include "ellipsoid.hpp"
 #include "base_de.hpp"
 
+#ifdef MC__USE_SOBOL
+  #include "sobol.hpp"
+#endif
+
 // *** TO DO
 // - Detect block structure and use it in ellipsoidal approach
 // - Implement scaling in ellipsoidal approach -> DONE
@@ -593,36 +597,41 @@ class ODEBND_BASE:
 
   //! @brief Computes inner bounds approximation using parameter sampling
   template <typename ODESLV> inline bool _bounds
-    ( const T*Ip, T**Ixk, T*If, ODESLV&traj, const unsigned nsamp,
+    ( const T*Ip, T**Ixk, T*If, ODESLV&traj, const int nsamp,
       std::vector<Results>&results, std::ostream&os );
 
   //! @brief Recursive function computing bounds on solutions of IVP in ODEs using sampling
   template <typename ODESLV> inline bool _sampling
-    ( const T*Ip, T**Ixk, T*If, ODESLV&traj, const unsigned nsamp,
-      unsigned* vsamp, const unsigned ipar, double*p, double**xk,
+    ( const T*Ip, T**Ixk, T*If, ODESLV&traj, const int nsamp,
+      int* vsamp, const unsigned ipar, double*p, double**xk,
       double*f, std::vector<Results>&results, std::ostream&os );
 
   //! @brief Computes Hausdorff distance between interval enclosure and actual reachable set of parametric ODEs, using parameter sampling
-  template <typename ODEBND> inline bool _hausdorff
-    ( const T*Ip, double**Hxk, double*Hf, ODEBND&dineq, const unsigned nsamp,
-      std::ostream&os=std::cout );
+  template <typename ODEBND, typename ODESLV> inline bool _hausdorff
+    ( const T*Ip, double**Hxk, double*Hf, ODEBND&dineq, ODESLV&traj,
+      const int nsamp, std::ostream&os=std::cout );
 
   //! @brief Computes Hausdorff distance between polynomial model remainder enclosure and actual remainder function range, using parameter sampling
   template <typename ODEBND, typename ODESLV> inline bool _hausdorff
     ( const PVT*PMp, double**Hxk, double*Hf, ODEBND&dineq, ODESLV&traj,
-      const unsigned nsamp, std::ostream&os=std::cout );
+      const int nsamp, std::ostream&os=std::cout );
 
   //! @brief Function to bound the remainder function relative to a polynomial model at sampling points
   template<typename ODESLV> bool _remainders
     ( const unsigned ns, const unsigned np, const T*Ip, const PVT*const*PMxk,
-      const PVT*PMf, T**Rxk, T*Rf, ODESLV&traj, const unsigned nsamp,
+      const PVT*PMf, T**Rxk, T*Rf, ODESLV&traj, const int nsamp,
       std::ostream&os=std::cout );
+
+  //! @brief Function to bound the remainder function relative to a polynomial model for a given sample list
+  template <typename ODESLV> bool _remainders
+  ( const unsigned ns, const std::list<const double*>&Lp, const PVT*const*PMxk,
+    const PVT*PMf, T**Rxk, T*Rf, ODESLV&traj, std::ostream&os=std::cout );
 
   //! @brief Recrusive function computing bounds on errors between solutions of IVP in ODEs and polynomial approximant using sampling
   template<typename ODESLV> bool _remainders
     ( const unsigned ns, const unsigned np, const T*Ip, const PVT*const*PMxk,
-      const PVT*PMf, T**Rxk, T*Rf, ODESLV&traj, const unsigned nsamp,
-      unsigned* vsamp, const unsigned ip, double*p, double**xk, double*f,
+      const PVT*PMf, T**Rxk, T*Rf, ODESLV&traj, const int nsamp,
+      int* vsamp, const unsigned ip, double*p, double**xk, double*f,
       std::ostream&os );
 
   //! @brief Position in symmetric matrix stored in lower triangular form
@@ -650,6 +659,12 @@ class ODEBND_BASE:
   //! @brief Record results in file <a>bndrec</a>, with accuracy of <a>iprec</a> digits
   template <typename VRES> static void _record
     ( std::ofstream&ofile, const VRES&bnd, const unsigned iprec=5 );
+
+#ifdef MC__USE_SOBOL
+  //! @brief Generate Sobol sampling points
+  void _get_sobol
+    ( const unsigned nr, double*r, long long int*pseed, const bool disp=false );
+#endif
 
   //! @brief Private methods to block default compiler methods
   ODEBND_BASE(const ODEBND_BASE&);
@@ -2626,6 +2641,25 @@ ODEBND_BASE<T,PMT,PVT>::_RHS_PM_SET
   return true;
 }
 
+#ifdef MC__USE_SOBOL
+template <typename T, typename PMT, typename PVT>
+inline
+void
+ODEBND_BASE<T,PMT,PVT>::_get_sobol
+( const unsigned nr, double*r, long long int*pseed, const bool disp )
+{
+  //if( disp ) std::cout << std::setw(6) << *pseed << "  ";
+  i8_sobol( nr, pseed, r );
+  if( disp ){
+    //std::cout << std::setw(6) << *pseed << "  ";
+    for( unsigned j=0; j<nr; j++ ){
+      std::cout << std::setw(6) << r[j] << "  ";
+    }
+    std::cout << std::endl;
+  }
+}
+#endif
+
 template <typename T, typename PMT, typename PVT>
 template <typename ODESLV> inline bool
 ODEBND_BASE<T,PMT,PVT>::_bounds
@@ -2687,9 +2721,33 @@ ODEBND_BASE<T,PMT,PVT>::_bounds
 template <typename T, typename PMT, typename PVT>
 template <typename ODESLV> inline bool
 ODEBND_BASE<T,PMT,PVT>::_bounds
-( const T*Ip, T**Ixk, T*If, ODESLV&traj, const unsigned nsamp, 
+( const T*Ip, T**Ixk, T*If, ODESLV&traj, const int nsamp, 
   std::vector<Results>&results, std::ostream&os )
 {
+  if( !nsamp ) return false;
+
+  // Sample using Sobol' low-discrepancy sequence
+  if( nsamp < 0 ){
+#ifdef MC__USE_SOBOL
+    long long SEED = 1;
+    std::vector<double> vSAM(_np);
+    std::list<const double*> Lp;
+    for(unsigned k=0; k<unsigned(-nsamp); k++){
+      double *p = new double[_np];
+      _get_sobol( _np, vSAM.data(), &SEED );
+      for( unsigned i=0; i<_np; i++ )
+        p[i] = Op<T>::l(Ip[i]) + Op<T>::diam(Ip[i]) * vSAM[i];
+      Lp.push_back( p );
+    }
+    bool flag = _bounds( Lp, Ixk, If, traj, results, os );
+    for( auto&& p : Lp ) delete[] p;
+    return flag;
+#else
+    return false;
+#endif
+  }
+
+  // Sample on grid
   int DISPLAY_SAVE = traj.options.DISPLAY;
   traj.options.DISPLAY = 0;
 
@@ -2724,7 +2782,7 @@ ODEBND_BASE<T,PMT,PVT>::_bounds
     results.push_back( Results( it->t, it->nx, it->X ) );
 
   // Start sampling process
-  unsigned* vsamp = new unsigned[_np];
+  int* vsamp = new int[_np];
   bool flag = _sampling( Ip, Ixk, If, traj, nsamp, vsamp, 0, p, xk, f, results, os );
   traj.options.DISPLAY = DISPLAY_SAVE;
 
@@ -2739,12 +2797,12 @@ ODEBND_BASE<T,PMT,PVT>::_bounds
 template <typename T, typename PMT, typename PVT>
 template <typename ODESLV> inline bool
 ODEBND_BASE<T,PMT,PVT>::_sampling
-( const T*Ip, T**Ixk, T*If, ODESLV&traj, const unsigned nsamp,
-  unsigned* vsamp, const unsigned ipar, double*p, double**xk,
+( const T*Ip, T**Ixk, T*If, ODESLV&traj, const int nsamp,
+  int* vsamp, const unsigned ipar, double*p, double**xk,
   double*f, std::vector<Results>&results, std::ostream&os )
 {
   // Update bounds for all sampling points
-  for( unsigned isamp=0; isamp<nsamp; isamp++ ){
+  for( int isamp=0; isamp<nsamp; isamp++ ){
     vsamp[ipar] = isamp;
 
     // Continue recursive call
@@ -2786,19 +2844,26 @@ ODEBND_BASE<T,PMT,PVT>::_sampling
 }  
 
 template <typename T, typename PMT, typename PVT>
-template <typename ODEBND> inline bool
+template <typename ODEBND, typename ODESLV> inline bool
 ODEBND_BASE<T,PMT,PVT>::_hausdorff
-( const T*Ip, double**Hxk, double*Hf, ODEBND&dineq, const unsigned nsamp,
-  std::ostream&os )
+( const T*Ip, double**Hxk, double*Hf, ODEBND&dineq, ODESLV&traj, 
+  const int nsamp, std::ostream&os )
 {
   int DISPLAY_ODEBND = dineq.options.DISPLAY;
+  int RESRECORD_ODEBND = dineq.options.RESRECORD;
+  int RESRECORD_ODESLV = traj.options.RESRECORD;
   dineq.options.DISPLAY = 0;
+  dineq.options.RESRECORD = traj.options.RESRECORD = false;
+  std::vector<Results> dumres; // dummy results vector
 
   // Compute inner bounds 
   T** Ixk0 = new T*[_nsmax+1];
   for( unsigned is=0; is<_nsmax+1; is++ ) Ixk0[is] = new T[_nx+_nq];
   T* If0 = _nf? new T[_nf]: 0;
-  if( dineq.bounds( nsamp, Ip, Ixk0, If0, os ) != ODEBND::NORMAL ){
+  if( !_bounds( Ip, Ixk0, If0, traj, nsamp, dumres, os ) ){
+    dineq.options.DISPLAY = DISPLAY_ODEBND;
+    dineq.options.RESRECORD = RESRECORD_ODEBND;
+    traj.options.RESRECORD = RESRECORD_ODESLV;
     for( unsigned is=0; is<_nsmax+1; is++ ) delete[] Ixk0[is];
     delete[] Ixk0;
     delete[] If0;
@@ -2814,15 +2879,20 @@ ODEBND_BASE<T,PMT,PVT>::_hausdorff
   unsigned nsf = dineq.final_stage();
 
   dineq.options.DISPLAY = DISPLAY_ODEBND;
+  dineq.options.RESRECORD = RESRECORD_ODEBND;
+  traj.options.RESRECORD = RESRECORD_ODESLV;
+
   double **Hxk_ = Hxk? Hxk: new double*[_nsmax+1];
   for( unsigned is=0; is<=_nsmax; is++ ){
     if( !Hxk_[is] ) Hxk_[is] = new double[_nx+_nq];
     for( unsigned i=0; i<_nx+_nq; i++ )
       Hxk_[is][i] = is<=nsf? _dH( Ixk[is][i], Ixk0[is][i] ): 0./0.;
-    if( dineq.options.DISPLAY >= 1 )
+    if( dineq.options.DISPLAY >= 1 ){
       _print_interm( _dT[is], _nx, Hxk_[is], "dHx", os );
       _print_interm( _nq, Hxk_[is]+_nx, "dHq", os );
+    }
   }
+
   double *Hf_ = Hf? Hf: new double[_nf];
   for( unsigned i=0; i<_nf; i++ )
     Hf_[i] = nsf==_nsmax? _dH( If[i], If0[i] ): 0./0.;
@@ -2846,7 +2916,7 @@ template <typename T, typename PMT, typename PVT>
 template <typename ODEBND, typename ODESLV> inline bool
 ODEBND_BASE<T,PMT,PVT>::_hausdorff
 ( const PVT*PMp, double**Hxk, double*Hf, ODEBND&dineq, ODESLV&traj,
-  const unsigned nsamp, std::ostream&os )
+  const int nsamp, std::ostream&os )
 {
   int DISPLAY_ODEBND = dineq.options.DISPLAY;
   int DISPLAY_ODESLV = traj.options.DISPLAY;
@@ -2866,12 +2936,12 @@ ODEBND_BASE<T,PMT,PVT>::_hausdorff
   traj.set_time( nsf, _dT.data(), _pT );
 
   // Compute remainder (outer) bounds 
-  T* Ip = new T[_npar];
-  for( unsigned ip=0; ip<_npar; ip++ ) Ip[ip] = PMp[ip].B();
+  T* Ip = new T[_np];
+  for( unsigned ip=0; ip<_np; ip++ ) Ip[ip] = PMp[ip].B();
   T** Rxk = new T*[_nsmax+1];
   for( unsigned is=0; is<_nsmax+1; is++ ) Rxk[is] = new T[_nx+_nq];
   T* Rf = _nf? new T[_nf]: 0;
-  bool flag = _remainders( nsf, _npar, Ip, PMxk, PMf, Rxk, Rf, traj, nsamp, os );
+  bool flag = _remainders( nsf, _np, Ip, PMxk, PMf, Rxk, Rf, traj, nsamp, os );
 
   dineq.options.DISPLAY = DISPLAY_ODEBND;
   traj.options.DISPLAY = DISPLAY_ODESLV;
@@ -2909,10 +2979,33 @@ template <typename T, typename PMT, typename PVT>
 template<typename ODESLV> inline bool
 ODEBND_BASE<T,PMT,PVT>::_remainders
 ( const unsigned ns, const unsigned np, const T*Ip, const PVT*const*PMxk,
-  const PVT*PMf, T**Rxk, T*Rf, ODESLV&traj, const unsigned nsamp,
+  const PVT*PMf, T**Rxk, T*Rf, ODESLV&traj, const int nsamp,
   std::ostream&os )
 {
-   // Initialization of sampled bounds at parameter lower bound
+  if( !nsamp ) return false;
+
+  // Sample using Sobol' low-discrepancy sequence
+  if( nsamp < 0 ){
+#ifdef MC__USE_SOBOL
+    long long SEED = 1;
+    std::vector<double> vSAM(np);
+    std::list<const double*> Lp;
+    for(unsigned k=0; k<unsigned(-nsamp); k++){
+      double *p = new double[np];
+      _get_sobol( np, vSAM.data(), &SEED );
+      for( unsigned i=0; i<np; i++ )
+        p[i] = Op<T>::l(Ip[i]) + Op<T>::diam(Ip[i]) * vSAM[i];
+      Lp.push_back( p );
+    }
+    bool flag = _remainders( ns, Lp, PMxk, PMf, Rxk, Rf, traj, os );
+    for( auto&& p : Lp ) delete[] p;
+    return flag;
+#else
+    return false;
+#endif
+  }
+
+  // Sample on grid - Initialization at parameter lower bound
   double *p = new double[np];
   for( unsigned ip=0; ip<np; ip++ )
     p[ip] = Op<T>::l(Ip[ip]);
@@ -2933,7 +3026,7 @@ ODEBND_BASE<T,PMT,PVT>::_remainders
     Rf[i] = f[i] - PMf[i].polynomial(p);
 
   // Start sampling process
-  unsigned* vsamp = new unsigned[np];
+  int* vsamp = new int[np];
   bool flag2 = _remainders( ns, np, Ip, PMxk, PMf, Rxk, Rf, traj, nsamp,
                             vsamp, 0, p, xk, f, os );
   
@@ -2946,16 +3039,60 @@ ODEBND_BASE<T,PMT,PVT>::_remainders
 }
 
 template <typename T, typename PMT, typename PVT>
+template <typename ODESLV> inline bool
+ODEBND_BASE<T,PMT,PVT>::_remainders
+( const unsigned ns, const std::list<const double*>&Lp, const PVT*const*PMxk,
+  const PVT*PMf, T**Rxk, T*Rf, ODESLV&traj, std::ostream&os )
+{
+  if( Lp.empty() ) return false;
+  int DISPLAY_SAVE = traj.options.DISPLAY;
+  traj.options.DISPLAY = 0;
+
+  // Initialization of state and function results
+  double **xk = PMxk? new double*[ns+1]: 0;
+  for( unsigned is=0; xk && is<=ns; is++ )
+    xk[is] = new double[_nx+_nq];
+  double *f = PMf? new double[_nf]: 0;
+
+  // Loop over all sampled parameter values
+  bool first = true;
+  for( auto itp=Lp.begin(); itp!=Lp.end(); ++itp, first=false ){
+    if( traj.states( *itp, xk, f, os ) != NORMAL ){
+      delete[] f;
+      for( unsigned is=0; is<=ns; is++ ) delete[] xk[is]; delete[] xk;
+      traj.options.DISPLAY = DISPLAY_SAVE;
+      return false;
+    }
+
+    // Update state and function bounds with current trajectory
+    for( unsigned is=0; PMxk && is<=ns; is++ )
+      for( unsigned i=0; i<_nx+_nq; i++ )
+        Rxk[is][i] = first? xk[is][i] - PMxk[is][i].polynomial( *itp ):
+                     Op<T>::hull( xk[is][i] - PMxk[is][i].polynomial( *itp ), Rxk[is][i] );
+    for( unsigned i=0; PMf && i<_nf; i++ )
+      Rf[i] = first? f[i] - PMf[i].polynomial( *itp ):
+              Op<T>::hull( f[i] - PMf[i].polynomial( *itp ), Rf[i] );
+  }
+
+  // Clean-up
+  delete[] f;
+  for( unsigned is=0; xk && is<=ns; is++ ) delete[] xk[is]; delete[] xk;
+  traj.options.DISPLAY = DISPLAY_SAVE;
+  
+  return true;
+}
+
+template <typename T, typename PMT, typename PVT>
 template<typename ODESLV> inline bool
 ODEBND_BASE<T,PMT,PVT>::_remainders
 ( const unsigned ns, const unsigned np, const T*Ip, const PVT*const*PMxk,
-  const PVT*PMf, T**Rxk, T*Rf, ODESLV&traj, const unsigned nsamp, unsigned* vsamp,
+  const PVT*PMf, T**Rxk, T*Rf, ODESLV&traj, const int nsamp, int* vsamp,
   const unsigned ip, double*p, double**xk, double*f, std::ostream&os )
 {
   typename ODESLV::STATUS flag = ODESLV::NORMAL;
 
   // Update bounds for all sampling points
-  for( unsigned isamp=0; isamp<nsamp; isamp++ ){
+  for( int isamp=0; isamp<nsamp; isamp++ ){
     vsamp[ip] = isamp;
 
     // Continue recursive call

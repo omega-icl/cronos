@@ -87,11 +87,11 @@ protected:
   bool _ignore_deps;
 
   //! @brief list of operations for objective evaluation
-  std::list<const FFOp*> _op_f;
+  FFSubgraph _op_f;
   //! @brief vector of lists of operations for constraint evaluation
-  std::vector< std::list<const FFOp*> > _op_g;
+  std::vector< FFSubgraph > _op_g;
   //! @brief list of operations for Lagragian gradient evaluation
-  std::list<const FFOp*> _op_dL;
+  FFSubgraph _op_dL;
   //! @brief Storage vector for function evaluation in double arithmetic
   //std::vector< double > _wk_D;
 
@@ -316,7 +316,7 @@ protected:
     () = 0;
   //! @brief Get local optimum
   virtual const double* _get_SLVLOC
-    ( const SOLUTION_NLP&locopt ) = 0;
+    ( const SOLUTION_OPT&locopt ) = 0;
 
   //! @brief Set branching scores for current node
   virtual void _set_branching_scores
@@ -486,7 +486,7 @@ CSEARCH_BASE<T>::_setup
   }
 
   // Initialize local solution
-  _set_SLVLOC();
+  //_set_SLVLOC();
 }
 
 template <typename T>
@@ -1184,7 +1184,7 @@ inline typename SBB<T>::STATUS
 CSEARCH_BASE<T>::_subproblem_feasibility
 ( SLVLOC&locopt, const OPT&options, const double*p, double&f )
 {
-  if( !locopt->test_feasibility( p,options.FEASTOL ) )
+  if( !locopt->is_feasible( p,options.FEASTOL ) )
     return SBB<T>::INFEASIBLE;
   f = locopt->solution().f;
   return SBB<T>::NORMAL;

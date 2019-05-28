@@ -1,38 +1,20 @@
-# Third-Party Libraries -->> CHANGE ACCORDINGLY <<--
-PATH_MC = $(HOME)/Programs/Devel/MC++/MC++_2.1
-LIB_MC = -llapack -lblas
-INC_MC = -I$(PATH_MC)/src/mc -I$(PATH_MC)/src/3rdparty/fadbad++ -I$(PATH_MC)/src/3rdparty/cpplapack-2015.05.11-1/include
-FLAGS_MC = -Wno-misleading-indentation -Wno-unknown-pragmas -DMC__USE_HSL
+# THIRD-PARTY LIBRARIES <<-- CHANGE AS APPROPRIATE -->>
 
-LIB_HSL = -lmc13 -lmc21 -lmc33 -lgfortran
-INC_HSL = 
+PATH_CRONOS = $(shell cd ../.. ; pwd)
+LIB_CRONOS = -L$(PATH_CRONOS)/lib -Wl,-rpath=$(PATH_CRONOS)/lib -lcronos
+INC_CRONOS = -I$(PATH_CRONOS)/include
 
-PATH_PROFIL = /home/bchachua/Programs/ThirdParty/Profil-2.0.8
-LIB_PROFIL  = -L$(PATH_PROFIL)/lib -lProfilPackages -lProfil -lBias -llr
-INC_PROFIL  = -I$(PATH_PROFIL)/include
-
-PATH_FILIB  = /opt/filib++
-LIB_FILIB   = -L$(PATH_FILIB)/lib -lprim
-INC_FILIB   = -I$(PATH_FILIB)/include/ -I$(PATH_FILIB)/include/interval
-FLAGS_FILIB = -frounding-math -ffloat-store
-
-#PROF = -pg
-OPTI = -Ofast
-#OPTI = -O2
-
-FLAG_ALL = -g $(OPTI) -Wall -std=c++11 $(FLAGS_FILIB) $(FLAGS_MC)
-LIB_ALL  = $(LIB_MC) $(LIB_PROFIL) $(LIB_FILIB) $(LIB_HSL)
-INC_ALL  = $(INC_MC) $(INC_PROFIL) $(INC_FILIB) $(INC_HSL)
+include $(PATH_CRONOS)/src/makeoptions.mk
 
 #####
 
 all: test1 test2 test3 test4 test5 test6
 
 test% : test%.o
-	g++ $(PROF) -o $@ $< $(LIB_ALL)
+	$(CPP) $< $(LIB_CRONOS) $(LIB_DEP) -o $@
 
-test%.o: test%.cpp
-	g++ $(PROF) -c $(FLAG_ALL) -I../../src $(INC_ALL) -o $@ $<
+%.o : %.cpp
+	$(CPP) -c $(FLAG_CPP) $(INC_CRONOS) $(INC_DEP) $< -o $@
 
 #####
 
@@ -49,6 +31,6 @@ gensvg :
 
 #####
 
-clean :
-	rm -f test? test?? *.o *.out *.dot *.svg *.eps *~
+clean:
+	rm -f test? test?b *.o *.out *.dat *.eps *.dot *.svg *~
 

@@ -1,42 +1,20 @@
-# Third-Party Libraries -->> CHANGE ACCORDINGLY <<--
-PATH_MC = $(HOME)/Programs/Devel/MC++/MC++_2.1
-LIB_MC = -llapack -lblas
-INC_MC = -I$(PATH_MC)/src/mc -I$(PATH_MC)/src/3rdparty/fadbad++ -I$(PATH_MC)/src/3rdparty/cpplapack-2015.05.11-1/include
-FLAG_MC = -Wno-misleading-indentation -Wno-unknown-pragmas
+# THIRD-PARTY LIBRARIES <<-- CHANGE AS APPROPRIATE -->>
 
-LIB_GSL = -lgsl -lgslcblas -lm
-INC_GSL = 
+PATH_CRONOS = $(shell cd ../.. ; pwd)
+LIB_CRONOS = -L$(PATH_CRONOS)/lib -Wl,-rpath=$(PATH_CRONOS)/lib -lcronos
+INC_CRONOS = -I$(PATH_CRONOS)/include
 
-PATH_SUNDIALS = /opt/sundials-2.7.0
-#PATH_SUNDIALS = /usr/local
-LIB_SUNDIALS = -L$(PATH_SUNDIALS)/lib -lsundials_cvodes -lsundials_nvecserial \
-               -llapack -lblas
-INC_SUNDIALS = -I$(PATH_SUNDIALS)/include -I$(PATH_SUNDIALS)/include/sundials \
-               -I$(PATH_SUNDIALS)/include/cvodes -I$(PATH_SUNDIALS)/include/nvector
-
-PATH_PROFIL = $(HOME)/Programs/ThirdParty/Profil-2.0.8
-LIB_PROFIL = -L$(PATH_PROFIL)/lib -lProfilPackages -lProfil -lBias -llr
-INC_PROFIL = -I$(PATH_PROFIL)/include
-
-PATH_FILIB = /opt/filib++
-LIB_FILIB  = -L$(PATH_FILIB)/lib -lprim
-INC_FILIB  = -I$(PATH_FILIB)/include/ -I$(PATH_FILIB)/include/interval
-FLAG_FILIB = -frounding-math -ffloat-store
-
-#FLAG_ALL = -g -Wall -Wno-misleading-indentation -std=c++11 $(FLAG_FILIB)
-FLAG_ALL = -g -Ofast -Wall -Wno-misleading-indentation -std=c++11 $(FLAG_FILIB) $(FLAG_MC)
-LIB_ALL  = $(LIB_MC) $(LIB_PROFIL) $(LIB_FILIB) $(LIB_GSL) $(LIB_SUNDIALS) $(LIB_LAPACK)
-INC_ALL  = $(INC_MC) $(INC_PROFIL) $(INC_FILIB) $(INC_GSL) $(INC_SUNDIALS) $(INC_LAPACK)
+include $(PATH_CRONOS)/src/makeoptions.mk
 
 #####
 
 all: test1 test2 test3 test4 test5 test6
 
 test% : test%.o
-	g++ -o $@ $< $(LIB_ALL)
+	$(CPP) $< $(FLAG_CPP) $(LIB_CRONOS) $(LIB_DEP) -o $@
 
-test%.o: test%.cpp
-	g++ -c $(FLAG_ALL) -I../../src $(INC_ALL) -o $@ $<
+%.o : %.cpp
+	$(CPP) -c $(FLAG_CPP) $(INC_CRONOS) $(INC_DEP) $< -o $@
 
 #####
 
@@ -53,6 +31,6 @@ gensvg :
 
 #####
 
-clean :
-	rm -f test? test?? *.o *.out *.dat *.eps *.dot *.svg *~
+clean:
+	rm -f test? test?b *.o *.out *.dat *.eps *.dot *.svg *~
 

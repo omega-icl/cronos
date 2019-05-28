@@ -95,7 +95,7 @@ int main()
   //}
 
   OC->options.ODESLVS.DISPLAY = 1;
-  OC->states( OC->solution().p );
+  OC->states( OC->solution().p.data() );
 
   return 0;
 }

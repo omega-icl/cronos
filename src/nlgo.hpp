@@ -235,7 +235,7 @@ public:
       DOMREDMAX(5), DOMREDTHRES(0.1), DOMREDBKOFF(1e-8), RELMETH(CHEB),
       LPALGO( LPRELAX_BASE<T>::LPALGO_DEFAULT ), LPPRESOLVE(-1),
       LPFEASTOL(1e-9), LPOPTIMTOL(1e-9), MIPRELGAP(1e-7), MIPABSGAP(1e-7),
-      PRESOS2BIGM(-1.), CMODEL(), CMODPROP(2), CMODCUTS(0),
+      MIPHEURISTICS(0.05), PRESOS2BIGM(-1.), CMODEL(), CMODPROP(2), CMODCUTS(0),
       CMODDMAX(1e20), DEPSUSE(true), CMODDEPS(0), CMODRED(APPEND),
       CMODWARMS(false), CMODRTOL(2e-1), CMODATOL(1e-8), CMODJOINT(false),
       NCOCUTS(false), NCOMETH(ASA), MAXITER(0), MAXCPU(7.2e3), DISPLAY(2),
@@ -246,56 +246,57 @@ public:
         CMODEL.MIN_FACTOR = 1e-8; }
     //! @brief Assignment operator
     Options& operator= ( Options&options ){
-        CSALGO       = options.CSALGO;
-        RELMETH      = options.RELMETH;
-        PREPROC      = options.PREPROC;
-        DOMREDMIG    = options.DOMREDMIG;
-        DOMREDMAX    = options.DOMREDMAX;
-        DOMREDTHRES  = options.DOMREDTHRES;
-        DOMREDBKOFF  = options.DOMREDBKOFF;
-        CVATOL       = options.CVATOL;
-        CVRTOL       = options.CVRTOL;
-        FEASTOL      = options.FEASTOL;
-        BRANCHPT     = options.BRANCHPT;
-        BRANCHDMIN   = options.BRANCHDMIN;
-        BRANCHVAR    = options.BRANCHVAR;
-        BRANCHSEL    = options.BRANCHSEL;
-        SCOBCHMETH   = options.SCOBCHMETH;
-        SCOBCHVMAX   = options.SCOBCHVMAX;
-        SCOBCHRTOL   = options.SCOBCHRTOL;
-        SCOBCHATOL   = options.SCOBCHATOL;
-        STGBCHDEPTH  = options.STGBCHDEPTH;
-        STGBCHDRMAX  = options.STGBCHDRMAX;
-        STGBCHWEIGHT = options.STGBCHWEIGHT;
-        LPALGO       = options.LPALGO;
-        LPPRESOLVE   = options.LPPRESOLVE;
-        LPFEASTOL    = options.LPFEASTOL;
-        LPOPTIMTOL   = options.LPOPTIMTOL;
-        MIPRELGAP    = options.MIPRELGAP;
-        MIPABSGAP    = options.MIPABSGAP;
-        PRESOS2BIGM  = options.PRESOS2BIGM;
-        CMODEL       = options.CMODEL;
-        CMODPROP     = options.CMODPROP;
-        CMODCUTS     = options.CMODCUTS;
-        CMODDMAX     = options.CMODDMAX;
-        DEPSUSE      = options.DEPSUSE;
-        CMODDEPS     = options.CMODDEPS;
-        CMODRED      = options.CMODRED;
-        CMODWARMS    = options.CMODWARMS;
-        CMODRTOL     = options.CMODRTOL;
-        CMODATOL     = options.CMODATOL;
-        CMODJOINT    = options.CMODJOINT;
-        NCOCUTS      = options.NCOCUTS;
-        NCOMETH      = options.NCOMETH;
-        MAXITER      = options.MAXITER;
-        MAXCPU       = options.MAXCPU;
-        DISPLAY      = options.DISPLAY;
-        MIPDISPLAY   = options.MIPDISPLAY;
-        MIPFILE      = options.MIPFILE;
-        POLIMG       = options.POLIMG;
-        NLPSLV       = options.NLPSLV;
-        AEBND        = options.AEBND;
-        return *this;
+        CSALGO        = options.CSALGO;
+        RELMETH       = options.RELMETH;
+        PREPROC       = options.PREPROC;
+        DOMREDMIG     = options.DOMREDMIG;
+        DOMREDMAX     = options.DOMREDMAX;
+        DOMREDTHRES   = options.DOMREDTHRES;
+        DOMREDBKOFF   = options.DOMREDBKOFF;
+        CVATOL        = options.CVATOL;
+        CVRTOL        = options.CVRTOL;
+        FEASTOL       = options.FEASTOL;
+        BRANCHPT      = options.BRANCHPT;
+        BRANCHDMIN    = options.BRANCHDMIN;
+        BRANCHVAR     = options.BRANCHVAR;
+        BRANCHSEL     = options.BRANCHSEL;
+        SCOBCHMETH    = options.SCOBCHMETH;
+        SCOBCHVMAX    = options.SCOBCHVMAX;
+        SCOBCHRTOL    = options.SCOBCHRTOL;
+        SCOBCHATOL    = options.SCOBCHATOL;
+        STGBCHDEPTH   = options.STGBCHDEPTH;
+        STGBCHDRMAX   = options.STGBCHDRMAX;
+        STGBCHWEIGHT  = options.STGBCHWEIGHT;
+        LPALGO        = options.LPALGO;
+        LPPRESOLVE    = options.LPPRESOLVE;
+        LPFEASTOL     = options.LPFEASTOL;
+        LPOPTIMTOL    = options.LPOPTIMTOL;
+        MIPRELGAP     = options.MIPRELGAP;
+        MIPABSGAP     = options.MIPABSGAP;
+        MIPHEURISTICS = options.MIPABSGAP;
+        PRESOS2BIGM   = options.PRESOS2BIGM;
+        CMODEL        = options.CMODEL;
+        CMODPROP      = options.CMODPROP;
+        CMODCUTS      = options.CMODCUTS;
+        CMODDMAX      = options.CMODDMAX;
+        DEPSUSE       = options.DEPSUSE;
+        CMODDEPS      = options.CMODDEPS;
+        CMODRED       = options.CMODRED;
+        CMODWARMS     = options.CMODWARMS;
+        CMODRTOL      = options.CMODRTOL;
+        CMODATOL      = options.CMODATOL;
+        CMODJOINT     = options.CMODJOINT;
+        NCOCUTS       = options.NCOCUTS;
+        NCOMETH       = options.NCOMETH;
+        MAXITER       = options.MAXITER;
+        MAXCPU        = options.MAXCPU;
+        DISPLAY       = options.DISPLAY;
+        MIPDISPLAY    = options.MIPDISPLAY;
+        MIPFILE       = options.MIPFILE;
+        POLIMG        = options.POLIMG;
+        NLPSLV        = options.NLPSLV;
+        AEBND         = options.AEBND;
+        return *this ;
       }
     //! @brief Complete search method
     enum CS{
@@ -381,6 +382,8 @@ public:
     double MIPRELGAP;
     //! @brief Tolerance on absolute MIP gap
     double MIPABSGAP;
+    //! @brief Desired fraction of total MIP runtime devoted to heuristics
+    double MIPHEURISTICS;
     //! @brief Parameter controlling SOS2 reformulations
     double PRESOS2BIGM;
     //! @brief CModel options
@@ -393,7 +396,7 @@ public:
     double CMODDMAX;
     //! @brief Whether to exploit dependent variables in equation subsystems
     bool DEPSUSE;
-     //! @brief Reduced-space Chebyhev model order (0: no reduction)
+     //! @brief Reduced-space Chebyshev model order (0: no reduction)
     unsigned CMODDEPS;
      //! @brief Reduction method
     REDUC CMODRED;
@@ -560,7 +563,7 @@ public:
       std::ostream&os=std::cout );
 
   //! @brief Local solution information after last NLP optimization
-  const SOLUTION_NLP& get_local_solution() const
+  const SOLUTION_OPT& get_local_solution() const
     { return _NLPSLV->solution(); }
 
   //! @brief Solve relaxed optimization model (or relaxed feasibility model if <a>feastest</a> is true) within variable range <a>P</a> and for variable types <a>tvar</a>
@@ -612,7 +615,7 @@ protected:
 
   //! @brief Get local optimum
   const double* _get_SLVLOC
-    ( const SOLUTION_NLP&locopt );
+    ( const SOLUTION_OPT&locopt );
 
   //! @brief Compute dependent Chebyshev variables
   bool _get_depcheb
@@ -841,12 +844,12 @@ NLGO<T>::_set_SLVLOC
 template <typename T>
 inline const double*
 NLGO<T>::_get_SLVLOC
-( const SOLUTION_NLP&locopt )
+( const SOLUTION_OPT&locopt )
 {
   //std::cout << locopt.n << " =?= " << BASE_NLP::_var.size() << " + " << BASE_NLP::_dep.size() << std::endl; 
-  assert( locopt.n == (int)BASE_NLP::_var.size() + (int)BASE_NLP::_dep.size() );
-  assert( locopt.m == (int)std::get<0>(BASE_NLP::_ctr).size() + (int)BASE_NLP::_sys.size() );
-  _Dvar.assign( locopt.p, locopt.p+locopt.n );
+  assert( locopt.p.size() == BASE_NLP::_var.size() + BASE_NLP::_dep.size() );
+  assert( locopt.g.size() == std::get<0>(BASE_NLP::_ctr).size() + (int)BASE_NLP::_sys.size() );
+  _Dvar = locopt.p;
   if( options.NCOCUTS ){
     //_Dvar.insert( _Dvar.end(), _nvar-locopt.n, 0. ); // <- MODIFY TO USE ACTUAL FJ MULTIPLIER VALUES (AFTER RESCALING)?
     _Dvar.push_back( 1. );
@@ -871,7 +874,7 @@ NLGO<T>::_get_SLVLOC
       mult_eq += sqr( locopt.ug[ig] );
       ig++;
     }
-    for( int ivar=0; ivar<locopt.n; ivar++ ){
+    for( unsigned ivar=0; ivar<locopt.p.size(); ivar++ ){
       if( !_tvar.empty() && _tvar[ivar] ) continue;
       _Dvar.push_back( std::fabs( locopt.upL[ivar] ) );
       _Dvar.push_back( std::fabs( locopt.upU[ivar] ) );
@@ -879,7 +882,7 @@ NLGO<T>::_get_SLVLOC
     }
     double mult_scal = ( - mult_ineq + std::sqrt( mult_ineq * mult_ineq + 4. * mult_eq ) )
                       / ( 2. * mult_eq );
-    for( unsigned i=locopt.n; i<_nvar; i++ ){
+    for( unsigned i=locopt.p.size(); i<_nvar; i++ ){
       _Dvar[i] *= mult_scal;
       //std::cout << "Dvar[" << i << "] = " << _Dvar[i] << std::endl;
     }

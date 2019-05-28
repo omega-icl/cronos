@@ -17,7 +17,7 @@
 #include <sys/time.h>
 
 #include "odebnd_base.hpp"
-#include "odeslv_sundials.hpp"
+#include "odeslvs_sundials.hpp"
 
 #include "ellipsoid.hpp"
 #include "tmodel.hpp"
@@ -43,6 +43,11 @@ class ODEBND_VAL:
 {
   typedef Ellipsoid E;
   typedef BASE_DE::STATUS STATUS;
+
+protected:
+  using ODEBND_BASE<T,PMT,PVT>::_diam;
+  using ODEBND_BASE<T,PMT,PVT>::_hausdorff;
+  using ODEBND_BASE<T,PMT,PVT>::_bounds;
 
 private:
   //! @brief number of independent variables in DAG
@@ -186,7 +191,7 @@ private:
   double _tval;
 
   //! @brief static pointer to local integrator class
-  ODESLV_SUNDIALS pODESLV;
+  ODESLVS_SUNDIALS pODESLVS;
 
 public:
   /** @defgroup ODEBND_VAL Discretized (validated) set-valued integration of parametric ODEs
@@ -208,7 +213,7 @@ public:
       TSORDER(7), WRAPMIT(ELLIPS), ORDMIT(1), DMAX(1e20), HMIN(1e-8), HMAX(1e8),
       HREDUC(0.8), HSTAB(true), TOL(1e-7), SCALING(true), ATOL(1e-10),
       QTOL(machprec()), TSTOP(true), PMVALID(false), USEINV(true),
-      DISPLAY(1), RESRECORD(false), ODESLV(typename ODESLV_SUNDIALS::Options())
+      DISPLAY(1), RESRECORD(false), ODESLVS(typename ODESLVS_SUNDIALS::Options())
       {}
     //! @brief Enumeration of wrapping mitigation strategies
     enum WRAPPING_STRATEGY{
@@ -250,7 +255,7 @@ public:
     //! @brief Whether or not to record results (default: false)
     bool RESRECORD;
     //! @brief Options of real-valued integrator for bounds sampling
-    typename ODESLV_SUNDIALS::Options ODESLV;
+    typename ODESLVS_SUNDIALS::Options ODESLVS;
   } options;
 
   //! @brief Structure storing integration statistics
@@ -316,15 +321,24 @@ public:
 
   //! @brief Computes polynomial model enclosure of reachable set of parametric ODEs
   STATUS bounds
-    ( const PVT*PMp, PVT**PMxk, E*ERxk=0, std::ostream&os=std::cout );
+    ( const PVT*PMp, PVT**PMxk, E*ERxk, PVT*PMf=0, std::ostream&os=std::cout );
 
- //! @brief Compute approximate interval enclosure of reachable set of parametric ODEs using parameter sampling
+  //! @brief Computes polynomial model enclosure of reachable set of parametric ODEs
   STATUS bounds
-    ( const T*Ip, T**Ixk, const unsigned nsamp, std::ostream&os=std::cout );
+    ( const PVT*PMp, PVT**PMxk, PVT*PMf=0, std::ostream&os=std::cout )
+    { return bounds( PMp, PMxk, 0, PMf, os ); }
 
   //! @brief Computes Hausdorff distance between polynomial model remainder enclosure and actual remainder function range, using parameter sampling
   STATUS hausdorff
-    ( const PVT*PMp, double**Hxk, const unsigned int nsamp, std::ostream&os=std::cout );
+    ( const int nsamp, const PVT*PMp, double**Hxk=0, double*Hf=0, std::ostream&os=std::cout );
+
+ //! @brief Compute approximate interval enclosure of reachable set of parametric ODEs using parameter sampling
+  STATUS bounds
+    ( const int nsamp, const T*Ip, T**Ixk=0, T*If=0, std::ostream&os=std::cout );
+
+ //! @brief Compute interval enclosure of reachable set of parametric ODEs for a list of sampled parameter values
+  STATUS bounds
+    ( const std::list<const double*>&Lp, T**Ixk=0, T*If=0, std::ostream&os=std::cout );
 
   //! @brief Record results in file <a>bndrec</a>, with accuracy of <a>iprec</a> digits
   void record
@@ -361,10 +375,6 @@ private:
   template <typename U> double _snorm
     ( U*R, const T*X ) const;
 
-  //! @brief Function computing set diameter
-  template <typename U> double _diam
-    ( U*X ) const;
-
   //! @brief Compute stepsize using Taylor remainder
   template <typename U> double _stepsize
     ( const unsigned q, U*UTRHS, const T*X, const bool hdep ) const;
@@ -389,7 +399,7 @@ private:
 
   //! @brief Function to initialize state polynomial models
   bool _init
-    ( const unsigned k, const double tk, PVT*PMxk, E*Exk );
+    ( const unsigned k, const double tk, PVT*PMxk, E*ERxk );
 
   //! @brief Function to set/size RHS evaluation
   bool _resize
@@ -557,17 +567,6 @@ ODEBND_VAL<T,PMT,PVT>::_snorm
 }
 
 template <typename T, typename PMT, typename PVT>
-template <typename U> inline double
-ODEBND_VAL<T,PMT,PVT>::_diam
-( U*X ) const
-{
-  double diam = 0.;
-  for( unsigned int ix=0; ix<_nx; ix++ )
-    diam = std::max( diam, Op<U>::diam(X[ix]) );
-  return diam;
-}
-
-template <typename T, typename PMT, typename PVT>
 template <typename U, typename V> inline U
 ODEBND_VAL<T,PMT,PVT>::_predictor
 ( const V&h, const unsigned q, const unsigned n, const U*U_TE,
@@ -705,7 +704,7 @@ ODEBND_VAL<T,PMT,PVT>::_propagate_INT
   _Ex.set();
 
   // Check enclosure diameter before returning
-  return( _diam(_Ix) < options.DMAX? NORMAL: FAILURE );
+  return( _diam(_nx,_Ix) < options.DMAX? NORMAL: FAILURE );
 }
 
 template <typename T, typename PMT, typename PVT>
@@ -1258,7 +1257,7 @@ ODEBND_VAL<T,PMT,PVT>::_propagate_ELL
   if( _update_ELL( os ) != NORMAL ) return FAILURE;
 
   // Check enclosure diameter before returning
-  return( _diam(_Ix) < options.DMAX? NORMAL: FAILURE );
+  return( _diam(_nx,_Ix) < options.DMAX? NORMAL: FAILURE );
 }
 
 template <typename T, typename PMT, typename PVT>
@@ -1414,7 +1413,7 @@ ODEBND_VAL<T,PMT,PVT>::_prepare
 template <typename T, typename PMT, typename PVT>
 inline bool
 ODEBND_VAL<T,PMT,PVT>::_init
-( const unsigned k, const double tk, PVT*PMxk, E*Exk )
+( const unsigned k, const double tk, PVT*PMxk, E*ERxk )
 {
   if( !_vIC.size() ) return false;
   if( k && _vIC.size()>1 ) throw Exceptions( Exceptions::REINIT );
@@ -1455,26 +1454,27 @@ ODEBND_VAL<T,PMT,PVT>::_init
 
   // Copy internal variables back into arguments
   for( unsigned ix=0; ix<_nx; ix++ ) PMxk[ix] = _PMx[ix];
-  if( Exk ) *Exk = _Ex;
+  if( ERxk ) *ERxk = _Ex;
   return true;
 }
 
 //! @fn template <typename T, typename PMT, typename PVT> inline typename ODEBND_VAL<T,PMT,PVT>::STATUS ODEBND_VAL<T,PMT,PVT>::bounds(
 //! const unsigned int ntk, const double*tk, const PVT*PMp, PVT**PMxk,
-//! E*Exk=0, std::ostream&os=std::cout )
+//! E*ERxk=0, PVT*PMf=0, std::ostream&os=std::cout )
 //!
 //! This function computes an interval enclosure of the reachable set of 
 //! the parametric ODEs defined in IVP using equally spaced samples:
-//!   - <a>PMp</a> [input] polynomial model parameter enclosure
+//!   - <a>PMp</a>  [input] polynomial model parameter enclosure
 //!   - <a>PMxk</a> [output] polynomial model state enclosures at stage times
-//!   - <a>Exk</a> [output] ellipsoidal remainders in polynomial model state enclosures at stage times (default: NULL)
-//!   - <a>os</a>  [input/output] output stream (default: std::cout)
+//!   - <a>ERxk</a> [output] ellipsoidal remainders in polynomial model state enclosures at stage times (default: NULL)
+//!   - <a>PMf</a>  [output] polynomial model of state-dependent functions
+//!   - <a>os</a>   [input/output] output stream (default: std::cout)
 //! .
 //! The return value is the status.
 template <typename T, typename PMT, typename PVT>
 inline typename ODEBND_VAL<T,PMT,PVT>::STATUS
 ODEBND_VAL<T,PMT,PVT>::bounds
-( const PVT*PMp, PVT**PMxk, E*Exk, std::ostream&os )
+( const PVT*PMp, PVT**PMxk, E*ERxk, PVT*PMf, std::ostream&os )
 {
   // Initialize validated ODE bounding
   if( !_prepare( PMp ) ) return FATAL;
@@ -1483,7 +1483,7 @@ ODEBND_VAL<T,PMT,PVT>::bounds
 
   try{
     // Initial state bounds
-    if( !_init( 0, _dT[0], PMxk[0], Exk ) ) return FATAL;
+    if( !_init( 0, _dT[0], PMxk[0], ERxk ) ) return FATAL;
     if( options.DISPLAY >= 1 )
       switch( options.WRAPMIT ){
         case Options::NONE:   _print_interm( _dT[0], _nx, _PMx, "x", os );      break;
@@ -1500,14 +1500,14 @@ ODEBND_VAL<T,PMT,PVT>::bounds
       const unsigned int iRHS = ( _vRHS.size()<2? 0: _istg );
       if( (!_istg || iRHS) && !_resize( options.TSORDER, iRHS ) ) return FATAL;
 
-      if( _istg && !_init( _istg, _dT[_istg], PMxk[_istg], Exk+_istg ) ) return FATAL;
+      if( _istg && !_init( _istg, _dT[_istg], PMxk[_istg], ERxk+_istg ) ) return FATAL;
       if( _propagate( _dT[_istg+1], os ) != NORMAL ){
         _final_stats( stats_traj );
         if( options.DISPLAY >= 1 ) _print_stats( stats_traj, os );
-	return FAILURE;
+        return FAILURE;
       }
       for( unsigned int ix=0; ix<_nx; ix++ ) PMxk[_istg+1][ix] = _PMx[ix];
-      if( Exk ) Exk[_istg+1] = _Ex;
+      if( ERxk ) ERxk[_istg+1] = _Ex;
       if( options.DISPLAY >= 1 )
         switch( options.WRAPMIT ){
           case Options::NONE:   _print_interm( _dT[_istg+1], _nx, _PMx, "x", os );      break;
@@ -1528,65 +1528,136 @@ ODEBND_VAL<T,PMT,PVT>::bounds
   return NORMAL;
 }
 
+
 //! @fn template <typename T, typename PMT, typename PVT> inline typename ODEBND_VAL<T,PMT,PVT>::STATUS ODEBND_VAL<T,PMT,PVT>::hausdorff(
-//! const PVT*PMp, double**Hxk, const unsigned int nsamp, std::ostream&os )
+//! const int nsamp, const PVT*PMp, double**Hxk, double*Hf, std::ostream&os=std::cout )
 //!
 //! This function computes the Hausdorff distance between the polynomial model
 //! remainder and the actual (sampled) range of the remainder function
 //! in projection onto each variable and for each stage time
 //! remainder and the actual range of the remainder function:
-//!   - <a>PMp</a> [input] polynomial model of parameter set
-//!   - <a>Hxk</a> [output] Hausdorff distance between the polynomial model
-//!     remainder and the actual (sampled) range of the remainder function,
-//!     at stage times
-//!   - <a>nsamp</a> [input] number of samples for each parameter
-//!   - <a>os</a> [input] output stream (default: std::cout)
-template <typename T, typename PMT, typename PVT> inline typename ODEBND_VAL<T,PMT,PVT>::STATUS
+//!   - <a>nsamp</a> [input]  number of samples for each parameter (>0: grid of
+//!                           nsamp in each dimension; <0: Sobol sampling of
+//!                           size -nsamp)
+//!   - <a>PMp</a>   [input]  polynomial model of parameter set
+//!   - <a>Hxk</a>   [output] Hausdorff distance between the polynomial model
+//!                           remainder and the actual (sampled) range of the
+//!                           remainder term for states at stage times
+//!   - <a>Hf</a>    [output] Hausdorff distance between the polynomial model
+//!                           remainder and the actual (sampled) range of the
+//!                           remainder term for state-dependent functions
+//!   - <a>os</a>    [input]  output stream [default: std::cout]
+template <typename T, typename PMT, typename PVT>
+inline typename ODEBND_VAL<T,PMT,PVT>::STATUS
 ODEBND_VAL<T,PMT,PVT>::hausdorff
-( const PVT*PMp, double**Hxk, const unsigned int nsamp, std::ostream&os )
+( const int nsamp, const PVT*PMp, double**Hxk, double*Hf, std::ostream&os )
 {
-  pODESLV.set( *this );
-  pODESLV.options = options.ODESLV;
-  return ODEBND_BASE<T,PMT,PVT>::_hausdorff( PMp, Hxk, 0, *this, pODESLV, nsamp, os )?
-         NORMAL: FAILURE;
+  pODESLVS.set( *this );
+  pODESLVS.options = options.ODESLVS;
+  return _hausdorff( PMp, Hxk, Hf, *this, pODESLVS, nsamp, os )? NORMAL: FAILURE;
 }
 
 //! @fn template <typename T, typename PMT, typename PVT> inline typename ODEBND_VAL<T,PMT,PVT>::STATUS ODEBND_VAL<T,PMT,PVT>::bounds(
-//! const T*Ip, T**Ixk, const unsigned nsamp, std::ostream&os=std::cout )
+//! const int nsamp, const T*Ip, T**Ixk=0, T*If=0, std::ostream&os=std::cout )
 //!
 //! This function computes projections of an inner-approximation enclosure of
 //! the reachable set of the parametric ODEs using sampling and continuous-time
 //! integration:
-//!   - <a>Ip</a>    [input] interval parameter set
+//!   - <a>nsamp</a> [input]  number of samples for each parameter (>0: grid of
+//!                           nsamp in each dimension; <0: Sobol sampling of
+//!                           size -nsamp)
+//!   - <a>Ip</a>    [input]  interval parameter set
 //!   - <a>Ixk</a>   [output] approximate interval state enclosures at stage times
-//!   - <a>nsamp</a> [input] number of samples for each parameter
-//!   - <a>os</a>    [input] output stream
+//!   - <a>If</a>    [output] approximate state-dependent function enclosures
+//!   - <a>os</a>    [input]  output stream
 //! .
 //! The return value is the status.
 template <typename T, typename PMT, typename PVT>
 inline typename ODEBND_VAL<T,PMT,PVT>::STATUS
 ODEBND_VAL<T,PMT,PVT>::bounds
-( const T*Ip, T**Ixk, const unsigned nsamp, std::ostream&os )
+( const int nsamp, const T*Ip, T**Ixk, T*If, std::ostream&os )
 {
+  // Local result arrays
+  T** Ixk_ = Ixk? Ixk: new T*[_nsmax+1];
+  for( unsigned is=0; is<=_nsmax; ++is )
+    if( !Ixk ) Ixk_[is] = 0;
+  T* If_  = If? If: new T[_nf];
+
   // Sample inner approximation
   STATUS flag = NORMAL;
-  pODESLV.set( *this );
-  pODESLV.options = options.ODESLV;
-  if( !ODEBND_VAL<T,PMT,PVT>::_bounds( Ip, Ixk, 0, pODESLV, nsamp, os ) )
+  pODESLVS.set( *this );
+  pODESLVS.options = options.ODESLVS;
+  //const unsigned SAVE_RESRECORD = pODESLVS.options.RESRECORD;
+  //pODESLVS.options.RESRECORD = options.RESRECORD;
+  if( !_bounds( Ip, Ixk_, If_, pODESLVS, nsamp, results_sta, os ) )
     flag = FAILURE;
+  //pODESLVS.options.RESRECORD = SAVE_RESRECORD;
 
   // Display results
   if( options.DISPLAY >= 1 ){
-    for( unsigned is=0; Ixk && is<=_nsmax; is++ )
-      _print_interm( _dT[is], _nx, Ixk[is], "x", os );
-    //if( If ) _print_interm( _nf, If, "f", os );
+    for( unsigned is=0; is<=_nsmax; is++ ){
+      _print_interm( _dT[is], _nx, Ixk_[is], " x", os );
+      _print_interm( _nq, Ixk_[is]+_nx, " q", os );
+    }
+    _print_interm( _nf, If_, " f", os );
   }
 
-  // Record intermediate results
-  results_sta.clear();
-  if( options.RESRECORD )
-    for( unsigned is=0; Ixk && is<=_nsmax; is++ )
-      results_sta.push_back( Results( _dT[is], _nx, Ixk[is] ) );
+  // Clean-up
+  for( unsigned is=0; is<=_nsmax; ++is )
+    if( !Ixk ) delete[] Ixk_[is];
+  if( !Ixk ) delete[] Ixk_;
+  if( !If )  delete[] If_;
+  
+  return flag;
+}
+
+//! @fn template <typename T, typename PMT, typename PVT> inline typename ODEBND_VAL<T,PMT,PVT>::STATUS ODEBND_VAL<T,PMT,PVT>::bounds(
+//! const std::list<const double*>&Lp, T**Ixk=0, T*If=0, std::ostream&os=std::cout )
+//!
+//! This function computes projections of an inner-approximation enclosure of
+//! the reachable set of the parametric ODEs using sampling and continuous-time
+//! integration:
+//!   - <a>Lp</a>    [input]  list of sampled parameter values
+//!   - <a>Ixk</a>   [output] approximate interval state enclosures at stage times
+//!   - <a>If</a>    [output] approximate state-dependent function enclosures
+//!   - <a>os</a>    [input]  output stream
+//! .
+//! The return value is the status.
+template <typename T, typename PMT, typename PVT>
+inline typename ODEBND_VAL<T,PMT,PVT>::STATUS
+ODEBND_VAL<T,PMT,PVT>::bounds
+( const std::list<const double*>&Lp, T**Ixk, T*If, std::ostream&os )
+{
+  // Local result arrays
+  T** Ixk_ = Ixk? Ixk: new T*[_nsmax+1];
+  for( unsigned is=0; is<=_nsmax; ++is )
+    if( !Ixk ) Ixk_[is] = 0;
+  T* If_  = If? If: new T[_nf];
+
+  // Sample inner approximation
+  STATUS flag = NORMAL;
+  pODESLVS.set( *this );
+  pODESLVS.options = options.ODESLVS;
+  //const unsigned SAVE_RESRECORD = pODESLVS.options.RESRECORD;
+  //pODESLVS.options.RESRECORD = options.RESRECORD;
+  if( !_bounds( Lp, Ixk_, If_, pODESLVS, results_sta, os ) )
+    flag = FAILURE;
+  //pODESLVS.options.RESRECORD = SAVE_RESRECORD;
+
+  // Display results
+  if( options.DISPLAY >= 1 ){
+    for( unsigned is=0; is<=_nsmax; is++ ){
+      _print_interm( _dT[is], _nx, Ixk_[is], " x", os );
+      _print_interm( _nq, Ixk_[is]+_nx, " q", os );
+    }
+    _print_interm( _nf, If_, " f", os );
+  }
+
+  // Clean-up
+  for( unsigned is=0; is<=_nsmax; ++is )
+    if( !Ixk ) delete[] Ixk_[is];
+  if( !Ixk ) delete[] Ixk_;
+  if( !If )  delete[] If_;
   
   return flag;
 }

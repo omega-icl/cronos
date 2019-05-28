@@ -552,7 +552,9 @@ AEBND<T,PMT,PVT>::_init
 
     // Initialize block operations and Jacobian
     _sgsys[ib] = _dag->subgraph( _nblk[ib], _sys.data()+_pblk[ib] );
-    _jac[ib] = _dag->SFAD( _nblk[ib], _sys.data()+_pblk[ib],
+    //_jac[ib] = _dag->SFAD( _nblk[ib], _sys.data()+_pblk[ib],
+    //                       _ldblk[ib], _var.data()+_pblk[ib] ); 
+    _jac[ib] = _dag->SBAD( _nblk[ib], _sys.data()+_pblk[ib],
                            _ldblk[ib], _var.data()+_pblk[ib] ); 
     _sgjac[ib] = _dag->subgraph( std::get<0>(_jac[ib]), std::get<3>(_jac[ib]) );
     if( _maxop < _sgsys[ib].l_op.size() ) _maxop = _sgsys[ib].l_op.size();
@@ -1202,7 +1204,7 @@ AEBND<T,PMT,PVT>::_ge
       for( unsigned j=_nblk[ib]; j<_ldblk[ib]; j++ )
         b[k] -= G[_ndx(k,j,_ldblk[ib])] * ( varblk[j] - refblk[j] );
 
-    // Perform forward substitution
+    // Perform forward elimination
     for( unsigned k=0; k<_nblk[ib]-1; k++ ){
       if( Op<U>::l( G[_ndx(k,k,_ldblk[ib])] ) <= 0. 
        && Op<U>::u( G[_ndx(k,k,_ldblk[ib])] ) >= 0. ) return SINGULAR;
@@ -1226,7 +1228,7 @@ AEBND<T,PMT,PVT>::_ge
     std::cout << std::endl;
 #endif
 
-    // Perform backward elimination
+    // Perform backward substitution
     // std::cout << "G[" << _ndx(_nblk[ib]-1,_nblk[ib]-1,_nblk[ib]) << "] = "
     //           << G[_ndx(_nblk[ib]-1,_nblk[ib]-1,_nblk[ib])] << std::endl;
     if( Op<U>::l( G[_ndx(_nblk[ib]-1,_nblk[ib]-1,_ldblk[ib])] ) <= 0. 

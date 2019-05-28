@@ -1,7 +1,7 @@
 const unsigned int NPM   = 4;	// <- Order of poynomial expansion
 const unsigned int NSAMP = 50;	// <- Number of sampling points for inner approx.
 #define SAVE_RESULTS		    // <- Whether to save bounds to file
-#undef  TEST_CONVERGENCE	    // <- Whether to test Hausdorff convergence of bounds
+#define TEST_CONVERGENCE	    // <- Whether to test Hausdorff convergence of bounds
 #define USE_CMODEL		        // <- whether to use Chebyshev models or Taylor models
 #define USE_VALIDATED           // <- whether to use the validated integrator for comparison
 
@@ -28,8 +28,8 @@ int main()
 {
   mc::FFGraph IVP;  // DAG describing the problem
 
-  const unsigned int NS = 3;  // Time stages
-  double T0 = 0., TF = 15.;   // Time span
+  const unsigned int NS = 2;  // Time stages
+  double T0 = 0., TF = 10.;   // Time span
   double TS[NS+1]; TS[0] = T0;
   for( unsigned k=0; k<NS; k++ ) TS[k+1] = TS[k] + (TF-T0)/(double)NS;
 
@@ -128,13 +128,21 @@ int main()
 #if defined( TEST_CONVERGENCE )
   LV1.options.DISPLAY = 0;
   std::cout << std::scientific << std::setprecision(5);
-  for( unsigned int k=0; k<20; k++ ){
-    PV PMp0[NP] = { PV( &PMEnv, 0, Ip[0]/pow(1.5,k) ) };
-    LV1.hausdorff( PMp0, Hxk, NSAMP );
-    std::cout << mc::Op<I>::diam( PMp0[0].B() ) << "  " << Hxk[NS][0] << std::endl;
+  for( unsigned int k=0; k<15; k++ ){
+    PV PMp0[NP];
+    for( unsigned i=0; i<NP; i++ ){
+      I Ipred = mc::Op<I>::mid(Ip[0])+I(-0.5,0.5)*mc::Op<I>::diam(Ip[0])*pow(0.8,k);
+      PMp0[i].set( &PMEnv, i, Ipred );
+    }
+    LV1.hausdorff( NSAMP, PMp0, Hxk );
+    std::cout << mc::Op<I>::diam( PMp0[0].B() );
+    for( unsigned j=0; j<NS; j++ )
+      std::cout << "  " << Hxk[j+1][0];
+    std::cout << std::endl;
   }
 #endif
 #endif
+//return 0;
 
   /////////////////////////////////////////////////////////////////////////
   // ODE trajectories bounding - differential inequalities
@@ -175,6 +183,21 @@ int main()
   LV2.record( bnd2recI );
 #endif
 
+#if defined( TEST_CONVERGENCE )
+  LV2.options.DISPLAY = 0;
+  std::cout << std::scientific << std::setprecision(5);
+  for( unsigned int k=0; k<15; k++ ){
+    I Ip0[NP];
+    for( unsigned i=0; i<NP; i++ )
+      Ip0[i] = mc::Op<I>::mid(Ip[0])+I(-0.5,0.5)*mc::Op<I>::diam(Ip[0])*pow(0.8,k);
+    LV2.hausdorff( NSAMP, Ip0, Hxk );
+    std::cout << mc::Op<I>::diam( Ip0[0] );
+    for( unsigned j=0; j<NS; j++ )
+      std::cout << "  " << Hxk[j+1][0];
+    std::cout << std::endl;
+  }
+#endif
+
   std::cout << "\nCONTINUOUS SET-VALUED INTEGRATION - POLYNOMIAL MODEL ENCLOSURE OF REACHABLE SET:\n\n";
   LV2.options.PMNOREM = false;
   LV2.options.DMAX    = 5.;
@@ -187,11 +210,17 @@ int main()
 #if defined( TEST_CONVERGENCE )
   LV2.options.DISPLAY = 0;
   std::cout << std::scientific << std::setprecision(5);
-  for( unsigned int k=0; k<10; k++ ){
-    I Ipred = mc::Op<I>::mid(Ip[0])+I(-0.5,0.5)*mc::Op<I>::diam(Ip[0])*pow(0.8,k);
-    PV PMp0[NP] = { PV( &PMEnv, 0, Ipred ) };
+  for( unsigned k=0; k<15; k++ ){
+    PV PMp0[NP];
+    for( unsigned i=0; i<NP; i++ ){
+      I Ipred = mc::Op<I>::mid(Ip[0])+I(-0.5,0.5)*mc::Op<I>::diam(Ip[0])*pow(0.8,k);
+      PMp0[i].set( &PMEnv, i, Ipred );
+    }
     LV2.hausdorff( NSAMP, PMp0, Hxk );
-    std::cout << mc::Op<I>::diam( PMp0[0].B() ) << "  " << Hxk[NS][0] << std::endl;
+    std::cout << mc::Op<I>::diam( PMp0[0].B() );
+    for( unsigned j=0; j<NS; j++ )
+      std::cout << "  " << Hxk[j+1][0];
+    std::cout << std::endl;
   }
 #endif
 

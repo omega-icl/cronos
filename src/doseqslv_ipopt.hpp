@@ -167,7 +167,7 @@ OC (LOCAL) SOLUTION:
 #undef  MC__DOSEQSLV_IPOPT_TRACE
 
 /* TO DO:
-- Feasibility and optimality tests (both 1st-order and 2nd-order conditions)
+- Feasibility and optimality tests -> DONE
 */
 
 namespace mc
@@ -514,7 +514,7 @@ private:
     ( Ipopt::SmartPtr<Ipopt::IpoptApplication>&IpoptApp );
 
 #ifdef MC__USE_SOBOL
-  //! @brief Get next Sobol sampling point
+  //! @brief Generate Sobol sampling points
   void _get_sobol
     ( const unsigned nr, double*r, long long int*pseed, const bool disp=false );
 #endif

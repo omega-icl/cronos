@@ -1,5 +1,5 @@
-const unsigned NORD = 5;        // <- Order of polynomial expansion
-const unsigned NSAMP = 100;    // <- Number of sampling points for inner approx.
+const unsigned NORD = 3;        // <- Order of polynomial expansion
+const unsigned NSAMP = 500;    // <- Number of sampling points for inner approx.
 #define SAVE_RESULTS	        // <- Whether to save bounds to file
 #define USE_CMODEL		        // <- whether to use Chebyshev models or Taylor models
 #undef  MC__AEBND_DEBUG
@@ -94,38 +94,23 @@ int main()
             &P_TL4 = X[8];
 
   // Parameters
-//  const unsigned NP = NX+1;
-//  mc::FFVar P[NP];
-//  for( unsigned int i=0; i<NP; i++ ) P[i].set( &NIFTE );
-//  mc::FFVar &TF     = P[0],
-//            &P_ad0  = P[1],
-//            &P_d0   = P[2],
-//            &P_p0   = P[3],
-//            &U_f0   = P[4],
-//            &U_p0   = P[5], 
-//            &P_TL10 = P[6],
-//            &P_TL20 = P[7],
-//            &P_TL30 = P[8],
-//            &P_TL40 = P[9];
-  const unsigned NP = 1;
+  const unsigned NP = NX;
   mc::FFVar P[NP];
   for( unsigned int i=0; i<NP; i++ ) P[i].set( &NIFTE );
-  mc::FFVar &TF     = P[0],
-            P_ad0  = P_ad_REF,
-            P_d0   = P_d_REF,
-            P_p0   = P_p_REF,
-            U_f0   = U_f_REF,
-            U_p0   = U_p_REF, 
-            P_TL10 = P_TL1_REF,
-            P_TL20 = P_TL2_REF,
-            P_TL30 = P_TL3_REF,
-            P_TL40 = P_TL4_REF;
+  mc::FFVar TF      = TF_REF,
+            &P_ad0  = P[0],
+            &P_d0   = P[1],
+            &P_p0   = P[2],
+            &U_f0   = P[3],
+            &U_p0   = P[4], 
+            &P_TL10 = P[5],
+            &P_TL20 = P[6],
+            &P_TL30 = P[7],
+            &P_TL40 = P[8];
 
   // Dynamics
   mc::FFVar RHS[NX];
 //  RHS[0] = TF * ( ( tau*(-K-P_ad) )/(R_th*C_ad) 
-//                + ( tau*U0*(U_f + U_p) )/(P0*C_ad)
-//                - ( tau*(P_ad-P_TL1-P_TL2-P_TL3-P_TL4) )/(R_TL5*C_ad) );
   RHS[0] = TF * ( ( tau*(K*tanh(Lambda*P_d)-P_ad) )/(R_th*C_ad) 
                 + ( tau*U0*(U_f + U_p) )/(P0*C_ad)
                 - ( tau*(P_ad-P_TL1-P_TL2-P_TL3-P_TL4) )/(R_TL5*C_ad) );
@@ -180,45 +165,27 @@ int main()
   IC[8] = P_TL40;
 
   // Parameter bounds
-  I Ip[NP];
-  Ip[0] = TF_REF * I( 0.9, 1.1 );
-//  Ip[1] = P_ad_REF * I( 0.99, 1.01 );
-//  Ip[2] = P_d_REF * I( 0.99, 1.01 );
-//  Ip[3] = P_p_REF * I( 0.99, 1.01 );
-//  Ip[4] = U_f_REF * I( 0.99, 1.01 );
-//  Ip[5] = U_p_REF * I( 0.99, 1.01 );
-//  Ip[6] = P_TL1_REF * I( 0.99, 1.01 );
-//  Ip[7] = P_TL2_REF * I( 0.99, 1.01 );
-//  Ip[8] = P_TL3_REF * I( 0.99, 1.01 );
-//  Ip[9] = P_TL4_REF * I( 0.99, 1.01 );
+  I Ip[NP], *Ixk[2] = { 0, 0 }, UNC( 0.5, 2.0 );
+  Ip[0] = P_ad_REF * UNC;
+  Ip[1] = P_d_REF * UNC;
+  Ip[2] = P_p_REF * UNC;
+  Ip[3] = U_f_REF * UNC;
+  Ip[4] = U_p_REF * UNC;
+  Ip[5] = P_TL1_REF * UNC;
+  Ip[6] = P_TL2_REF * UNC;
+  Ip[7] = P_TL3_REF * UNC;
+  Ip[8] = P_TL4_REF * UNC;
 
   PM PMenv( NP, NORD );    // polynomial model environment
-  PV PMp[NP];
+  PV PMp[NP], *PMxk[2] = { 0, 0 };
   for( unsigned int i=0; i<NP; i++ ) PMp[i] = PV( &PMenv, i, Ip[i] );
-
-  // Evaluation of RHS
-  double dF1dx, dX0[NX] = { P_ad_REF,  P_d_REF,   P_p_REF, U_f_REF, U_p_REF, P_TL1_REF, 
-                            P_TL2_REF, P_TL3_REF, P_TL4_REF };
-  NIFTE.eval( 1, RHS, &dF1dx, 1, &TF, &TF_REF, NX, X, dX0 );
-  std::cout << "dF1dx = " << dF1dx << std::endl;
-
-  I IF1dx, IX0[NX] = { P_ad_REF,  P_d_REF,   P_p_REF, U_f_REF, U_p_REF, P_TL1_REF, 
-                       P_TL2_REF, P_TL3_REF, P_TL4_REF };
-  NIFTE.eval( 1, RHS, &IF1dx, 1, &TF, Ip, NX, X, IX0 );
-  std::cout << "IF1dx = " << IF1dx << std::endl;
-
-  PV PMF1dx, PMX0[NX] = { P_ad_REF,  P_d_REF,   P_p_REF, U_f_REF, U_p_REF, P_TL1_REF, 
-                          P_TL2_REF, P_TL3_REF, P_TL4_REF };
-  NIFTE.eval( 1, RHS, &PMF1dx, 1, &TF, PMp, NX, X, PMX0 );
-  std::cout << "PMF1dx = " << PMF1dx << std::endl;
-
 
   /////////////////////////////////////////////////////////////////////////
   // Continuous-time ODE bounding
 
   mc::ODEBND_SUNDIALS<I,PM,PV> bnd;
   bnd.set_dag( &NIFTE );
-  bnd.set_time( 0., 2. );
+  bnd.set_time( 0., 1. );
   bnd.set_parameter( NP, P );
   bnd.set_state( NX, X );
   bnd.set_differential( NX, RHS );
@@ -243,24 +210,23 @@ int main()
   std::cout << "\nNON_VALIDATED INTEGRATION - INNER-APPROXIMATION OF REACHABLE SET:\n\n";
   bnd.bounds( -NSAMP, Ip );
 #if defined( SAVE_RESULTS )
-  std::ofstream apprec( "test8_APPROX_STA.dat", std::ios_base::out );
+  std::ofstream apprec( "test8c_APPROX_STA.dat", std::ios_base::out );
   bnd.record( apprec );
 #endif
 
 //  std::cout << "\nCONTINUOUS SET-VALUED INTEGRATION - INTERVAL ENCLOSURE OF REACHABLE SET:\n\n";
 //  bnd.bounds( Ip );
 //#if defined( SAVE_RESULTS )
-//  std::ofstream bnd2recI( "test8_DINEQI_STA.dat", std::ios_base::out );
+//  std::ofstream bnd2recI( "test8c_DINEQI_STA.dat", std::ios_base::out );
 //  bnd.record( bnd2recI );
 //#endif
 
 //  std::cout << "\nCONTINUOUS SET-VALUED INTEGRATION - POLYNOMIAL MODEL ENCLOSURE OF REACHABLE SET:\n\n";
-  PV *PMxk[2];
 //  bnd.options.PMNOREM = false;//true;
 //  bnd.options.DMAX    = 1e2;
 //  bnd.bounds( PMp, PMxk );
 //#if defined( SAVE_RESULTS )
-//  std::ofstream bnd2recPM( "test8_DINEQPM_STA.dat", std::ios_base::out );
+//  std::ofstream bnd2recPM( "test8c_DINEQPM_STA.dat", std::ios_base::out );
 //  bnd.record( bnd2recPM );
 //#endif
 
@@ -269,7 +235,7 @@ int main()
 
   mc::ODEBND_EXPAND<I,PM,PV> bnd2;
   bnd2.set_dag( &NIFTE );
-  bnd2.set_time( 0., .6 );
+  bnd2.set_time( 0., 0.3 );
   bnd2.set_parameter( NP, P );
   bnd2.set_state( NX, X );
   bnd2.set_differential( NX, RHS );
@@ -283,7 +249,7 @@ int main()
   bnd2.options.TORD      = 4;
   bnd2.options.H0        = 0.005;
   bnd2.options.LBLK      = //20;
-  bnd2.options.DBLK      = 10;//50/NS;
+  bnd2.options.DBLK      = 20;//50/NS;
   bnd2.options.DISPLAY   = 1;
   bnd2.options.RESRECORD = true;
   bnd2.options.AEBND.DISPLAY = 1;
@@ -295,7 +261,7 @@ int main()
   bnd2.setup();
 
 //  std::cout << "\nDISCRETIZED SET-VALUED INTEGRATION - INTERVAL ENCLOSURE OF REACHABLE SET:\n\n";
-//  I *Ixk[2]; //,Ix0[NX] = { I(0,1), I(0,1) };
+//  I Ix0[NX] = { I(0,1), I(0,1) };
 //  for( unsigned k=0; k<=1; k++ ){
 //    Ixk[k] = new I[NX];
 //    //for( unsigned i=0; i<NX; i++ )
@@ -303,11 +269,11 @@ int main()
 // }
 //  bnd2.bounds( Ip, Ixk );
 //  for( unsigned k=0; k<=1; k++ ) delete[] Ixk[k];
-//  std::ofstream ofileI( "test8_EXPANDI_STA.dat", std::ios_base::out );
+//  std::ofstream ofileI( "test8c_EXPANDI_STA.dat", std::ios_base::out );
 //  bnd2.record( ofileI );
 
   std::cout << "\nDISCRETIZED SET-VALUED INTEGRATION - POLYNOMIAL MODEL ENCLOSURE OF REACHABLE SET:\n\n";
-  //PV *PMxk[2];// PMx0[NX] = { I(0,1), I(0,1) },
+  //PV PMx0[NX] = { I(0,1), I(0,1) },
   for( unsigned k=0; k<=1; k++ ){
     if( !PMxk[k] ) PMxk[k] = new PV[NX];
     //for( unsigned i=0; i<NX; i++ )
@@ -315,32 +281,8 @@ int main()
   }
   bnd2.bounds( PMp, PMxk );
   for( unsigned k=0; k<=1; k++ ) delete[] PMxk[k];
-  std::ofstream ofilePM( "test8_EXPANDPM_STA.dat", std::ios_base::out );
+  std::ofstream ofilePM( "test8c_EXPANDPM_STA.dat", std::ios_base::out );
   bnd2.record( ofilePM );
-
-
-  /////////////////////////////////////////////////////////////////////////
-  // ODE sampling
-
-  mc::ODESLV_SUNDIALS sol;
-  sol.set_dag( &NIFTE );
-  sol.set_time( 0.,2. );
-  sol.set_parameter( NP, P );
-  sol.set_state( NX, X );
-  sol.set_differential( NX, RHS );
-  //sol.set_quadrature( NQ, QUAD, Q );
-  sol.set_initial( NX, IC );
-  sol.options = bnd.options;
-  sol.options.DISPLAY = 0;
-
-  double p[NP];
-  double *xk[2];
-  std::ofstream ofileCP( "test8_COMP_STA.dat", std::ios_base::out );
-  for( unsigned ip=0; ip<=NSAMP; ip++ ){
-    p[0] = mc::Op<I>::l(Ip[0]) + mc::Op<I>::diam(Ip[0])*ip/(double)NSAMP;
-    sol.states( p, xk );
-    ofileCP << p[0] << "  " << xk[1][0] << "  " << PMxk[1][0].polynomial( p ) << std::endl;
-  }
 
   return 0;
 }

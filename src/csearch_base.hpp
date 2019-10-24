@@ -21,10 +21,10 @@
 #include "lprelax_base.hpp"
 #include "base_nlp.hpp"
 #include "scmodel.hpp"
+#include "ismodel.hpp"
 
-#undef MC__NLGO_DEBUG
+//#undef MC__NLGO_DEBUG
 //#undef MC__NLGO_TRACE
-#undef MC__NLGO_SHOW_BREAKPTS
 
 namespace mc
 {
@@ -143,6 +143,17 @@ protected:
   //! @brief Interval reduced-space dependents
   std::vector<T> _Irdep;
 
+  //! @brief Interval superposition model environment
+  ISModel<T>* _ISMenv;
+  //! @brief Interval superposition variables
+  std::vector< ISVar<T> > _ISMvar;
+  //! @brief Interval superposition objective variable
+  ISVar<T> _ISMobj;
+  //! @brief Interval superposition constraint variables
+  std::vector< ISVar<T> > _ISMctr;
+  //! @brief Storage vector for function evaluation in Interval superposition arithmetic
+  std::vector< ISVar<T> > _wk_ISM;
+
   //! @brief Current incumbent value
   double _f_inc;
   //! @brief Variable values at current incumbent
@@ -173,7 +184,7 @@ public:
   //! @brief Constructor
   CSEARCH_BASE
     ()
-    : _dag(0), _nvar(0), _nctr(0), _CMenv(0), _CMrenv(0), _lagr_grad(0)
+    : _dag(0), _nvar(0), _nctr(0), _CMenv(0), _CMrenv(0), _ISMenv(0), _lagr_grad(0)
     {}
 
   //! @brief Destructor
@@ -181,6 +192,7 @@ public:
     ()
     {
       _cleanup();
+      delete _ISMenv;
       delete _CMenv;
       delete _CMrenv;
       // No need to delete _NLPSLV
@@ -301,6 +313,10 @@ protected:
   //! @brief Set model polyhedral Chebyshev-derived cuts
   template <typename OPT>
   void _set_chebcuts
+    ( const OPT&options, const bool feastest );
+  //! @brief Set model polyhedral superposition-derived cuts
+  template <typename OPT>
+  void _set_supcuts
     ( const OPT&options, const bool feastest );
 
   //! @brief Set options of SBB solver
@@ -1075,13 +1091,15 @@ CSEARCH_BASE<T>::_subproblem_relaxed
 #endif
 */
   // Main loop for relaxation and domain reduction
+  _update_polrelax( options, stats, P.data(), tvar );
   std::vector<T> P1;
   for( unsigned nred=0; nred < options.DOMREDMAX; nred++ ){
     P1 = P;
-    if( nred )
+    if( nred ){
       _update_depcheb( options, stats, P.data() );
       //_rescale_depcheb( options, stats, P.data() );
-    _update_polrelax( options, stats, P.data(), tvar );
+      _update_polrelax( options, stats, P.data(), tvar );
+    }
     // Solve relaxation
     //_relax( options, stats, P.data(), tvar, 0, false );
     //if( get_status() == LPRELAX_BASE<T>::LP_INFEASIBLE ) return SBB<T>::INFEASIBLE;
@@ -1444,7 +1462,7 @@ CSEARCH_BASE<T>::_refine_polrelax
   for( auto itv = _POLenv.Vars().begin(); itv!=_POLenv.Vars().end(); ++itv ){
     double Xval = _get_variable( *itv->second );
     itv->second->add_breakpt( Xval );
-#ifdef MC__NLGO_SHOW_BREAKPTS
+#ifdef MC__CSEARCH_SHOW_BREAKPTS
     std::cout << itv->second->name();
     for( auto it = itv->second->breakpts().begin(); it!=itv->second->breakpts().end(); ++it )
       std::cout << "  " << *it;
@@ -1466,6 +1484,8 @@ CSEARCH_BASE<T>::_refine_polrelax
     _set_poacuts( options, feastest );
   if( options.RELMETH==OPT::CHEB || options.RELMETH==OPT::HYBRID )
     _set_chebcuts( options, feastest );
+  if( options.RELMETH==OPT::ISM )
+    _set_supcuts( options, feastest );
   stats.tPOLIMG += cpuclock();
 
   stats.tLPSET -= cpuclock();
@@ -1530,6 +1550,28 @@ CSEARCH_BASE<T>::_set_polrelax
     // Add polyhedral cuts
     _set_chebcuts( options, feastest );
   }
+
+  if( options.RELMETH==OPT::ISM ){
+    // Interval superposition model environment reset
+    if( _ISMenv && (_ISMenv->nvar() != _nvar || _ISMenv->ndiv() != options.ISMDIV) ){
+      _ISMvar.clear();
+      delete _ISMenv; _ISMenv = 0;   
+    }
+    if( !_ISMenv ){
+      // Set interval superposition model
+      _ISMenv = new ISModel<T>( _nvar, options.ISMDIV );
+      //_ISMenv->options = options.ISMODEL;
+      _ISMvar.resize( _nvar );
+    }
+
+    // Set/update ISM variables
+    for( unsigned ip=0; ip<_nvar; ip++ )
+      _ISMvar[ip].set( _ISMenv, ip, P[ip] );
+    
+    // Add polyhedral cuts
+    _set_supcuts( options, feastest );
+  }
+  
   stats.tPOLIMG += cpuclock();
 
   // Update cuts in relaxed model
@@ -1580,6 +1622,16 @@ CSEARCH_BASE<T>::_update_polrelax
     // Add Chebyshev-derived polyhedral cuts
     _set_chebcuts( options, feastest );
   }
+
+  if( options.RELMETH==OPT::ISM ){
+    // Update interval superposition variables
+    for( unsigned ip=0; ip<_nvar; ip++ )
+      _ISMvar[ip].set( _ISMenv, ip, P[ip] );
+
+    // Add Chebyshev-derived polyhedral cuts
+    _set_supcuts( options, feastest );
+  }
+
   stats.tPOLIMG += cpuclock();
 
   // Update cuts in relaxed model
@@ -1948,6 +2000,141 @@ CSEARCH_BASE<T>::_set_chebcuts
 #ifdef MC__NLGO_CHEBCUTS_DEBUG
   std::cout << _POLenv;
   { int dum; std::cin >> dum; }
+#endif
+}
+
+template <typename T>
+template <typename OPT>
+inline void
+CSEARCH_BASE<T>::_set_supcuts
+( const OPT&options, const bool feastest )
+{
+  // Auxiliary variables in polyhedral image are defined locally 
+  std::vector<std::vector<PolVar<T>>> POL_ISMaux( _nvar );
+  std::vector<double> DL_ISMaux( _ISMenv->ndiv() );
+  std::vector<double> DU_ISMaux( _ISMenv->ndiv() );
+
+  // Add polyhedral cuts for objective - by-pass if feasibility test or no objective function defined
+  auto ito = std::get<0>(_obj).begin();
+  for( unsigned j=0; ito!=std::get<0>(_obj).end() && j<1; ++ito, j++ ){
+    if( feastest || _fct_lin.find(std::get<1>(_obj).data()) != _fct_lin.end() ) continue;
+    try{
+#ifdef MC__NLGO_SUPCUTS_DEBUG
+      std::cout << "objective" << std::endl;
+#endif
+      // Interval superposition evaluation
+      _dag->eval( _op_f, _wk_ISM, 1, std::get<1>(_obj).data(), &_ISMobj, _nvar, _var.data(), _ISMvar.data() );
+#ifdef MC__NLGO_SUPCUTS_DEBUG
+      std::cout << "IAM of objective:\n" << _ISMobj;
+      //_dag->output( _op_f );
+#endif
+      _POLobj.set( &_POLenv, std::get<1>(_obj)[0], _ISMobj.B(), true );
+      // Polyhedral cut generation
+      const double rhs = (_ISMobj.ndep()? 0.: -_ISMobj.cst());
+      auto CutObjL = _POLenv.add_cut( PolCut<T>::LE, rhs, _POLobj, -1. );
+      auto CutObjU = _POLenv.add_cut( PolCut<T>::GE, rhs, _POLobj, -1. );
+      for( unsigned ivar=0; ivar<_nvar; ivar++ ){
+        auto&& vec = _ISMobj.C()[ivar];
+        if( vec.empty() ) continue;
+        if( POL_ISMaux[ivar].empty() ){
+          POL_ISMaux[ivar].resize( _ISMenv->ndiv() );
+          for( unsigned jsub=0; jsub<_ISMenv->ndiv(); jsub++ )
+            POL_ISMaux[ivar][jsub].set( &_POLenv, Op<T>::zeroone(), !options.ISMMIPREL );
+        }
+        for( unsigned jsub=0; jsub<_ISMenv->ndiv(); jsub++ ){
+          DL_ISMaux[jsub] = Op<T>::l(vec[jsub]);
+          DU_ISMaux[jsub] = Op<T>::u(vec[jsub]);
+        }
+        (*CutObjL)->append( _ISMenv->ndiv(), POL_ISMaux[ivar].data(), DL_ISMaux.data() );
+        (*CutObjU)->append( _ISMenv->ndiv(), POL_ISMaux[ivar].data(), DU_ISMaux.data() );
+      }
+      switch( std::get<0>(_obj)[0] ){
+        case MIN: _POLenv.add_cut( PolCut<T>::GE, 0., _POLobjaux, 1., _POLobj, -1. ); break;
+        case MAX: _POLenv.add_cut( PolCut<T>::LE, 0., _POLobjaux, 1., _POLobj, -1. ); break;
+      }
+    }
+    catch(...){
+      // No cut added for objective in case evaluation failed
+#ifdef MC__NLGO_SUPCUTS_DEBUG
+      std::cout << "evaluation failed" << std::endl;
+#endif
+    }
+  }
+
+  // Add polyhedral cuts for constraints - add slack to inequality constraints if feasibility test
+  _POLctr.resize( _nctr );
+  _ISMctr.resize( _nctr );
+  auto itc = std::get<0>(_ctr).begin();
+  for( unsigned j=0; itc!=std::get<0>(_ctr).end(); ++itc, j++ ){
+    if( _fct_lin.find(std::get<1>(_ctr).data()+j) != _fct_lin.end() ) continue;
+    try{
+      // Interval superposition evaluation
+      _dag->eval( _op_g[j], _wk_ISM, 1, std::get<1>(_ctr).data()+j, _ISMctr.data()+j, _nvar, _var.data(), _ISMvar.data() );
+#ifdef MC__NLGO_SUPCUTS_DEBUG
+      std::cout << "ISM of constraint #" << j << std::endl << _ISMctr[j];
+      //_dag->output( _op_g[j] );
+#endif
+      _POLctr[j].set( &_POLenv, std::get<1>(_ctr)[j], _ISMctr[j].B(), true );
+      // Polyhedral cut generation
+      const double rhs = (_ISMobj.ndep()? 0.: -_ISMctr[j].cst());
+      auto CutCtrL = _POLenv.add_cut( PolCut<T>::LE, rhs, _POLctr[j], -1. );
+      auto CutCtrU = _POLenv.add_cut( PolCut<T>::GE, rhs, _POLctr[j], -1. );
+      for( unsigned ivar=0; ivar<_nvar; ivar++ ){
+        auto&& vec = _ISMctr[j].C()[ivar];
+        if( vec.empty() ) continue;
+        if( POL_ISMaux[ivar].empty() ){
+          POL_ISMaux[ivar].resize( _ISMenv->ndiv() );
+          for( unsigned jsub=0; jsub<_ISMenv->ndiv(); jsub++ )
+            POL_ISMaux[ivar][jsub].set( &_POLenv, Op<T>::zeroone(), !options.ISMMIPREL );
+        }
+        for( unsigned jsub=0; jsub<_ISMenv->ndiv(); jsub++ ){
+          DL_ISMaux[jsub] = Op<T>::l(vec[jsub]);
+          DU_ISMaux[jsub] = Op<T>::u(vec[jsub]);
+        }
+        (*CutCtrL)->append( _ISMenv->ndiv(), POL_ISMaux[ivar].data(), DL_ISMaux.data() );
+        (*CutCtrU)->append( _ISMenv->ndiv(), POL_ISMaux[ivar].data(), DU_ISMaux.data() );
+      }
+      switch( (*itc) ){
+        case EQ: if( !feastest ){ _POLenv.add_cut( PolCut<T>::EQ, 0., _POLctr[j], 1. ); break; }
+                 else             _POLenv.add_cut( PolCut<T>::GE, 0., _POLctr[j], 1., _POLobjaux,  1. ); // no break
+        case LE: if( !feastest ){ _POLenv.add_cut( PolCut<T>::LE, 0., _POLctr[j], 1. ); break; }
+                 else           { _POLenv.add_cut( PolCut<T>::LE, 0., _POLctr[j], 1., _POLobjaux, -1. ); break; }
+        case GE: if( !feastest ){ _POLenv.add_cut( PolCut<T>::GE, 0., _POLctr[j], 1. ); break; }
+                 else           { _POLenv.add_cut( PolCut<T>::GE, 0., _POLctr[j], 1., _POLobjaux,  1. ); break; }
+      }
+    }
+    catch(...){
+      // No cut added for constraint #j in case evaluation failed
+#ifdef MC__NLGO_SUPCUTS_DEBUG
+      std::cout << "evaluation failed" << std::endl;
+#endif
+      continue;
+    }
+  }
+  
+  // Add polyhedral cuts for ISM-participating variables
+  for( unsigned ivar=0; ivar<_nvar; ivar++ ){
+    if( POL_ISMaux[ivar].empty() ) continue;
+    // Auxiliaries add up to 1
+    for( unsigned jsub=0; jsub<_ISMenv->ndiv(); jsub++ )
+      DL_ISMaux[jsub] = 1.;
+    _POLenv.add_cut( PolCut<T>::EQ, 1., _ISMenv->ndiv(), POL_ISMaux[ivar].data(), DL_ISMaux.data() );
+    // Relationship between variables and auxiliaries
+    PolVar<T> POLvarL( 0. ), POLvarU( 0. );
+    auto&& vec = _ISMvar[ivar].C()[ivar];
+#ifdef MC__NLGO_SUPCUTS_DEBUG
+    assert( !vec.empty() );
+#endif
+    for( unsigned jsub=0; jsub<_ISMenv->ndiv(); jsub++ ){
+      DL_ISMaux[jsub] = Op<T>::l(vec[jsub]);
+      DU_ISMaux[jsub] = Op<T>::u(vec[jsub]);
+    }
+    _POLenv.add_cut( PolCut<T>::LE, 0., _ISMenv->ndiv(), POL_ISMaux[ivar].data(), DL_ISMaux.data(), _POLvar[ivar], -1. );
+    _POLenv.add_cut( PolCut<T>::GE, 0., _ISMenv->ndiv(), POL_ISMaux[ivar].data(), DU_ISMaux.data(), _POLvar[ivar], -1. );
+  }
+
+#ifdef MC__CSEARCH_DEBUG
+  std::cout << _POLenv;
 #endif
 }
 

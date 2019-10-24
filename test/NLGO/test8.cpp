@@ -1,5 +1,4 @@
-const unsigned NSAMP = 100;    // <- Number of sampling points for inner approx.
-#undef  SAVE_RESULTS	       // <- Whether to save bounds to file
+#define SAVE_RESULTS	       // <- Whether to save bounds to file
 #define USE_CMODEL		       // <- whether to use Chebyshev models or Taylor models
 #undef  USE_PROFIL	           // specify to use PROFIL for interval arithmetic
 #define  MC__FFUNC_DEBUG_EVAL
@@ -34,10 +33,12 @@ const double R_f    = 2.1307e6;
 const double R_th   = 5.0212e8;
 const double L_d    = 1.8027e5;
 const double L_l    = 1.2710e7;
+//const double L_p    = 3.7739e5 * 39.81071706;
 const double L_p    = 3.7739e5;
 const double L_f    = 4.7428e6;
 const double C_ad   = 1.7618e-9;
 const double C_d    = 7.3513e-8;
+//const double C_p    = 7.4280e-8 * 0.1202264435;
 const double C_p    = 7.4280e-8;
 const double R_TL1  = 8.8203e+06;
 const double C_TL1  = 8.6087e-10;
@@ -60,6 +61,30 @@ const double P_TL2_REF = -3.099606866e-03;
 const double P_TL3_REF = -2.492678902e-02;
 const double P_TL4_REF = -1.979265621e-02;
 
+//////// css1 - stable
+//const double TF_REF    =  5.103390707e-01;
+//const double P_ad_REF  =  9.365730873e-02;
+//const double P_d_REF   =  4.776426344e-02;
+//const double P_p_REF   = -3.088034797e-01;
+//const double U_f_REF   =  0.000000000e+00;
+//const double U_p_REF   = -2.962018115e-01;
+//const double P_TL1_REF =  5.166030950e-03;
+//const double P_TL2_REF =  1.728732917e-02;
+//const double P_TL3_REF =  3.287392167e-02;
+//const double P_TL4_REF =  2.067277687e-02;
+
+//////// css2 - unstable
+//const double TF_REF    =  2.622451394e-01;
+//const double P_ad_REF  =  1.408898506e-01;
+//const double P_d_REF   =  3.813808745e-03;
+//const double P_p_REF   = 	1.339098843e-02;
+//const double U_f_REF   =  0.000000000e+00;
+//const double U_p_REF   =  7.662042110e-03;
+//const double P_TL1_REF =  1.873265679e-02;
+//const double P_TL2_REF =  3.525918952e-02;
+//const double P_TL3_REF =  1.482245760e-02;
+//const double P_TL4_REF =  6.166426847e-03;
+
 int main()
 {
 	
@@ -81,7 +106,8 @@ int main()
 
   // Parameters
   const unsigned NP = NX-1;
-  mc::FFVar P[NP];  for( unsigned int i=0; i<NP; i++ ) P[i].set( &NIFTE );
+  mc::FFVar P[NP];
+  for( unsigned int i=0; i<NP; i++ ) P[i].set( &NIFTE );
   mc::FFVar  TF     = TF_REF,
             &P_ad0  = P[0],
             &P_d0   = P[1],
@@ -150,20 +176,24 @@ int main()
   IC[8] = P_TL40;
 
   // Parameter bounds
-  I Ip[NP];
-  Ip[0] = P_ad_REF  * I( 0.9, 1.1 );
-  Ip[1] = P_d_REF   * I( 0.9, 1.1 );
-  Ip[2] = P_p_REF   * I( 0.9, 1.1 );
-  Ip[3] = U_p_REF   * I( 0.9, 1.1 );
-  Ip[4] = P_TL1_REF * I( 0.9, 1.1 );
-  Ip[5] = P_TL2_REF * I( 0.9, 1.1 );
-  Ip[6] = P_TL3_REF * I( 0.9, 1.1 );
-  Ip[7] = P_TL4_REF * I( 0.9, 1.1 );
+  I Ip[NP], UNC( 0.5, 2.0 ); //UNC( 0.9, 1.1 ) //UNC( 0.99, 1.01 )
+  Ip[0] = P_ad_REF  * UNC;
+  Ip[1] = P_d_REF   * UNC;
+  Ip[2] = P_p_REF   * UNC;
+  Ip[3] = U_p_REF   * UNC;
+  Ip[4] = P_TL1_REF * UNC;
+  Ip[5] = P_TL2_REF * UNC;
+  Ip[6] = P_TL3_REF * UNC;
+  Ip[7] = P_TL4_REF * UNC;
 
-  // State a priori bounds
+  // Initial state bounds
+  I Ix0[NX];
+  NIFTE.eval( NX, IC, Ix0, NP, P, Ip );
+
+  // A priori state bounds
   I Ix[NX];
   for( unsigned i=0; i<NX; i++ )
-    Ix[i] = I( -1., 1. );
+    Ix[i] = I( -2., 2. );
     
   /////////////////////////////////////////////////////////////////////////
   // ODE Discretization
@@ -181,10 +211,10 @@ int main()
   ODEDISCR.options.RESRECORD = 1000;
 #endif
   ODEDISCR.options.INTMETH   = mc::ODEBND_EXPAND<I,PM,PV>::Options::METHOD::RK;//TS
-  ODEDISCR.options.TORD      = 4;
-  ODEDISCR.options.H0        = 0.005;
-  ODEDISCR.options.LBLK      = 200;
-  ODEDISCR.options.DBLK      = 200;//50/NS;
+  ODEDISCR.options.TORD      = 4; // 2;
+  ODEDISCR.options.H0        = 0.005; //0.002;
+  ODEDISCR.options.LBLK      = 200; //200;
+  ODEDISCR.options.DBLK      = 200; //200;//50/NS;
   ODEDISCR.options.DISPLAY   = 1;
   ODEDISCR.options.RESRECORD = true;
   ODEDISCR.options.AEBND.DISPLAY = 2;
@@ -257,23 +287,24 @@ int main()
 
 #if defined( SAVE_RESULTS )
   std::ofstream bndSTA;
-  bndSTA.open( "test8_STA.dat", std::ios_base::app );
+  bndSTA.open( "test8_STA3.dat", std::ios_base::app );
 #endif
 
   ODEDISCR.vVAR()[NP+NX+1].set( ODEDISCR.options.H0 );
   std::vector<I> IALL( Ip, Ip+NP );
+  IALL.insert( IALL.end(), Ix0, Ix0+NX );
   for( unsigned k=0; k<=ODEDISCR.options.LBLK; k++ )
     IALL.insert( IALL.end(), Ix, Ix+NX );
 
   int status( 0 );    
-  for( unsigned NT=100; NT<=ODEDISCR.options.LBLK; NT++ ){
+  for( unsigned NT=1; NT<=ODEDISCR.options.LBLK; NT+=5 ){
     const double tf = TF_REF * NT * ODEDISCR.options.H0;
 #if defined( SAVE_RESULTS )
     bndSTA << tf;
 #endif
 
     mc::NLGO<I> NLP;  
-    NLP.options.MIPFILE         = "test8.lp";
+    NLP.options.MIPFILE         = "";//test8.lp";
     NLP.options.RELMETH         = mc::NLGO<I>::Options::DRL;
     NLP.options.MAXITER         = 10;
     NLP.options.DEPSUSE         = false;//true; //false;
@@ -291,12 +322,14 @@ int main()
     //NLP.options.POLIMG.DCDECOMP_SCALE = false;
 
     NLP.set_dag( &NIFTE );
-    NLP.set_var( NP, ODEDISCR.vVAR().data() );
+    NLP.set_var( NP+NX, ODEDISCR.vVAR().data() );
     NLP.set_dep( NX*(NT+1), ODEDISCR.vDEP().data(), ODEDISCR.vRES().data() );
  
     // Minimize the value of P_ad at final time
+    std::cout << "setting-up" << std::endl;
     NLP.set_obj( mc::BASE_NLP::MIN, ODEDISCR.vDEP()[NX*NT] );   
     NLP.setup( IALL.data() ); 
+    std::cout << " OK!" << std::endl;
     status = NLP.relax( IALL.data() );
     const double P_ad_L = NLP.get_objective();
     std::cout << "relaxed objective: " << P_ad_L << std::endl;
@@ -305,8 +338,10 @@ int main()
 #endif
 
     // Maximize the value of P_ad at final time
+    std::cout << "setting-up" << std::endl;
     NLP.set_obj( mc::BASE_NLP::MAX, ODEDISCR.vDEP()[NX*NT] );   
     NLP.setup( IALL.data() ); 
+    std::cout << " OK!" << std::endl;
     status = NLP.relax( IALL.data() );
     const double P_ad_U = NLP.get_objective();
     std::cout << "relaxed objective: " << P_ad_U << std::endl;

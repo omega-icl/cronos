@@ -260,19 +260,19 @@ LPRELAX_BASE<T>::_solve_LPmodel
 ( const OPT&options, STAT&stats, const std::vector<FFVar>&var )
 {
   stats.tLPSOL -= cpuclock();
+  _LPexcpt = false;
 #ifdef MC__USE_CPLEX
   try{
     _set_LPoptions( options );
-  }
-  catch(IloException& e){
-    throw std::runtime_error("Invalid options setup");
-  }
-  _LPexcpt = false;
-  if( options.MIPFILE != "" )
-    _ILOcplex->exportModel( options.MIPFILE.c_str() );
+  //}
+  //catch(IloException& e){
+  //  throw std::runtime_error("Invalid options setup");
+  //}
+    if( options.MIPFILE != "" )
+      _ILOcplex->exportModel( options.MIPFILE.c_str() );
   //{ int dum; std::cout << "PAUSED"; std::cin >> dum; }
   //_time = -_cplex->getCplexTime();
-  try{
+  //try{
     _ILOcplex->solve();
   }
   catch(IloException& e){

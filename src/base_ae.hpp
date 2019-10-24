@@ -128,6 +128,16 @@ public:
       }
     }
 
+  //! @brief Add decision variables
+  void add_var
+    ( const std::vector<FFVar>&var )
+    { _var.insert( _var.end(), var.begin(), var.end() );
+      for( unsigned i=0; i<var.size(); i++ ){
+        _varlm.push_back( FFVar( _dag ) );
+        _varum.push_back( FFVar( _dag ) );
+      }
+    }
+
   //! @brief Set decision variables
   void set_var
     ( const unsigned nvar, const FFVar*var )
@@ -138,17 +148,28 @@ public:
       }
     }
 
-  //! @brief Reset decision variables
-  void reset_var
-    ()
-    { _var.clear(); _varlm.clear(); _varum.clear(); }
+  //! @brief Add decision variables
+  void add_var
+    ( const unsigned nvar, const FFVar*var )
+    { _var.insert( _var.end(), var, var+nvar );
+      for( unsigned i=0; i<nvar; i++ ){
+        _varlm.push_back( FFVar( _dag ) );
+        _varum.push_back( FFVar( _dag ) );
+      }
+    }
 
   //! @brief Add decision variable
   void add_var
     ( const FFVar&var )
     { _var.push_back( var );
       _varlm.push_back( FFVar( _dag ) );
-      _varum.push_back( FFVar( _dag ) ); }
+      _varum.push_back( FFVar( _dag ) );
+    }
+
+  //! @brief Reset decision variables
+  void reset_var
+    ()
+    { _var.clear(); _varlm.clear(); _varum.clear(); }
 
   //! @brief Get dependent variables
   const std::vector<FFVar>& dep() const

@@ -249,7 +249,7 @@ public:
     ( FFVar*X, std::ostream&os=std::cout );
 
   //! @brief Whether the blocks contain a unique solution branch
-  std::vector<bool>& uniblk
+  const std::vector<bool>& uniblk
     () const
     { return _uniblk; }
 
@@ -493,20 +493,7 @@ AEBND<T,PMT,PVT>::setup
   for( auto iv=BASE_AE::_var.begin(); iv!=BASE_AE::_var.end(); ++iv, ivar++ )
     _var[ivar] = *iv;
 
-  // (Re)size whole-system preconditioning matrix
-  _Y.resize( _ndep, _ndep );
-
-  _issetup = true;
-  return NORMAL;
-}
-
-template <typename T, typename PMT, typename PVT>
-inline bool
-AEBND<T,PMT,PVT>::_init
-()
-{
-  if( !_issetup ) return false;
-
+  // Initialize block computations according to decomposition option
   switch( options.BLKDEC ){
    case Options::DECOMPOSITION::NONE:
     _noblk = 1;
@@ -560,6 +547,74 @@ AEBND<T,PMT,PVT>::_init
     if( _maxop < _sgsys[ib].l_op.size() ) _maxop = _sgsys[ib].l_op.size();
     if( _maxop < _sgjac[ib].l_op.size() ) _maxop = _sgjac[ib].l_op.size();
   }
+
+  // (Re)size whole-system preconditioning matrix
+  _Y.resize( _ndep, _ndep );
+
+  _issetup = true;
+  return NORMAL;
+}
+
+template <typename T, typename PMT, typename PVT>
+inline bool
+AEBND<T,PMT,PVT>::_init
+()
+{
+  if( !_issetup ) return false;
+
+//  switch( options.BLKDEC ){
+//   case Options::DECOMPOSITION::NONE:
+//    _noblk = 1;
+//    _nblk.resize(1); _nblk[0] = _ndep;
+//    _pblk.resize(1); _pblk[0] = 0;
+//    //_fpdep.resize(_ndep); _rpdep.resize(_ndep);
+//    //for( unsigned i=0; i<_ndep; i++ ) _fpdep[i] = _rpdep[i] = i;
+//    _linblk.resize(1); _linblk[0] = BASE_AE::_linsys;
+//    _bwblk.resize(1);  _bwblk[0]  = BASE_AE::_bwsys;
+//    break;
+
+//   default:
+//    _noblk = BASE_AE::_noblk;
+//    _nblk  = BASE_AE::_nblk;
+//    _pblk  = BASE_AE::_pblk;
+//    _linblk = BASE_AE::_linblk;
+//    _bwblk  = BASE_AE::_bwblk;
+//  }
+//  _fpdep = BASE_AE::_fpdep;
+//  _rpdep = BASE_AE::_rpdep;
+
+//  _sgsys.resize(_noblk);
+//  auto it = _jac.begin();
+//  for( ; it != _jac.end(); ++it ){
+//    if( !std::get<0>(*it) ) continue;
+//    delete[] std::get<1>(*it);
+//    delete[] std::get<2>(*it);
+//    delete[] std::get<3>(*it);
+//  }
+//  _jac.resize(_noblk);
+//  _sgjac.resize(_noblk);
+
+//  _ldblk.resize(_noblk);
+//  _nblkmax = _ldblkmax = _maxop = 0;
+
+//  for( unsigned ib=0; ib<_noblk; ib++ ){
+//    // Set maximal block dimensions
+//    _ldblk[ib] = _nblk[ib];
+//    if( options.BLKDEC == Options::DECOMPOSITION::RECUR )
+//      for( unsigned jb=ib; jb>0; jb-- ) _ldblk[ib] += _nblk[jb-1];
+//    if( _ldblkmax < _ldblk[ib] ) _ldblkmax = _ldblk[ib];
+//    if( _nblkmax < _nblk[ib] ) _nblkmax = _nblk[ib];
+
+//    // Initialize block operations and Jacobian
+//    _sgsys[ib] = _dag->subgraph( _nblk[ib], _sys.data()+_pblk[ib] );
+//    //_jac[ib] = _dag->SFAD( _nblk[ib], _sys.data()+_pblk[ib],
+//    //                       _ldblk[ib], _var.data()+_pblk[ib] ); 
+//    _jac[ib] = _dag->SBAD( _nblk[ib], _sys.data()+_pblk[ib],
+//                           _ldblk[ib], _var.data()+_pblk[ib] ); 
+//    _sgjac[ib] = _dag->subgraph( std::get<0>(_jac[ib]), std::get<3>(_jac[ib]) );
+//    if( _maxop < _sgsys[ib].l_op.size() ) _maxop = _sgsys[ib].l_op.size();
+//    if( _maxop < _sgjac[ib].l_op.size() ) _maxop = _sgjac[ib].l_op.size();
+//  }
 
   // Initializing bound-crossing by dependent branch to true
   _xlodep.assign( _ndep, true );
@@ -986,7 +1041,7 @@ AEBND<T,PMT,PVT>::_precondlin
 #ifdef MC__AEBND_SHOW_PRECONDITIONING
         std::cout << "Full preconditioning matrix:\n" << _Y << std::endl;
 #endif
-      _stats_ae.precond += cpuclock();
+      //_stats_ae.precond += cpuclock();
 
       // Set G = Y*dfdx
       for( unsigned i=0; i<_nblk[ib]; i++ ){
@@ -1014,7 +1069,7 @@ AEBND<T,PMT,PVT>::_precondlin
       }
       std::cout << std::endl;
 #endif
-      //_stats_ae.precond += cpuclock();
+      _stats_ae.precond += cpuclock();
     }
 
     if( f ){
@@ -1040,13 +1095,13 @@ AEBND<T,PMT,PVT>::_precondlin
       std::cout << std::endl;
       { int dum; std::cin >> dum; }
 #endif
-      //_stats_ae.precond -= cpuclock();
+      _stats_ae.precond -= cpuclock();
       for (unsigned i=0; i<_nblk[ib]; i++ ){
         b[i] = 0.;
         for( unsigned j=0; j<_ldblk[ib]; j++)
           b[i] -= _Y(_pblk[ib]+i,_pblk[ib]+j) * f[_pblk[ib]+j];
       }
-      //_stats_ae.precond += cpuclock();
+      _stats_ae.precond += cpuclock();
 #ifdef MC__AEBND_DEBUG
       std::cout << "Preconditioned RHS Block #" << ib+1 << ":\n";
       for (unsigned i=0; i<_nblk[ib]; i++ ) std::cout << b[i] << std::endl;

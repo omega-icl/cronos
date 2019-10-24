@@ -235,11 +235,12 @@ public:
       DOMREDMAX(5), DOMREDTHRES(0.1), DOMREDBKOFF(1e-8), RELMETH(CHEB),
       LPALGO( LPRELAX_BASE<T>::LPALGO_DEFAULT ), LPPRESOLVE(-1),
       LPFEASTOL(1e-9), LPOPTIMTOL(1e-9), MIPRELGAP(1e-7), MIPABSGAP(1e-7),
-      MIPHEURISTICS(0.05), PRESOS2BIGM(-1.), CMODEL(), CMODPROP(2), CMODCUTS(0),
-      CMODDMAX(1e20), DEPSUSE(true), CMODDEPS(0), CMODRED(APPEND),
-      CMODWARMS(false), CMODRTOL(2e-1), CMODATOL(1e-8), CMODJOINT(false),
-      NCOCUTS(false), NCOMETH(ASA), MAXITER(0), MAXCPU(7.2e3), DISPLAY(2),
-      MIPDISPLAY(0), MIPFILE(""), POLIMG(), NLPSLV(), AEBND(0)
+      MIPHEURISTICS(0.05), PRESOS2BIGM(-1.), ISMDIV(10), ISMMIPREL(true), 
+      CMODEL(), CMODPROP(2), CMODCUTS(0), CMODDMAX(1e20), DEPSUSE(true),
+      CMODDEPS(0), CMODRED(APPEND), CMODWARMS(false), CMODRTOL(2e-1),
+      CMODATOL(1e-8), CMODJOINT(false), NCOCUTS(false), NCOMETH(ASA),
+      MAXITER(0), MAXCPU(7.2e3), DISPLAY(2), MIPDISPLAY(0), MIPFILE(""),
+      POLIMG(), NLPSLV(), AEBND(0)
       { //AEBND.BOUNDER     = t_AEBND::Options::ALGORITHM::GS;
         //AEBND.BLKDEC      = t_AEBND::Options::DECOMPOSITION::DIAG;
         CMODEL.MIXED_IA   = true;
@@ -275,6 +276,8 @@ public:
         MIPABSGAP     = options.MIPABSGAP;
         MIPHEURISTICS = options.MIPABSGAP;
         PRESOS2BIGM   = options.PRESOS2BIGM;
+        ISMDIV        = options.ISMDIV;
+        ISMMIPREL     = options.ISMMIPREL;
         CMODEL        = options.CMODEL;
         CMODPROP      = options.CMODPROP;
         CMODCUTS      = options.CMODCUTS;
@@ -305,9 +308,10 @@ public:
     };
     //! @brief Relaxation strategy
     enum RELAX{
-      DRL=0, //!< Decomposition-relaxation-linearization (Tawarmalani & Sahinidis)
-      CHEB,  //!< Chebyshev-derived relaxations, controlled by parameters CMODPROP and CMODCUT
-      HYBRID //!< Combination of DRL and CHEB
+      DRL=0,  //!< Decomposition-relaxation-linearization (Tawarmalani & Sahinidis)
+      CHEB,   //!< Chebyshev-derived relaxations, controlled by parameters CMODPROP and CMODCUT
+      HYBRID, //!< Combination of DRL and CHEB
+      ISM     //!< Interval superposition model relaxations, controlled by parameters ISMDIV
     };
     //! @brief Reduced-space strategy
     enum REDUC{
@@ -386,6 +390,10 @@ public:
     double MIPHEURISTICS;
     //! @brief Parameter controlling SOS2 reformulations
     double PRESOS2BIGM;
+    //! @brief Number of partition subdivisions in interval superposition model
+    unsigned ISMDIV;
+    //! @brief Whether to generate a MIP relaxation of ISM (true) or LP relaxation (false)
+    bool ISMMIPREL;
     //! @brief CModel options
     typename SCModel<T>::Options CMODEL;
     //! @brief Chebyhev model propagation order (0: no propag.)
@@ -1612,6 +1620,7 @@ NLGO<T>::Options::display
    case DRL:    out << "DRL"    << std::endl; break;
    case CHEB:   out << "CHEB"   << std::endl; break;
    case HYBRID: out << "HYBRID" << std::endl; break;
+   case ISM:    out << "ISM"    << std::endl; break;
   }
   out << std::setw(60) << "  ORDER OF CHEBYSHEV MODEL PROPAGATION";
   switch( CMODPROP ){

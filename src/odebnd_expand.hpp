@@ -39,8 +39,11 @@ class ODEBND_EXPAND:
 
   using ODEBND_BASE<T,PMT,PVT>::_If;
   using ODEBND_BASE<T,PMT,PVT>::_PMf;
+  using ODEBND_BASE<T,PMT,PVT>::_IWK;
+  using ODEBND_BASE<T,PMT,PVT>::_PMWK;
 
   using ODEBND_BASE<T,PMT,PVT>::_pIC;
+  using ODEBND_BASE<T,PMT,PVT>::_opIC;
   using ODEBND_BASE<T,PMT,PVT>::_pRHS;
   using ODEBND_BASE<T,PMT,PVT>::_pQUAD;
 
@@ -236,10 +239,6 @@ protected:
   void _END_STA
     ();
 
-  //! @brief Function to construct IC residuals
-  void _AE_SET_ICRES
-    ( const FFVar*x, FFVar*res );
-
   //! @brief Function to construct (trivial) CC residuals
   void _AE_SET_CCRES
     ( const FFVar*x0, const FFVar*x, FFVar*res );
@@ -251,23 +250,39 @@ protected:
 
   //! @brief Function to construct nonlinear equation system from ODE residuals
   void _AE_SET
-    ( const bool init );
+    ();
 
   //! @brief Function to bound ODE residual solutions using interval arithmetic
   typename t_AEBND::STATUS _AE_SOLVE
-    ( const bool init, const T*Ix0, const T*Ixap );
+    ( const T*Ixap );
 
   //! @brief Function to bound ODE residual solutions using polynomial model arithmetic
   typename t_AEBND::STATUS _AE_SOLVE
-    ( const bool init, const PVT*PMx0, const PVT*PMxap );
+    ( const PVT*PMxap );
 
   //! @brief Function to bound the functions at intermediate/end point
   bool _FCT_I_STA
-    ( const unsigned pos_fct, const double t, const T*Ix );
+    ( const unsigned pos_fct, const T*Ix );
 
   //! @brief Function to bound the functions at intermediate/end point
   bool _FCT_PM_STA
-    ( const unsigned pos_fct, const double t, const PVT*PMx );
+    ( const unsigned pos_fct, const PVT*PMx );
+
+  //! @brief Function to bound the initial conditions
+  bool _IC_I_STA
+    ();
+
+  //! @brief Function to bound the initial conditions
+  bool _IC_PM_STA
+    ();
+
+  //! @brief Function to bound the (dis)continuity conditions
+  bool _CC_I_STA
+    ( const T*Ix, const bool cont );
+
+  //! @brief Function to bound the (dis)continuity conditions
+  bool _CC_PM_STA
+    ( const PVT*PMx, const bool cont );
 
   //! @brief Private methods to block default compiler methods
   ODEBND_EXPAND(const ODEBND_EXPAND&);
@@ -350,16 +365,8 @@ ODEBND_EXPAND<T,PMT,PVT>::setup
   
   // Define AE systems for the discretized ODEs in each stage
   for( _istg=0; _istg<_nsmax; _istg++ ){
-    _vRES[_istg].resize( (_nx+_nq)*(LBLK+2) );
-
-    _pos_ic = ( _vIC.size()>=_nsmax? _istg:0 );
-    if( _pos_ic == _istg ){
-      if( !_IC_SET( _pos_ic ) ) return FATAL;
-      _AE_SET_ICRES( _vDEP.data(), _vRES[_istg].data() );
-    }
-    else{
-      _AE_SET_CCRES( _pX, _vDEP.data(), _vRES[_istg].data() );
-    }
+    _vRES[_istg].resize( (_nx+_nq)*(LBLK+1) );
+    _AE_SET_CCRES( _pX, _vDEP.data(), _vRES[_istg].data() );
     _pos_rhs  = ( _vRHS.size()<=1? 0: _istg );
     _pos_quad = ( _vQUAD.size()<=1? 0: _istg );
     if( !_RHS_SET( _pos_rhs, _pos_quad ) ) return FATAL;
@@ -368,15 +375,12 @@ ODEBND_EXPAND<T,PMT,PVT>::setup
         _vDEP.data()+(k+1)*(_nx+_nq), _pT?_vVAR.data()+_np+_nx+_nq+2+k:0,
         _pT?_vVAR.data()+_np+_nx+_nq+2+k+1:0, _vVAR[_np+_nx+_nq+1],
         _vRES[_istg].data()+(k+1)*(_nx+_nq) );
-
-    _AE_SET_CCRES( _pX, _vDEP.data(), _vRES[_istg].data()+(LBLK+1)*(_nx+_nq) );
   }
 
 #ifdef MC__ODEBND_EXPAND_DEBUG
   std::ofstream oRES( "RES_TS.dot", std::ios_base::out );
-  //_pDAG->dot_script( (_nx+_nq)*(LBLK+1), _vRES[0].data(), oRES );
-  _pDAG->dot_script( (_nx+_nq)*LBLK, _vRES[0].data()+_nx+_nq, oRES );
-  _pDAG->output( _pDAG->subgraph( (_nx+_nq)*LBLK, _vRES[0].data()+_nx+_nq ) );
+  _pDAG->dot_script( (_nx+_nq)*(LBLK+1), _vRES[0].data(), oRES );
+  _pDAG->output( _pDAG->subgraph( (_nx+_nq)*(LBLK+1), _vRES[0].data() ) );
   oRES.close();
   { int dum; std::cin >> dum; std::cout << "--PAUSED"; }
 #endif
@@ -395,16 +399,6 @@ ODEBND_EXPAND<T,PMT,PVT>::setup
 }
 
 template <typename T, typename PMT, typename PVT> inline void
-ODEBND_EXPAND<T,PMT,PVT>::_AE_SET_ICRES
-( const FFVar*x, FFVar*res )
-{
-  for( unsigned i=0; i<_nx+_nq; i++ ){
-    res[i] = x[i];
-    if( i<_nx ) res[i] -= _pIC[i];
-  }
-}
-
-template <typename T, typename PMT, typename PVT> inline void
 ODEBND_EXPAND<T,PMT,PVT>::_AE_SET_CCRES
 ( const FFVar*x0, const FFVar*x, FFVar*res )
 {
@@ -412,9 +406,6 @@ ODEBND_EXPAND<T,PMT,PVT>::_AE_SET_CCRES
     res[i] = x[i] - x0[i];
   }
 }
-
-// Add option NOINI to specified that initial state bounds are provided; i.e. implement Gaussian elimination for explicit methods, and terminate for implicit methods
-// Create public access to array of vectors of residuals _vRES
 
 template <typename T, typename PMT, typename PVT> inline void
 ODEBND_EXPAND<T,PMT,PVT>::_AE_SET_RHSRES
@@ -499,45 +490,21 @@ ODEBND_EXPAND<T,PMT,PVT>::_AE_SET_RHSRES
 
 template <typename T, typename PMT, typename PVT> inline void
 ODEBND_EXPAND<T,PMT,PVT>::_AE_SET
-( const bool init )
+()
 {
-  const unsigned LBLK = options.LBLK;
-  if( init ){ // independents to include state at end of previous stage
-    for( unsigned i=0; i<_nx; i++)
-      _vVAR[_np+i] = _pX[i];
-    for( unsigned i=0; i<_nq; i++)
-      _vVAR[_np+_nx+i] = _pQ[i];
-    _AEBND.set_var( _np+_nx+_nq+2+LBLK+1, _vVAR.data() );
-    _AEBND.set_dep( (_nx+_nq)*(LBLK+1), _vDEP.data(),
-                    _vRES[_istg].data() );
-  }
-  else{       // independents to include state at initial time
-#ifdef MC__ODEBND_EXPAND_NO_TRIVIAL_RESIDUAL
-    for( unsigned i=0; i<_nx+_nq; i++)
-      _vVAR[_np+i] = _vDEP[i];
-    _AEBND.set_var( _np+_nx+_nq+2+LBLK+1, _vVAR.data() );
-    _AEBND.set_dep( (_nx+_nq)*LBLK, _vDEP.data()+_nx+_nq,
-                    _vRES[_istg].data()+_nx+_nq );
-#else
-    for( unsigned i=0; i<_nx; i++)
-      _vVAR[_np+i] = _pX[i];
-    for( unsigned i=0; i<_nq; i++)
-      _vVAR[_np+_nx+i] = _pQ[i];
-    _AEBND.set_var( _np+_nx+_nq+2+LBLK+1, _vVAR.data() );
-    _AEBND.set_dep( (_nx+_nq)*(LBLK+1), _vDEP.data(),
-                    _vRES[_istg].data()+_nx+_nq );
-#endif
-  }
-#ifdef MC__ODEBND_EXPAND_DEBUG
-  _AEBND.options.DISPLAY = 2;
-  _AEBND.options.BLKDEC = false;//true;
-#endif
+  const unsigned &LBLK = options.LBLK;
+  for( unsigned i=0; i<_nx; i++)
+    _vVAR[_np+i] = _pX[i];
+  for( unsigned i=0; i<_nq; i++)
+    _vVAR[_np+_nx+i] = _pQ[i];
+  _AEBND.set_var( _np+_nx+_nq+2+LBLK+1, _vVAR.data() );
+  _AEBND.set_dep( (_nx+_nq)*(LBLK+1), _vDEP.data(), _vRES[_istg].data());
   _AEBND.setup();
 }
 
 template <typename T, typename PMT, typename PVT> inline bool
 ODEBND_EXPAND<T,PMT,PVT>::_FCT_I_STA
-( const unsigned pos_fct, const double t, const T*Ix )
+( const unsigned pos_fct, const T*Ix )
 {
   if( !_nf ) return true;
   const FFVar* pFCT = _vFCT.at( pos_fct );
@@ -547,14 +514,14 @@ ODEBND_EXPAND<T,PMT,PVT>::_FCT_I_STA
     std::cout << "Ix[" << ix << "] = " << Ix[ix] << std::endl;
 #endif
   }
-  if( _pT ) _IVAR[_np+_nx+_nq] = t;       // current time
+  if( _pT ) _IVAR[_np+_nx+_nq] = _t;       // current time
   _pDAG->eval( _nf, pFCT, _If, _np+_nx+_nq+1, _vVAR.data(), _IVAR.data(), pos_fct?true:false );
   return true;
 }
 
 template <typename T, typename PMT, typename PVT> inline bool
 ODEBND_EXPAND<T,PMT,PVT>::_FCT_PM_STA
-( const unsigned pos_fct, const double t, const PVT*PMx )
+( const unsigned pos_fct, const PVT*PMx )
 {
   if( !_nf ) return true;
   const FFVar* pFCT = _vFCT.at( pos_fct );
@@ -564,38 +531,114 @@ ODEBND_EXPAND<T,PMT,PVT>::_FCT_PM_STA
     std::cout << "PMx[" << ix << "] = " << PMx[ix] << std::endl;
 #endif
   }
-  if( _pT ) _PMVAR[_np+_nx+_nq] = t;       // current time
+  if( _pT ) _PMVAR[_np+_nx+_nq] = _t;       // current time
   _pDAG->eval( _nf, pFCT, _PMf, _np+_nx+_nq+1, _vVAR.data(), _PMVAR.data(), pos_fct?true:false );
+  return true;
+}
+
+template <typename T, typename PMT, typename PVT>
+inline bool
+ODEBND_EXPAND<T,PMT,PVT>::_IC_I_STA
+()
+{
+  // Initial states
+  if( _pT ){
+    _IVAR[_np+_nx+_nq] = _t;       // current time
+    _pDAG->eval( _opIC, _IWK, _nx, _pIC, _IVAR.data()+_np, _np, _vVAR.data(), _IVAR.data(), 1, _pT, _IVAR.data()+_np+_nx+_nq );
+  }
+  else
+    _pDAG->eval( _opIC, _IWK, _nx, _pIC, _IVAR.data()+_np, _np, _vVAR.data(), _IVAR.data() ); 
+  
+  //Initial quadratures
+  for( unsigned i=0; i<_nq; i++)
+    _IVAR[_np+_nx+i] = 0.;                  // initial quadrature
+
+  return true;
+}
+
+template <typename T, typename PMT, typename PVT>
+inline bool
+ODEBND_EXPAND<T,PMT,PVT>::_CC_I_STA
+( const T*Ix, const bool cont )
+{
+  // Initial states
+  if( cont )
+    for( unsigned i=0; i<_nx; i++)
+      _IVAR[_np+i] = Ix[i];
+  else if( _pT ){
+    _IVAR[_np+_nx+_nq] = _t;       // current time
+    _pDAG->eval( _opIC, _IWK, _nx, _pIC,  _IVAR.data()+_np, _np, _vVAR.data(), _IVAR.data(), _nx+_nq, _vVAR.data()+_nx, Ix, 1, _pT, _IVAR.data()+_np+_nx+_nq );
+  }
+  else
+    _pDAG->eval( _opIC, _IWK, _nx, _pIC,  _IVAR.data()+_np, _np, _vVAR.data(), _IVAR.data(), _nx+_nq, _vVAR.data()+_nx, Ix );
+
+  // Initial quadratures
+  for( unsigned i=0; i<_nq; i++)
+    _IVAR[_np+_nx+i] = Ix[_nx+i];
+
+  return true;
+}
+
+template <typename T, typename PMT, typename PVT>
+inline bool
+ODEBND_EXPAND<T,PMT,PVT>::_IC_PM_STA
+()
+{
+  // Initial states
+  if( _pT ){
+    _PMVAR[_np+_nx+_nq] = _t;       // current time
+    _pDAG->eval( _opIC, _PMWK, _nx, _pIC,  _PMVAR.data()+_np, _np, _vVAR.data(), _PMVAR.data(), 1, _pT, _PMVAR.data()+_np+_nx+_nq );
+  }
+  else
+    _pDAG->eval( _opIC, _PMWK, _nx, _pIC,  _PMVAR.data()+_np, _np, _vVAR.data(), _PMVAR.data() ); 
+  
+  // Initial quadratures
+  for( unsigned i=0; i<_nq; i++)
+    _PMVAR[_np+_nx+i] = 0.;
+
+  return true;
+}
+
+template <typename T, typename PMT, typename PVT>
+inline bool
+ODEBND_EXPAND<T,PMT,PVT>::_CC_PM_STA
+( const PVT*PMx, const bool cont )
+{
+  // Initial states
+  if( cont )
+    for( unsigned i=0; i<_nx; i++)
+      _PMVAR[_np+i] = PMx[i];
+  else if( _pT ){
+    _PMVAR[_np+_nx+_nq] = _t;       // current time
+    _pDAG->eval( _opIC, _PMWK, _nx, _pIC,  _PMVAR.data()+_np, _np, _vVAR.data(), _PMVAR.data(), _nx+_nq, _vVAR.data()+_nx, PMx, 1, _pT, _PMVAR.data()+_np+_nx+_nq );
+  }
+  else
+    _pDAG->eval( _opIC, _PMWK, _nx, _pIC,  _PMVAR.data()+_np, _np, _vVAR.data(), _PMVAR.data(), _nx+_nq, _vVAR.data()+_nx, PMx );
+
+  // Initial quadratures
+  for( unsigned i=0; i<_nq; i++)
+    _PMVAR[_np+_nx+i] = PMx[_nx+i];
+
   return true;
 }
 
 template <typename T, typename PMT, typename PVT>
 inline typename AEBND<T,PMT,PVT>::STATUS
 ODEBND_EXPAND<T,PMT,PVT>::_AE_SOLVE
-( const bool init, const T*Ix0, const T*Ixap )
+( const T*Ixap )
 {
-  const unsigned LBLK = options.LBLK;
-  //assert( _nq == 0 ); // Quadrature enclosures not implemented
+  const unsigned &LBLK = options.LBLK;
 
-  for( unsigned i=0; i<_nx; i++)
-    _IVAR[_np+i] = Ix0[i];                // initial state
-  for( unsigned i=0; i<_nq; i++)
-    _IVAR[_np+_nx+i] = 0.;                 // initial quadrature
   if( _pT ) _IVAR[_np+_nx+_nq] = _t;      // initial time
   _IVAR[_np+_nx+_nq+1] = _h;              // time step
   for( unsigned k=0; _pT && k<LBLK+1; k++)
     _IVAR[_np+_nx+_nq+2+k] = _t+k*_h;     // stage times
 
-  for( unsigned k=0, ik=0; k<LBLK+1; k++, ik+=_nx+_nq)
+  for( unsigned k=0, ik=0; Ixap && k<LBLK+1; k++, ik+=_nx+_nq)
     for( unsigned i=0; i<_nx+_nq; i++ )
       _IDEP[ik+i] = Ixap[i];              // state enclosure
 
-  return init? _AEBND.solve( _IVAR.data(), _IDEP.data(), _IDEP.data() ):
-#ifdef MC__ODEBND_EXPAND_NO_TRIVIAL_RESIDUAL
-               _AEBND.solve( _IVAR.data(), _IDEP.data()+_nx+_nq, _IDEP.data()+_nx+_nq );
-#else
-               _AEBND.solve( _IVAR.data(), _IDEP.data(), _IDEP.data() );
-#endif
+  return _AEBND.solve( _IVAR.data(), _IDEP.data(), _IDEP.data() );
 }
 
 //! @fn template <typename T, typename PMT, typename PVT> inline typename ODEBND_EXPAND<T,PMT,PVT>::STATUS ODEBND_EXPAND<T,PMT,PVT>::bounds(
@@ -615,51 +658,65 @@ ODEBND_EXPAND<T,PMT,PVT>::bounds
 ( const T*Ip, T**Ixk, T*If, std::ostream&os )
 {
   // Check arguments
-  if( !Ip || !Ixk ) return FATAL;
+  if( !Ip ) return FATAL;
 
-  const unsigned LBLK = options.LBLK;
-  const unsigned DBLK = options.DBLK;
-  const double H0 = options.H0, TOL = 1e-8;
-  _INI_STA( Ip );
+  const unsigned &LBLK = options.LBLK;
+  const unsigned &DBLK = options.DBLK;
+  const double &H0 = options.H0, TOL = 1e-8;
 
   try{
+   // Initialize trajectory integration
+    _INI_STA( Ip );
+    _t = _dT[0];
+
+    // Bounds on initial states/quadratures
+    if( !_IC_SET( 0 )
+     || !_IC_I_STA() )
+      { _END_STA(); return FAILURE; }
+
+    // Display / record / return initial states/quadratures
+    if( options.DISPLAY >= 1 ){
+      _print_interm( _t, _nx, _IVAR.data()+_np, "x", os );
+      _print_interm( _nq, _IVAR.data()+_np+_nx, "q", os );
+    }
+    if( Ixk ){
+      if( !Ixk[0] ) Ixk[0] = new T[_nx+_nq];
+      for( unsigned ix=0; ix<_nx+_nq; ix++ )
+        Ixk[0][ix] = _IVAR[_np+ix];
+    }
+
     // Integrate ODEs through each stage
     for( _istg=0; _istg<_nsmax; _istg++ ){
       _t = _dT[_istg];
       _h = ( _t + LBLK*options.H0 > _dT[_istg+1]-TOL? (_dT[_istg+1]-_t)/LBLK: H0 ); 
-      std::cout << "STEP SIZE: " << _h << std::endl;
 
-      // First step of stage w/ initial conditions
-      _AE_SET( true );
-      auto flag = _AE_SOLVE( true, Ixk[_istg], Ixk[_istg+1] );
-      if( flag != t_AEBND::NORMAL ){ _END_STA(); return FAILURE; }
-
-      // Display / record / return initial results
-      if( !_istg ){
-        for( unsigned ix=0; ix<_nx+_nq; ix++ )
-          Ixk[_istg][ix] = _IDEP[ix];
-        if( options.DISPLAY >= 1 ){
-          _print_interm( _t, _nx, Ixk[_istg], "x", os );
-          _print_interm( _nq, Ixk[_istg]+_nx, "q", os );
-        }
-      }
-      for( unsigned k=0; options.RESRECORD && k<=DBLK; k++ )
-        results_sta.push_back( Results( _t+k*_h, _nx+_nq, _IDEP.data()+(_nx+_nq)*k ) );
+      // Bounds on state (dis)continuities (if any) at stage times
+      _pos_ic = ( _vIC.size()>=_nsmax? _istg:0 );
+      if( _pos_ic
+       && ( !_IC_SET( _pos_ic )
+         || !_CC_I_STA( _IDEP.data()+(_nx+_nq)*LBLK, false ) ) )
+        { _END_STA(); return FAILURE; }
+      if( _istg && !_pos_ic
+       && !_CC_I_STA( _IDEP.data()+(_nx+_nq)*LBLK, true ) )
+        { _END_STA(); return FAILURE; }
+      if( options.RESRECORD )
+        results_sta.push_back( Results( _t, _nx+_nq, _IVAR.data()+_np ) );
 
       // Next steps w/o initial conditions
       bool reinit = true;
-      while( _t+LBLK*_h < _dT[_istg+1]-TOL ){
-        _t += DBLK*_h;
+      while( _t < _dT[_istg+1]-TOL ){
         _h = ( _t + LBLK*options.H0 > _dT[_istg+1]-TOL? (_dT[_istg+1]-_t)/LBLK: H0 ); 
-
-        if( reinit ){ _AE_SET( false ); reinit = false; }
-        auto flag = _AE_SOLVE( false, _IDEP.data()+(_nx+_nq)*DBLK, Ixk[_istg+1] );
+        if( reinit )
+          { _AE_SET(); reinit = false; }
+        else if( !_CC_I_STA( _IDEP.data()+(_nx+_nq)*LBLK, true ) )
+          { _END_STA(); return FAILURE; }
+        
+        auto flag = _AE_SOLVE( Ixk? Ixk[_istg+1]: 0 );
         if( flag != t_AEBND::NORMAL ){ _END_STA(); return FAILURE; }
-
         for( unsigned k=1; options.RESRECORD && k<=DBLK; k++ )
           results_sta.push_back( Results( _t+k*_h, _nx+_nq, _IDEP.data()+(_nx+_nq)*k ) );
+        _t += LBLK*_h;
       }
-      _t += LBLK*_h;
 
       // Display / return stage results
       for( unsigned ix=0; ix<_nx+_nq; ix++ )
@@ -673,7 +730,7 @@ ODEBND_EXPAND<T,PMT,PVT>::bounds
       _pos_fct = ( _vFCT.size()>=_nsmax? _istg:0 );
       if( _nf
        && (_vFCT.size()>=_nsmax || _istg==_nsmax-1)
-       && !_FCT_I_STA( _pos_fct, _t, _IDEP.data()+(_nx+_nq)*LBLK ) )
+       && !_FCT_I_STA( _pos_fct, _IDEP.data()+(_nx+_nq)*LBLK ) )
         { _END_STA(); return FATAL; }
     }
 
@@ -740,30 +797,20 @@ ODEBND_EXPAND<T,PMT,PVT>::hausdorff
 template <typename T, typename PMT, typename PVT>
 inline typename AEBND<T,PMT,PVT>::STATUS
 ODEBND_EXPAND<T,PMT,PVT>::_AE_SOLVE
-( const bool init, const PVT*PMx0, const PVT*PMxap )
+( const PVT*PMxap )
 {
-  const unsigned LBLK = options.LBLK;
-  //assert( _nq == 0 ); // Quadrature enclosures not implemented
+  const unsigned &LBLK = options.LBLK;
 
-  for( unsigned i=0; i<_nx; i++)
-    _PMVAR[_np+i] = PMx0[i];                // initial state
-  for( unsigned i=0; i<_nq; i++)
-    _PMVAR[_np+_nx+i] = 0.;                  // initial quadrature
   if( _pT ) _PMVAR[_np+_nx+_nq] = _t;       // initial time
   _PMVAR[_np+_nx+_nq+1] = _h;               // time step
   for( unsigned k=0; _pT && k<LBLK+1; k++)
     _PMVAR[_np+_nx+_nq+2+k] = _t+k*_h;      // stage times
 
-  for( unsigned k=0, ik=0; k<LBLK+1; k++, ik+=_nx+_nq)
+  for( unsigned k=0, ik=0; PMxap && k<LBLK+1; k++, ik+=_nx+_nq)
     for( unsigned i=0; i<_nx+_nq; i++ )
       _PMDEP[ik+i] = PMxap[i];              // state enclosure
 
-  return init? _AEBND.solve( _PMVAR.data(), _PMDEP.data(), _PMDEP.data() ):
-#ifdef MC__ODEBND_EXPAND_NO_TRIVIAL_RESIDUAL
-               _AEBND.solve( _PMVAR.data(), _PMDEP.data()+_nx+_nq, _PMDEP.data()+_nx+_nq );
-#else
-               _AEBND.solve( _PMVAR.data(), _PMDEP.data(), _PMDEP.data() );
-#endif
+  return _AEBND.solve( _PMVAR.data(), _PMDEP.data(), _PMDEP.data() );
 }
 
 //! @fn template <typename T, typename PMT, typename PVT> inline typename ODEBND_EXPAND<T,PMT,PVT>::STATUS ODEBND_EXPAND<T,PMT,PVT>::bounds(
@@ -783,50 +830,65 @@ ODEBND_EXPAND<T,PMT,PVT>::bounds
 ( const PVT*PMp, PVT**PMxk, PVT*PMf, std::ostream&os )
 {
   // Check arguments
-  if( !PMp || !PMxk ) return FATAL;
+  if( !PMp ) return FATAL;
 
-  const unsigned LBLK = options.LBLK;
-  const unsigned DBLK = options.DBLK;
-  const double H0 = options.H0, TOL = 1e-8;
-  _INI_STA( PMp );
+  const unsigned &LBLK = options.LBLK;
+  const unsigned &DBLK = options.DBLK;
+  const double &H0 = options.H0, TOL = 1e-8;
 
   try{
+   // Initialize trajectory integration
+    _INI_STA( PMp );
+    _t = _dT[0];
+
+    // Bounds on initial states/quadratures
+    if( !_IC_SET( 0 )
+     || !_IC_PM_STA() )
+      { _END_STA(); return FAILURE; }
+
+    // Display / record / return initial states/quadratures
+    if( options.DISPLAY >= 1 ){
+      _print_interm( _t, _nx, _PMVAR.data()+_np, "x", os );
+      _print_interm( _nq, _PMVAR.data()+_np+_nx, "q", os );
+    }
+    if( PMxk ){
+      if( !PMxk[0] ) PMxk[0] = new PVT[_nx+_nq];
+      for( unsigned ix=0; ix<_nx+_nq; ix++ )
+        PMxk[0][ix] = _PMVAR[_np+ix];
+    }
+
     // Integrate ODEs through each stage
     for( _istg=0; _istg<_nsmax; _istg++ ){
       _t = _dT[_istg];
       _h = ( _t + LBLK*options.H0 > _dT[_istg+1]-TOL? (_dT[_istg+1]-_t)/LBLK: H0 ); 
 
-      // First step of stage w/ initial conditions
-      _AE_SET( true );
-      auto flag = _AE_SOLVE( true, PMxk[_istg], PMxk[_istg+1] );
-      if( flag != t_AEBND::NORMAL ){ _END_STA(); return FAILURE; }
-
-      // Display / record / return initial results
-      if( !_istg ){
-        for( unsigned ix=0; ix<_nx+_nq; ix++ )
-          PMxk[0][ix] = _PMDEP[ix];
-        if( options.DISPLAY >= 1 ){
-          _print_interm( _t, _nx, PMxk[0], "x", os );
-          _print_interm( _nq, PMxk[0]+_nx, "q", os );
-        }
-      }
-      for( unsigned k=0; options.RESRECORD && k<=DBLK; k++ )
-        results_sta.push_back( Results( _t+k*_h, _nx+_nq, _PMDEP.data()+(_nx+_nq)*k ) );
+      // Bounds on state (dis)continuities (if any) at stage times
+      _pos_ic = ( _vIC.size()>=_nsmax? _istg:0 );
+      if( _pos_ic
+       && ( !_IC_SET( _pos_ic )
+         || !_CC_PM_STA( _PMDEP.data()+(_nx+_nq)*LBLK, false ) ) )
+        { _END_STA(); return FAILURE; }
+      if( _istg && !_pos_ic
+       && !_CC_PM_STA( _PMDEP.data()+(_nx+_nq)*LBLK, true ) )
+        { _END_STA(); return FAILURE; }
+      if( options.RESRECORD )
+        results_sta.push_back( Results( _t, _nx+_nq, _PMVAR.data()+_np ) );
 
       // Next steps w/o initial conditions
       bool reinit = true;
-      while( _t+LBLK*_h < _dT[_istg+1]-TOL ){
-        _t += DBLK*_h;
+      while( _t < _dT[_istg+1]-TOL ){
         _h = ( _t + LBLK*options.H0 > _dT[_istg+1]-TOL? (_dT[_istg+1]-_t)/LBLK: H0 ); 
-
-        if( reinit ){ _AE_SET( false ); reinit = false; }
-        auto flag = _AE_SOLVE( false, _PMDEP.data()+(_nx+_nq)*DBLK, PMxk[_istg+1] );
+        if( reinit )
+          { _AE_SET(); reinit = false; }
+        else if( !_CC_PM_STA( _PMDEP.data()+(_nx+_nq)*LBLK, true ) )
+          { _END_STA(); return FAILURE; }
+        
+        auto flag = _AE_SOLVE( PMxk? PMxk[_istg+1]: 0 );
         if( flag != t_AEBND::NORMAL ){ _END_STA(); return FAILURE; }
-
         for( unsigned k=1; options.RESRECORD && k<=DBLK; k++ )
           results_sta.push_back( Results( _t+k*_h, _nx+_nq, _PMDEP.data()+(_nx+_nq)*k ) );
+        _t += LBLK*_h;
       }
-      _t += LBLK*_h;
 
       // Display / return stage results
       for( unsigned ix=0; ix<_nx+_nq; ix++ )
@@ -840,7 +902,7 @@ ODEBND_EXPAND<T,PMT,PVT>::bounds
       _pos_fct = ( _vFCT.size()>=_nsmax? _istg:0 );
       if( _nf
        && (_vFCT.size()>=_nsmax || _istg==_nsmax-1)
-       && !_FCT_PM_STA( _pos_fct, _t, _PMDEP.data()+(_nx+_nq)*LBLK ) )
+       && !_FCT_PM_STA( _pos_fct, _PMDEP.data()+(_nx+_nq)*LBLK ) )
         { _END_STA(); return FATAL; }
     }
 

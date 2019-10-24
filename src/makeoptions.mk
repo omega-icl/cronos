@@ -51,7 +51,7 @@ INC_DEP  = $(INC_MC) $(INC_PROFIL) $(INC_BOOST) $(INC_MIP) $(INC_IPOPT) $(INC_SU
 
 # COMPILATION <<-- CHANGE AS APPROPRIATE -->>
 
-#DEBUG = -g
+DEBUG = -g
 #PROF = -pg
 OPTIM = -Ofast
 WARN  = -Wall

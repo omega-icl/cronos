@@ -589,7 +589,7 @@ ODEBND_SUNDIALS<T,PMT,PVT>::_bounds
       _vec_sta.push_back( std::vector<realtype>( vsta, vsta+lsta ) );
     }
 
-    // Display / record / return initial results
+    // Display / record / return initial states/quadratures
     if( options.DISPLAY >= 1 ){
       _print_interm( _t, _nx, _Ix, "x", os );
       _print_interm( _nq, _Iq, "q", os );
@@ -906,8 +906,8 @@ ODEBND_SUNDIALS<T,PMT,PVT>::_bounds
         _print_interm( _t, _nx, _PMx, "x", os );
       _print_interm( _nq, _PMq, "q", os );
     }
-    if( options.RESRECORD )
-      results_sta.push_back( Results( _t, _nx, _PMx, _nq, _PMq ) );
+    //if( options.RESRECORD )
+    //  results_sta.push_back( Results( _t, _nx, _PMx, _nq, _PMq ) );
     if( PMxk ){
       if( !PMxk[0] ) PMxk[0] = new PVT[_nx+_nq];
       for( unsigned ix=0; ix<_nx+_nq; ix++ )

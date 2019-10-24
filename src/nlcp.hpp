@@ -377,6 +377,7 @@ NLCP<T>::Options::display
    case NLGO<T>::Options::DRL:    out << "DRL"    << std::endl; break;
    case NLGO<T>::Options::CHEB:   out << "CHEB"   << std::endl; break;
    case NLGO<T>::Options::HYBRID: out << "HYBRID" << std::endl; break;
+   case NLGO<T>::Options::ISM:    out << "ISM"    << std::endl; break;
   }
   out << std::setw(60) << "  ORDER OF CHEBYSHEV MODEL PROPAGATION";
   switch( NLGO<T>::Options::CMODPROP ){

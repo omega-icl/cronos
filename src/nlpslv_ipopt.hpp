@@ -17,7 +17,7 @@ Consider a nonlinear optimization problem in the form:
 \f}
 where \f$f, g_1, \ldots, g_m\f$ are factorable, potentially nonlinear, real-valued functions; and \f$x_1, \ldots, x_n\f$ are continuous decision variables. The class mc::NLPSLV_IPOPT solves such NLP problems using the software package <A href="https://projects.coin-or.org/Ipopt">IPOPT</A>, which implements a local solution method (interior point). IPOPT requires the first and second derivatives as well as the sparsity pattern of the objective and constraint functions in the NLP model. This information is generated using direct acyclic graphs (DAG) in <A href="https://projects.coin-or.org/MCpp">MC++</A>.
 
-\section sec_NLPSLV_solve How to Solve an NLP Model using mc::NLPSLV_IPOPT?
+\section sec_NLPSLV_IPOPT_solve How to Solve an NLP Model using mc::NLPSLV_IPOPT?
 
 Consider the following NLP:
 \f{align*}
@@ -45,7 +45,7 @@ Next, we set the variables and objective/constraint functions by creating a DAG 
   NLP->set_var( NP, P );                      // decision variables
   NLP->set_obj( BASE_NLP::MAX, P[0]+P[1] );   // objective
   NLP->add_ctr( BASE_NLP::LE, P[0]*P[1]-4. ); // constraints
-  NLP->setup();                               // DAG
+  NLP->setup();
 \endcode
 
 Given initial bounds \f$P\f$ and initial guesses \f$p_0\f$ on the decision variables, the NLP model is solved as:
@@ -68,9 +68,9 @@ The return value is of the enumeration type <A href="http://www.coin-or.org/Doxy
 
   if( status == Ipopt::Solve_Succeeded ){
     std::cout << "NLP (LOCAL) SOLUTION: " << std::endl;
-    std::cout << "  f* = " << pNLP->solution().f << std::endl;
+    std::cout << "  f* = " << NLP->solution().f << std::endl;
     for( unsigned int ip=0; ip<NP; ip++ )
-      std::cout << "  p*(" << ip << ") = " << pNLP->solution().p[ip] << std::endl;
+      std::cout << "  p*(" << ip << ") = " << NLP->solution().p[ip] << std::endl;
   }
 \endcode
 
@@ -344,7 +344,7 @@ public:
       return _scaling;
     }
 
-  //! @brief Get IPOPT solution info
+  //! @brief Get solution info
   const SOLUTION_OPT& solution() const
     {
       return _solution;

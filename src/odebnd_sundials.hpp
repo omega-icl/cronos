@@ -967,6 +967,7 @@ ODEBND_SUNDIALS<T,PMT,PVT>::_bounds
       const double TSTEP = ( _dT[_istg+1] - _t  ) / NSTEP;
       double TSTOP = _t+TSTEP;
       for( unsigned k=0; k<NSTEP; k++, TSTOP+=TSTEP ){
+        //std::cout << "time: " << _t << std::endl;
         if( k+1 == NSTEP ) TSTOP = _dT[_istg+1];
         if( !store )
           _cv_flag = CVode( _cv_mem, TSTOP, _Nx, &_t, CV_NORMAL );

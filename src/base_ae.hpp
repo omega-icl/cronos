@@ -46,6 +46,9 @@ protected:
   //! @brief equation multipliers
   std::vector<FFVar> _sysm;
 
+  //! @brief Whether the system equations have changed
+  bool _newsys;
+
   //! @brief number of AE block
   unsigned _noblk;
 
@@ -97,7 +100,7 @@ public:
 
   //! @brief Class constructor
   BASE_AE()
-    : _dag(0), _noblk(0), _singsys(false), _linsys(false)
+    : _dag(0), _newsys(true), _noblk(0), _singsys(false), _linsys(false)
     {}
 
   //! @brief Class destructor
@@ -188,6 +191,7 @@ public:
         _depum.push_back( FFVar( _dag ) );
         _sysm.push_back( FFVar( _dag ) );
       }
+      _newsys = true;
     }
 
   //! @brief Set dependent variables
@@ -199,6 +203,7 @@ public:
         _depum.push_back( FFVar( _dag ) );
         _sysm.push_back( FFVar( _dag ) );
       }
+      _newsys = true;
     }
 
   //! @brief Reset dependent variables
@@ -216,20 +221,26 @@ public:
   //! @brief Reset algebraic equations
   void reset_sys
     ()
-    { _sys.clear(); _sysm.clear(); }
+    { _sys.clear(); _sysm.clear(); _newsys = true; }
 
   //! @brief Add algebraic equation
   void add_sys
     ( const FFVar&eq )
     { _sys.push_back( eq );
-      _sysm.push_back( FFVar( _dag ) ); }
+      _sysm.push_back( FFVar( _dag ) );
+      _newsys = true;
+    }
 
-  //! @brief Copy equations
+  //! @brief Copy algebraic system and structure
   void set
     ( const BASE_AE&aes )
     { _dag = aes._dag; _var = aes._var; _dep = aes._dep; _sys = aes._sys; 
-      _varlm = aes._varlm; _varum = aes._varum; _deplm = aes._deplm;
-      _depum = aes._depum; _sysm = aes._sysm; }
+      _varlm = aes._varlm; _varum = aes._varum; _deplm  = aes._deplm;
+      _depum = aes._depum; _sysm  = aes._sysm;  _newsys = aes._newsys;
+      _noblk = aes._noblk; _pblk  = aes._pblk;  _nblk   = aes._nblk;
+      _singsys = aes._singsys; _linsys = aes._linsys; _linblk = aes._linblk;
+      _lindep = aes._lindep; _bwsys = aes._bwsys; _bwblk = aes._bwblk;
+      _fpdep = aes._fpdep; _rpdep = aes._rpdep; }
 
   //! @brief Number of blocks
   unsigned int noblk
@@ -344,6 +355,8 @@ BASE_AE::set_block
 {
   const unsigned int ndep = _dep.size();
   if( !ndep || _sys.size() != ndep ) return false;
+  if( !_newsys ) return true;
+  _newsys = false;
 
   // Perform block lower-triangular decomposition using MC21A/MC13D
   int NB = 1;

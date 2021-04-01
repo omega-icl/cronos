@@ -926,6 +926,7 @@ SBB<T>::_branching_score_subset
   struct lt_scores{
     bool operator()
       ( const std::pair<unsigned,double>&el1, const std::pair<unsigned,double>el2 )
+      const
       { return el1.second < el2.second; }
   };
   std::multiset< std::pair<unsigned,double>, lt_scores > allscores;

@@ -1,4 +1,4 @@
-// Copyright (C) 2014-2017 Benoit Chachuat, Imperial College London.
+// Copyright (C) 2014-2019 Benoit Chachuat, Imperial College London.
 // All Rights Reserved.
 // This code is published under the Eclipse Public License.
 
@@ -149,7 +149,7 @@ public:
     //! @brief Constructor
     Options( int iDISP=1 ):
       BOUNDER(ALGORITHM::AUTO), PRECOND(PRECONDITIONING::INVMD),
-      BLKDEC(DECOMPOSITION::RECUR), INTERBND(true), MAXIT(10),
+      BLKDEC(DECOMPOSITION::RECUR), MAXREC(0), INTERBND(true), MAXIT(10),
       RTOL(1e-7), ATOL(machprec()), PMNOREM(false), DISPLAY(iDISP)
       {}
     //! @brief Enumeration of bounding methods (for polynomial models only)
@@ -167,8 +167,9 @@ public:
     enum class PRECONDITIONING{
       NONE=0,   //!< No preconditioning used
       INVMD=1,  //!< Inverse of Jacobian mid-point (dense)
-      INVMB=2   //!< Inverse of Jacobian mid-point (banded)
-    };
+      INVMB=2,  //!< Inverse of Jacobian mid-point (banded)
+      QRMD=3    //!< QR decomposition of Jacobian mid-point (dense)
+          };
     //! @brief Bounding method
     PRECONDITIONING PRECOND;
     //! @brief Enumeration of preconditioning methods
@@ -179,6 +180,8 @@ public:
     };
     //! @brief Level of block decomposition (default, recursive: 2, diagonal: 1, no decomposition: 0)
     DECOMPOSITION BLKDEC;
+    //! @brief Maximum number of recursive blocks (default: 0 - no limit)
+    unsigned int MAXREC;
     //! @brief Whether or not to intersect bounds with previous iteration in iterative methods (default: true)
     bool INTERBND;
     //! @brief Maximum number of iterations (default: 10, no limit: 0)
@@ -532,8 +535,10 @@ AEBND<T,PMT,PVT>::setup
   for( unsigned ib=0; ib<_noblk; ib++ ){
     // Set maximal block dimensions
     _ldblk[ib] = _nblk[ib];
-    if( options.BLKDEC == Options::DECOMPOSITION::RECUR )
-      for( unsigned jb=ib; jb>0; jb-- ) _ldblk[ib] += _nblk[jb-1];
+    if( options.BLKDEC == Options::DECOMPOSITION::RECUR ){
+      const unsigned int jbmin = ((options.MAXREC && ib>options.MAXREC)? ib-options.MAXREC: 0);
+      for( unsigned jb=ib; jb>jbmin; jb-- ) _ldblk[ib] += _nblk[jb-1];
+    }
     if( _ldblkmax < _ldblk[ib] ) _ldblkmax = _ldblk[ib];
     if( _nblkmax < _nblk[ib] ) _nblkmax = _nblk[ib];
 
@@ -561,60 +566,6 @@ AEBND<T,PMT,PVT>::_init
 ()
 {
   if( !_issetup ) return false;
-
-//  switch( options.BLKDEC ){
-//   case Options::DECOMPOSITION::NONE:
-//    _noblk = 1;
-//    _nblk.resize(1); _nblk[0] = _ndep;
-//    _pblk.resize(1); _pblk[0] = 0;
-//    //_fpdep.resize(_ndep); _rpdep.resize(_ndep);
-//    //for( unsigned i=0; i<_ndep; i++ ) _fpdep[i] = _rpdep[i] = i;
-//    _linblk.resize(1); _linblk[0] = BASE_AE::_linsys;
-//    _bwblk.resize(1);  _bwblk[0]  = BASE_AE::_bwsys;
-//    break;
-
-//   default:
-//    _noblk = BASE_AE::_noblk;
-//    _nblk  = BASE_AE::_nblk;
-//    _pblk  = BASE_AE::_pblk;
-//    _linblk = BASE_AE::_linblk;
-//    _bwblk  = BASE_AE::_bwblk;
-//  }
-//  _fpdep = BASE_AE::_fpdep;
-//  _rpdep = BASE_AE::_rpdep;
-
-//  _sgsys.resize(_noblk);
-//  auto it = _jac.begin();
-//  for( ; it != _jac.end(); ++it ){
-//    if( !std::get<0>(*it) ) continue;
-//    delete[] std::get<1>(*it);
-//    delete[] std::get<2>(*it);
-//    delete[] std::get<3>(*it);
-//  }
-//  _jac.resize(_noblk);
-//  _sgjac.resize(_noblk);
-
-//  _ldblk.resize(_noblk);
-//  _nblkmax = _ldblkmax = _maxop = 0;
-
-//  for( unsigned ib=0; ib<_noblk; ib++ ){
-//    // Set maximal block dimensions
-//    _ldblk[ib] = _nblk[ib];
-//    if( options.BLKDEC == Options::DECOMPOSITION::RECUR )
-//      for( unsigned jb=ib; jb>0; jb-- ) _ldblk[ib] += _nblk[jb-1];
-//    if( _ldblkmax < _ldblk[ib] ) _ldblkmax = _ldblk[ib];
-//    if( _nblkmax < _nblk[ib] ) _nblkmax = _nblk[ib];
-
-//    // Initialize block operations and Jacobian
-//    _sgsys[ib] = _dag->subgraph( _nblk[ib], _sys.data()+_pblk[ib] );
-//    //_jac[ib] = _dag->SFAD( _nblk[ib], _sys.data()+_pblk[ib],
-//    //                       _ldblk[ib], _var.data()+_pblk[ib] ); 
-//    _jac[ib] = _dag->SBAD( _nblk[ib], _sys.data()+_pblk[ib],
-//                           _ldblk[ib], _var.data()+_pblk[ib] ); 
-//    _sgjac[ib] = _dag->subgraph( std::get<0>(_jac[ib]), std::get<3>(_jac[ib]) );
-//    if( _maxop < _sgsys[ib].l_op.size() ) _maxop = _sgsys[ib].l_op.size();
-//    if( _maxop < _sgjac[ib].l_op.size() ) _maxop = _sgjac[ib].l_op.size();
-//  }
 
   // Initializing bound-crossing by dependent branch to true
   _xlodep.assign( _ndep, true );
@@ -804,7 +755,7 @@ inline bool
 AEBND<T,PMT,PVT>::_crosstest
 ( const unsigned nx, const PVT*x, const PVT*x0, int*xlodep, int*xupdep ) const
 {
-  // when applying a parametric intevval Newton-type method, if any improvement ia observed
+  // when applying a parametric intevval Newton-type method, if any improvement is observed
   // on any of the bounds, it is known that a solution curve does not cross that bound
   // see: Stuber, M. (2013), PhD Thesis, Corollary 3.4.3.
   bool cross = false;
@@ -954,7 +905,7 @@ AEBND<T,PMT,PVT>::_precondlin
 
       // Compute diagonal preconditioning block in _Y
       _stats_ae.precond -= cpuclock();
-      CPPL::dgematrix mA, Y;
+      CPPL::dgematrix mA, Y, Q, R;
       CPPL::dgbmatrix mB;
       switch( options.PRECOND ){
 
@@ -990,6 +941,26 @@ AEBND<T,PMT,PVT>::_precondlin
         if( dgbsv( mB, Y ) ) goto nocond;//throw Exceptions( Exceptions::PRECOND );
         break;
 
+      case Options::PRECONDITIONING::QRMD:
+        mA.resize(_nblk[ib],_nblk[ib]);
+        mA.zero();
+        for( unsigned ie=0; ie<neJAC; ie++ )
+          if( cJAC[ie] < _nblk[ib] )
+            mA(rJAC[ie],cJAC[ie]) = Op<U>::mid( vJAC[ie] );
+#ifdef MC__AEBND_DEBUG
+        std::cout << "Mid-point of LHS Block #" << ib+1 << ":\n" << mA << std::endl;
+#endif
+        if( _nblk[ib]==1 ){
+          if( isequal(mA(0,0),0.) ) goto nocond;//throw Exceptions( Exceptions::PRECOND );
+          Y.resize(1,1); Y(0,0) = 1.; break;
+        }
+        if( dgeqrf( mA, Q, R ) ) goto nocond;//throw Exceptions( Exceptions::PRECOND );
+#ifdef MC__AEBND_DEBUG
+        std::cout << "QR decomposition of LHS Block #" << ib+1 << ":\n" << Q << R << Q*R << std::endl;
+#endif
+        Y = t(Q);
+        break;
+
       case Options::PRECONDITIONING::NONE:
       nocond:
         Y.resize(_nblk[ib],_nblk[ib]); Y.identity();
@@ -1010,7 +981,7 @@ AEBND<T,PMT,PVT>::_precondlin
         std::set<unsigned> colY;
         for( unsigned ie=0; ie<neJAC; ie++ )
           if( cJAC[ie] >= _nblk[ib] ){
-            auto it = colY.insert( cJAC[ie]-_nblk[ib] );
+            auto&& it = colY.insert( cJAC[ie]-_nblk[ib] );
             mC(rJAC[ie],*it.first) = Op<U>::mid( vJAC[ie] );
             //mC(rJAC[ie],cJAC[ie]-_nblk[ib]) = Op<U>::mid( vJAC[ie] );
           }
@@ -1020,26 +991,20 @@ AEBND<T,PMT,PVT>::_precondlin
         Y *= mC;
 #ifdef MC__AEBND_DEBUG
         std::cout << "Intermediate matrix Yii·mC:\n" << Y << std::endl << " { ";
-        for( auto kt=colY.begin(); kt!=colY.end(); ++kt ) std::cout << *kt << " ";
+        for( auto&& kt=colY.begin(); kt!=colY.end(); ++kt ) std::cout << *kt << " ";
         std::cout << "}" << std::endl;
 #endif
         for( unsigned i=0; i<_nblk[ib]; i++ )
           for( unsigned j=0; j<_ldblk[ib]-_nblk[ib]; j++ ){
             _Y(_pblk[ib]+i,_pblk[ib]+_nblk[ib]+j) = 0.;
-            for( auto kt=colY.begin(); kt!=colY.end(); ++kt )
+            for( auto&& kt=colY.begin(); kt!=colY.end(); ++kt )
               _Y(_pblk[ib]+i,_pblk[ib]+_nblk[ib]+j)
                 -= Y(i,*kt) * _Y(_pblk[ib]+_nblk[ib]+*kt,_pblk[ib]+_nblk[ib]+j);
           }
-//        for( unsigned i=0; i<_nblk[ib]; i++ )
-//          for( unsigned j=0; j<_ldblk[ib]-_nblk[ib]; j++ ){
-//            _Y(_pblk[ib]+i,_pblk[ib]+_nblk[ib]+j) = 0.;
-//            for( unsigned k=0; k<_ldblk[ib]-_nblk[ib]; k++ )
-//              _Y(_pblk[ib]+i,_pblk[ib]+_nblk[ib]+j)
-//                -= Y(i,k) * _Y(_pblk[ib]+_nblk[ib]+k,_pblk[ib]+_nblk[ib]+j);
-//          }
       }
 #ifdef MC__AEBND_SHOW_PRECONDITIONING
-        std::cout << "Full preconditioning matrix:\n" << _Y << std::endl;
+        std::cout << std::scientific << std::setprecision(5)
+                  << "Full preconditioning matrix:\n" << _Y << std::endl;
 #endif
       //_stats_ae.precond += cpuclock();
 
@@ -1047,7 +1012,9 @@ AEBND<T,PMT,PVT>::_precondlin
       for( unsigned i=0; i<_nblk[ib]; i++ ){
         for( unsigned j=0; j<_ldblk[ib]; j++ )
           G[_ndx(i,j,_ldblk[ib])] = 0.;
-        for( int jb=ib; jb>=0; jb-- ){
+        const int jbmin = ((options.MAXREC && ib>options.MAXREC)? ib-options.MAXREC: 0);
+        //std::cout << "jbmin: " << jbmin << std::endl;
+        for( int jb=ib; jb>=jbmin; jb-- ){
           const unsigned neJAC = std::get<0>(_jac[jb]);
           const unsigned *rJAC = std::get<1>(_jac[jb]);
           const unsigned *cJAC = std::get<2>(_jac[jb]);
@@ -1055,7 +1022,11 @@ AEBND<T,PMT,PVT>::_precondlin
           for( unsigned ie=0; ie<neJAC; ie++ ){
             const unsigned j = _pblk[jb]-_pblk[ib]+cJAC[ie];
             const unsigned k = _pblk[jb]-_pblk[ib]+rJAC[ie];
-            G[_ndx(i,j,_ldblk[ib])] += _Y(_pblk[ib]+i,_pblk[ib]+k) * vJAC[ie];
+            //std::cout << "(i,j,k): " << i << " " << j << " " << k << std::endl;
+	    if( j < _ldblk[ib] )
+              G[_ndx(i,j,_ldblk[ib])] += _Y(_pblk[ib]+i,_pblk[ib]+k) * vJAC[ie];
+	    //else
+	    //  std::cout << " -- not used" << std::endl;
           }
           if( _nblk[ib] == _ldblk[ib] ) break; // diagonal preconditioning
         }
@@ -1078,12 +1049,19 @@ AEBND<T,PMT,PVT>::_precondlin
       _dag->eval( _sgsys[ib], wkf, _nblk[ib], _sys.data()+_pblk[ib], f+_pblk[ib],
                   _nvar-_pblk[ib], _var.data()+_pblk[ib], ref+_pblk[ib] );
       // Update function value for previous block (if any)
-      if( ib && _nblk[ib] < _ldblk[ib] )
-        _dag->eval( _sgsys[ib-1], wkf, _nblk[ib-1], _sys.data()+_pblk[ib-1], f+_pblk[ib-1],
-                    _nvar-_pblk[ib-1], _var.data()+_pblk[ib-1], ref+_pblk[ib-1] );
+//      if( ib && _nblk[ib] < _ldblk[ib] )
+//        _dag->eval( _sgsys[ib-1], wkf, _nblk[ib-1], _sys.data()+_pblk[ib-1], f+_pblk[ib-1],
+//                    _nvar-_pblk[ib-1], _var.data()+_pblk[ib-1], ref+_pblk[ib-1] );  
+      const int jbmin = ((options.MAXREC && ib>options.MAXREC)? ib-options.MAXREC: 0);
+      for( int jb=ib-1; jb>=jbmin; jb-- ){
+        _dag->eval( _sgsys[jb], wkf, _nblk[jb], _sys.data()+_pblk[jb], f+_pblk[jb],
+                    _nvar-_pblk[jb], _var.data()+_pblk[jb], ref+_pblk[jb] );
+        if( !jbmin ) break; // no need to recompute ealier blocks since identical
+        //std::cout << "NO BREAK!" << std::endl; int dum; std::cin >> dum;
+      }
       _stats_ae.evalrhs += cpuclock();
 #ifdef MC__AEBND_DEBUG
-      _dag->output( _sgsys[ib] );
+      //_dag->output( _sgsys[ib] );
       //std::cout << "Intermediates in Block #" << ib+1 << ":\n";
       //for (unsigned i=0; i<_sgsys[ib].size(); i++ ) std::cout << opf[i] << std::endl;
       std::cout << "reference in Block #" << ib+1 << ":\n";
@@ -1251,6 +1229,7 @@ AEBND<T,PMT,PVT>::_ge
   try{
     // Compute preconditionned LHS matrix and RHS vector
     std::vector<U> G(_nblk[ib]*_ldblk[ib]), b(_nblk[ib]); 
+    //std::cout << "Block: " << ib << "  G is " << _nblk[ib] << "x" << _ldblk[ib] << std::endl;
     _reference( ib, var, ref, var, true ); // zero reference to compute right-hand-side vector
     _precondlin( ib, G, b, wk, f, ref, wk, jacf, var, os );
 

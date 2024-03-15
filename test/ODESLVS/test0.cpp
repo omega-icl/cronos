@@ -1,6 +1,7 @@
 #define SAVE_RESULTS		// <- Whether to save bounds to file
+#define MC__BASE_CVODES_CHECK
 
-#include "odeslvs_cvodes.hpp"
+#include "odeslv_cvodes.hpp"
 
 int main()
 {
@@ -39,33 +40,30 @@ int main()
 */
   mc::FFVar QUAD[NQ];  // Quadrature function
   QUAD[0] = X[1];
-
+/*
   mc::FFVar FCT[NF];  // State functions
   FCT[0] = X[0] * X[1];
-  FCT[1] = P[0] * pow( X[0], 2 ) + Q[0];
-/*
+  //FCT[1] = P[0] * pow( X[0], 2 );
+*/
   mc::FFVar FCT[NF*NS];  // State functions
   for( unsigned k=0; k<NF*NS; k++ ) FCT[k] = 0.;
   if( NS > 1 ) FCT[((NS-1)/NF)*NF+0] = X[0] + 0.1*P[0];
   FCT[(NS-1)*NF+0] = X[0] * X[1];
   FCT[(NS-1)*NF+1] = P[0] * pow( X[0], 2 );
   for( unsigned k=0; k<NS; k++ ) FCT[k*NF+1] += Q[0];
-*/
+
   /////////////////////////////////////////////////////////////////////////
   // Compute ODE solutions
 
-  mc::ODESLVS_CVODES LV;
+  mc::ODESLV_CVODES LV;
 
   LV.options.INTMETH   = mc::BASE_CVODES::Options::MSBDF;//MSADAMS;
-  LV.options.NLINSOL   = mc::BASE_CVODES::Options::FIXEDPOINT;//NEWTON;
-  LV.options.LINSOL    = mc::BASE_CVODES::Options::DIAG;//DENSE;
-  LV.options.FSACORR   = mc::BASE_CVODES::Options::STAGGERED;//STAGGERED1;//SIMULTANEOUS;
+  LV.options.NLINSOL   = mc::BASE_CVODES::Options::NEWTON;//FIXEDPOINT;
+  LV.options.LINSOL    = mc::BASE_CVODES::Options::DENSE;//DENSEDQ;//DIAG;
   LV.options.NMAX      = 2000;
   LV.options.DISPLAY   = 1;
-  LV.options.ATOL      = LV.options.ATOLB     = LV.options.ATOLS  = 1e-9;
-  LV.options.RTOL      = LV.options.RTOLB     = LV.options.RTOLS  = 1e-9;
-  LV.options.QERR      = LV.options.QERRS     = 1;
-  LV.options.ASACHKPT  = 1000;
+  LV.options.ATOL      = 1e-9;
+  LV.options.RTOL      = 1e-9;
 #if defined( SAVE_RESULTS )
   LV.options.RESRECORD = 100;
 #endif
@@ -78,45 +76,17 @@ int main()
   LV.set_initial( NX, IC );
   //LV.set_initial( NS, NX, IC );
   LV.set_quadrature( NQ, QUAD, Q );
-  LV.set_function( NF, FCT );
-  //LV.set_function( NS, NF, FCT );
+  //LV.set_function( NF, FCT );
+  LV.set_function( NS, NF, FCT );
   LV.setup();
-  
-  double p[NP] = { 2.95 };  // Parameter values
-
-#if defined( SAVE_RESULTS )
-  std::ofstream direcSTA, direcFSA[NP], direcASA[NF];
-  char fname[50];
-#endif
 
   std::cout << "\nCONTINUOUS-TIME INTEGRATION:\n\n";
+  double p[NP] = { 2.95 };  // Parameter values
   LV.states( p ); //, xk, f );
 #if defined( SAVE_RESULTS )
+  std::ofstream direcSTA;
   direcSTA.open( "test1_STA.dat", std::ios_base::out );
   LV.record( direcSTA );
-#endif
-
-  std::cout << "\nCONTINUOUS-TIME INTEGRATION WITH FORWARD SENSITIVITY ANALYSIS:\n\n";
-  LV.states_FSA( p ); //, xk, f, xpk, fp );
-#if defined( SAVE_RESULTS )
-  direcSTA.open( "test1_STA.dat", std::ios_base::out );
-  for( unsigned i=0; i<NP; ++i ){
-    sprintf( fname, "test1_FSA%d.dat",i );  
-    direcFSA[i].open( fname, std::ios_base::out );
-  }
-  LV.record( direcSTA, direcFSA );
-#endif
-
-  std::cout << "\nCONTINUOUS-TIME INTEGRATION WITH ADJOINT SENSITIVITY ANALYSIS:\n\n";
-  //for( unsigned i=0; i<1000; i++ )
-  LV.states_ASA( p ); //, xk, f, lk, fp );
-#if defined( SAVE_RESULTS )
-  direcSTA.open( "test1_STA.dat", std::ios_base::out );
-  for( unsigned i=0; i<NF; ++i ){
-    sprintf( fname, "test1_ASA%d.dat",i );  
-    direcASA[i].open( fname, std::ios_base::out );
-  }
-  LV.record( direcSTA, direcASA );
 #endif
 
   return 0;

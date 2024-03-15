@@ -1,6 +1,6 @@
 #define SAVE_RESULTS		// <- Whether to save bounds to file
 
-#include "odeslvs_sundials.hpp"
+#include "odeslvs_cvodes.hpp"
 
 int main()
 {
@@ -41,10 +41,10 @@ int main()
   /////////////////////////////////////////////////////////////////////////
   // Compute ODE solutions
 
-  mc::ODESLVS_SUNDIALS LV;
+  mc::ODESLVS_CVODES LV;
 
-  LV.options.JACAPPROX = mc::BASE_SUNDIALS::Options::CV_DIAG;//CV_DENSE;
-  LV.options.INTMETH   = mc::BASE_SUNDIALS::Options::MSBDF;//MSADAMS;
+  LV.options.LINSOL    = mc::BASE_CVODES::Options::DIAG;//DENSE;
+  LV.options.INTMETH   = mc::BASE_CVODES::Options::MSBDF;//MSADAMS;
   LV.options.NMAX      = 0; //20000;
   LV.options.DISPLAY   = 1;
   LV.options.ATOL      = LV.options.ATOLB      = LV.options.ATOLS  = 1e-9;
@@ -60,7 +60,8 @@ int main()
   LV.set_differential( NS, NX, RHS );
   LV.set_initial( NX, IC );
   LV.set_function( NS, NF, FCT );
-
+  LV.setup();
+  
   double p0[NP];
   p0[0] = 6.;
   p0[1] = 0.5;

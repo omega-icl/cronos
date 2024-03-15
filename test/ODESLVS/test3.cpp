@@ -1,6 +1,6 @@
 #define SAVE_RESULTS		// <- Whether to save bounds to file
 
-#include "odeslv_sundials.hpp"
+#include "odeslv_cvodes.hpp"
 
 using std::cout;
 using std::endl;
@@ -22,15 +22,10 @@ int main()
   const double psi    = 1.39e5;   // Pa, for converting P_d to P_th
   const double chi    = 3.28e-3;  // /Pa, for converting P_d to P_th
 
-  const unsigned int NS = 1;      // Time stages
   double t0 = 0., tf = 5. ;       // Time span
-  //const unsigned int NS = 1000;   // Time stages
-  //double tk[NS+1]; tk[0] = t0;
-  //for( unsigned k=0; k<NS; k++ ) tk[k+1] = tk[k] + (tf-t0)/(double)NS;
 
   const unsigned NP = 10;  // Number of parameters
   const unsigned NX = 5;   // Number of states
-  const unsigned NF = 0;   // Number of state functions
   const unsigned NQ = 3;   // Number of state quadratures
 
   mc::FFVar P[NP];  // Parameters
@@ -74,8 +69,10 @@ int main()
   /////////////////////////////////////////////////////////////////////////
   // Solve NIFTE dynamics
 
-  mc::ODESLV_SUNDIALS IVP;
-  IVP.options.INTMETH   = mc::BASE_SUNDIALS::Options::MSBDF;//MSADAMS;
+  mc::ODESLV_CVODES IVP;
+  IVP.options.INTMETH   = mc::BASE_CVODES::Options::MSBDF;//MSADAMS;
+  IVP.options.NLINSOL   = mc::BASE_CVODES::Options::NEWTON;//FIXEDPOINT;
+  IVP.options.LINSOL    = mc::BASE_CVODES::Options::DENSE;
   IVP.options.DISPLAY   = 1;
   IVP.options.NMAX      = 10000;
   IVP.options.ATOL      = IVP.options.ATOLB      = IVP.options.ATOLS  = 1e-9;
@@ -83,21 +80,16 @@ int main()
 
   IVP.set_dag( &NIFTE );
   IVP.set_time( t0, tf );
-  //IVP.set_time( NS, tk );
   IVP.set_state( NX, X );
   IVP.set_parameter( NP, P );
   IVP.set_differential( NX, RHS );
   IVP.set_initial( NX, IC );
   IVP.set_quadrature( NQ, QUAD, Q );
-
+  IVP.setup();
+  
 #if defined( SAVE_RESULTS )
   IVP.options.RESRECORD = 500;
 #endif
-  
-  //double *xk[NS+1];
-  //for( unsigned k=0; k<=NS; k++ ){
-  //  xk[k] = new double[NX+NQ];
-  //}
 
   std::cout << "\nCONTINUOUS-TIME INTEGRATION:\n\n";
   IVP.states( p );//, xk );
@@ -107,11 +99,6 @@ int main()
   direcSTA.open( "test3_STA.dat", std::ios_base::out );
   IVP.record( direcSTA );
 #endif
-
-  // cleanup
-  //for( unsigned k=0; k<=NS; k++ ){
-  //  delete[] xk[k];
-  //}
 
   return 0;
 }

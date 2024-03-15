@@ -1,4 +1,4 @@
-// Copyright (C) 2019 Benoit Chachuat, Imperial College London.
+// Copyright (C) Benoit Chachuat, Imperial College London.
 // All Rights Reserved.
 // This code is published under the Eclipse Public License.
 
@@ -7,21 +7,23 @@
 
 #undef  MC__DEBUG__BASE_DE
 
+#include <assert.h>
 #include "ffunc.hpp"
 
 namespace mc
 {
-//! @brief C++ base class for defining of parametric IVP-DAEs
+//! @brief C++ base class for defining of parametric differential-algebraic equations
 ////////////////////////////////////////////////////////////////////////
 //! mc::BASE_DE is a C++ base class for defining the variables,
 //! parameters and functions participating in parametric differential-
 //! algebraic equations (DAEs)
 ////////////////////////////////////////////////////////////////////////
+template <typename... ExtOps>
 class BASE_DE
 {
 protected:
-  //! @brief pointer to DAG of IVP-DAE system
-  FFGraph* _pDAG;
+  //! @brief pointer to DAG of equation
+  FFGraph<ExtOps...>* _dag;
 
   //! @brief max size of time stages
   unsigned _nsmax;
@@ -53,11 +55,11 @@ protected:
   //! @brief size of initial states
   unsigned _nx0;
 
-  //! @brief size of sensitivity/adjoint variables
-  unsigned _ny;
+//  //! @brief size of sensitivity/adjoint variables
+//  unsigned _ny;
 
-  //! @brief pointer to sensitivity/adjoint variables
-  FFVar* _pY;
+//  //! @brief pointer to sensitivity/adjoint variables
+//  FFVar* _pY;
 
   //! @brief size of parameters
   unsigned _np;
@@ -73,12 +75,6 @@ protected:
 
   //! @brief map between DAG index and quadrature index
   std::map<int,unsigned> _ndxQ;
-
-  //! @brief size of sensitivity/adjoint quadratures
-  unsigned _nyq;
-
-  //! @brief pointer to sensitivity/adjoint quadratures
-  FFVar* _pYQ;
 
   //! @brief size of bound multipliers
   unsigned _nbm;
@@ -131,14 +127,15 @@ protected:
 public:
   //! @brief Class constructor
   BASE_DE()
-    : _pDAG(0), _nsmax(0), _dT(), _pT(0), _nd(0), _na(0), _pDX(0),
-      _nx(0), _pX(0), _nx0(0), _ny(0), _pY(0), _np(0), _pP(0),
-      _nq(0), _pQ(0), _nyq(0), _pYQ(0), _nbm(0), _pML(0), _pMU(0), _ni(0), _nf(0)
+    : _dag(nullptr), _nsmax(0), _dT(), _pT(nullptr),
+      _nd(0), _na(0), _pDX(nullptr), _nx(0), _pX(nullptr), _nx0(0),
+      _np(0), _pP(nullptr), _nq(0), _pQ(nullptr),
+      _nbm(0), _pML(nullptr), _pMU(nullptr), _ni(0), _nf(0)
     {}
 
   //! @brief Class destructor
   virtual ~BASE_DE()
-    { delete[] _pY; delete[] _pYQ; delete[] _pDX; delete[] _pML; delete[] _pMU; }
+    { delete[] _pDX; delete[] _pML; delete[] _pMU; }
 
   //! @brief Integrator status
   enum STATUS{
@@ -148,13 +145,14 @@ public:
   };
 
   //! @brief Get pointer to DAG
-  FFGraph* dag() const
-    { return _pDAG; }
+  FFGraph<ExtOps...>* dag()
+    const
+    { return _dag; }
 
   //! @brief Set pointer to DAG
   void set_dag
-    ( FFGraph*pDAG )
-    { _pDAG = pDAG; }
+    ( FFGraph<ExtOps...>* dag )
+    { _dag = dag; }
 
   //! @brief Get size of state
   unsigned nx() const
@@ -182,15 +180,14 @@ public:
 
   //! @brief Set state
   void set_state
-    ( const unsigned nx, const FFVar*pX, const FFVar*pDX=0 )
-    { if( nx != _nx){ delete[] _pDX; _pDX = (nx?new FFVar[nx]:0); }
+    ( const unsigned nx, const FFVar*pX, const FFVar*pDX=nullptr )
+    { if( nx != _nx){ delete[] _pDX; _pDX = (nx?new FFVar[nx]:nullptr); }
       _nx = nx; _pX = pX; _ndxX.clear();
       for( unsigned ix=0; ix<_nx; ix++ ){
         //std::cout << _pX[ix].id().second << std::endl;
         _ndxX.insert( std::make_pair( _pX[ix].id().second, ix ) );
-        //_ndxX[_pX[ix].id().second] = ix;
         if( pDX ) _pDX[ix] = pDX[ix];
-        else if( _pDX[ix].dag() != _pDAG ) _pDX[ix].set( _pDAG );
+        else if( _pDX[ix].dag() != _dag ) _pDX[ix].set( _dag );
       } }
 
   //! @brief Return size of parameter
@@ -220,12 +217,12 @@ public:
 
   //! @brief Set time
   void set_time
-    ( const unsigned ns, const double*dT, const FFVar*pT=0 )
+    ( const unsigned ns, const double*dT, const FFVar*pT=nullptr )
     { _nsmax = ns; _dT.assign( dT, dT+ns+1 ); _pT = pT; }
 
   //! @brief Set time
   void set_time
-    ( const double t0, const double tf, const FFVar*pT=0 )
+    ( const double t0, const double tf, const FFVar*pT=nullptr )
     { _nsmax = 1;
       _dT.clear();
       _dT.push_back( t0 );
@@ -252,13 +249,20 @@ public:
     ( const unsigned ns, const unsigned na, const FFVar*const AE )
     { _na = na; _vAE.clear(); for( unsigned i=0; i<ns; i++ ) _vAE.push_back( AE+i*_na ); }
 
+  //! @brief Return size of quadrature
+  unsigned nq() const
+    { return _nq; }
+
+  //! @brief Get pointer to quadratures
+  const FFVar* quadrature() const
+    { return _pQ; }
+
   //! @brief Define quadrature equations in single-stage IVP-DAE
   void set_quadrature
     ( const unsigned nq, const FFVar*const QUAD, const FFVar*pQ )
     { _nq = nq; _pQ = pQ; _ndxQ.clear();
       for( unsigned iq=0; iq<_nq; iq++ )
         _ndxQ.insert( std::make_pair( _pQ[iq].id().second, iq ) );
-        //_ndxQ[_pQ[iq].id().second] = iq;
       _vQUAD.clear(); _vQUAD.push_back( QUAD ); }
 
   //! @brief Define quadrature equations in multi-stage IVP-DAE with <a>ns</a> stages
@@ -289,6 +293,10 @@ public:
     ( const unsigned ns, const unsigned nx0, const FFVar*const IC )
     { _nx0 = nx0; _vIC.clear(); for( unsigned i=0; i<ns; i++ ) _vIC.push_back( IC+i*_nx0 ); }
 
+  //! @brief Return size of function
+  unsigned nf() const
+    { return _nf; }
+
   //! @brief Define state function in single-stage IVP-DAE
   void set_function
     ( const unsigned nf, const FFVar*const FCT )
@@ -306,15 +314,15 @@ public:
 
   //! @brief Copy DAE-IVP
   void set
-    ( const BASE_DE&de )
-    { _pDAG = de._pDAG;
+    ( BASE_DE<ExtOps...> const& de )
+    { _dag = de._dag;
       _nsmax = de._nsmax; _nx = de._nx; _nx0 = de._nx0; _nd = de._nd; _na = de._na;
       _nq = de._nq; _np = de._np; _ni = de._ni; _nf = de._nf;
       _dT = de._dT; _pT = de._pT; _pX = de._pX; _pP = de._pP; _pQ = de._pQ;
       _ndxX = de._ndxX; _ndxQ = de._ndxQ;
-      delete[] _pDX; _pDX = (de._pDX && _nx? new FFVar[_nx]:0);
-      delete[] _pY; delete[] _pYQ; delete[] _pML; delete[] _pMU; _pY = _pYQ = _pML = _pMU = 0;
-      _ny = _nyq = _nbm = 0;
+      delete[] _pDX; _pDX = (de._pDX && _nx? new FFVar[_nx]: nullptr);
+      delete[] _pML; delete[] _pMU; _pML = _pMU = nullptr;
+      _nbm = 0;
       _vIC = de._vIC; _vRHS = de._vRHS; _vAE = de._vAE; _vQUAD = de._vQUAD;
       _vINV = de._vINV; _vFCT = de._vFCT; };
 
@@ -327,27 +335,6 @@ public:
     { return _istg; }
 
 protected:
-  //! @brief Get pointer to sensitivity/adjoint variables
-  const FFVar* sensitivity() const
-    { return _pY; }
-
-  //! @brief Get pointer to quadratures
-  const FFVar* quadrature() const
-    { return _pQ; }
-
-  //! @brief Get pointer to sensitivity/adjoint quadratures
-  const FFVar* sensquadrature() const
-    { return _pYQ; }
-
-  //! @brief Set sensitivity/adjoint arrays
-  void set_sensitivity
-    ( const unsigned ny, const unsigned nyq )
-    { if( _ny != ny ){ delete[] _pY; _ny = ny; _pY = new FFVar[_ny]; }
-      for( unsigned iy=0; iy<_ny; iy++ )
-        if( _pY[iy].dag() != _pDAG ) _pY[iy].set( _pDAG );
-      if( _nyq != nyq ){ delete[] _pYQ; _nyq = nyq; _pYQ = new FFVar[_nyq]; }
-      for( unsigned iyq=0; iyq<_nyq; iyq++ )
-        if( _pYQ[iyq].dag() != _pDAG ) _pYQ[iyq].set( _pDAG ); }
 
   //! @brief Get pointer to lower bound multipliers
   const FFVar* lowerboundmultiplier() const
@@ -365,24 +352,24 @@ protected:
         _nbm = _np; _pML = new FFVar[_nbm]; _pMU = new FFVar[_nbm];
       }
       for( unsigned ibm=0; ibm<_nbm; ibm++ ){
-        if( _pML[ibm].dag() != _pDAG ) _pML[ibm].set( _pDAG );
-        if( _pMU[ibm].dag() != _pDAG ) _pMU[ibm].set( _pDAG );
+        if( _pML[ibm].dag() != _dag ) _pML[ibm].set( _dag );
+        if( _pMU[ibm].dag() != _dag ) _pMU[ibm].set( _dag );
       } }
 
   //! @brief Get pointer to initial/transition value function
   const FFVar* _pIC
     ( const unsigned is=0 ) const
-    { return( is<_vIC.size()? _vIC.at( is ): 0 ); }
+    { return( is<_vIC.size()? _vIC.at( is ): nullptr ); }
 
   //! @brief Get pointer to right-hand-side function
   const FFVar* _pRHS
     ( const unsigned is ) const
-    { return( is<_vRHS.size()? _vRHS.at( is ): 0 ); }
+    { return( is<_vRHS.size()? _vRHS.at( is ): nullptr ); }
 
   //! @brief Get pointer to quadrature function
   const FFVar* _pQUAD
     ( const unsigned is ) const
-    { return( is<_vQUAD.size()? _vQUAD.at( is ): 0 ); }
+    { return( is<_vQUAD.size()? _vQUAD.at( is ): nullptr ); }
 
   //! @brief Set state/quadrature dependencies w.r.t. parameters
   bool set_depend
@@ -403,14 +390,15 @@ protected:
       const std::string&var, std::ostream&os=std::cout );
 
   //! @brief Private methods to block default compiler methods
-  BASE_DE(const BASE_DE&);
-  BASE_DE& operator=(const BASE_DE&);
+  BASE_DE( BASE_DE<ExtOps...> const& ) = delete;
+  BASE_DE<ExtOps...>& operator=( BASE_DE<ExtOps...> const& ) = delete;
 };
 
+template <typename... ExtOps>
 template <typename U>
 inline
 void
-BASE_DE::_print_interm
+BASE_DE<ExtOps...>::_print_interm
 ( const double t, const unsigned nx, const U*x, const std::string&var,
   std::ostream&os )
 {
@@ -420,10 +408,11 @@ BASE_DE::_print_interm
   return;
 }
 
+template <typename... ExtOps>
 template <typename U, typename V>
 inline
 void
-BASE_DE::_print_interm
+BASE_DE<ExtOps...>::_print_interm
 ( const double t, const unsigned nx, const U*x, const V&r,
   const std::string&var, std::ostream&os )
 {
@@ -434,10 +423,11 @@ BASE_DE::_print_interm
   return;
 }
 
+template <typename... ExtOps>
 template <typename U>
 inline
 void
-BASE_DE::_print_interm
+BASE_DE<ExtOps...>::_print_interm
 ( const unsigned nx, const U*x, const std::string&var, std::ostream&os )
 {
   if( !x ) return;
@@ -446,9 +436,10 @@ BASE_DE::_print_interm
   return;
 }
 
+template <typename... ExtOps>
 inline
 bool
-BASE_DE::set_depend
+BASE_DE<ExtOps...>::set_depend
 ( const unsigned ns )
 {
   if( _nd != _nx || _nx0 != _nx ) return false; // ODE systems only
@@ -465,12 +456,12 @@ BASE_DE::set_depend
   vVAR.insert( vVAR.end(), _pQ, _pQ+_nq );
   const unsigned nVAR = vVAR.size();
   std::vector<FFDep> depVAR( nVAR, 0 );
-  for( unsigned ip=0; ip<_np; ++ip ) depVAR[ip] = _pP[ip].dep();
+  for( unsigned ip=0; ip<_np; ++ip ) depVAR[ip].indep( ip );//_pP[ip].id().second );
 
   // Initial/transition condition
   const FFVar* pIC = _pIC();
   if( !pIC ) return false;
-  _pDAG->eval( _nx, pIC, _depX.data(), _np+1, vVAR.data(), depVAR.data() ); 
+  _dag->eval( _nx, pIC, _depX.data(), _np+1, vVAR.data(), depVAR.data() ); 
   for( unsigned ix=0; ix<_nx; ix++ ){
     depVAR[_np+1+ix] = _depX[ix];
 #ifdef MC__DEBUG__BASE_DE
@@ -483,7 +474,7 @@ BASE_DE::set_depend
     const unsigned _pos_ic = ( _vIC.size()>=ns? is:0 );
     if( _pos_ic ){
       const FFVar* pIC = _pIC(is);
-      _pDAG->eval( _nx, pIC, _depX.data()+_nx*is, _np+1+_nx, vVAR.data(), depVAR.data() ); 
+      _dag->eval( _nx, pIC, _depX.data()+_nx*is, _np+1+_nx, vVAR.data(), depVAR.data() ); 
       for( unsigned ix=0; ix<_nx; ix++ ){
         depVAR[_np+1+ix] = _depX[ix];
 #ifdef MC__DEBUG__BASE_DE
@@ -499,7 +490,7 @@ BASE_DE::set_depend
     for( unsigned ix=0; ix<_nx; ix++ )
       std::cout << "X[" << is+1 << "][" << ix << "]: " << depVAR[_np+1+ix] << std::endl;
 #endif
-    _pDAG->eval( _nx, pRHS, _depX.data()+_nx*is, _np+1+_nx, vVAR.data(), depVAR.data() ); 
+    _dag->eval( _nx, pRHS, _depX.data()+_nx*is, _np+1+_nx, vVAR.data(), depVAR.data() ); 
     for( unsigned ix=0; ix<_nx; ix++ ){
       depVAR[_np+1+ix] += _depX[_nx*is+ix];
 #ifdef MC__DEBUG__BASE_DE
@@ -509,7 +500,7 @@ BASE_DE::set_depend
     bool iterate = true;
     while( iterate ){
       iterate = false;
-      _pDAG->eval( _nx, pRHS, _depX.data()+_nx*is, _np+1+_nx, vVAR.data(), depVAR.data() ); 
+      _dag->eval( _nx, pRHS, _depX.data()+_nx*is, _np+1+_nx, vVAR.data(), depVAR.data() ); 
       for( unsigned ix=0; ix<_nx; ix++ ){
         if( depVAR[_np+1+ix] == depVAR[_np+1+ix]+_depX[_nx*is+ix] ) continue;
         iterate = true;
@@ -526,9 +517,9 @@ BASE_DE::set_depend
       const FFVar* pQUAD = _pQUAD(pos_quad);
       if( !pQUAD ) return false;
 #ifdef MC__DEBUG__BASE_DE
-      _pDAG->output( _pDAG->subgraph( _nq, pQUAD ) );
+      _dag->output( _dag->subgraph( _nq, pQUAD ) );
 #endif
-      _pDAG->eval( _nq, pQUAD, _depQ.data()+_nq*is, _np+1+_nx, vVAR.data(), depVAR.data() ); 
+      _dag->eval( _nq, pQUAD, _depQ.data()+_nq*is, _np+1+_nx, vVAR.data(), depVAR.data() ); 
       for( unsigned iq=0; iq<_nq; iq++ ){
 #ifdef MC__DEBUG__BASE_DE
         std::cout << "Q[" << is+1 << "][" << iq << "]: " << _depQ[_nq*is+iq] << std::endl;
@@ -540,7 +531,7 @@ BASE_DE::set_depend
     // Function stage contribution
     if( _nf ){
       const FFVar* pFCT = _vFCT.at( is );
-      _pDAG->eval( _nf, pFCT, _depF.data(), nVAR, vVAR.data(), depVAR.data(), true );
+      _dag->eval( _nf, pFCT, _depF.data(), nVAR, vVAR.data(), depVAR.data(), true );
 #ifdef MC__DEBUG__BASE_DE
       for( unsigned ic=0; ic<_nf; ic++ )
         std::cout << "G[" << is+1 << "][" << ic << "]: " << _depF[ic] << std::endl;

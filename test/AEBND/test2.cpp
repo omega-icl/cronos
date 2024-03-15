@@ -2,10 +2,26 @@ const unsigned int NPM   = 2;	// <- Order of Taylor model
 #define USE_CMODEL		// <- Use Chebyshev models?
 #undef  MC__AEBND_SHOW_PRECONDITIONING
 
-#include "aebnd.hpp"
-
-#include "interval.hpp"
-typedef mc::Interval I;
+#ifdef MC__USE_PROFIL
+ #include "mcprofil.hpp"
+ typedef INTERVAL I;
+#else
+ #ifdef MC__USE_FILIB
+  #include "mcfilib.hpp"
+  typedef filib::interval<double,filib::native_switched,filib::i_mode_extended> I;
+ #else
+  #ifdef MC__USE_BOOST
+   #include "mcboost.hpp"
+   typedef boost::numeric::interval_lib::save_state<boost::numeric::interval_lib::rounded_transc_opp<double>> T_boost_round;
+   typedef boost::numeric::interval_lib::checking_base<double> T_boost_check;
+   typedef boost::numeric::interval_lib::policies<T_boost_round,T_boost_check> T_boost_policy;
+   typedef boost::numeric::interval<double,T_boost_policy> I;
+  #else
+   #include "interval.hpp"
+   typedef mc::Interval I;
+  #endif
+ #endif
+#endif
 
 #ifdef USE_CMODEL
   #include "cmodel.hpp"
@@ -17,11 +33,14 @@ typedef mc::Interval I;
   typedef mc::TVar<I> PV;
 #endif
 
-using namespace CPPL;
+#include "aebnd.hpp"
+typedef mc::FFGraph<> t_DAG;
+typedef mc::AEBND<I,PM,PV> t_AEBND;
 
 int main()
 {
-  mc::FFGraph NLE;  // DAG describing the problem
+ try{
+  t_DAG NLE;  // DAG describing the problem
 
   const unsigned NP = 1;  // Parameter dimension
   const unsigned NT = 11;  // State dimension
@@ -52,25 +71,29 @@ int main()
 
   /////////////////////////////////////////////////////////////////////////
   // Bound AE solution set
-  mc::AEBND<I,PM,PV> BND;
+  t_AEBND BND;
 
   BND.set_dag( &NLE );
   BND.set_var( NP, P );
   BND.set_dep( NT, T, F );
 
-  BND.options.DISPLAY = 1;
-  BND.options.MAXIT   = 20;
-  BND.options.RTOL    =
-  BND.options.ATOL    = 1e-10;
-  BND.options.BOUNDER  = mc::AEBND<I,PM,PV>::Options::ALGORITHM::GS;//GE;//KRAW;//GS;
-  BND.options.PRECOND  = mc::AEBND<I,PM,PV>::Options::PRECONDITIONING::INVMD;//QRM;//NONE;
-  BND.options.BLKDEC   = mc::AEBND<I,PM,PV>::Options::DECOMPOSITION::RECUR;//NONE;//DIAG;
+  BND.options.DISPLEVEL = 1;
+  BND.options.MAXIT     = 20;
+  BND.options.RTOL      =
+  BND.options.ATOL      = 1e-10;
+  BND.options.BOUNDER   = t_AEBND::Options::ALGORITHM::GS;//GE;//KRAW;//GS;
+  BND.options.PRECOND   = t_AEBND::Options::PRECONDITIONING::INVMD;//QRM;//NONE;
+  BND.options.BLKDEC    = t_AEBND::Options::DECOMPOSITION::RECUR;//NONE;//DIAG;
 
   BND.setup();
-  std::cout << "\nSuccessful? " << (BND.solve( Ip, It, It0 )==mc::AEBND<I,PM,PV>::NORMAL?"Y\n":"N\n");
-  std::cout << "\nSuccessful? " << (BND.solve( PMp, PMt, It )==mc::AEBND<I,PM,PV>::NORMAL?"Y\n":"N\n");
+  std::cout << "\nSuccessful? " << (BND.solve( Ip, It, It0 )==t_AEBND::NORMAL?"Y\n":"N\n");
+  std::cout << "\nSuccessful? " << (BND.solve( PMp, PMt, It )==t_AEBND::NORMAL?"Y\n":"N\n");
+ }
 
-  return 0;
+ catch( t_AEBND::Exceptions &eObj ){
+  std::cerr << "Error " << eObj.ierr()
+            << eObj.what() << std::endl;
+ }
+
+ return 0;
 }
-
-

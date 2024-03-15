@@ -1,17 +1,17 @@
 # THIRD-PARTY LIBRARIES <<-- CHANGE AS APPROPRIATE -->>
 
 PATH_CRONOS = $(shell cd ../.. ; pwd)
-LIB_CRONOS = -L$(PATH_CRONOS)/lib -Wl,-rpath=$(PATH_CRONOS)/lib -lcronos
+LIB_CRONOS = #-L$(PATH_CRONOS)/lib -Wl,-rpath=$(PATH_CRONOS)/lib -lcronos
 INC_CRONOS = -I$(PATH_CRONOS)/include
 
 include $(PATH_CRONOS)/src/makeoptions.mk
 
 #####
 
-all: test1 test2 test3
+all: test0 test0b test1 test1b test2 test3
 
 test% : test%.o
-	$(CPP) $< $(LIB_CRONOS) $(LIB_DEP) -o $@
+	$(CPP) $^ $(LIB_CRONOS) $(LIB_DEP) -o $@
 
 %.o : %.cpp
 	$(CPP) -c $(FLAG_CPP) $(INC_CRONOS) $(INC_DEP) $< -o $@
@@ -21,16 +21,18 @@ test% : test%.o
 graph : gendot gensvg
 
 gendot :
-	dot -Tsvg -O $(shell ls *.dot)
+	dot -Tpng -O $(shell ls *.dot)
 
 gensvg :
-	@for FILE in $(shell ls *.svg); do \
+	@for FILE in $(shell ls *.png); do \
 	  echo $$FILE; \
+	  convert -resize 70% $$FILE $$FILE; \
 	  (display $$FILE &); \
 	done
 
 #####
 
 clean:
-	rm -f test? test?b *.o *.out *.dat *.eps *.dot *.svg *~
+	rm -f *.o *.out *.dat *.eps *.dot *.svg *.png *~
+	rm -f test? test??
 

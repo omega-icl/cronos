@@ -1,10 +1,10 @@
 
-  CRONOS - Complete seaRch sOlutions for NOnlinear Systems ( version 1.0.0 )
+  CRONOS - Complete seaRch sOlutions for NOnlinear Systems (version 3.0)
                                  ----
 
 This directory contains the C++ implementation of the library CRONOS
-implementing complete search techniques for nonlinear and dynamic 
-systems.
+implementing simulation and relaxation techniques for nonlinear systems
+of algebraic and equations with applications in complete-search optimization.
 
 For more information, see 
 

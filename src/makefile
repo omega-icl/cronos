@@ -4,13 +4,13 @@
 #   and the compiled libraries
 # - `make cleaninstall' removes the libraries, object files, and links
 
-export version = 1.1
+export version = 2.0
 
 export rootpath = $(shell cd .. ; pwd)
 export srcpath  = $(rootpath)/src
 export incpath  = $(rootpath)/include
+export binpath  = $(rootpath)/bin
 export libpath  = $(rootpath)/lib
-export thirdppath = $(srcpath)/3rdparty
 
 #####
 
@@ -25,9 +25,12 @@ dirs :
 		echo creating directory for compiled libraries; \
 		mkdir $(libpath); \
 	fi
+#	@if test ! -e $(binpath)/; then \
+#		echo creating directory for executables; \
+#		mkdir $(binpath); \
+#	fi
 
 cronos_inst:
-	echo $(thirdppath)
 	-(cd $(srcpath); make -f cronos.mk install)
 
 #####

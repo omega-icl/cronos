@@ -1,4 +1,4 @@
-// Copyright (C) 2014 Benoit Chachuat, Imperial College London.
+// Copyright (C) Benoit Chachuat, Imperial College London.
 // All Rights Reserved.
 // This code is published under the Eclipse Public License.
 
@@ -16,11 +16,19 @@ namespace mc
 //! equations, distinguishing between independent and dependent
 //! variables
 ////////////////////////////////////////////////////////////////////////
+template <typename... ExtOps>
 class BASE_AE
 {
+public:
+  //! @brief Infinity
+  static double INF;
+
 protected:
   //! @brief pointer to DAG of equation
-  FFGraph* _dag;
+  FFGraph<ExtOps...>* _dag;
+
+  //! @brief parameters
+  std::vector<FFVar> _par;
 
   //! @brief decision variables
   std::vector<FFVar> _var;
@@ -30,21 +38,6 @@ protected:
 
   //! @brief equation system
   std::vector<FFVar> _sys;
-
-  //! @brief variable lower bound multipliers
-  std::vector<FFVar> _varlm;
-
-  //! @brief variable upper bound multipliers
-  std::vector<FFVar> _varum;
-
-  //! @brief dependent lower bound multipliers
-  std::vector<FFVar> _deplm;
-
-  //! @brief dependent upper bound multipliers
-  std::vector<FFVar> _depum;
-
-  //! @brief equation multipliers
-  std::vector<FFVar> _sysm;
 
   //! @brief Whether the system equations have changed
   bool _newsys;
@@ -85,9 +78,14 @@ protected:
   //! @brief variable indices after possible permutation (reverse)
   std::vector<unsigned> _rpdep;
 
-  //! @brief Perform block decomposition of system
+  //! @brief Perform block decomposition of system using Harwell's MC13
   bool set_block
     ( const bool disp=false, std::ostream&os=std::cout );
+
+  //! @brief Set block decomposition of system using user arrays IOR, IB and IPERM (per Harwell's MC13 input/output)
+  bool set_block
+    ( int const NB, int const* IOR=nullptr, int const* IB=nullptr, int const* IPERM=nullptr,
+      const bool disp=false, std::ostream&os=std::cout );
 
   //! @brief Reset block decomposition
   bool reset_block
@@ -100,7 +98,7 @@ public:
 
   //! @brief Class constructor
   BASE_AE()
-    : _dag(0), _newsys(true), _noblk(0), _singsys(false), _linsys(false)
+    : _dag(nullptr), _newsys(true), _noblk(0), _singsys(false), _linsys(false)
     {}
 
   //! @brief Class destructor
@@ -108,135 +106,172 @@ public:
     {}
 
   //! @brief Get pointer to DAG
-  FFGraph* dag() const
+  FFGraph<ExtOps...>* dag()
+    const
     { return _dag; }
 
   //! @brief Set pointer to DAG
   void set_dag
-    ( FFGraph*dag )
+    ( FFGraph<ExtOps...>* dag )
     { _dag = dag; }
 
+  //! @brief Get parameters
+  std::vector<FFVar> const& par()
+    const
+    { return _par; }
+
+  //! @brief Set parameters
+  void set_par
+    ( std::vector<FFVar> const& par, std::vector<double> const& val=std::vector<double>() )
+    { _par = par;
+      for( unsigned i=0; i<val.size() && i<_par.size(); i++ ){
+        _par[i].set( val[i] );
+      }
+    }
+
+  //! @brief Add parameters
+  void add_par
+    ( std::vector<FFVar> const& par, std::vector<double> const& val=std::vector<double>() )
+    { _par.insert( _par.end(), par.begin(), par.end() );
+      for( unsigned i=0; i<val.size() && i<par.size(); i++ ){
+        _par[_par.size()-par.size()+i].set( val[i] );
+      }
+    }
+
+  //! @brief Set parameters
+  void set_par
+    ( unsigned const npar, FFVar const* par, double const* val=0 )
+    { _par.assign( par, par+npar );
+      for( unsigned i=0; val && i<_par.size(); i++ ){
+        _par[i].set( val[i] );
+      }
+    }
+
+  //! @brief Add parameters
+  void add_par
+    ( unsigned const npar, FFVar const* par, double const* val=0 )
+    { _par.insert( _par.end(), par, par+npar );
+      for( unsigned i=0; val && i<npar; i++ ){
+        _par[_par.size()-npar+i].set( val[i] );
+      }
+    }
+
+  //! @brief Set parameters
+  void set_par
+    ( FFVar const& par )
+    { _par.assign( &par, &par+1 );
+    }
+
+  //! @brief Set parameters
+  void set_par
+    ( FFVar const& par, double const val )
+    { _par.assign( &par, &par+1 );
+      _par[0].set( val );
+    }
+
+  //! @brief Add parameter
+  void add_par
+    ( const FFVar&par )
+    { _par.push_back( par ); }
+
+  //! @brief Add parameter
+  void add_par
+    ( const FFVar&par, const double val )
+    { _par.push_back( par );
+      _par.back().set( val ); }
+
+  //! @brief Reset parameters
+  void reset_par
+    ()
+    { _par.clear(); }
+
   //! @brief Get decision variables
-  const std::vector<FFVar>& var() const
+  std::vector<FFVar> const& var() const
     { return _var; }
 
   //! @brief Set decision variables
   void set_var
-    ( const std::vector<FFVar>&var )
-    { _var = var;
-      _varlm.clear(); _varum.clear();
-      for( unsigned i=0; i<_var.size(); i++ ){
-        _varlm.push_back( FFVar( _dag ) );
-        _varum.push_back( FFVar( _dag ) );
-      }
-    }
+    ( std::vector<FFVar> const& var )
+    { _var = var; }
 
   //! @brief Add decision variables
   void add_var
-    ( const std::vector<FFVar>&var )
-    { _var.insert( _var.end(), var.begin(), var.end() );
-      for( unsigned i=0; i<var.size(); i++ ){
-        _varlm.push_back( FFVar( _dag ) );
-        _varum.push_back( FFVar( _dag ) );
-      }
-    }
+    ( std::vector<FFVar> const& var )
+    { _var.insert( _var.end(), var.begin(), var.end() ); }
 
   //! @brief Set decision variables
   void set_var
-    ( const unsigned nvar, const FFVar*var )
-    { _var.assign( var, var+nvar );
-      for( unsigned i=0; i<_var.size(); i++ ){
-        _varlm.push_back( FFVar( _dag ) );
-        _varum.push_back( FFVar( _dag ) );
-      }
-    }
+    ( unsigned const nvar, FFVar const* var )
+    { _var.assign( var, var+nvar ); }
 
   //! @brief Add decision variables
   void add_var
-    ( const unsigned nvar, const FFVar*var )
-    { _var.insert( _var.end(), var, var+nvar );
-      for( unsigned i=0; i<nvar; i++ ){
-        _varlm.push_back( FFVar( _dag ) );
-        _varum.push_back( FFVar( _dag ) );
-      }
-    }
+    ( unsigned const nvar, FFVar const* var )
+    { _var.insert( _var.end(), var, var+nvar ); }
 
   //! @brief Add decision variable
   void add_var
-    ( const FFVar&var )
-    { _var.push_back( var );
-      _varlm.push_back( FFVar( _dag ) );
-      _varum.push_back( FFVar( _dag ) );
-    }
+    ( FFVar const& var )
+    { _var.push_back( var ); }
 
   //! @brief Reset decision variables
   void reset_var
     ()
-    { _var.clear(); _varlm.clear(); _varum.clear(); }
+    { _var.clear(); }
 
   //! @brief Get dependent variables
-  const std::vector<FFVar>& dep() const
+  std::vector<FFVar> const& dep
+    ()
+    const
     { return _dep; }
 
   //! @brief Get equation system
-  const std::vector<FFVar>& sys() const
+  std::vector<FFVar> const& sys
+    ()
+    const
     { return _sys; }
 
   //! @brief Set dependent variables
   void set_dep
-    ( const std::vector<FFVar>&dep, const std::vector<FFVar>&sys )
-    { assert( dep.size()==sys.size() ); _dep = dep; _sys = sys;
-      for( unsigned i=0; i<_dep.size(); i++ ){
-        _deplm.push_back( FFVar( _dag ) );
-        _depum.push_back( FFVar( _dag ) );
-        _sysm.push_back( FFVar( _dag ) );
-      }
-      _newsys = true;
-    }
+    ( std::vector<FFVar> const& dep, std::vector<FFVar> const& sys )
+    { assert( dep.size() == sys.size() );
+      _dep = dep;
+      _sys = sys;
+      _newsys = true; }
 
   //! @brief Set dependent variables
   void set_dep
-    ( const unsigned ndep, const FFVar*dep, const FFVar*eq )
-    { _dep.assign( dep, dep+ndep ); _sys.assign( eq, eq+ndep );
-      for( unsigned i=0; i<_dep.size(); i++ ){
-        _deplm.push_back( FFVar( _dag ) );
-        _depum.push_back( FFVar( _dag ) );
-        _sysm.push_back( FFVar( _dag ) );
-      }
-      _newsys = true;
-    }
-
-  //! @brief Reset dependent variables
-  void reset_dep
-    ()
-    { _dep.clear(); _deplm.clear(); _depum.clear(); }
+    ( unsigned const ndep, FFVar const* dep, FFVar const* sys )
+    { _dep.assign( dep, dep+ndep );
+      _sys.assign( sys, sys+ndep );
+      _newsys = true; }
 
   //! @brief Add dependent variable
   void add_dep
-    ( const FFVar&dep )
-    { _dep.push_back( dep );
-      _deplm.push_back( FFVar( _dag ) );
-      _depum.push_back( FFVar( _dag ) ); }
+    ( FFVar const& dep )
+    { _dep.push_back( dep ); }
+    
+  //! @brief Reset dependent variables
+  void reset_dep
+    ()
+    { _dep.clear(); _newsys = true; }
+
+  //! @brief Add algebraic equation
+  void add_sys
+    ( FFVar const& sys )
+    { _sys.push_back( sys );
+      _newsys = true; }
 
   //! @brief Reset algebraic equations
   void reset_sys
     ()
-    { _sys.clear(); _sysm.clear(); _newsys = true; }
-
-  //! @brief Add algebraic equation
-  void add_sys
-    ( const FFVar&eq )
-    { _sys.push_back( eq );
-      _sysm.push_back( FFVar( _dag ) );
-      _newsys = true;
-    }
+    { _sys.clear(); _newsys = true; }
 
   //! @brief Copy algebraic system and structure
   void set
-    ( const BASE_AE&aes )
-    { _dag = aes._dag; _var = aes._var; _dep = aes._dep; _sys = aes._sys; 
-      _varlm = aes._varlm; _varum = aes._varum; _deplm  = aes._deplm;
-      _depum = aes._depum; _sysm  = aes._sysm;  _newsys = aes._newsys;
+    ( BASE_AE<ExtOps...> const& aes )
+    { _dag = aes._dag; //std::cout << "DAG: " << aes._dag << std::endl;
+      _var = aes._var; _dep = aes._dep; _sys = aes._sys; _newsys = aes._newsys;
       _noblk = aes._noblk; _pblk  = aes._pblk;  _nblk   = aes._nblk;
       _singsys = aes._singsys; _linsys = aes._linsys; _linblk = aes._linblk;
       _lindep = aes._lindep; _bwsys = aes._bwsys; _bwblk = aes._bwblk;
@@ -244,99 +279,85 @@ public:
 
   //! @brief Number of blocks
   unsigned int noblk
-    () const
+    ()
+    const
     { return _noblk; }
 
-  //! @brief Size of block #ib
+  //! @brief Size of block ib
   unsigned int nblk
-    ( const unsigned ib ) const
+    ( const unsigned ib )
+    const
     { return ib<_noblk? _nblk[ib]: 0; }
 
   //! @brief Current block
   unsigned int iblk
-    () const
+    ()
+    const
     { return _iblk; }
 
-  //! @brief Linearity of block #ib
+  //! @brief Linearity of block ib
   bool linblk
-    ( const unsigned ib ) const
+    ( const unsigned ib )
+    const
     { return ib<_noblk? _linblk[ib]: false; }
 
-  //! @brief Equations in block #ib
-  const FFVar* eqblk
-    ( const unsigned ib ) const
+  //! @brief Equations in block ib
+  FFVar const* eqblk
+    ( const unsigned ib )
+    const
     { return ib<_noblk? _sys.data()+_pblk[ib]: 0; }
 
-  //! @brief Variables in block #ib
-  const FFVar* depblk
-    ( const unsigned ib ) const
+  //! @brief Variables in block ib
+  FFVar const* depblk
+    ( const unsigned ib )
+    const
     { return ib<_noblk? _dep.data()+_pblk[ib]: 0; }
 
-  //! @brief Linearity of block #ib
+  //! @brief Linearity of block ib
   bool lindepblk
-    ( const unsigned ib, const unsigned j ) const
+    ( const unsigned ib, const unsigned j )
+    const
     { return ib<_noblk && j<_nblk[ib]? _lindep[_pblk[ib]+j]: false; }
 
   //! @brief Forward permutation of dependent variables
   unsigned int pblk
-    ( const unsigned ib ) const
+    ( const unsigned ib )
+    const
     { return ib<_noblk? _pblk[ib]: 0; }
 
   //! @brief Forward permutation of dependent variables
   unsigned int fpdep
-    ( const unsigned i ) const
+    ( const unsigned i )
+    const
     { return i<_dep.size()? _fpdep[i]: 0; }
 
   //! @brief Reverse permutation of dependent variables
   unsigned int rpdep
-    ( const unsigned i ) const
+    ( const unsigned i )
+    const
     { return i<_dep.size()? _rpdep[i]: 0; }
 
   //! @brief Reverse permutation of dependent variables
   unsigned int rpdep
-    ( const unsigned ib, const unsigned j ) const
+    ( const unsigned ib, const unsigned j )
+    const
     { return ib<_noblk && j<_nblk[ib]? _rpdep[_pblk[ib]+j]: 0; }
-
-  //! @brief Infinity
-  static double INF;
   /** @} */
 
 protected:
-//  //! @brief Get pointer to lower bound multipliers
-//  const FFVar* lowerboundmultiplier() const
-//    { return _lbm.data(); }
-
-//  //! @brief Get pointer to upper bound multipliers
-//  const FFVar* upperboundmultiplier() const
-//    { return _ubm.data(); }
-
-//  //! @brief Set bound multipliers
-//  void set_boundmultiplier
-//    ()
-//    { for( unsigned i=_lbm.size(); i<_var.size()+_dep.size(); i++ ){
-//        _lbm.push_back( FFVar(_dag) );
-//        _ubm.push_back( FFVar(_dag) );
-//      } }
-
-//  //! @brief Get pointer to equation multipliers
-//  const FFVar* equationmultiplier() const
-//    { return _sysm.data(); }
-
-//  //! @brief Set equation multipliers
-//  void set_equationmultiplier
-//    ()
-//    { for( unsigned i=_sysm.size(); i<_sys.size(); i++ )
-//        _sysm.push_back( FFVar(_dag) ); }
 
   //! @brief Private methods to block default compiler methods
-  BASE_AE(const BASE_AE&);
-  BASE_AE& operator=(const BASE_AE&);
+  BASE_AE( BASE_AE<ExtOps...> const& );
+  BASE_AE<ExtOps...>& operator=( BASE_AE<ExtOps...> const& );
 };
 
-double BASE_AE::INF = 1e20;
+template <typename... ExtOps>
+inline double BASE_AE<ExtOps...>::INF = 1E30;
 
-inline bool
-BASE_AE::reset_block
+template <typename... ExtOps>
+inline
+bool
+BASE_AE<ExtOps...>::reset_block
 ()
 {
   const unsigned int ndep = _dep.size();
@@ -349,21 +370,59 @@ BASE_AE::reset_block
   return true;
 }
 
-inline bool
-BASE_AE::set_block
+template <typename... ExtOps>
+inline
+bool
+BASE_AE<ExtOps...>::set_block
 ( const bool disp, std::ostream&os )
 {
   const unsigned int ndep = _dep.size();
   if( !ndep || _sys.size() != ndep ) return false;
   if( !_newsys ) return true;
-  _newsys = false;
+  //_newsys = false;
 
   // Perform block lower-triangular decomposition using MC21A/MC13D
   int NB = 1;
   std::vector<int> IPERM(ndep), IOR(ndep), IB(ndep);
   _singsys = !_dag->MC13( ndep, _sys.data(), _dep.data(), IPERM.data(),
-    IOR.data(), IB.data(), NB, disp?true:false, os );
+                          IOR.data(), IB.data(), NB, disp?true:false, os );
   if( _singsys ) return reset_block();
+
+  return set_block( NB, IOR.data(), IB.data(), IPERM.data() );
+}
+
+template <typename... ExtOps>
+inline
+bool
+BASE_AE<ExtOps...>::set_block
+( int const NB, int const* IOR, int const* IB, int const* IPERM,
+  const bool disp, std::ostream&os )
+{
+  const unsigned int ndep = _dep.size();
+  if( !ndep || _sys.size() != ndep ) return false;
+  if( !_newsys ) return true;
+  _newsys  = false;
+  _singsys = false;
+
+//  // Display permuted system structure
+//  if( disp ){
+//    std::cout << std::endl << "Number of Blocks: " << NB << std::endl;
+//    os << "Lower-triangular block structure:" << std::endl
+//       << std::right << "     ";
+//    for( unsigned j=0; j<nDep; j++ )
+//    //  os << " " << std::setw(3) << IOR[j]-1;
+//      os << " " << std::setw(4) << _dep[IOR[j]-1];
+//    os << std::endl;
+//    for( unsigned i=0; i<nDep; i++ ){
+//      //os << std::setw(3) << IPERM[IOR[i]-1]-1 << " ";
+//      os << std::setw(4) << _sys[IPERM[IOR[i]-1]-1] << " ";
+//      for( unsigned j=0; j<nDep; j++ )
+//        os << std::setw(3) << " "
+//           << (vDep[IPERM[IOR[i]-1]-1].dep(IOR[j]-1).first?"X ":"  ");
+//      os << std::endl;
+//    }
+//    os << std::endl;
+//  }
 
   // Permute order of equation system AND variables in vectors sys and var,
   // now arranged in upper-triangular block form
@@ -371,10 +430,18 @@ BASE_AE::set_block
   std::vector<FFVar> sys(ndep), var(ndep);
   _fpdep.resize(ndep); _rpdep.resize(ndep);
   for( unsigned int i=0; i<ndep; i++ ){
-    sys[i] = _sys[IPERM[IOR[ndep-i-1]-1]-1];
-    var[i] = _dep[IOR[ndep-i-1]-1];
-    _fpdep[IOR[i]-1] = ndep-i-1;
-    _rpdep[ndep-i-1] = IOR[i]-1;
+    if( IOR ){
+      sys[i] = IPERM? _sys[IPERM[IOR[ndep-i-1]-1]-1]: _sys[IOR[ndep-i-1]-1];
+      var[i] = _dep[IOR[ndep-i-1]-1];
+      _fpdep[IOR[i]-1] = ndep-i-1;
+      _rpdep[ndep-i-1] = IOR[i]-1;
+    }
+    else{
+      sys[i] = IPERM? _sys[IPERM[ndep-i-1]-1]: _sys[ndep-i-1];
+      var[i] = _dep[ndep-i-1];
+      _fpdep[i] = ndep-i-1;
+      _rpdep[ndep-i-1] = i;    
+    }
   }
   _sys = sys;
   _dep = var;
@@ -384,8 +451,15 @@ BASE_AE::set_block
   _nblk.resize(_noblk);
   _pblk.resize(_noblk);
   for( int i=0; i<NB; i++ ){
-    _nblk[i] = ( i==NB-1? ndep+1: IB[i+1] ) - IB[i]; 
-    _pblk[i] = ndep+1 - IB[i] - _nblk[i];   
+    if( IB ){
+      _nblk[i] = ( i==NB-1? ndep+1: IB[i+1] ) - IB[i];
+      _pblk[i] = ndep - (IB[i]-1) - _nblk[i];
+    }
+    else{
+      assert( NB == (int)ndep );
+      _nblk[i] = 1;
+      _pblk[i] = ndep-i-1;
+    }
   }
 
   // Systam & block properties (linearity, Jacobian bandwidth)
@@ -398,8 +472,7 @@ BASE_AE::set_block
   std::vector<FFDep> depsys(ndep), depvar(var.size());
   for( unsigned i=0; i<ndep; i++ ) depvar[i].indep(i);
   //for( unsigned i=0; i<var.size(); i++ ) std::cout << var[i] << ": " << depvar[i] << std::endl;
-  _dag->eval( ndep, sys.data(), depsys.data(), var.size(), var.data(),
-              depvar.data() );
+  _dag->eval( ndep, sys.data(), depsys.data(), var.size(), var.data(), depvar.data() );
   _bwsys.first = _bwsys.second = 0;
   for( unsigned i=0; i<ndep; i++ ){
     auto cit = depsys[i].dep().begin();

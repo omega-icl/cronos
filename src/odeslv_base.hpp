@@ -17,6 +17,10 @@
 
 #include "base_de.hpp"
 
+#ifdef MC__MBDOE_SETUP_DEBUG
+ #include "ffexpr.hpp"
+#endif
+
 namespace mc
 {
 //! @brief C++ base class for computing solutions of parametric ODEs using continuous-time real-valued integration.
@@ -161,6 +165,10 @@ protected:
   //! @brief Function setting up local DAG
   bool _SETUP
     ();
+
+  //! @brief Function setting up DAG of IVP
+  bool _SETUP
+    ( ODESLV_BASE<ExtOps...> const& IVP );
 
   //! @brief Function converting integrator array to internal format
   template <typename REALTYPE>
@@ -332,10 +340,29 @@ ODESLV_BASE<ExtOps...>::_SETUP
   _vRHS.clear();
   _vRHS.reserve( BASE_DE<ExtOps...>::_vRHS.size() );
   for( auto& rhs0 : BASE_DE<ExtOps...>::_vRHS ){
+#ifdef MC__ODESLV_BASE_DEBUG
+    //BASE_DE<ExtOps...>::_dag->output( BASE_DE<ExtOps...>::_dag->subgraph( _nx, rhs0 ), " - Before insert" );
+    FFSubgraph sgrhs0 = BASE_DE<ExtOps...>::_dag->subgraph( _nx, rhs0 );
+    std::vector<FFExpr> exprrhs0 = FFExpr::subgraph( BASE_DE<ExtOps...>::_dag, sgrhs0 ); 
+    for( unsigned j=0; j<_nx; ++j )
+        std::cout << "RHS0[" << j << "] = " << exprrhs0[j] << std::endl;
+#endif
     FFVar* rhs = new FFVar[_nx];
+    //for( unsigned j=0; j<_nx; ++j ){
+    //  BASE_DE<ExtOps...>::_dag->output( BASE_DE<ExtOps...>::_dag->subgraph( 1, rhs0+j ), " - Before insert" );
+    //  _dag->insert( BASE_DE<ExtOps...>::_dag, 1, rhs0+j, rhs+j );
+    //}
     _dag->insert( BASE_DE<ExtOps...>::_dag, _nx, rhs0, rhs );
     _vRHS.push_back( rhs );
+#ifdef MC__ODESLV_BASE_DEBUG
+    //_dag->output( _dag->subgraph( _nx, rhs ), " - After insert" );
+    FFSubgraph sgrhs = _dag->subgraph( _nx, rhs );
+    std::vector<FFExpr> exprrhs = FFExpr::subgraph( _dag, sgrhs ); 
+    for( unsigned j=0; j<_nx; ++j )
+        std::cout << "RHS[" << j << "] = " << exprrhs[j] << std::endl;
+#endif
   }
+  //std::cout << *_dag;
 
   for( auto& quad : _vQUAD ) delete[] quad;
   _vQUAD.clear();
@@ -352,6 +379,80 @@ ODESLV_BASE<ExtOps...>::_SETUP
   for( auto& fct0 : BASE_DE<ExtOps...>::_vFCT ){
     FFVar* fct = new FFVar[_nf];
     _dag->insert( BASE_DE<ExtOps...>::_dag, _nf, fct0, fct );
+    _vFCT.push_back( fct );
+  }
+
+  return true;
+}
+
+template <typename... ExtOps>
+inline
+bool
+ODESLV_BASE<ExtOps...>::_SETUP
+( ODESLV_BASE<ExtOps...> const& IVP )
+{
+  delete _dag; _dag = new FFGraph<ExtOps...>;
+
+  delete _pT; _pT = nullptr;
+  if( BASE_DE<ExtOps...>::_pT ){
+    _pT  = new FFVar;
+    _dag->insert( IVP._dag, 1, IVP._pT, _pT );
+  }
+
+  delete[] _pX; _pX = nullptr;
+  if( _nx ){
+    _pX  = new FFVar[_nx];
+    _dag->insert( IVP._dag, _nx, IVP._pX, _pX );
+  }
+
+  delete[] _pQ; _pQ = nullptr;
+  if( _nq ){
+    _pQ  = new FFVar[_nq];
+    _dag->insert( IVP._dag, _nq, IVP._pQ, _pQ );
+  }
+
+  delete[] _pP; _pP = nullptr;
+  if( _np ){
+    _pP  = new FFVar[_np];
+    _dag->insert( IVP._dag, _np, IVP._pP, _pP );
+  }
+  
+  for( auto& ic : _vIC ) delete[] ic;
+  _vIC.clear();
+  _vIC.reserve( IVP._vIC.size() );
+  for( auto const& ic0 : IVP._vIC ){
+    FFVar* ic = new FFVar[_nx0];
+    _dag->insert( IVP._dag, _nx0, ic0, ic );
+    _vIC.push_back( ic );
+  }
+    
+  for( auto& rhs : _vRHS )  delete[] rhs;
+  _vRHS.clear();
+  _vRHS.reserve( IVP._vRHS.size() );
+  for( auto const& rhs0 : IVP._vRHS ){
+    //IVP._dag->output( IVP._dag->subgraph( 1, rhs0 ), " - Before insert" );
+    FFVar* rhs = new FFVar[_nx];
+    _dag->insert( IVP._dag, _nx, rhs0, rhs );
+    _vRHS.push_back( rhs );
+    //_dag->output( _dag->subgraph( 1, rhs ), " - After insert" );
+  }
+  //std::cout << *_dag;
+
+  for( auto& quad : _vQUAD ) delete[] quad;
+  _vQUAD.clear();
+  _vQUAD.reserve( IVP._vQUAD.size() );
+  for( auto const& quad0 : IVP._vQUAD ){
+    FFVar* quad = new FFVar[_nq];
+    _dag->insert( IVP._dag, _nq, quad0, quad );
+    _vQUAD.push_back( quad );
+  }
+
+  for( auto& fct : _vFCT )  delete[] fct;
+  _vFCT.clear();
+  _vFCT.reserve( IVP._vFCT.size() );
+  for( auto const& fct0 : IVP._vFCT ){
+    FFVar* fct = new FFVar[_nf];
+    _dag->insert( IVP._dag, _nf, fct0, fct );
     _vFCT.push_back( fct );
   }
 

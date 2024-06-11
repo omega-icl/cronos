@@ -158,10 +158,6 @@ public:
   unsigned nx() const
     { return _nx; }
 
-  //! @brief Get size of initial condition
-  unsigned nx0() const
-    { return _nx0; }
-
   //! @brief Get size of differential state
   unsigned nd() const
     { return _nd; }
@@ -204,108 +200,205 @@ public:
     { _np = np; _pP = pP; }
 
   //! @brief Return max size of time stages
-  unsigned nsmax() const
+  unsigned nsmax
+    ()
+    const
     { return _nsmax; }
 
   //! @brief Get pointer to stage times
-  const double* stage() const
+  double const* stage
+    () 
+    const
     { return _dT.data(); }
 
   //! @brief Get pointer to time
-  const FFVar* time() const
+  FFVar const* time
+    ()
+    const
     { return _pT; }
 
   //! @brief Set time
   void set_time
-    ( const unsigned ns, const double*dT, const FFVar*pT=nullptr )
+    ( unsigned const ns, double const* dT, FFVar const* pT=nullptr )
     { _nsmax = ns; _dT.assign( dT, dT+ns+1 ); _pT = pT; }
 
   //! @brief Set time
   void set_time
-    ( const double t0, const double tf, const FFVar*pT=nullptr )
+    ( double const& t0, double const& tf, FFVar const* pT=nullptr )
     { _nsmax = 1;
       _dT.clear();
       _dT.push_back( t0 );
       _dT.push_back( tf );
       _pT = pT; }
 
-  //! @brief Define RHS of differential equations in single-stage IVP-DAE
-  void set_differential
-    ( const unsigned nd, const FFVar*const RHS )
-    { _nd = nd; _vRHS.clear(); _vRHS.push_back( RHS ); }
+  //! @brief Get pointer to differential expressions
+  std::vector<FFVar const*> const& get_differential
+    ()
+    const
+    { return _vRHS; }
 
-  //! @brief Define RHS of differential equations in multi-stage IVP-DAE with <a>ns</a> stages
+  //! @brief Define differential equations in single-stage IVP-DAE
   void set_differential
-    ( const unsigned ns, const unsigned nd, const FFVar*const RHS )
-    { _nd = nd; _vRHS.clear(); for( unsigned i=0; i<ns; i++ ) _vRHS.push_back( RHS+i*_nd ); }
+    ( unsigned const nd, FFVar const* DE )
+    { set_differential( 1, nd, DE ); }
+
+  //! @brief Define differential equations in multi-stage IVP-DAE with <a>ns</a> stages
+  void set_differential
+    ( unsigned const ns, unsigned const nd, FFVar const* DE )
+    { std::vector<FFVar const*> vDE( ns );
+      for( unsigned i=0; i<ns; i++ ) vDE[i] = DE+i*nd;
+      set_differential( nd, vDE ); }
+
+  //! @brief Define differential equations in multi-stage IVP-DAE
+  void set_differential
+    ( unsigned const nd, std::vector<FFVar const*> const& vDE )
+    { _nd = nd; _vRHS = vDE; }
+
+  //! @brief Get pointer to algebraic expressions
+  std::vector<FFVar const*> const& get_algebraic
+    ()
+    const
+    { return _vAE; }
 
   //! @brief Define algebraic equations in single-stage IVP-DAE
   void set_algebraic
-    ( const unsigned na, const FFVar*const AE )
-    { _na = na; _vAE.clear(); _vAE.push_back( AE ); }
+    ( const unsigned na, FFVar const* AE )
+    { set_algebraic( 1, na, AE ); }
 
   //! @brief Define algebraic equations in multi-stage IVP-DAE with <a>ns</a> stages
   void set_algebraic
-    ( const unsigned ns, const unsigned na, const FFVar*const AE )
-    { _na = na; _vAE.clear(); for( unsigned i=0; i<ns; i++ ) _vAE.push_back( AE+i*_na ); }
+    ( const unsigned ns, const unsigned na, FFVar const* AE )
+    { std::vector<FFVar const*> vAE( ns );
+      for( unsigned i=0; i<ns; i++ ) vAE[i] = AE+i*na;
+      set_algebraic( na, vAE ); }
+
+  //! @brief Define algebraic equations in multi-stage IVP-DAE
+  void set_algebraic
+    ( unsigned const na, std::vector<FFVar const*> const& vAE )
+    { _na = na; _vAE = vAE; }
 
   //! @brief Return size of quadrature
-  unsigned nq() const
+  unsigned nq
+    ()
+    const
     { return _nq; }
 
   //! @brief Get pointer to quadratures
-  const FFVar* quadrature() const
+  FFVar const* quadrature
+    ()
+    const
     { return _pQ; }
+
+  //! @brief Get quadrature expressions
+  std::vector<FFVar const*> const& get_quadrature
+    ()
+    const
+    { return _vQUAD; }
 
   //! @brief Define quadrature equations in single-stage IVP-DAE
   void set_quadrature
-    ( const unsigned nq, const FFVar*const QUAD, const FFVar*pQ )
-    { _nq = nq; _pQ = pQ; _ndxQ.clear();
-      for( unsigned iq=0; iq<_nq; iq++ )
-        _ndxQ.insert( std::make_pair( _pQ[iq].id().second, iq ) );
-      _vQUAD.clear(); _vQUAD.push_back( QUAD ); }
+    ( unsigned const nq, FFVar const*const QUAD, FFVar const* pQ )
+    { set_quadrature( 1, nq, QUAD, pQ ); }
 
   //! @brief Define quadrature equations in multi-stage IVP-DAE with <a>ns</a> stages
   void set_quadrature
-    ( const unsigned ns, const unsigned nq, const FFVar*const QUAD, const FFVar*pQ )
+    ( unsigned const ns, unsigned const nq, FFVar const* QUAD, FFVar const* pQ )
+    { std::vector<FFVar const*> vQUAD( ns );
+      for( unsigned i=0; i<ns; i++ ) vQUAD[i] = QUAD+i*nq;
+      set_quadrature( nq, vQUAD, pQ ); }
+
+  //! @brief Define quadrature equations in multi-stage IVP-DAE with <a>ns</a> stages
+  void set_quadrature
+    ( unsigned const nq, std::vector<FFVar const*> const& vQUAD, FFVar const* pQ )
     { _nq = nq; _pQ = pQ; _ndxQ.clear();
       for( unsigned iq=0; iq<_nq; iq++ )
         _ndxQ.insert( std::make_pair( _pQ[iq].id().second, iq ) );
-      _vQUAD.clear(); for( unsigned i=0; i<ns; i++ ) _vQUAD.push_back( QUAD+i*_nq ); }
+      _vQUAD = vQUAD; }
+
+  //! @brief Return size of invariant
+  unsigned ni
+    ()
+    const
+    { return _ni; }
+
+  //! @brief Get invariant equations
+  std::vector<FFVar const*> const& get_invariant
+    ()
+    const
+    { return _vINV; }
 
   //! @brief Define invariant equations in single-stage IVP-DAE
   void set_invariant
-    ( const unsigned ni, const FFVar*const INV )
-    { _ni = ni; _vINV.clear(); _vINV.push_back( INV ); }
+    ( unsigned const ni, FFVar const* INV )
+    { set_invariant( 1, ni, INV ); }
 
   //! @brief Define invariant equations in multi-stage IVP-DAE with <a>ns</a> stages
   void set_invariant
-    ( const unsigned ns, const unsigned ni, const FFVar*const INV )
-    { _ni = ni; _vINV.clear(); for( unsigned i=0; i<ns; i++ ) _vINV.push_back( INV+i*_ni ); }
+    ( unsigned const ns, unsigned const ni, FFVar const* INV )
+    { std::vector<FFVar const*> vINV( ns );
+      for( unsigned i=0; i<ns; i++ ) vINV[i] = INV+i*ni;
+      set_invariant( ni, vINV ); }
 
-  //! @brief Define IC of differential variables in single-stage IVP-DAE
-  void set_initial
-    ( const unsigned nx0, const FFVar*const IC )
-    { _nx0 = nx0; _vIC.clear(); _vIC.push_back( IC ); }
+  //! @brief Define initial conditions in multi-stage IVP-DAE
+  void set_invariant
+    ( unsigned const ni, std::vector<FFVar const*> const& vINV )
+    { _ni = ni; _vINV = vINV; }
 
-  //! @brief Define IC of differential variables in multi-stage IVP-DAE with <a>ns</a> stages
+  //! @brief Return size of function
+  unsigned nx0
+    ()
+    const
+    { return _nx0; }
+
+  //! @brief Get initial conditions
+  std::vector<FFVar const*> const& get_initial
+    ()
+    const
+    { return _vIC; }
+
+  //! @brief Define initial conditions in single-stage IVP-DAE
   void set_initial
-    ( const unsigned ns, const unsigned nx0, const FFVar*const IC )
-    { _nx0 = nx0; _vIC.clear(); for( unsigned i=0; i<ns; i++ ) _vIC.push_back( IC+i*_nx0 ); }
+    ( unsigned const nx0, FFVar const* IC )
+    { set_initial( 1, nx0, IC); }
+
+  //! @brief Define initial conditions in multi-stage IVP-DAE with <a>ns</a> stages
+  void set_initial
+    ( unsigned const ns, unsigned const nx0, FFVar const* IC )
+    { std::vector<FFVar const*> vIC( ns );
+      for( unsigned i=0; i<ns; i++ ) vIC[i] = IC+i*nx0;
+      set_initial( nx0, vIC ); }
+
+  //! @brief Define initial conditions in multi-stage IVP-DAE
+  void set_initial
+    ( unsigned const nx0, std::vector<FFVar const*> const& vIC )
+    { _nx0 = nx0; _vIC = vIC; }
 
   //! @brief Return size of function
   unsigned nf() const
     { return _nf; }
 
+  //! @brief Get initial conditions
+  std::vector<FFVar const*> const& get_function
+    ()
+    const
+    { return _vFCT; }
+
   //! @brief Define state function in single-stage IVP-DAE
   void set_function
-    ( const unsigned nf, const FFVar*const FCT )
-    { _nf = nf; _vFCT.clear(); _vFCT.push_back( FCT ); }
+    ( unsigned const nf, FFVar const* FCT )
+    { set_function( 1, nf, FCT ); }
 
-  //! @brief Define state function in multi-stage IVP-DAE with <a>ns</a> stages
+  //! @brief Define state functions in multi-stage IVP-DAE with <a>ns</a> stages
   void set_function
-    ( const unsigned ns, const unsigned nf, const FFVar*const FCT )
-    { _nf = nf; _vFCT.clear(); for( unsigned i=0; i<ns; i++ ) _vFCT.push_back( FCT+i*_nf ); }
+    ( unsigned const ns, unsigned const nf, FFVar const* FCT )
+    { std::vector<FFVar const*> vFCT( ns );
+      for( unsigned i=0; i<ns; i++ ) vFCT[i] = FCT+i*nf;
+      set_function( nf, vFCT ); }
+
+  //! @brief Define state functions in multi-stage IVP-DAE
+  void set_function
+    ( unsigned const nf, std::vector<FFVar const*> const& vFCT )
+    { _nf = nf; _vFCT = vFCT; }
 
   //! @brief Reset state functions
   void reset_function

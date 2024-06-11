@@ -138,6 +138,10 @@ protected:
   bool _SETUP
     ();
 
+  //! @brief Function setting up DAG of IVP
+  bool _SETUP
+    ( ODESLVS_BASE<ExtOps...> const& IVP );
+
   //! @brief Function to initialize sensitivity for parameter <a>isen</a>
   bool _IC_SET_FSA
     ( unsigned const isen );
@@ -301,6 +305,33 @@ ODESLVS_BASE<ExtOps...>::_SETUP
 template <typename... ExtOps>
 inline
 bool
+ODESLVS_BASE<ExtOps...>::_SETUP
+( ODESLVS_BASE<ExtOps...> const& IVP )
+{
+  if( !ODESLV_BASE<ExtOps...>::_SETUP( IVP) ) return false;
+
+  delete[] _pY; _pY = nullptr;
+  _ny = _nx;
+  if( _ny ){
+    _pY  = new FFVar[_ny];
+    for( unsigned iy=0; iy<_ny; ++iy ) _pY[iy].set( _dag );
+  }
+//  std::cerr << "_pY[" << _ny << "]: " << _pY << std::endl;
+
+  delete[] _pYQ; _pYQ = nullptr;
+  _nyq = ( _np<_nq? _nq: _np );
+  if( _nyq ){
+    _pYQ  = new FFVar[_nyq];
+    for( unsigned iyq=0; iyq<_nyq; ++iyq ) _pYQ[iyq].set( _dag );
+  }
+//  std::cerr << "_pYQ[" << _nyq << "]: " << _pYQ << std::endl;
+  
+  return true;
+}
+
+template <typename... ExtOps>
+inline
+bool
 ODESLVS_BASE<ExtOps...>::_INI_D_SEN
 ( double const* p, unsigned const nvec, unsigned const nyq )
 {
@@ -366,7 +397,7 @@ ODESLVS_BASE<ExtOps...>::_IC_SET_FSA
 ( unsigned const isen )
 {
   _pIC = _vIC.at(0);
-  delete[] _pSACFCT; _pSACFCT = _dag->FAD( _nx, _pIC, 1, _pVAR+_ny+_nx+isen);
+  delete[] _pSACFCT; _pSACFCT = _dag->FAD( _nx, _pIC, 1, _pVAR+_ny+_nx+isen );
   _pIC = _pSACFCT;
   return true;
 }

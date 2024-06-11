@@ -174,6 +174,11 @@ class ODESLVS_CVODES
     ()
     { return ODESLVS_BASE<ExtOps...>::_SETUP(); }
 
+  //! @brief Setup local copy of parametric ODEs based on IVP
+  bool setup
+    ( ODESLVS_CVODES<ExtOps...> const& IVP )
+    { return ODESLVS_BASE<ExtOps...>::_SETUP( IVP ); }
+
   //! @brief Record state and sensitivity trajectories in files <a>obndsta</a> and <a>obndsa</a>, with accuracy of <a>iprec</a> digits
   void record
     ( std::ofstream& obndsta, std::ofstream* obndsen, unsigned const iprec=5 )
@@ -1374,10 +1379,11 @@ public:
         ODESLVS_CVODES<ExtOps...>* pODEloc = new ODESLVS_CVODES<ExtOps...>;
         pODEloc->set( *pODE );
         pODEloc->options = pODE->options;
-        pODEloc->setup();
-        pOp->data = pODEloc;
-        pOp->owndata = true;
-        pODE = static_cast<ODESLVS_CVODES<ExtOps...>*>( pOp->data );
+        pODEloc->setup( *pODE );
+	auto opins = update_data( *this, pOp, pODEloc, true );
+	assert( opins.second );
+	pOp = opins.first;
+        data = pODE = static_cast<ODESLVS_CVODES<ExtOps...>*>( pOp->data );
       }
       assert( idep < nFun*nVar );
       return *(pRes[idep]);
@@ -1396,9 +1402,10 @@ public:
         ODESLVS_CVODES<ExtOps...>* pODEloc = new ODESLVS_CVODES<ExtOps...>;
         pODEloc->set( *pODE );
         pODEloc->options = pODE->options;
-        pODEloc->setup();
-        pOp->data = pODEloc;
-        pOp->owndata = true;
+        pODEloc->setup( *pODE );
+	auto opins = update_data( *this, pOp, pODEloc, true );
+	assert( opins.second );
+	pOp = opins.first;
         pODE = static_cast<ODESLVS_CVODES<ExtOps...>*>( pOp->data );
       }
       return pRes;
@@ -1502,9 +1509,10 @@ public:
         ODESLVS_CVODES<ExtOps...>* pODEloc = new ODESLVS_CVODES<ExtOps...>;
         pODEloc->set( *pODE );
         pODEloc->options = pODE->options;
-        pODEloc->setup();
-        pOp->data = pODEloc;
-        pOp->owndata = true;
+        pODEloc->setup( *pODE );
+	auto opins = update_data( *this, pOp, pODEloc, true );
+	assert( opins.second );
+	pOp = opins.first;
         pODE = static_cast<ODESLVS_CVODES<ExtOps...>*>( pOp->data );
       }
 #ifdef MC__FFODE_CHECK
@@ -1526,9 +1534,10 @@ public:
         ODESLVS_CVODES<ExtOps...>* pODEloc = new ODESLVS_CVODES<ExtOps...>;
         pODEloc->set( *pODE );
         pODEloc->options = pODE->options;
-        pODEloc->setup();
-        pOp->data = pODEloc;
-        pOp->owndata = true;
+        pODEloc->setup( *pODE );
+	auto opins = update_data( *this, pOp, pODEloc, true );
+	assert( opins.second );
+	pOp = opins.first;
         pODE = static_cast<ODESLVS_CVODES<ExtOps...>*>( pOp->data );
       }
       return pRes;
@@ -1598,7 +1607,8 @@ const
 #endif
 
   if( pODE->states( vVar, nullptr, vRes ) != ODESLVS_CVODES<ExtOps...>::NORMAL ){
-    std::cerr << "FFODE::eval ** Integration failure\n";
+    for( unsigned i=0; i<nVar; ++i ) std::cout << "vVar[" << i << "] = " << vVar[i] << std::endl;
+    std::cerr << "FFODE::eval double ** Integration failure\n";
     throw typename ODESLVS_CVODES<ExtOps...>::Exceptions( ODESLVS_CVODES<ExtOps...>::Exceptions::INTERN );
   }
 }
@@ -1664,7 +1674,7 @@ const
   std::vector<double> vResVal( nRes ), vResDer( nRes*nVar ); 
   if( nVar <= 2*nRes ){
     if( pODE->states_FSA( vVarVal.data(), nullptr, vResVal.data(), nullptr, vResDer.data() ) != ODESLVS_CVODES<ExtOps...>::NORMAL ){
-      std::cerr << "FFODE::eval ** Integration failure\n";
+      std::cerr << "FFODE::eval fadbad::F<double> ** Integration failure\n";
       throw typename ODESLVS_CVODES<ExtOps...>::Exceptions( ODESLVS_CVODES<ExtOps...>::Exceptions::INTERN );
     }
   }

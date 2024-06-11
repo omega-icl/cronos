@@ -183,6 +183,11 @@ public:
     ()
     { return ODESLV_BASE<ExtOps...>::_SETUP(); }
 
+  //! @brief Setup local copy of parametric ODEs based on IVP
+  bool setup
+    ( ODESLV_CVODES<ExtOps...> const& IVP )
+    { return ODESLV_BASE<ExtOps...>::_SETUP( IVP ); }
+
   //! @brief Record results in file <a>ores</a>, with accuracy of <a>iprec</a> digits
   void record
     ( std::ofstream& ores, unsigned const iprec=5 )
@@ -619,7 +624,7 @@ ODESLV_CVODES<ExtOps...>::_states
 ( double const* p, double** xk, double* f, bool const store, std::ostream& os )
 {
   // Check size
-  if( !p ) return STATUS::FATAL;
+  //if( !p ) return STATUS::FATAL;
 
   try{
     // Initialize trajectory integration

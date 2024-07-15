@@ -156,7 +156,7 @@ protected:
 
   //! @brief Function to reinitialize adjoint at stage times for function <a>ifct</a>
   bool _CC_SET_ASA
-    ( unsigned const pos_fct, unsigned const ifct );
+    ( unsigned const pos_ic, unsigned const pos_fct, unsigned const ifct );
 
   //! @brief Function to initial adjoint at terminal time for function <a>ifct</a>
   bool _TC_SET_ASA
@@ -438,16 +438,22 @@ template <typename... ExtOps>
 inline
 bool
 ODESLVS_BASE<ExtOps...>::_CC_SET_ASA
-( unsigned const pos_fct, unsigned const ifct )
+( unsigned const pos_ic, unsigned const pos_fct, unsigned const ifct )
 {
-  _pIC = _vFCT.at(pos_fct-1)+ifct;
+  _pIC = _vIC.at( pos_ic );
+  FFVar pHAM = (pos_fct? _vFCT.at(pos_fct-1)[ifct]: 0.);
+#ifdef MC__ODESLVS_BASE_DEBUG
+  std::cout << "pos_ic: " << pos_ic << std::endl;
+  std::cout << "pos_fct: " << pos_fct << std::endl;
+#endif
+  for( unsigned ix=0; ix<_nx; ix++ ) pHAM += _pY[ix] * (pos_ic? _pIC[ix]: _pX[ix] );
 #ifndef MC__ODEBNDS_GSL_USE_BAD
-  delete[] _pSACFCT; _pSACFCT = _dag->FAD( 1, _pIC, _nx+_np, _pVAR+_ny );
+  delete[] _pSACFCT; _pSACFCT = _dag->FAD( 1, &pHAM, _nx+_np, _pVAR+_ny );
 #else
-  delete[] _pSACFCT; _pSACFCT = _dag->BAD( 1, _pIC, _nx+_np, _pVAR+_ny );
+  delete[] _pSACFCT; _pSACFCT = _dag->BAD( 1, &pHAM, _nx+_np, _pVAR+_ny );
 #endif
   for( unsigned iy=0; iy<_nx; iy++ )
-    _pSAFCT[iy] = _pY[iy] + _pSACFCT[iy];
+    _pSAFCT[iy] = _pSACFCT[iy];
 
   return true;
 }
@@ -526,17 +532,19 @@ ODESLVS_BASE<ExtOps...>::_RHS_SET_ASA
   }
   _pQUAD  = _nq? _vQUAD.at( iQUAD ): 0;
   std::vector<FFVar> vHAM( _nf, pHAM );
-  FFVar const* pFCT = _vFCT.at(pos_fct);
-  for( unsigned ifct=0; ifct<_nf; ifct++ ){
+  if( pos_fct ){
+    FFVar const* pFCT = _vFCT.at(pos_fct-1);
+    for( unsigned ifct=0; ifct<_nf; ifct++ ){
 #ifndef MC__ODEBNDS_GSL_USE_BAD
-    delete[] _pSACFCT; _pSACFCT = _nq? _dag->FAD( 1, pFCT+ifct, _nq, _pQ ): nullptr;
+      delete[] _pSACFCT; _pSACFCT = _nq? _dag->FAD( 1, pFCT+ifct, _nq, _pQ ): nullptr;
 #else
-    delete[] _pSACFCT; _pSACFCT = _nq? _dag->BAD( 1, pFCT+ifct, _nq, _pQ ): nullptr;
+      delete[] _pSACFCT; _pSACFCT = _nq? _dag->BAD( 1, pFCT+ifct, _nq, _pQ ): nullptr;
 #endif
-    for( unsigned iq=0; iq<_nq; iq++ ){
-      if( !_pSACFCT[iq].cst() ) return false; // quadrature appears nonlinearly in function
-      if( neg ) vHAM[ifct] -= _pQUAD[iq] * _pSACFCT[iq];
-      else      vHAM[ifct] += _pQUAD[iq] * _pSACFCT[iq];
+      for( unsigned iq=0; iq<_nq; iq++ ){
+        if( !_pSACFCT[iq].cst() ) return false; // quadrature appears nonlinearly in function
+        if( neg ) vHAM[ifct] -= _pQUAD[iq] * _pSACFCT[iq];
+        else      vHAM[ifct] += _pQUAD[iq] * _pSACFCT[iq];
+      }
     }
   }
 

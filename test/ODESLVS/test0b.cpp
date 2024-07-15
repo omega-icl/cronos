@@ -3,59 +3,60 @@
 
 #include "odeslv_cvodes.hpp"
 
-void states( mc::ODESLV_CVODES<>* ivp, double*p, double*f )
+void solve_state( mc::ODESLV_CVODES<>& ivp, std::vector<double>& p, std::vector<double>& f )
 {
-  ivp->states( p, nullptr, f );
+  ivp.solve_state( p );
+  f = ivp.val_function();
 }
 
 int main()
 {
   mc::FFGraph IVP;  // DAG describing the problem
 
-  double t0 = 0., tf = 10.;     // Time span
-  const unsigned NS = 1;  // Time stages
+  const unsigned NS = 2;  // Time stages
+  double t0 = 0., tf = 10.;       // Time span
+  std::vector<double> T( NS+1 );  // Time stages
+  for( unsigned int i=0; i<=NS; i++ ) T[i] = t0 + i * ( tf - t0 ) / NS; 
 
   const unsigned NP = 1;  // Number of parameters
-  const unsigned NX = 2;  // Number of states
-  const unsigned NQ = 1;  // Number of state quadratures
-  const unsigned NF = 2;  // Number of state functions
-
-  mc::FFVar P[NP];  // Parameters
+  std::vector<mc::FFVar> P(NP);   // Parameters
   for( unsigned int i=0; i<NP; i++ ) P[i].set( &IVP );
 
-  mc::FFVar X[NX];  // States
+  const unsigned NX = 2;  // Number of states
+  std::vector<mc::FFVar> X(NX);   // States
   for( unsigned int i=0; i<NX; i++ ) X[i].set( &IVP );
 
-  mc::FFVar Q[NQ];  // State quadratures
+  const unsigned NQ = 1;  // Number of state quadratures
+  std::vector<mc::FFVar> Q(NQ);   // State quadratures
   for( unsigned i=0; i<NQ; i++ ) Q[i].set( &IVP );
 
-  mc::FFVar RHS[NX];  // Right-hand side function
+  std::vector<mc::FFVar> RHS(NX); // Right-hand side function
   RHS[0] = P[0] * X[0] * ( 1. - X[1] );
   RHS[1] = P[0] * X[1] * ( X[0] - 1. );
-
-  mc::FFVar IC[NX];   // Initial value function
+/*
+  std::vector<mc::FFVar> IC(NX);  // Initial value function
   IC[0] = 1.2;
   IC[1] = 1.1 + 0.01*(P[0]-3.);
-/*
-  mc::FFVar IC[NX*NS];   // Initial value function
-  for( unsigned k=0; k<NX*NS; k++ ) IC[k] = X[k%NX];
-  IC[0] = 1.2;
-  IC[1] = 1.1;// + 0.01*P[0];
-  //if( NS > 1 ) IC[(NS/2)*NX+1] = X[1] - 0.5;
 */
-  mc::FFVar QUAD[NQ];  // Quadrature function
+  std::vector<std::vector<mc::FFVar>> IC(NS);   // Initial value function
+  IC[0].assign( { 1.2, 1.1 + 0.01*P[0] } );
+  for( unsigned k=1; k<NS; k++ )
+     IC[k].assign( { X[0], X[1] - 0.5 } );
+
+  std::vector<mc::FFVar> QUAD(NQ);  // Quadrature function
   QUAD[0] = X[1];
+
+  const unsigned NF = 2;  // Number of state functions
 /*
-  mc::FFVar FCT[NF];  // State functions
+  std::vector<mc::FFVar> FCT(NF);  // State functions
   FCT[0] = X[0] * X[1];
-  //FCT[1] = P[0] * pow( X[0], 2 );
+  FCT[1] = P[0] * pow( X[0], 2 );
 */
-  mc::FFVar FCT[NF*NS];  // State functions
-  for( unsigned k=0; k<NF*NS; k++ ) FCT[k] = 0.;
-  if( NS > 1 ) FCT[((NS-1)/NF)*NF+0] = X[0] + 0.1*P[0];
-  FCT[(NS-1)*NF+0] = X[0] * X[1];
-  FCT[(NS-1)*NF+1] = P[0] * pow( X[0], 2 );
-  for( unsigned k=0; k<NS; k++ ) FCT[k*NF+1] += Q[0];
+  std::vector<std::vector<mc::FFVar>> FCT(NS);  // State functions
+  for( unsigned k=0; k<NS-1; k++ )
+    FCT[k].assign( { 0., Q[0] } );
+  FCT[NS-1].assign( { X[0] * X[1], Q[0] } );
+
 
   /////////////////////////////////////////////////////////////////////////
   // Define ODE problem
@@ -71,15 +72,13 @@ int main()
   LV.options.RTOL      = 1e-9;
 
   LV.set_dag( &IVP );
-  LV.set_state( NX, X );
-  LV.set_time( t0, tf );
-  LV.set_parameter( NP, P );
-  LV.set_differential( NX, RHS );
-  LV.set_initial( NX, IC );
-  //LV.set_initial( NS, NX, IC );
-  LV.set_quadrature( NQ, QUAD, Q );
-  //LV.set_function( NF, FCT );
-  LV.set_function( NS, NF, FCT );
+  LV.set_state( X );
+  LV.set_time( T );//t0, tf );
+  LV.set_parameter( P );
+  LV.set_differential( RHS );
+  LV.set_initial( IC );
+  LV.set_quadrature( QUAD, Q );
+  LV.set_function( FCT );
 
   /////////////////////////////////////////////////////////////////////////
   // Make local copies
@@ -89,22 +88,20 @@ int main()
   std::vector<std::thread> vth( NTH );
 #endif
   std::vector<mc::ODESLV_CVODES<>> vivp( NTH );
-  std::vector<double[NF]> vf( NTH );
-  std::vector<double[2][NX]> vxk( NTH );
-  std::vector<double> vp( NTH );
+  std::vector<std::vector<double>> vf( NTH );
+  std::vector<std::vector<double>> vp( NTH );
   double p0 = 3.0, dp = 0.1/(NTH-1.), pL = p0 - 0.1/2.;
   std::ofstream os;// = std::cout;
 
   for( unsigned ith=0; ith<NTH; ++ith ){
-    vp[ith] = pL+ith*dp;  // Parameter values
+    vp[ith].assign( { pL+ith*dp } );  // Parameter values
     vivp[ith].set( LV );
     vivp[ith].options = LV.options;
     vivp[ith].setup();
 #if defined( USE_THREADS )
-    vth[ith] = std::thread( states, &vivp[ith], &vp[ith], vf[ith] );
-    //vth[ith] = std::thread( &mc::ODESLV_CVODES<>::states, &vivp[ith], &vp[ith], &vxk[ith], vf[ith], os );
+    vth[ith] = std::thread( solve_state, std::ref(vivp[ith]), std::ref(vp[ith]), std::ref(vf[ith]) );
 #else
-    vivp[ith].states( &vp[ith], nullptr, vf[ith] );
+    solve_state( vivp[ith], vp[ith], vf[ith] );
 #endif
   }
 
@@ -113,7 +110,7 @@ int main()
 #if defined( USE_THREADS )
     vth[ith].join();
 #endif
-    std::cout << vp[ith];
+    std::cout << vp[ith][0];
     for( unsigned k=0; k<NF;++k )
       std::cout << "  " << vf[ith][k];
     std::cout << std::endl;

@@ -33,7 +33,12 @@ class ODESLVS_CVODES
  
   using ODESLV_BASE<ExtOps...>::_print_interm;
   using ODESLV_BASE<ExtOps...>::_record;
-
+  using ODESLV_BASE<ExtOps...>::_IC_D_QUAD;
+  using ODESLV_BASE<ExtOps...>::_D2vec;
+  using ODESLV_BASE<ExtOps...>::_Dx;
+  using ODESLV_BASE<ExtOps...>::_Dq;
+  using ODESLV_BASE<ExtOps...>::_Df;
+      
   using ODESLVS_BASE<ExtOps...>::_nsmax;
   using ODESLVS_BASE<ExtOps...>::_istg;
   using ODESLVS_BASE<ExtOps...>::_t;
@@ -41,7 +46,6 @@ class ODESLVS_CVODES
   using ODESLVS_BASE<ExtOps...>::_nx;
   using ODESLVS_BASE<ExtOps...>::_nq;
   using ODESLVS_BASE<ExtOps...>::_nf;
-  using ODESLVS_BASE<ExtOps...>::_Df;
   using ODESLVS_BASE<ExtOps...>::_np;
   using ODESLVS_BASE<ExtOps...>::_Dfp;
   using ODESLVS_BASE<ExtOps...>::_ny;
@@ -81,12 +85,15 @@ class ODESLVS_CVODES
   using ODESLV_CVODES<ExtOps...>::_pos_rhs;
   using ODESLV_CVODES<ExtOps...>::_pos_quad;
   using ODESLV_CVODES<ExtOps...>::_pos_fct;
-  using ODESLV_CVODES<ExtOps...>::_vec_sta;
   using ODESLV_CVODES<ExtOps...>::_END_STA;
   using ODESLV_CVODES<ExtOps...>::_states;
+  using ODESLV_CVODES<ExtOps...>::_states_stage;
   using ODESLV_CVODES<ExtOps...>::MC_CVRHS__;
   using ODESLV_CVODES<ExtOps...>::MC_CVQUAD__;
   using ODESLV_CVODES<ExtOps...>::MC_CVJAC__;
+  using ODESLV_CVODES<ExtOps...>::_xk;
+  using ODESLV_CVODES<ExtOps...>::_qk;
+  using ODESLV_CVODES<ExtOps...>::_f;
 
   //! @brief Dense SUNMatrix for use in linear solves
   SUNMatrix _sun_matB;
@@ -127,6 +134,18 @@ class ODESLVS_CVODES
   //! @brief position in _Nq
   unsigned _pos_adjquad; 
 
+  //! @brief state sensitivity values at stage times
+  std::vector< std::vector< std::vector< double > > > _xpk;
+
+  //! @brief state adjoint values at stage times
+  std::vector< std::vector< std::vector< double > > > _lk;
+
+  //! @brief quadrature sensitivity values at stage times
+  std::vector< std::vector< std::vector< double > > > _qpk;
+
+  //! @brief function derivatives
+  std::vector< std::vector< double > > _fp;
+
  public:
 
   using BASE_DE<ExtOps...>::set;
@@ -141,9 +160,12 @@ class ODESLVS_CVODES
   using BASE_DE<ExtOps...>::np;
   using BASE_DE<ExtOps...>::nf;
   using ODESLV_CVODES<ExtOps...>::options;
-  using ODESLV_CVODES<ExtOps...>::states;
-  using ODESLV_CVODES<ExtOps...>::results_sta;
-  using ODESLV_CVODES<ExtOps...>::stats_sta;
+  using ODESLV_CVODES<ExtOps...>::solve_state;
+  using ODESLV_CVODES<ExtOps...>::val_state;
+  using ODESLV_CVODES<ExtOps...>::val_quadrature;
+  using ODESLV_CVODES<ExtOps...>::val_function;
+  using ODESLV_CVODES<ExtOps...>::results_state;
+  using ODESLV_CVODES<ExtOps...>::stats_state;
   
   //! @brief Default constructor
   ODESLVS_CVODES
@@ -154,20 +176,26 @@ class ODESLVS_CVODES
     ();
 
   //! @brief Statistics for sensitivity/adjoint integration
-  Stats stats_sen;
+  Stats stats_sensitivity;
 
   //! @brief Vector storing adjoint/sensitivity trajectyories (see Options::RESRECORD)
-  std::vector< std::vector< Results > > results_sen;
+  std::vector< std::vector< Results > > results_sensitivity;
 
  //! @brief Propagate states and state-sensitivities forward in time through every time stages
-  STATUS states_FSA
-    ( double const* p, double** xk=nullptr, double* f=nullptr, double** xpk=nullptr,
-      double* fp=nullptr, std::ostream& os=std::cout );
+  STATUS solve_sensitivity
+    ( std::vector<double> const& p, std::ostream& os=std::cout );
+
+ //! @brief Propagate states and state-sensitivities forward in time through every time stages
+  STATUS solve_sensitivity
+    ( double const* p, std::ostream& os=std::cout );
 
   //! @brief Propagate states and adjoints forward and backward in time through every time stages
-  STATUS states_ASA
-    ( double const* p, double** xk=nullptr, double* f=nullptr, double** lk=nullptr,
-      double* fp=nullptr, std::ostream& os=std::cout );
+  STATUS solve_adjoint
+    ( std::vector<double> const& p, std::ostream& os=std::cout );
+
+  //! @brief Propagate states and adjoints forward and backward in time through every time stages
+  STATUS solve_adjoint
+    ( double const* p, std::ostream& os=std::cout );
 
   //! @brief Setup local copy of parametric ODEs
   bool setup
@@ -184,26 +212,48 @@ class ODESLVS_CVODES
     ( std::ofstream& obndsta, std::ofstream* obndsen, unsigned const iprec=5 )
     const
     { this->ODESLV_CVODES<ExtOps...>::record( obndsta, iprec );
-      for( unsigned isen=0; isen<results_sen.size(); ++isen )
-        this->ODESLV_BASE<ExtOps...>::_record( obndsen[isen], results_sen[isen], iprec ); }
+      for( unsigned isen=0; isen<results_sensitivity.size(); ++isen )
+        this->ODESLV_BASE<ExtOps...>::_record( obndsen[isen], results_sensitivity[isen], iprec ); }
 
   //! @brief Record state trajectories in files <a>obndsta</a>, with accuracy of <a>iprec</a> digits
   void record
     ( std::ofstream& obndsta, unsigned const iprec=5 )
     const
     { ODESLV_CVODES<ExtOps...>::record( obndsta, iprec ); }
+
+  //! @brief Retreive state sensitivity values at stage times
+  std::vector< std::vector< std::vector< double > > > const& val_state_sensitivity
+    ()
+    const
+    { return _xpk; }
+
+  //! @brief Retreive adjoint sensitivity values at stage times
+  std::vector< std::vector< std::vector< double > > > const& val_state_adjoint
+    ()
+    const
+    { return _lk; }
+
+  //! @brief Retreive quadrature sensitivity values at stage times
+  std::vector< std::vector< std::vector< double > > > const& val_quadrature_sensitivity
+    ()
+    const
+    { return _qpk; }
+
+  //! @brief Retreive function values at stage times
+  std::vector< std::vector< double > > const& val_function_gradient
+    ()
+    const
+    { return _fp; }
   /** @} */
 
  protected:
   //! @brief Propagate states and state-sensitivities forward in time through every time stages
   STATUS _states_FSA
-    ( double const* p, double** xk=nullptr, double* f=nullptr, double** xpk=nullptr,
-      double* fp=nullptr, std::ostream& os=std::cout );
+    ( double const* p, std::ostream& os=std::cout );
 
   //! @brief Propagate states and adjoints forward and backward in time through every time stages
   STATUS _states_ASA
-    ( double const* p, double** xk=nullptr, double* f=nullptr, double** lk=nullptr,
-      double* fp=nullptr, std::ostream& os=std::cout );
+    ( double const* p, std::ostream& os=std::cout );
 
  private:
   //! @brief Function to initialize CVodes memory block (virtual)
@@ -232,6 +282,10 @@ class ODESLVS_CVODES
 
   //! @brief Function to finalize sensitivity/adjoint bounding
   void _END_SEN
+    ();
+
+  //! @brief Function to reinitialize sensitivity analysis
+  bool _REINI_SEN
     ();
 
   //! @brief Function to initialize adjoint sensitivity analysis
@@ -558,6 +612,8 @@ bool
 ODESLVS_CVODES<ExtOps...>::_CC_CVODES_ASA
 ( unsigned const ifct, int const indexB )
 {
+
+  // std::cout << "Calling CVodeReInitB @t=" << _t << std::endl;
   // Reinitialize CVodeS memory block for current time _t and adjoint _Ny
   _cv_flag = CVodeReInitB( _cv_mem, indexB, _t, _Ny[ifct] );
   if( _check_cv_flag( &_cv_flag, "CVodeReInitB", 1 ) ) return false;
@@ -601,7 +657,21 @@ ODESLVS_CVODES<ExtOps...>::_END_SEN
 ()
 {
   // Get final CPU time
-  _final_stats( stats_sen );
+  _final_stats( stats_sensitivity );
+}
+
+template <typename... ExtOps>
+bool
+ODESLVS_CVODES<ExtOps...>::_REINI_SEN
+()
+{
+  // reset at time stages
+  _xpk.clear(); _xpk.reserve(_nsmax);
+  _lk.clear();  _lk.reserve(_nsmax);
+  _qpk.clear(); _qpk.reserve(_nsmax);
+  _fp.clear();  _fp.reserve(_nf);
+
+  return true;
 }
 
 template <typename... ExtOps>
@@ -611,7 +681,7 @@ ODESLVS_CVODES<ExtOps...>::_INI_ASA
 ( double const* p )
 {
   // Initialize bound propagation
-  if( !_INI_D_SEN( p, _nf, _np ) )
+  if( !_INI_D_SEN( p, _nf, _np ) || !_REINI_SEN() )
     return false;
 
   // Set SUNDIALS adjoint/quadrature arrays
@@ -627,16 +697,16 @@ ODESLVS_CVODES<ExtOps...>::_INI_ASA
       if( _Ny[i] ) N_VDestroy( _Ny[i] );
       _Ny[i] = N_VNew_Serial( _ny, sunctx );
     }
-    if( !_Nyq[i] || NV_LENGTH_S( _Nyq[i] ) != _np ){
+    if( !_Nyq[i] || NV_LENGTH_S( _Nyq[i] ) != (sunindextype)_np ){
       if( _Nyq[i] ) N_VDestroy( _Nyq[i] );
       _Nyq[i] = N_VNew_Serial( _np, sunctx );
     }
   }
 
   // Reset result record and statistics
-  results_sen.clear();
-  results_sen.resize( _nf );
-  _init_stats( stats_sen );
+  results_sensitivity.clear();
+  results_sensitivity.resize( _nf );
+  _init_stats( stats_sensitivity );
 
   return true;
 }
@@ -663,18 +733,18 @@ ODESLVS_CVODES<ExtOps...>::CVRHSB__
 {
   _ifct = *static_cast<unsigned*>( user_data );
 #ifdef MC__ODESLVS_CVODES_DEBUG
-  std::cout << "@t=" << t << "\nx:\n";
-  for( unsigned i=0; i<NV_LENGTH_S( x ); i++ ) std::cout << NV_Ith_S( x, i ) << std::endl;
-  std::cout << "y" << _ifct << ":\n";
-  for( unsigned i=0; i<NV_LENGTH_S( y ); i++ ) std::cout << NV_Ith_S( y, i ) << std::endl;
+  std::cout << std::scientific << std::setprecision(6) << t;
+  for( unsigned i=0; i<NV_LENGTH_S( x ); i++ ) std::cout << "  " << NV_Ith_S( x, i );
+  for( unsigned i=0; i<NV_LENGTH_S( y ); i++ ) std::cout << "  " << NV_Ith_S( y, i );
 #endif
   bool flag = _RHS_D_SEN( t, NV_DATA_S( x ), NV_DATA_S( y ), NV_DATA_S( ydot ), _ifct );
 #ifdef MC__ODESLVS_CVODES_DEBUG
-  std::cout << "ydot" << _ifct << ":\n";
-  for( unsigned i=0; i<NV_LENGTH_S( ydot ); i++ ) std::cout << NV_Ith_S( ydot, i ) << std::endl;
+  std::cout << "  " << _ifct;
+  for( unsigned i=0; i<NV_LENGTH_S( ydot ); i++ ) std::cout << "  " << NV_Ith_S( ydot, i );
+  std::cout << std::endl;
   { int dum; std::cin >> dum; }
 #endif
-  stats_sen.numRHS++;
+  stats_sensitivity.numRHS++;
   return( flag? 0: -1 );
 }
 
@@ -705,14 +775,14 @@ ODESLVS_CVODES<ExtOps...>::CVJACB__
   switch( options.LINSOL ){
    case Options::DIAG:
    case Options::DENSEDQ:
-   case Options::SPARSE:
+   //case Options::SPARSE:
     flag = false;
     break;
    case Options::DENSE:
     flag = _JAC_D_SEN( t, NV_DATA_S( x ), NV_DATA_S( y ), SM_COLS_D(Jac) );
     break;
   }
-  stats_sen.numJAC++; // increment JAC counter
+  stats_sensitivity.numJAC++; // increment JAC counter
   return( flag? 0: -1 );
 }
 
@@ -741,27 +811,42 @@ ODESLVS_CVODES<ExtOps...>::CVQUADB__
   return( flag? 0: -1 );
 }
 
-//! @fn template <typename... ExtOps> inline typename ODESLVS_CVODES<ExtOps...>::STATUS ODESLVS_CVODES<ExtOps...>::states_ASA
-//!( unsigned const ns, double const* tk, double const* p, double** xk,
-//!  double* f, double** lk, double* fp, std::ostream& os=std::cout )
+//! @fn template <typename... ExtOps> inline typename ODESLVS_CVODES<ExtOps...>::STATUS ODESLVS_CVODES<ExtOps...>::solve_adjoint
+//!( std::vector<double> const& p, std::ostream& os=std::cout )
 //!
 //! This function computes a solution to the parametric ODEs with adjoint
 //! sensitivity analysis:
 //!  - <a>p</a>  [input]  parameter values
-//!  - <a>xk</a> [output] state + quadrature values at stage times
-//!  - <a>f</a>  [output] function values
-//!  - <a>lk</a> [output] adjoint + adjoint quadrature values at stage times
-//!  - <a>fp</a> [output] function derivatives
 //!  - <a>os</a> [input]  output stream [default: std::cout]
 //! .
 //! The return value is the status.
 template <typename... ExtOps>
 typename ODESLVS_CVODES<ExtOps...>::STATUS
-ODESLVS_CVODES<ExtOps...>::states_ASA
-( double const* p, double** xk, double* f, double** lk, double* fp, std::ostream& os )
+ODESLVS_CVODES<ExtOps...>::solve_adjoint
+( std::vector<double> const& p, std::ostream& os )
 {
   registration();
-  STATUS flag = _states_ASA( p, xk, f, lk, fp, os );
+  STATUS flag = _states_ASA( p.data(), os );
+  unregistration();
+  return flag;
+}
+
+//! @fn template <typename... ExtOps> inline typename ODESLVS_CVODES<ExtOps...>::STATUS ODESLVS_CVODES<ExtOps...>::solve_adjoint
+//!( double const* p, std::ostream& os=std::cout )
+//!
+//! This function computes a solution to the parametric ODEs with adjoint
+//! sensitivity analysis:
+//!  - <a>p</a>  [input]  parameter values
+//!  - <a>os</a> [input]  output stream [default: std::cout]
+//! .
+//! The return value is the status.
+template <typename... ExtOps>
+typename ODESLVS_CVODES<ExtOps...>::STATUS
+ODESLVS_CVODES<ExtOps...>::solve_adjoint
+( double const* p, std::ostream& os )
+{
+  registration();
+  STATUS flag = _states_ASA( p, os );
   unregistration();
   return flag;
 }
@@ -769,34 +854,39 @@ ODESLVS_CVODES<ExtOps...>::states_ASA
 template <typename... ExtOps>
 typename ODESLVS_CVODES<ExtOps...>::STATUS
 ODESLVS_CVODES<ExtOps...>::_states_ASA
-( double const* p, double** xk, double* f, double** lk, double* fp, std::ostream& os )
+( double const* p, std::ostream& os )
 {
   // Compute state bounds and store intermediate results
   STATUS flag = STATUS::NORMAL;
-  flag = ODESLV_CVODES<ExtOps...>::_states( p, xk, f, true, os);
+  flag = ODESLV_CVODES<ExtOps...>::_states( p, true, os );
   if( flag != STATUS::NORMAL ) return flag;
 
-  // Nothing to do if no functions are defined
-  if( !_nf ) return STATUS::NORMAL;
+  // Nothing to do if no functions or parameters are defined
+  if( !_nf || !_np ) return STATUS::NORMAL;
 
   try{
     // Initialize adjoint integration
-    if( !_INI_ASA( p )) return STATUS::FATAL;
+    if( !_INI_ASA( p ) ) return STATUS::FATAL;
     _t = _dT[_nsmax];
     const unsigned NSTEP = options.RESRECORD? options.RESRECORD: 1;
 
     // Terminal adjoint & quadrature values
-    if( lk && !lk[_nsmax] ) lk[_nsmax] = new double[(_nx+_np)*_nf];
+    _lk.resize( _nsmax+1, std::vector<std::vector<double>>( _nf ) );
+    _qpk.resize( _nsmax+1, std::vector<std::vector<double>>( _nf ) );
+//    if( lk && !lk[_nsmax] ) lk[_nsmax] = new double[(_nx+_np)*_nf];
     _pos_fct = ( _vFCT.size()>=_nsmax? _nsmax-1:0 );
     for( _ifct=0; _ifct < _nf; _ifct++ ){
       if( !_TC_SET_ASA( _pos_fct, _ifct )
-       || !_TC_D_SEN( _t, _vec_sta[_nsmax].data(), NV_DATA_S(_Ny[_ifct]) )
+       || !_TC_D_SEN( _t, _xk[_nsmax].data(), NV_DATA_S(_Ny[_ifct]) )
        || ( _Nyq && _Nyq[_ifct] && !_TC_D_QUAD_ASA( NV_DATA_S(_Nyq[_ifct]) ) ) )
         { _END_SEN(); return STATUS::FATAL; }
       _GET_D_SEN( NV_DATA_S(_Ny[_ifct]), _np, _Nyq? NV_DATA_S(_Nyq[_ifct]): 0 );
       for( unsigned iq=0; iq<_np; iq++ )
         _Dfp[iq*_nf+_ifct] = _Dyq[iq];
+
       // Display / record / return adjoint terminal values
+      _lk[_nsmax].push_back( std::vector<double>( _Dy, _Dy+_ny ) );
+      _qpk[_nsmax].push_back( std::vector<double>( _Dyq, _Dyq+_np ) );
       if( options.DISPLAY >= 1 ){
         std::ostringstream ol; ol << " l[" << _ifct << "]";
         if( !_ifct ) _print_interm( _dT[_nsmax], _nx, _Dy, ol.str(), os );
@@ -805,9 +895,9 @@ ODESLVS_CVODES<ExtOps...>::_states_ASA
         _print_interm( _np, _Dyq, oq.str(), os );
       }
       if( options.RESRECORD )
-        results_sen[_ifct].push_back( Results( _t, _nx, _Dy, _np, _Dyq ) );
-      for( unsigned iy=0; lk && iy<_ny+_np; iy++ )
-        lk[_nsmax][_ifct*(_nx+_np)+iy] = iy<_ny? _Dy[iy]: _Dyq[iy-_ny];
+        results_sensitivity[_ifct].push_back( Results( _t, _nx, _Dy, _np, _Dyq ) );
+//      for( unsigned iy=0; lk && iy<_ny+_np; iy++ )
+//        lk[_nsmax][_ifct*(_nx+_np)+iy] = iy<_ny? _Dy[iy]: _Dyq[iy-_ny];
     }
 
     // Initialization of adjoint integration
@@ -818,15 +908,30 @@ ODESLVS_CVODES<ExtOps...>::_states_ASA
     // Integrate adjoint ODEs through each stage using SUNDIALS
     for( _istg=_nsmax; _istg>0; _istg-- ){
 
+      // Is forward state evaluation needed after discontinuity?
+      if( _istg<_nsmax && _vIC.size()>=_nsmax ){
+        _t = _dT[_istg-1];
+        _D2vec( _xk[_istg-1].data(), _nx, NV_DATA_S( _Nx ) );
+        _IC_D_QUAD( NV_DATA_S( _Nq ) );
+        std::cout << "RESTARTING FORWARD INTEGRATION at t=" << _t << std::endl;
+        _states_stage( _istg-1, _t, _Nx, _Nq, true, true, false, os );
+      }
+
       // Update list of operations in RHSADJ and QUADADJ
       _pos_rhs  = ( _vRHS.size() <=1? 0: _istg-1 );
       _pos_quad = ( _vQUAD.size()<=1? 0: _istg-1 );
+      _pos_fct  = ( _vFCT.size()>=_nsmax? _istg: ( _vFCT.size()==1 && _istg==_nsmax? 1: 0 ) );   
+      //_vFCT.size()>=_nsmax? _istg: 0 );
+#ifdef MC__ODESLVS_CVODES_DEBUG
+      std::cout << "pos_fct: " << _pos_fct << std::endl;
+#endif
       if( !ODESLV_BASE<ExtOps...>::_RHS_D_SET( _pos_rhs, _pos_quad )
        || !_RHS_SET_ASA( _pos_rhs, _pos_quad, _pos_fct )
        || !_RHS_D_SET( _nf, _np ) )
         { _END_SEN(); return STATUS::FATAL; }
 
       // Propagate bounds backward to previous stage time
+      _t = _dT[_istg];
       const double TSTEP = ( _t - _dT[_istg-1] ) / NSTEP;
       double TSTOP = _t-TSTEP;
       for( unsigned k=0; k<NSTEP; k++, TSTOP-=TSTEP ){
@@ -853,7 +958,7 @@ ODESLVS_CVODES<ExtOps...>::_states_ASA
             for( unsigned ip=0; ip<_np; ip++ )
               std::cout << "_Nyq" << _ifct << "[" << ip << "] = " << NV_Ith_S(_Nyq[_ifct],ip) << std::endl;
 #endif
-            results_sen[_ifct].push_back( Results( _t, _nx, NV_DATA_S(_Ny[_ifct]), _np, _Nyq && _Nyq[_ifct]? NV_DATA_S(_Nyq[_ifct]): 0 ) );
+            results_sensitivity[_ifct].push_back( Results( _t, _nx, NV_DATA_S(_Ny[_ifct]), _np, _Nyq && _Nyq[_ifct]? NV_DATA_S(_Nyq[_ifct]): 0 ) );
           }
         }
       }
@@ -861,7 +966,7 @@ ODESLVS_CVODES<ExtOps...>::_states_ASA
         void *cv_memB = CVodeGetAdjCVodeBmem( _cv_mem, _indexB[_ifct] );
         long int nstpB;
         _cv_flag = CVodeGetNumSteps( cv_memB, &nstpB );
-        stats_sen.numSteps += nstpB;
+        stats_sensitivity.numSteps += nstpB;
 #ifdef MC__ODESLVS_CVODES_DEBUG
         std::cout << "Number of steps for adjoint #" << _ifct << ": " 
                   << nstpB << std::endl;
@@ -871,9 +976,9 @@ ODESLVS_CVODES<ExtOps...>::_states_ASA
       // states/adjoints/quadratures at stage time
 #ifdef MC__ODESLVS_CVODES_DEBUG
       for( unsigned ix=0; ix<_nx; ix++ )
-        std::cout << "_vec_sta = " << _vec_sta[_istg-1][ix] << std::endl;
+        std::cout << "xk[" << _istg-1 << "][" << ix << "] = " << _xk[_istg-1][ix] << std::endl;
 #endif
-      if( lk && !lk[_istg-1] ) lk[_istg-1] = new double[(_nx+_np)*_nf];
+//      if( lk && !lk[_istg-1] ) lk[_istg-1] = new double[(_nx+_np)*_nf];
       for( _ifct=0; _ifct < _nf; _ifct++ ){
         _cv_flag = CVodeGetB( _cv_mem, _indexB[_ifct], &_t, _Ny[_ifct]);
         if( _check_cv_flag( &_cv_flag, "CVodeGetB", 1) )
@@ -889,12 +994,13 @@ ODESLVS_CVODES<ExtOps...>::_states_ASA
         for( unsigned ip=0; ip<_np; ip++ )
           std::cout << "_Nyq" << _ifct << "[" << ip << "] = " << NV_Ith_S(_Nyq[_ifct],ip) << std::endl;
 #endif
-        // Add function contribution to adjoint bounds (discontinuities)
+        // Add function contribution to adjoint values (discontinuities)
         if( _istg > 1  ){
-          _pos_fct = ( _vFCT.size()>=_nsmax? _istg-1:0 );
-          if( _pos_fct
-           && ( !_CC_SET_ASA( _pos_fct, _ifct )
-             || !_CC_D_SEN( _t, _vec_sta[_istg-1].data(), NV_DATA_S(_Ny[_ifct]) )
+          _pos_ic  = ( _vIC.size() >=_nsmax? _istg-1: 0 );
+          _pos_fct = ( _vFCT.size()>=_nsmax? _istg-1: 0 );
+          if( ( _pos_fct || _pos_ic )
+           && ( !_CC_SET_ASA( _pos_ic, _pos_fct, _ifct )
+             || !_CC_D_SEN( _t, _xk[_istg-1].data(), NV_DATA_S(_Ny[_ifct]) )
              || ( _Nyq && _Nyq[_ifct] && !_CC_D_QUAD_ASA( NV_DATA_S(_Nyq[_ifct]) ) ) ) )
             { _END_SEN(); return STATUS::FATAL; }
           //else if( !_pos_fct )
@@ -910,13 +1016,16 @@ ODESLVS_CVODES<ExtOps...>::_states_ASA
           if( !_CC_CVODES_ASA( _ifct, _indexB[_ifct] ) )
             { _END_SEN(); return STATUS::FATAL; }
         }
-        // Add initial state contribution to derivative bounds
+        
+        // Add initial state contribution to function derivatives 
         else if( !_IC_SET_ASA()
-              || !_IC_D_SEN( _t, _vec_sta[_istg-1].data(), NV_DATA_S(_Ny[_ifct]) )
+              || !_IC_D_SEN( _t, _xk[_istg-1].data(), NV_DATA_S(_Ny[_ifct]) )
               || ( _Nyq && _Nyq[_ifct] && !_IC_D_QUAD_ASA( NV_DATA_S(_Nyq[_ifct]) ) ) )
           { _END_SEN(); return STATUS::FATAL; }
 
         // Display / record / return adjoint terminal values
+        _lk[_istg-1].push_back( std::vector<double>( _Dy, _Dy+_ny ) );
+        _qpk[_istg-1].push_back( std::vector<double>( _Dyq, _Dyq+_np ) );
         if( options.DISPLAY >= 1 ){
           std::ostringstream ol; ol << " l[" << _ifct << "]";
           if( !_ifct ) _print_interm( _dT[_istg-1], _nx, _Dy, ol.str(), os );
@@ -925,9 +1034,9 @@ ODESLVS_CVODES<ExtOps...>::_states_ASA
           _print_interm( _np, _Dyq, oq.str(), os );
         }
         if( options.RESRECORD )
-          results_sen[_ifct].push_back( Results( _t, _nx, _Dy, _np, _Dyq ) );
-        for( unsigned iy=0; lk && iy<_ny+_np; iy++ )
-          lk[_istg-1][_ifct*(_nx+_np)+iy] = iy<_ny? _Dy[iy]: _Dyq[iy-_ny];
+          results_sensitivity[_ifct].push_back( Results( _t, _nx, _Dy, _np, _Dyq ) );
+//        for( unsigned iy=0; lk && iy<_ny+_np; iy++ )
+//          lk[_istg-1][_ifct*(_nx+_np)+iy] = iy<_ny? _Dy[iy]: _Dyq[iy-_ny];
 
         // Keep track of function derivatives
         for( unsigned iq=0; iq<_np; iq++ ) _Dfp[iq*_nf+_ifct] = _Dyq[iq];
@@ -935,7 +1044,9 @@ ODESLVS_CVODES<ExtOps...>::_states_ASA
     }
 
     // Display / return function derivatives
-    for( unsigned i=0; fp && i<_nf*_np; i++ ) fp[i] = _Dfp[i];
+    for( unsigned ip=0; ip<_np; ++ip )
+      _fp.push_back( std::vector<double>( _Dfp.data()+ip*_nf, _Dfp.data()+(ip+1)*_nf ) );
+//    for( unsigned i=0; fp && i<_nf*_np; i++ ) fp[i] = _Dfp[i];
     if( options.DISPLAY >= 1 ){
       for( unsigned iq=0; iq<_np; iq++ ){
         std::ostringstream ofp; ofp << " fp[" << iq << "]";
@@ -945,12 +1056,12 @@ ODESLVS_CVODES<ExtOps...>::_states_ASA
   }
   catch(...){
     _END_SEN();
-    if( options.DISPLAY >= 1 ) _print_stats( stats_sen, os );
+    if( options.DISPLAY >= 1 ) _print_stats( stats_sensitivity, os );
     return STATUS::FAILURE;
   }
 
   _END_SEN();
-  if( options.DISPLAY >= 1 ) _print_stats( stats_sen, os );
+  if( options.DISPLAY >= 1 ) _print_stats( stats_sensitivity, os );
   return STATUS::NORMAL;
 }
 
@@ -960,7 +1071,7 @@ ODESLVS_CVODES<ExtOps...>::_INI_FSA
 ( double const* p )
 {
   // Initialize bound propagation
-  if( !_INI_D_SEN( p, _np, _nq ) )
+  if( !_INI_D_SEN( p, _np, _nq ) || !_REINI_SEN() )
     return false;
 
   // Set SUNDIALS sensitivity/quadrature arrays
@@ -974,20 +1085,20 @@ ODESLVS_CVODES<ExtOps...>::_INI_FSA
     if( _nq ) _Nyq = N_VCloneVectorArray( _np, _Nq );
   }
   for( unsigned i=0; i<_np; i++ ){
-    if( !_Ny[i] || NV_LENGTH_S( _Ny[i] ) != _nx ){
+    if( !_Ny[i] || NV_LENGTH_S( _Ny[i] ) != (sunindextype)_nx ){
       if( _Ny[i] ) N_VDestroy( _Ny[i] );
       _Ny[i] = N_VNew_Serial( _nx, sunctx );
     }
-    if( _Nyq && (!_Nyq[i] || NV_LENGTH_S( _Nyq[i] ) != _nq) ){
+    if( _Nyq && (!_Nyq[i] || NV_LENGTH_S( _Nyq[i] ) != (sunindextype)_nq) ){
       if( _Nyq[i] ) N_VDestroy( _Nyq[i] );
       _Nyq[i] = _nq? N_VNew_Serial( _nq, sunctx ): nullptr;
     }
   }
 
   // Reset result record and statistics
-  results_sen.clear();
-  results_sen.resize( _np );
-  _init_stats( stats_sen );
+  results_sensitivity.clear();
+  results_sensitivity.resize( _np );
+  _init_stats( stats_sensitivity );
 
   return true;
 }
@@ -1026,7 +1137,7 @@ ODESLVS_CVODES<ExtOps...>::CVRHSF__
   for( unsigned i=0; i<NV_LENGTH_S( ydot ); i++ ) std::cout << NV_Ith_S( ydot, i ) << std::endl;
   { int dum; std::cin >> dum; }
 #endif
-  stats_sen.numRHS++;
+  stats_sensitivity.numRHS++;
   return( flag? 0: -1 );
 }
 
@@ -1075,27 +1186,44 @@ ODESLVS_CVODES<ExtOps...>::CVQUADF__
   return( flag? 0: -1 );
 }
 
-//! @fn template <typename... ExtOps> inline typename ODESLVS_CVODES<ExtOps...>::STATUS ODESLVS_CVODES<ExtOps...>::states_FSA(
-//! double const* p, double** xk, double* f, double** xpk, double* fp, std::ostream& os=std::cout )
+//! @fn template <typename... ExtOps> inline typename ODESLVS_CVODES<ExtOps...>::STATUS ODESLVS_CVODES<ExtOps...>::solve_sensitivity(
+//! std::vector<double> const& p, std::ostream& os=std::cout )
 //!
 //! This function computes a solution to the parametric ODEs with forward
 //! sensitivity analysis:
 //!  - <a>p</a>   [input]  parameter values
-//!  - <a>xk</a>  [output] state & quadrature values at stage times
-//!  - <a>f</a>   [output] function values
-//!  - <a>xpk</a> [output] state- & quadrature-sensitivity values at stage times
-//!  - <a>fp</a>  [output] function derivatives
 //!  - <a>os</a>  [input]  output stream [default: std::cout]
 //! .
 //! The return value is the status.
 template <typename... ExtOps>
 typename ODESLVS_CVODES<ExtOps...>::STATUS
 inline
-ODESLVS_CVODES<ExtOps...>::states_FSA
-( double const* p, double** xk, double* f, double** xpk, double* fp, std::ostream& os )
+ODESLVS_CVODES<ExtOps...>::solve_sensitivity
+( std::vector<double> const& p, std::ostream& os )
 {
   registration();
-  STATUS flag = _states_FSA( p, xk, f, xpk, fp, os );
+  STATUS flag = _states_FSA( p.data(), os );
+  unregistration();
+  return flag;
+}
+
+//! @fn template <typename... ExtOps> inline typename ODESLVS_CVODES<ExtOps...>::STATUS ODESLVS_CVODES<ExtOps...>::solve_sensitivity(
+//! std::vector<double> const& p, std::ostream& os=std::cout )
+//!
+//! This function computes a solution to the parametric ODEs with forward
+//! sensitivity analysis:
+//!  - <a>p</a>   [input]  parameter values
+//!  - <a>os</a>  [input]  output stream [default: std::cout]
+//! .
+//! The return value is the status.
+template <typename... ExtOps>
+typename ODESLVS_CVODES<ExtOps...>::STATUS
+inline
+ODESLVS_CVODES<ExtOps...>::solve_sensitivity
+( double const* p, std::ostream& os )
+{
+  registration();
+  STATUS flag = _states_FSA( p, os );
   unregistration();
   return flag;
 }
@@ -1104,10 +1232,13 @@ template <typename... ExtOps>
 typename ODESLVS_CVODES<ExtOps...>::STATUS
 inline
 ODESLVS_CVODES<ExtOps...>::_states_FSA
-( double const* p, double** xk, double* f, double** xpk, double* fp, std::ostream& os )
+( double const* p, std::ostream& os )
 {
   // Check arguments
-  if( !p ) return STATUS::FATAL;
+  if( !_np )
+    return _states( nullptr, false, os );
+  else if( !p )
+    return STATUS::FATAL;
 
   try{
     // Initialize trajectory integration
@@ -1117,7 +1248,6 @@ ODESLVS_CVODES<ExtOps...>::_states_FSA
     const unsigned NSTEP = options.RESRECORD? options.RESRECORD: 1;
 
     // Initial state/quadrature values
-    if( xk && !xk[0] ) xk[0] = new double[_nx+_nq];
     if( !ODESLV_BASE<ExtOps...>::_IC_D_SET()
      || !ODESLV_BASE<ExtOps...>::_IC_D_STA( _t, NV_DATA_S( _Nx ) )
      || ( _Nq && !ODESLV_BASE<ExtOps...>::_IC_D_QUAD( NV_DATA_S( _Nq ) ) ) )
@@ -1125,17 +1255,18 @@ ODESLVS_CVODES<ExtOps...>::_states_FSA
     ODESLV_BASE<ExtOps...>::_GET_D_STA( NV_DATA_S(_Nx), _nq && _Nq? NV_DATA_S(_Nq): nullptr );
 
     // Display / record / return initial results
+    _xk.push_back( std::vector<double>( _Dx, _Dx+_nx ) );
+    if( _nq ) _qk.push_back( std::vector<double>( _Dq, _Dq+_nq ) );
     if( options.DISPLAY >= 1 ){
-      _print_interm( _t, _nx, ODESLV_BASE<ExtOps...>::_Dx, " x", os );
-      _print_interm( _nq, ODESLV_BASE<ExtOps...>::_Dq, " q", os );
+      _print_interm( _t, _nx, _Dx, " x", os );
+      _print_interm( _nq, _Dq, " q", os );
     }
-    if( options.RESRECORD )
-      results_sta.push_back( Results( _t, _nx, NV_DATA_S(_Nx), _nq, _nq? NV_DATA_S(_Nq): nullptr ) );
-    for( unsigned ix=0; xk && ix<_nx+_nq; ix++ )
-      xk[0][ix] = ix<_nx? ODESLV_BASE<ExtOps...>::_Dx[ix]: ODESLV_BASE<ExtOps...>::_Dq[ix-_nx];
+//    if( options.RESRECORD )
+//      results_state.push_back( Results( _t, _nx, NV_DATA_S(_Nx), _nq, _nq? NV_DATA_S(_Nq): nullptr ) );
 
     // Initial state/quadrature sensitivities
-    if( xpk && !xpk[0] ) xpk[0] = new double[(_nx+_nq)*_np];
+    _xpk.push_back( std::vector<std::vector<double>>( _np ) );
+    if( _nq ) _qpk.push_back( std::vector<std::vector<double>>( _np ) );
     for( _isen=0; _isen<_np; _isen++ ){
       if( !_IC_SET_FSA( _isen )
        || !ODESLV_BASE<ExtOps...>::_IC_D_STA( _t, NV_DATA_S(_Ny[_isen]) )
@@ -1144,16 +1275,18 @@ ODESLVS_CVODES<ExtOps...>::_states_FSA
       _GET_D_SEN( NV_DATA_S(_Ny[_isen]), _nq, _nq && _Nyq? NV_DATA_S(_Nyq[_isen]): nullptr );
 
       // Display / record / return initial results
+      _xpk[0].push_back( std::vector<double>( _Dy, _Dy+_nx ) );
+      if( _nq ) _qpk[0].push_back( std::vector<double>( _Dyq, _Dyq+_nq ) );
       if( options.DISPLAY >= 1 ){
         std::ostringstream oxp; oxp << " xp[" << _isen << "]";
         _print_interm( _nx, _Dy, oxp.str(), os );
         std::ostringstream oqp; oqp << " qp[" << _isen << "]";
         _print_interm( _nq, _Dyq, oqp.str(), os );
       }
-      if( options.RESRECORD )
-        results_sen[_isen].push_back( Results( _t, _nx, NV_DATA_S(_Ny[_isen]), _nq, _nq? NV_DATA_S(_Nyq[_isen]):nullptr ) );
-      for( unsigned ix=0; xpk && ix<_nx+_nq; ix++ )
-        xpk[0][(_nx+_nq)*_isen+ix] = ix<_nx? _Dy[ix]: _Dyq[ix-_nx];
+//      if( options.RESRECORD )
+//        results_sensitivity[_isen].push_back( Results( _t, _nx, NV_DATA_S(_Ny[_isen]), _nq, _nq? NV_DATA_S(_Nyq[_isen]):nullptr ) );
+//      for( unsigned ix=0; xpk && ix<_nx+_nq; ix++ )
+//        xpk[0][(_nx+_nq)*_isen+ix] = ix<_nx? _Dy[ix]: _Dyq[ix-_nx];
     }
 
     // Integrate ODEs through each stage using SUNDIALS
@@ -1162,8 +1295,9 @@ ODESLVS_CVODES<ExtOps...>::_states_FSA
       { _END_STA(); _END_SEN(); return STATUS::FATAL; }
 
     for( _istg=0; _istg<_nsmax; _istg++ ){
-      // Bounds on state discontinuities (if any) at stage times
-      // and integrator reinitialization (if applicable)
+    
+      // Account for state/sensitivity discontinuities (if any) at stage times
+      // and solver reinitialization (if applicable)
       _pos_ic = ( _vIC.size()>=_nsmax? _istg:0 );
       if( _pos_ic
        && ( !ODESLV_BASE<ExtOps...>::_CC_D_SET( _pos_ic )
@@ -1171,12 +1305,13 @@ ODESLVS_CVODES<ExtOps...>::_states_FSA
          || !ODESLV_CVODES<ExtOps...>::_CC_CVODE_STA() ) )
         { _END_STA(); _END_SEN(); return STATUS::FAILURE; }
       if( _istg 
-       && !ODESLV_CVODES<ExtOps...>::_CC_CVODE_QUAD() )
-       //&& ( ( _Nq && !ODESLV_BASE<ExtOps...>::_IC_D_QUAD( NV_DATA_S( _Nq ) ) ) // quadrature reinitialization
-       //  || !ODESLV_CVODES<ExtOps...>::_CC_CVODE_QUAD() ) )
+       //&& !ODESLV_CVODES<ExtOps...>::_CC_CVODE_QUAD() )
+       && ( ( _Nq && !ODESLV_BASE<ExtOps...>::_IC_D_QUAD( NV_DATA_S( _Nq ) ) ) // quadrature reinitialization
+         || !ODESLV_CVODES<ExtOps...>::_CC_CVODE_QUAD() ) )
         { _END_STA(); _END_SEN(); return STATUS::FAILURE; }
       if( options.RESRECORD )
-        results_sta.push_back( Results( _t, _nx, NV_DATA_S(_Nx), _nq, _nq? NV_DATA_S(_Nq): nullptr ) );
+        results_state.push_back( Results( _t, _nx, NV_DATA_S(_Nx), _nq, _nq? NV_DATA_S(_Nq): nullptr ) );
+
       for( _isen=0; _isen<_np; _isen++ ){
         if( _pos_ic
          && ( !_CC_SET_FSA( _pos_ic, _isen )
@@ -1184,9 +1319,9 @@ ODESLVS_CVODES<ExtOps...>::_states_FSA
            || ( _isen==_np-1 && !_CC_CVODES_FSA() ) ) )
             { _END_STA(); _END_SEN(); return STATUS::FATAL; }
         if( _istg
-         && ( _isen==_np-1 && !_CC_CVODES_QUAD() ) )
-         //&& ( ( _Nyq && _Nyq[_isen] && !ODESLV_BASE<ExtOps...>::_IC_D_QUAD( NV_DATA_S(_Nyq[_isen]) ) ) //quadrature sensitivity reinitialization
-         //  || ( _isen==_np-1 && !_CC_CVODES_QUAD() ) ) )
+         //&& ( _isen==_np-1 && !_CC_CVODES_QUAD() ) )
+         && ( ( _Nyq && _Nyq[_isen] && !ODESLV_BASE<ExtOps...>::_IC_D_QUAD( NV_DATA_S(_Nyq[_isen]) ) ) //quadrature sensitivity reinitialization
+           || ( _isen==_np-1 && !_CC_CVODES_QUAD() ) ) )
             { _END_STA(); _END_SEN(); return STATUS::FATAL; }
 #ifdef MC__ODESLVS_CVODES_DEBUG
         for( unsigned iy=0; iy<NV_LENGTH_S(_Ny[_isen]); iy++ )
@@ -1195,7 +1330,7 @@ ODESLVS_CVODES<ExtOps...>::_states_FSA
           std::cout << "_Nyq" << _isen << "[" << iy << "] = " << NV_Ith_S(_Nyq[_isen],iy) << std::endl;
 #endif
         if( options.RESRECORD )
-          results_sen[_isen].push_back( Results( _t, _nx, NV_DATA_S(_Ny[_isen]), _nq, _nq? NV_DATA_S(_Nyq[_isen]): nullptr ) );
+          results_sensitivity[_isen].push_back( Results( _t, _nx, NV_DATA_S(_Ny[_isen]), _nq, _nq? NV_DATA_S(_Nyq[_isen]): nullptr ) );
       }
 
       // update list of operations in RHS, JAC, QUAD, RHSFSA and QUADFSA
@@ -1211,22 +1346,14 @@ ODESLVS_CVODES<ExtOps...>::_states_FSA
       _cv_flag = CVodeSetStopTime( _cv_mem, _dT[_istg+1] );
       if( _check_cv_flag(&_cv_flag, "CVodeSetStopTime", 1) )
         { _END_STA(); _END_SEN(); return STATUS::FATAL; }
-/*
-      while( _t < _dT[_istg+1] ){
-        _cv_flag = CVode( _cv_mem, _dT[_istg+1], _Nx, &_t, CV_ONE_STEP );
-        if( _check_cv_flag(&_cv_flag, "CVode", 1)
-         || (options.NMAX && stats_sen.numSteps > options.NMAX) )
-          throw Exceptions( Exceptions::INTERN );
-        stats_sta.numSteps++;
-        stats_sen.numSteps++;
-*/
+
       const double TSTEP = ( _dT[_istg+1] - _t ) / NSTEP;
       double TSTOP = _t+TSTEP;
       for( unsigned k=0; k<NSTEP; k++, TSTOP+=TSTEP ){
         if( k+1 == NSTEP ) TSTOP = _dT[_istg+1];
         _cv_flag = CVode( _cv_mem, TSTOP, _Nx, &_t, CV_NORMAL );
         if( _check_cv_flag( &_cv_flag, "CVode", 1 ) )
-         //|| (options.NMAX && stats_sen.numSteps > options.NMAX) )
+         //|| (options.NMAX && stats_sensitivity.numSteps > options.NMAX) )
           throw Exceptions( Exceptions::INTERN );
 
         // intermediate record
@@ -1236,7 +1363,7 @@ ODESLVS_CVODES<ExtOps...>::_states_FSA
             if( _check_cv_flag(&_cv_flag, "CVodeGetQuad", 1) )
               { _END_STA(); return STATUS::FATAL; }
           }
-          results_sta.push_back( Results( _t, _nx, NV_DATA_S(_Nx), _nq, _nq? NV_DATA_S(_Nq): nullptr ) );
+          results_state.push_back( Results( _t, _nx, NV_DATA_S(_Nx), _nq, _nq? NV_DATA_S(_Nq): nullptr ) );
           for( _isen=0; _isen<_np; _isen++ ){
             _cv_flag = CVodeGetSens1(_cv_mem, &_t, _isen, _Ny[_isen] );
             if( _check_cv_flag( &_cv_flag, "CVodeGetSens", 1) )
@@ -1248,26 +1375,27 @@ ODESLVS_CVODES<ExtOps...>::_states_FSA
               //for( unsigned iq=0; iq<_nq; ++iq )
               //  std::cerr << "_Nyq[" << _isen << "][" << iq << "] = " << NV_DATA_S(_Nyq[_isen])[iq] << std::endl;
             }
-            results_sen[_isen].push_back( Results( _t, _nx, NV_DATA_S(_Ny[_isen]), _nq, _nq? NV_DATA_S(_Nyq[_isen]): nullptr ) );
+            results_sensitivity[_isen].push_back( Results( _t, _nx, NV_DATA_S(_Ny[_isen]), _nq, _nq? NV_DATA_S(_Nyq[_isen]): nullptr ) );
           }
         }
       }
 
       // Intermediate states and quadratures
-      if( xk && !xk[_istg+1] ) xk[_istg+1] = new double[_nx+_nq];
       if( _nq ){
         _cv_flag = CVodeGetQuad( _cv_mem, &_t, _Nq );
         if( _check_cv_flag(&_cv_flag, "CVodeGetQuad", 1) )
           { _END_STA(); return STATUS::FATAL; }
       }
       ODESLV_BASE<ExtOps...>::_GET_D_STA( NV_DATA_S(_Nx), _nq && _Nq? NV_DATA_S(_Nq): nullptr );
+
       // Display / return stage results
-      for( unsigned ix=0; xk && ix<_nx+_nq; ix++ )
-        xk[_istg+1][ix] = ix<_nx? ODESLV_CVODES<ExtOps...>::_Dx[ix]: ODESLV_CVODES<ExtOps...>::_Dq[ix-_nx];
+      _xk.push_back( std::vector<double>( _Dx, _Dx+_nx ) );
+      if( _nq ) _qk.push_back( std::vector<double>( _Dq, _Dq+_nq ) );
       if( options.DISPLAY >= 1 ){
-        _print_interm( _t, _nx, ODESLV_BASE<ExtOps...>::_Dx, " x", os );
-        _print_interm( _nq, ODESLV_BASE<ExtOps...>::_Dq, " q", os );
+        _print_interm( _t, _nx, _Dx, " x", os );
+        _print_interm( _nq, _Dq, " q", os );
       }
+
       // Add intermediate function terms
       _pos_fct = ( _vFCT.size()>=_nsmax? _istg:0 );
       if( (_vFCT.size()>=_nsmax || _istg==_nsmax-1)
@@ -1275,7 +1403,8 @@ ODESLVS_CVODES<ExtOps...>::_states_FSA
         { _END_STA(); _END_SEN(); return STATUS::FATAL; }
 
       // Intermediate state and quadrature sensitivities
-      if( xpk && !xpk[_istg+1] ) xpk[_istg+1] = new double[(_nx+_nq)*_np];
+      _xpk.push_back( std::vector<std::vector<double>>( _np ) );
+      if( _nq ) _qpk.push_back( std::vector<std::vector<double>>( _np ) );
       for( _isen=0; _isen<_np; _isen++ ){
         _cv_flag = CVodeGetSens1(_cv_mem, &_t, _isen, _Ny[_isen] );
         if( _check_cv_flag( &_cv_flag, "CVodeGetSens", 1) )
@@ -1291,14 +1420,17 @@ ODESLVS_CVODES<ExtOps...>::_states_FSA
                     _nq, _nq && _Nyq[_isen]? NV_DATA_S(_Nyq[_isen]): nullptr );
 
         // Display / return stage results
+        _xpk[_istg+1].push_back( std::vector<double>( _Dy, _Dy+_nx ) );
+        if( _nq ) _qpk[_istg+1].push_back( std::vector<double>( _Dyq, _Dyq+_nq ) );
         if( options.DISPLAY >= 1 ){
           std::ostringstream oxp; oxp << " xp[" << _isen << "]";
           _print_interm( _nx, _Dy, oxp.str(), os );
           std::ostringstream oqp; oqp << " qp[" << _isen << "]";
           _print_interm( _nq, _Dyq, oqp.str(), os );
         }
-        for( unsigned ix=0; xpk && ix<_nx+_nq; ix++ )
-          xpk[_istg+1][(_nx+_nq)*_isen+ix] = ix<_nx? _Dy[ix]: _Dyq[ix-_nx];
+//        for( unsigned ix=0; xpk && ix<_nx+_nq; ix++ )
+//          xpk[_istg+1][(_nx+_nq)*_isen+ix] = ix<_nx? _Dy[ix]: _Dyq[ix-_nx];
+
         // Add intermediate function derivative terms
         if( (_vFCT.size()>=_nsmax || _istg==_nsmax-1)
          && !_FCT_D_SEN( _pos_fct, _isen, _t ) )
@@ -1307,8 +1439,11 @@ ODESLVS_CVODES<ExtOps...>::_states_FSA
     }
 
     // Display / return function values and derivatives
-    for( unsigned i=0; f && i<_nf; i++ ) f[i] = _Df[i];
-    for( unsigned i=0; fp && i<_nf*_np; i++ ) fp[i] = _Dfp[i];
+    _f = _Df;
+    for( unsigned ip=0; ip<_np; ++ip )
+      _fp.push_back( std::vector<double>( _Dfp.data()+ip*_nf, _Dfp.data()+(ip+1)*_nf ) );
+//    for( unsigned i=0; f && i<_nf; i++ ) f[i] = _Df[i];
+//    for( unsigned i=0; fp && i<_nf*_np; i++ ) fp[i] = _Dfp[i];
     if( options.DISPLAY >= 1 ){
       _print_interm( _nf, _Df.data(), " f", os );
       for( unsigned iq=0; iq<_np; iq++ ){
@@ -1321,22 +1456,22 @@ ODESLVS_CVODES<ExtOps...>::_states_FSA
     _END_STA(); _END_SEN();
     long int nstp;
     _cv_flag = CVodeGetNumSteps( _cv_mem, &nstp );
-    stats_sta.numSteps += nstp;
-    stats_sen.numSteps += nstp;
-    if( options.DISPLAY >= 1 ) _print_stats( stats_sen, os );
+    stats_state.numSteps += nstp;
+    stats_sensitivity.numSteps += nstp;
+    if( options.DISPLAY >= 1 ) _print_stats( stats_sensitivity, os );
     return STATUS::FAILURE;
   }
 
   long int nstp;
   _cv_flag = CVodeGetNumSteps( _cv_mem, &nstp );
-  stats_sta.numSteps += nstp;
-  stats_sen.numSteps += nstp;
+  stats_state.numSteps += nstp;
+  stats_sensitivity.numSteps += nstp;
 #ifdef MC__ODESLVS_CVODES_DEBUG
   std::cout << "number of steps: " << nstp << std::endl;
 #endif
 
   _END_STA(); _END_SEN();
-  if( options.DISPLAY >= 1 ) _print_stats( stats_sen, os );
+  if( options.DISPLAY >= 1 ) _print_stats( stats_sensitivity, os );
   return STATUS::NORMAL;
 }
 
@@ -1384,6 +1519,7 @@ public:
 	assert( opins.second );
 	pOp = opins.first;
         data = pODE = static_cast<ODESLVS_CVODES<ExtOps...>*>( pOp->data );
+        data = pOp->data;
       }
       assert( idep < nFun*nVar );
       return *(pRes[idep]);
@@ -1407,6 +1543,7 @@ public:
 	assert( opins.second );
 	pOp = opins.first;
         pODE = static_cast<ODESLVS_CVODES<ExtOps...>*>( pOp->data );
+        data = pOp->data;
       }
       return pRes;
     }
@@ -1514,6 +1651,7 @@ public:
 	assert( opins.second );
 	pOp = opins.first;
         pODE = static_cast<ODESLVS_CVODES<ExtOps...>*>( pOp->data );
+        data = pOp->data;
       }
 #ifdef MC__FFODE_CHECK
       assert( idep < nFun*nVar );
@@ -1539,6 +1677,7 @@ public:
 	assert( opins.second );
 	pOp = opins.first;
         pODE = static_cast<ODESLVS_CVODES<ExtOps...>*>( pOp->data );
+        data = pOp->data;
       }
       return pRes;
     }
@@ -1606,11 +1745,12 @@ const
   assert( pODE && nRes == pODE->nf() && nVar == pODE->np() );
 #endif
 
-  if( pODE->states( vVar, nullptr, vRes ) != ODESLVS_CVODES<ExtOps...>::NORMAL ){
+  if( pODE->solve_state( vVar ) != ODESLVS_CVODES<ExtOps...>::NORMAL ){
     for( unsigned i=0; i<nVar; ++i ) std::cout << "vVar[" << i << "] = " << vVar[i] << std::endl;
     std::cerr << "FFODE::eval double ** Integration failure\n";
     throw typename ODESLVS_CVODES<ExtOps...>::Exceptions( ODESLVS_CVODES<ExtOps...>::Exceptions::INTERN );
   }
+  for( unsigned i=0; i<nRes; ++i ) vRes[i] = pODE->val_function()[i];
 }
 
 template<unsigned int ID, typename... ExtOps>
@@ -1669,31 +1809,29 @@ const
 #endif
 
   std::vector<double> vVarVal( nVar );
-  for( unsigned i=0; i<nVar; ++i )
-    vVarVal[i] = vVar[i].val();
-  std::vector<double> vResVal( nRes ), vResDer( nRes*nVar ); 
-  if( nVar <= 2*nRes ){
-    if( pODE->states_FSA( vVarVal.data(), nullptr, vResVal.data(), nullptr, vResDer.data() ) != ODESLVS_CVODES<ExtOps...>::NORMAL ){
+  for( unsigned i=0; i<nVar; ++i ) vVarVal[i] = vVar[i].val();
+  if( nVar <= 3*nRes ){
+    if( pODE->solve_sensitivity( vVarVal ) != ODESLVS_CVODES<ExtOps...>::NORMAL ){
       std::cerr << "FFODE::eval fadbad::F<double> ** Integration failure\n";
       throw typename ODESLVS_CVODES<ExtOps...>::Exceptions( ODESLVS_CVODES<ExtOps...>::Exceptions::INTERN );
     }
   }
   else{
-    if( pODE->states_ASA( vVarVal.data(), nullptr, vResVal.data(), nullptr, vResDer.data() ) != ODESLVS_CVODES<ExtOps...>::NORMAL ){
+    if( pODE->solve_adjoint( vVarVal ) != ODESLVS_CVODES<ExtOps...>::NORMAL ){
       std::cerr << "FFODE::eval ** Integration failure\n";
       throw typename ODESLVS_CVODES<ExtOps...>::Exceptions( ODESLVS_CVODES<ExtOps...>::Exceptions::INTERN );
     }
   }
 
   for( unsigned k=0; k<nRes; ++k ){
-    vRes[k] = vResVal[k];
+    vRes[k] = pODE->val_function()[k];
     for( unsigned i=0; i<nVar; ++i )
       vRes[k].setDepend( vVar[i] );
     for( unsigned j=0; j<vRes[k].size(); ++j ){
       vRes[k][j] = 0.;
       for( unsigned i=0; i<nVar; ++i ){
         if( vVar[i][j] == 0. ) continue;
-        vRes[k][j] += vResDer[k+nRes*i] * vVar[i][j];
+        vRes[k][j] += pODE->val_function_gradient()[i][k] * vVar[i][j];
       }
     }
   }
@@ -1789,18 +1927,21 @@ const
   assert( pODE && nRes == pODE->nf()*pODE->np() && nVar == pODE->np() );
 #endif
 
-  if( nVar <= 2*nRes ){
-    if( pODE->states_FSA( vVar, nullptr, nullptr, nullptr, vRes ) != ODESLVS_CVODES<ExtOps...>::NORMAL ){
+  if( nVar <= 3*nRes ){
+    if( pODE->solve_sensitivity( vVar ) != ODESLVS_CVODES<ExtOps...>::NORMAL ){
       std::cerr << "FFGRADODE::eval ** Integration failure\n";
       throw typename ODESLVS_CVODES<ExtOps...>::Exceptions( ODESLVS_CVODES<ExtOps...>::Exceptions::INTERN );
     }
   }
   else{
-    if( pODE->states_ASA( vVar, nullptr, nullptr, nullptr, vRes ) != ODESLVS_CVODES<ExtOps...>::NORMAL ){
+    if( pODE->solve_adjoint( vVar ) != ODESLVS_CVODES<ExtOps...>::NORMAL ){
       std::cerr << "FFGRADODE::eval ** Integration failure\n";
       throw typename ODESLVS_CVODES<ExtOps...>::Exceptions( ODESLVS_CVODES<ExtOps...>::Exceptions::INTERN );
     }
   }
+  for( unsigned i=0, k=0; i<pODE->np(); ++i )
+    for( unsigned j=0; j<pODE->nf(); ++j, ++k )
+      vRes[k] = pODE->val_function_gradient()[i][j]; // DOUBLE-CHECK ENTRY ORDERING!!!
 }
 
 template<unsigned int ID, typename... ExtOps>

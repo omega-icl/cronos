@@ -95,8 +95,14 @@ class ODESLV_CVODES
   //! @brief checkpoints for adjoint integration
   int _nchk;
 
-  //! @brief state parameterizations at time stages for adjoint integration
-  std::vector< std::vector< sunrealtype > > _vec_sta;
+  //! @brief state values at stage times
+  std::vector< std::vector< double > > _xk;
+
+  //! @brief quadrature values at stage times
+  std::vector< std::vector< double > > _qk;
+
+  //! @brief function values
+  std::vector< double > _f;
 
 public:
 
@@ -140,7 +146,7 @@ public:
       }
     //! @brief Display level (default: 1)
     int DISPLAY;
-    //! @brief Whether or not to record results (default: false)
+    //! @brief Whether or not to record results (default: 0)
     unsigned RESRECORD;
    } options;
 
@@ -168,15 +174,18 @@ public:
    };
 
   //! @brief Vector storing results (upon request only)
-  std::vector< Results > results_sta;
+  std::vector< Results > results_state;
 
   //! @brief Statistics for state integration
-  Stats stats_sta;
+  Stats stats_state;
 
   //! @brief Computes solution of parametric ODEs
-  STATUS states
-    ( double const* p, double** xk=nullptr, double* f=nullptr,
-      std::ostream& os=std::cout );
+  STATUS solve_state
+    ( std::vector<double> const& p, std::ostream& os=std::cout );
+
+  //! @brief Computes solution of parametric ODEs
+  STATUS solve_state
+    ( double const*p, std::ostream& os=std::cout );
 
   //! @brief Setup local copy of parametric ODEs
   bool setup
@@ -192,7 +201,25 @@ public:
   void record
     ( std::ofstream& ores, unsigned const iprec=5 )
     const
-    { return _record( ores, results_sta, iprec ); }
+    { return _record( ores, results_state, iprec ); }
+    
+  //! @brief Retreive state values at stage times
+  std::vector< std::vector< double > > const& val_state
+    ()
+    const
+    { return _xk; }
+
+  //! @brief Retreive quadrature values at stage times
+  std::vector< std::vector< double > > const& val_quadrature
+    ()
+    const
+    { return _qk; }
+
+  //! @brief Retreive function values at stage times
+  std::vector< double > const& val_function
+    ()
+    const
+    { return _f; }
   /** @} */
 
 protected:
@@ -248,8 +275,13 @@ protected:
       N_Vector tmp1, N_Vector tmp2, N_Vector tmp3 );
 
   //! @brief Solve parametric ODEs forward in time through every time stages
-  virtual STATUS _states
-    ( double const* p, double** xk, double* f, bool const store, std::ostream& os );
+  STATUS _states
+    ( double const* p, bool const store, std::ostream& os );
+
+  //! @brief Solve parametric ODEs forward in time in current time stage
+  STATUS _states_stage
+    ( unsigned istg, double& t, N_Vector& Nx, N_Vector& Nq, bool const reinit, 
+      bool const store, bool const record, std::ostream& os );
 
 private:
 
@@ -451,6 +483,7 @@ bool
 ODESLV_CVODES<ExtOps...>::_CC_CVODE_STA
 ()
 {
+
   // Reinitialize CVode memory block for current time _t and current state _Nx
   _cv_flag = CVodeReInit( _cv_mem, _t, _Nx );
   if( _check_cv_flag( &_cv_flag, "CVodeReInit", 1 ) ) return false;
@@ -463,6 +496,7 @@ bool
 ODESLV_CVODES<ExtOps...>::_CC_CVODE_QUAD
 ()
 {
+
   // Reinitialize CVode memory block for current quarature _Nq
   if( !_Nq ) return true;
   _cv_flag = CVodeQuadReInit( _cv_mem, _Nq );
@@ -476,7 +510,7 @@ void
 ODESLV_CVODES<ExtOps...>::_END_STA()
 {
   // Get final CPU time
-  _final_stats( stats_sta );
+  _final_stats( stats_state );
 }
 
 template <typename... ExtOps>
@@ -496,21 +530,23 @@ ODESLV_CVODES<ExtOps...>::_INI_STA
 ()
 {
   // Set SUNDIALS state/quadrature arrays
-  if( !_Nx || NV_LENGTH_S( _Nx ) != _nx ){
+  if( !_Nx || NV_LENGTH_S( _Nx ) != (sunindextype)_nx ){
     if( _Nx ) N_VDestroy( _Nx );
     _Nx  = N_VNew_Serial( _nx, sunctx );
   }
-  if( !_Nq || NV_LENGTH_S( _Nq ) != _nq ){
+  if( !_Nq || NV_LENGTH_S( _Nq ) != (sunindextype)_nq ){
     if( _Nq ) N_VDestroy_Serial( _Nq );
     _Nq  = _nq? N_VNew_Serial( _nq, sunctx ): nullptr;
   }
 
-  // Initialize state parameterization at time stages
-  _vec_sta.clear();
+  // reset at time stages
+  _xk.clear(); _xk.reserve(_nsmax);
+  _qk.clear(); _qk.reserve(_nsmax);
+  _f.clear();  _f.reserve(_nf);
 
   // Reset result record and statistics
-  results_sta.clear();
-  _init_stats( stats_sta );
+  results_state.clear();
+  _init_stats( stats_state );
 
   return true;
 }
@@ -536,16 +572,16 @@ ODESLV_CVODES<ExtOps...>::CVRHS__
 ( sunrealtype t, N_Vector y, N_Vector ydot, void *user_data )
 {
 #ifdef MC__ODESLV_CVODES_DEBUG
-  std::cout << "@t=" << t << "\nx:\n";
-  for( unsigned i=0; i<NV_LENGTH_S( y ); i++ ) std::cout << NV_Ith_S( y, i ) << std::endl;
+  std::cout << std::scientific << std::setprecision(6) << t;
+  for( unsigned i=0; i<NV_LENGTH_S( y ); i++ ) std::cout << "  " << NV_Ith_S( y, i );
 #endif
   bool flag = _RHS_D_STA( t, NV_DATA_S( y ), NV_DATA_S( ydot ) );
 #ifdef MC__ODESLV_CVODES_DEBUG
-  std::cout << "xdot:\n";
-  for( unsigned i=0; i<NV_LENGTH_S( ydot ); i++ ) std::cout << NV_Ith_S( ydot, i ) << std::endl;
+  for( unsigned i=0; i<NV_LENGTH_S( ydot ); i++ ) std::cout << "  " << NV_Ith_S( ydot, i );
+  std::cout << std::endl;
   { int dum; std::cin >> dum; }
 #endif
-  stats_sta.numRHS++;
+  stats_state.numRHS++;
   return( flag? 0: -1 );
 }
 
@@ -601,7 +637,7 @@ ODESLV_CVODES<ExtOps...>::CVJAC__
   switch( options.LINSOL ){
    case Options::DIAG:
    case Options::DENSEDQ:
-   case Options::SPARSE:
+   //case Options::SPARSE:
    default:
     flag = false;
     break;
@@ -614,124 +650,122 @@ ODESLV_CVODES<ExtOps...>::CVJAC__
     break;
 #endif
   }
-  stats_sta.numJAC++; // increment JAC counter
+  stats_state.numJAC++; // increment JAC counter
   return( flag? 0: -1 );
 }
 
 template <typename... ExtOps>
 typename ODESLV_CVODES<ExtOps...>::STATUS
-ODESLV_CVODES<ExtOps...>::_states
-( double const* p, double** xk, double* f, bool const store, std::ostream& os )
+ODESLV_CVODES<ExtOps...>::_states_stage
+( unsigned istg, double& t, N_Vector& Nx, N_Vector& Nq, bool const reinit, bool const store,
+  bool const record, std::ostream& os )
 {
-  // Check size
-  //if( !p ) return STATUS::FATAL;
+  // State discontinuities (if any) at stage times
+  // and integrator reinitialization (if applicable)
+  _pos_ic = ( _vIC.size()>=_nsmax? istg:0 );
+  if( _pos_ic && ( !_CC_D_SET( _pos_ic )
+                || !_CC_D_STA( t, NV_DATA_S( Nx ) )
+                || !_CC_CVODE_STA() ) )
+    { _END_STA(); return STATUS::FAILURE; }
+  else if( !istg && reinit && !_CC_CVODE_STA() )
+    { _END_STA(); return STATUS::FAILURE; }
+  //if( istg && !_CC_CVODE_QUAD() )
+  if( ( istg || reinit )
+   && ( ( Nq && !_IC_D_QUAD( NV_DATA_S( Nq ) ) ) // quadrature reinitialization
+     || !_CC_CVODE_QUAD() ) )
+    { _END_STA(); return STATUS::FAILURE; }
+  if( record )
+    results_state.push_back( Results( t, _nx, NV_DATA_S(Nx), _nq, _nq? NV_DATA_S(Nq): nullptr ) );
 
+  // update list of operations in RHS, JAC and QUAD
+  _pos_rhs  = ( _vRHS.size()<=1? 0: istg );
+  _pos_quad = ( _vQUAD.size()<=1? 0: istg );
+  if( (!istg || _pos_rhs || _pos_quad)
+    && !_RHS_D_SET( _pos_rhs, _pos_quad ) )
+    { _END_STA(); return STATUS::FATAL; }
+
+  // integrate till end of time stage
+  _cv_flag = CVodeSetStopTime( _cv_mem, _dT[istg+1] );
+  if( _check_cv_flag( &_cv_flag, "CVodeSetStopTime", 1 ) )
+    { _END_STA(); return STATUS::FATAL; }
+
+  unsigned const NSTEP = options.RESRECORD? options.RESRECORD: 1;
+  double const TSTEP = ( _dT[istg+1] - t ) / NSTEP;
+  double TSTOP = t + TSTEP;
+  for( unsigned k=0; k<NSTEP; k++, TSTOP+=TSTEP ){
+
+    if( k+1 == NSTEP ) TSTOP = _dT[istg+1];
+    if( !store )
+      _cv_flag = CVode( _cv_mem, TSTOP, Nx, &t, CV_NORMAL );
+    else
+      _cv_flag = CVodeF( _cv_mem, TSTOP, Nx, &t, CV_NORMAL, &_nchk );
+    if( _check_cv_flag( &_cv_flag, store?"CVodeF":"CVode", 1 ) )
+     //|| (options.NMAX && stats_state.numSteps > options.NMAX) )
+      throw Exceptions( Exceptions::INTERN );
+
+    // intermediate record
+    if( record ){
+      if( _nq ){
+        _cv_flag = CVodeGetQuad( _cv_mem, &t, Nq );
+        if( _check_cv_flag(&_cv_flag, "CVodeGetQuad", 1) )
+          { _END_STA(); return STATUS::FATAL; }
+      }
+      results_state.push_back( Results( t, _nx, NV_DATA_S(Nx), _nq, _nq? NV_DATA_S(Nq): nullptr ) );
+    }
+  }
+
+  return STATUS::NORMAL;
+}
+
+template <typename... ExtOps>
+typename ODESLV_CVODES<ExtOps...>::STATUS
+ODESLV_CVODES<ExtOps...>::_states
+( double const* p, bool const store, std::ostream& os )
+{
   try{
     // Initialize trajectory integration
     if( !_INI_STA( p ) ) return STATUS::FATAL;
     _t = _dT[0];
-    const unsigned NSTEP = options.RESRECORD? options.RESRECORD: 1;
 
     // Initial state/quadrature values
     if( !_IC_D_SET()
      || !_IC_D_STA( _t, NV_DATA_S( _Nx ) )
      || (_Nq && !_IC_D_QUAD( NV_DATA_S( _Nq ) ) ) )
       { _END_STA(); return STATUS::FATAL; }
-    _GET_D_STA( NV_DATA_S(_Nx), _nq && _Nq? NV_DATA_S(_Nq): 0 );
+    _GET_D_STA( NV_DATA_S(_Nx), _nq && _Nq? NV_DATA_S(_Nq): nullptr );
 
-    // Store full state at initial time
-    if( store ){
-      sunrealtype*vsta = NV_DATA_S(_Nx);
-      unsigned lsta = NV_LENGTH_S(_Nx);
-      _vec_sta.push_back( std::vector<sunrealtype>( vsta, vsta+lsta ) );
-    }
+//    // Store full state at initial time
+//    if( store ){
+//      sunrealtype*vsta = NV_DATA_S(_Nx);
+//      unsigned lsta = NV_LENGTH_S(_Nx);
+//      _vec_sta.push_back( std::vector<double>( vsta, vsta+lsta ) );
+//    }
 
     // Display / record / return initial results
+    _xk.push_back( std::vector<double>( _Dx, _Dx+_nx ) );
+    if( _nq ) _qk.push_back( std::vector<double>( _Dq, _Dq+_nq ) );
     if( options.DISPLAY >= 1 ){
       _print_interm( _t, _nx, _Dx, " x", os );
       _print_interm( _nq, _Dq, " q", os );
     }
-    if( options.RESRECORD )
-      results_sta.push_back( Results( _t, _nx, NV_DATA_S(_Nx), _nq, _nq? NV_DATA_S(_Nq): 0 ) );
-    if( xk ){
-      if( !xk[0] ) xk[0] = new double[_nx+_nq];
-      for( unsigned ix=0; ix<_nx+_nq; ix++ )
-        xk[0][ix] = ix<_nx? _Dx[ix]: _Dq[ix-_nx];
-    }
+//    if( options.RESRECORD )
+//      results_state.push_back( Results( _t, _nx, NV_DATA_S(_Nx), _nq, _nq? NV_DATA_S(_Nq): nullptr ) );
 
     // Integrate ODEs through each stage using SUNDIALS
     if( !_INI_CVODE() )
       { _END_STA(); return STATUS::FATAL; }
 
     for( _istg=0; _istg<_nsmax; _istg++ ){
-      // State discontinuities (if any) at stage times
-      // and integrator reinitialization (if applicable)
-      _pos_ic = ( _vIC.size()>=_nsmax? _istg:0 );
-      if( _pos_ic
-       && ( !_CC_D_SET( _pos_ic )
-         || !_CC_D_STA( _t, NV_DATA_S( _Nx ) )
-         || !_CC_CVODE_STA() ) )
-        { _END_STA(); return STATUS::FAILURE; }
-      if( _istg 
-       && !_CC_CVODE_QUAD() )
-       //&& ( ( _Nq && !_IC_D_QUAD( NV_DATA_S( _Nq ) ) ) // quadrature reinitialization
-       //  || !_CC_CVODE_QUAD() ) )
-        { _END_STA(); return STATUS::FAILURE; }
-      if( options.RESRECORD )
-        results_sta.push_back( Results( _t, _nx, NV_DATA_S(_Nx), _nq, _nq? NV_DATA_S(_Nq): 0 ) );
 
-      // update list of operations in RHS, JAC and QUAD
-      _pos_rhs  = ( _vRHS.size()<=1? 0: _istg );
-      _pos_quad = ( _vQUAD.size()<=1? 0: _istg );
-      if( (!_istg || _pos_rhs || _pos_quad)
-        && !_RHS_D_SET( _pos_rhs, _pos_quad ) )
-        { _END_STA(); return STATUS::FATAL; }
+      // Integrate states over stage
+      _states_stage( _istg, _t, _Nx, _Nq, false, store, options.RESRECORD, os );
 
-      // integrate till end of time stage
-      _cv_flag = CVodeSetStopTime( _cv_mem, _dT[_istg+1] );
-      if( _check_cv_flag( &_cv_flag, "CVodeSetStopTime", 1 ) )
-        { _END_STA(); return STATUS::FATAL; }
-/*
-      while( _t < _dT[_istg+1] ){
-        if( !store )
-          _cv_flag = CVode( _cv_mem, _dT[_istg+1], _Nx, &_t, CV_ONE_STEP );
-        else
-          _cv_flag = CVodeF( _cv_mem, _dT[_istg+1], _Nx, &_t, CV_ONE_STEP, &_nchk );
-        if( _check_cv_flag(&_cv_flag, store?"CVodeF":"CVode", 1)
-         || (options.NMAX && stats_sta.numSteps > options.NMAX) )
-          throw Exceptions( Exceptions::INTERN );
-        stats_sta.numSteps++;
-      }
-*/
-      const double TSTEP = ( _dT[_istg+1] - _t  ) / NSTEP;
-      double TSTOP = _t+TSTEP;
-      for( unsigned k=0; k<NSTEP; k++, TSTOP+=TSTEP ){
-        if( k+1 == NSTEP ) TSTOP = _dT[_istg+1];
-        if( !store )
-          _cv_flag = CVode( _cv_mem, TSTOP, _Nx, &_t, CV_NORMAL );
-        else
-          _cv_flag = CVodeF( _cv_mem, TSTOP, _Nx, &_t, CV_NORMAL, &_nchk );
-        if( _check_cv_flag( &_cv_flag, store?"CVodeF":"CVode", 1 ) )
-         //|| (options.NMAX && stats_sta.numSteps > options.NMAX) )
-          throw Exceptions( Exceptions::INTERN );
-
-        // intermediate record
-        if( options.RESRECORD ){
-          if( _nq ){
-            _cv_flag = CVodeGetQuad( _cv_mem, &_t, _Nq );
-            if( _check_cv_flag(&_cv_flag, "CVodeGetQuad", 1) )
-              { _END_STA(); return STATUS::FATAL; }
-          }
-          results_sta.push_back( Results( _t, _nx, NV_DATA_S(_Nx), _nq, _nq? NV_DATA_S(_Nq): 0 ) );
-        }
-      }
-
-      // Store full state at stage time
-      if( store ){
-        sunrealtype*vsta = NV_DATA_S(_Nx);
-        unsigned lsta = NV_LENGTH_S(_Nx);
-        _vec_sta.push_back( std::vector<sunrealtype>( vsta, vsta+lsta ) );
-      }
+//      // Store full state at stage time
+//      if( store ){
+//        sunrealtype*vsta = NV_DATA_S(_Nx);
+//        unsigned lsta = NV_LENGTH_S(_Nx);
+//        _vec_sta.push_back( std::vector<double>( vsta, vsta+lsta ) );
+//      }
 
       // Intermediate states and quadratures
       if( _nq ){
@@ -742,12 +776,8 @@ ODESLV_CVODES<ExtOps...>::_states
      _GET_D_STA( NV_DATA_S(_Nx), _nq && _Nq? NV_DATA_S(_Nq): 0 );
 
       // Display / return stage results
-      if( xk ){
-        if( !xk[_istg+1] ) xk[_istg+1] = new double[_nx+_nq];
-        unsigned ix = 0;
-        for( ; ix<_nx; ix++ ) xk[_istg+1][ix] = _Dx[ix];
-        for( ; ix<_nx+_nq; ix++ ) xk[_istg+1][ix] = _Dq[ix-_nx];
-      }
+      _xk.push_back( std::vector<double>( _Dx, _Dx+_nx ) );
+      if( _nq ) _qk.push_back( std::vector<double>( _Dq, _Dq+_nq ) );
       if( options.DISPLAY >= 1 ){
         _print_interm( _t, _nx, _Dx, " x", os );
         _print_interm( _nq, _Dq, " q", os );
@@ -763,52 +793,71 @@ ODESLV_CVODES<ExtOps...>::_states
 #endif
 
     // Display / return function values
-    for( unsigned i=0; f && i<_nf; i++ ) f[i] = _Df[i];
+    _f = _Df;
     if( options.DISPLAY >= 1 ){
       _print_interm( _nf, _Df.data(), " f", os );
       // Print final statistics to the screen
-      //os << "\nFinal Statistics:\n";
-      //_cv_flag = CVodePrintAllStats( _cv_mem, stdout, SUN_OUTPUTFORMAT_TABLE);
+      // os << "\nFinal Statistics:\n";
+      // _cv_flag = CVodePrintAllStats( _cv_mem, stdout, SUN_OUTPUTFORMAT_TABLE);
     }
   }
   catch(...){
     _END_STA();
     long int nstp;
     _cv_flag = CVodeGetNumSteps( _cv_mem, &nstp );
-    stats_sta.numSteps += nstp;
-    if( options.DISPLAY >= 1 ) _print_stats( stats_sta, os );
+    stats_state.numSteps += nstp;
+    if( options.DISPLAY >= 1 ) _print_stats( stats_state, os );
+    //std::cout << "failed status: " << STATUS::FAILURE << std::endl;
     return STATUS::FAILURE;
   }
 
   long int nstp;
   _cv_flag = CVodeGetNumSteps( _cv_mem, &nstp );
-  stats_sta.numSteps += nstp;
+  stats_state.numSteps += nstp;
 #ifdef MC__ODESLV_CVODES_DEBUG
   std::cout << "number of steps: " << nstp << std::endl;
 #endif
 
   _END_STA();
-  if( options.DISPLAY >= 1 ) _print_stats( stats_sta, os );
+  if( options.DISPLAY >= 1 ) _print_stats( stats_state, os );
+  //std::cout << "normal status: " << STATUS::NORMAL << std::endl;
   return STATUS::NORMAL;
 }
 
-//! @fn template <typename... ExtOps> inline typename ODESLV_CVODES<ExtOps...>::STATUS ODESLV_CVODES<ExtOps...>::states(
-//! double const* p, double** xk, double* q, double* f, std::ostream& os=std::cout )
+//! @fn template <typename... ExtOps> inline typename ODESLV_CVODES<ExtOps...>::STATUS ODESLV_CVODES<ExtOps...>::solve_state(
+//! std::vector<double> const& p, std::ostream& os=std::cout )
 //!
 //! This function computes a solution to the parametric ODEs:
 //!   - <a>p</a>  [input]  parameter values
-//!   - <a>xk</a> [output] state & quadrature values at stage times
-//!   - <a>f</a>  [output] function values
 //!   - <a>os</a> [input]  output stream [default: std::cout]
 //! .
 //! The return value is the status.
 template <typename... ExtOps>
 typename ODESLV_CVODES<ExtOps...>::STATUS
-ODESLV_CVODES<ExtOps...>::states
-( double const* p, double** xk, double* f, std::ostream& os )
+ODESLV_CVODES<ExtOps...>::solve_state
+( std::vector<double> const& p, std::ostream& os )
 {
   registration();
-  STATUS flag = _states( p, xk, f, false, os );
+  STATUS flag = _states( p.data(), false, os );
+  unregistration();
+  return flag;
+}
+
+//! @fn template <typename... ExtOps> inline typename ODESLV_CVODES<ExtOps...>::STATUS ODESLV_CVODES<ExtOps...>::solve_state(
+//! double const* p, std::ostream& os=std::cout )
+//!
+//! This function computes a solution to the parametric ODEs:
+//!   - <a>p</a>  [input]  parameter values
+//!   - <a>os</a> [input]  output stream [default: std::cout]
+//! .
+//! The return value is the status.
+template <typename... ExtOps>
+typename ODESLV_CVODES<ExtOps...>::STATUS
+ODESLV_CVODES<ExtOps...>::solve_state
+( double const* p, std::ostream& os )
+{
+  registration();
+  STATUS flag = _states( p, false, os );
   unregistration();
   return flag;
 }

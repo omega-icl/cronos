@@ -1,14 +1,11 @@
 # THIRD-PARTY LIBRARIES <<-- CHANGE AS APPROPRIATE -->>
 
 PATH_CRONOS = $(shell cd ../.. ; pwd)
-LIB_CRONOS = #-L$(PATH_CRONOS)/lib -Wl,-rpath=$(PATH_CRONOS)/lib -lcronos
-INC_CRONOS = -I$(PATH_CRONOS)/include
-
 include $(PATH_CRONOS)/src/makeoptions.mk
 
 #####
 
-all: test0 test0b test1 test1b test2 test3
+all: test0 test0b test1 test1b test2 test3 test4
 
 test% : test%.o
 	$(CPP) $^ $(LIB_CRONOS) $(LIB_DEP) -o $@

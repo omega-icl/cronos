@@ -4,85 +4,84 @@
 
 int main()
 {
-  mc::FFGraph IVP;  // DAG describing the problem
+  mc::FFGraph IVPDAG;  // DAG describing the problem
 
-  double t0 = 0., tf = 10.;     // Time span
-  const unsigned NS = 1;  // Time stages
+  const unsigned NS = 4;  // Time stages
+  double t0 = 0., tf = 10.;       // Time span
+  std::vector<double> T( NS+1 );  // Time stages
+  for( unsigned int i=0; i<=NS; i++ ) T[i] = t0 + i * ( tf - t0 ) / NS; 
 
-  const unsigned NP = 1;  // Number of parameters
+  const unsigned NP = 2;  // Number of parameters
+  std::vector<mc::FFVar> P(NP);   // Parameters
+  for( unsigned int i=0; i<NP; i++ ) P[i].set( &IVPDAG );
+
   const unsigned NX = 2;  // Number of states
+  std::vector<mc::FFVar> X(NX);   // States
+  for( unsigned int i=0; i<NX; i++ ) X[i].set( &IVPDAG );
+
   const unsigned NQ = 1;  // Number of state quadratures
-  const unsigned NF = 2;  // Number of state functions
+  std::vector<mc::FFVar> Q(NQ);   // State quadratures
+  for( unsigned i=0; i<NQ; i++ ) Q[i].set( &IVPDAG );
 
-  mc::FFVar P[NP];  // Parameters
-  for( unsigned int i=0; i<NP; i++ ) P[i].set( &IVP );
-
-  mc::FFVar X[NX];  // States
-  for( unsigned int i=0; i<NX; i++ ) X[i].set( &IVP );
-
-  mc::FFVar Q[NQ];  // State quadratures
-  for( unsigned i=0; i<NQ; i++ ) Q[i].set( &IVP );
-
-  mc::FFVar RHS[NX];  // Right-hand side function
+  std::vector<mc::FFVar> RHS(NX); // Right-hand side function
   RHS[0] = P[0] * X[0] * ( 1. - X[1] );
   RHS[1] = P[0] * X[1] * ( X[0] - 1. );
 
-  mc::FFVar IC[NX];   // Initial value function
-  IC[0] = 1.2;
-  IC[1] = 1.1 + 0.01*(P[0]-3.);
-/*
-  mc::FFVar IC[NX*NS];   // Initial value function
-  for( unsigned k=0; k<NX*NS; k++ ) IC[k] = X[k%NX];
-  IC[0] = 1.2;
-  IC[1] = 1.1;// + 0.01*P[0];
-  //if( NS > 1 ) IC[(NS/2)*NX+1] = X[1] - 0.5;
-*/
-  mc::FFVar QUAD[NQ];  // Quadrature function
+//  std::vector<mc::FFVar> IC(NX);  // Initial value function
+//  IC[0] = 1.2;
+//  IC[1] = 1.1 + 0.01*P[1];
+
+  std::vector<std::vector<mc::FFVar>> IC(NS);   // Initial value function
+  IC[0].assign( { 1.2, 1.1 + 0.01*P[1] } );
+  for( unsigned k=1; k<NS; k++ )
+     IC[k].assign( { X[0], X[1] - 0.02*P[1] } );
+
+  std::vector<mc::FFVar> QUAD(NQ);  // Quadrature function
   QUAD[0] = X[1];
 
-  mc::FFVar FCT[NF];  // State functions
-  FCT[0] = X[0] * X[1];
-  FCT[1] = P[0] * pow( X[0], 2 ) + Q[0];
-/*
-  mc::FFVar FCT[NF*NS];  // State functions
-  for( unsigned k=0; k<NF*NS; k++ ) FCT[k] = 0.;
-  if( NS > 1 ) FCT[((NS-1)/NF)*NF+0] = X[0] + 0.1*P[0];
-  FCT[(NS-1)*NF+0] = X[0] * X[1];
-  FCT[(NS-1)*NF+1] = P[0] * pow( X[0], 2 );
-  for( unsigned k=0; k<NS; k++ ) FCT[k*NF+1] += Q[0];
-*/
+  const unsigned NF = 2;  // Number of state functions
+
+//  std::vector<mc::FFVar> FCT(NF);  // State functions
+//  FCT[0] = X[0] * X[1];
+//  FCT[1] = Q[0]; //P[0] * pow( X[0], 2 );
+//  //FCT[0] = Q[0]; //P[0] * pow( X[0], 2 );
+
+  std::vector<std::vector<mc::FFVar>> FCT(NS);  // State functions
+  for( unsigned k=0; k<NS-1; k++ )
+    FCT[k].assign( { X[0] * X[1], Q[0] } );
+  FCT[NS-1].assign( { X[0] * X[1], Q[0] } );
+
+
   /////////////////////////////////////////////////////////////////////////
   // Compute ODE solutions
 
-  mc::ODESLVS_CVODES LV;
+  mc::ODESLVS_CVODES IVP;
 
-  LV.options.INTMETH   = mc::BASE_CVODES::Options::MSBDF;//MSADAMS;
-  LV.options.NLINSOL   = mc::BASE_CVODES::Options::FIXEDPOINT;//NEWTON;
-  LV.options.LINSOL    = mc::BASE_CVODES::Options::DIAG;//DENSE;
-  LV.options.FSACORR   = mc::BASE_CVODES::Options::STAGGERED;//STAGGERED1;//SIMULTANEOUS;
-  LV.options.NMAX      = 2000;
-  LV.options.DISPLAY   = 1;
-  LV.options.ATOL      = LV.options.ATOLB     = LV.options.ATOLS  = 1e-9;
-  LV.options.RTOL      = LV.options.RTOLB     = LV.options.RTOLS  = 1e-9;
-  LV.options.QERR      = LV.options.QERRS     = 1;
-  LV.options.ASACHKPT  = 1000;
+  IVP.options.INTMETH   = mc::BASE_CVODES::Options::MSBDF;//MSADAMS;
+  IVP.options.NLINSOL   = mc::BASE_CVODES::Options::NEWTON;//FIXEDPOINT;
+  IVP.options.LINSOL    = mc::BASE_CVODES::Options::DENSE;//DIAG;
+  IVP.options.FSACORR   = mc::BASE_CVODES::Options::STAGGERED;//STAGGERED1;//SIMULTANEOUS;
+  IVP.options.NMAX      = 2000;
+  IVP.options.DISPLAY   = 1;
+  IVP.options.ATOL      = IVP.options.ATOLB     = IVP.options.ATOLS  = 1e-9;
+  IVP.options.RTOL      = IVP.options.RTOLB     = IVP.options.RTOLS  = 1e-9;
+  IVP.options.QERR      = IVP.options.QERRS     = 1;
+  IVP.options.ASACHKPT  = 2000;
 #if defined( SAVE_RESULTS )
-  LV.options.RESRECORD = 100;
+  IVP.options.RESRECORD = 100;
 #endif
 
-  LV.set_dag( &IVP );
-  LV.set_state( NX, X );
-  LV.set_time( t0, tf );
-  LV.set_parameter( NP, P );
-  LV.set_differential( NX, RHS );
-  LV.set_initial( NX, IC );
-  //LV.set_initial( NS, NX, IC );
-  LV.set_quadrature( NQ, QUAD, Q );
-  LV.set_function( NF, FCT );
-  //LV.set_function( NS, NF, FCT );
-  LV.setup();
+  IVP.set_dag( &IVPDAG );
+  IVP.set_time( T );
+  IVP.set_state( X );
+  IVP.set_parameter( P );
+  IVP.set_differential( RHS );
+  IVP.set_initial( IC );
+  IVP.set_quadrature( QUAD, Q );
+  IVP.set_function( FCT );
+  IVP.setup();
   
-  double p[NP] = { 2.95 };  // Parameter values
+  std::vector<double> p( { 2.96, 3. } );  // Parameter values
 
 #if defined( SAVE_RESULTS )
   std::ofstream direcSTA, direcFSA[NP], direcASA[NF];
@@ -90,33 +89,33 @@ int main()
 #endif
 
   std::cout << "\nCONTINUOUS-TIME INTEGRATION:\n\n";
-  LV.states( p ); //, xk, f );
+  IVP.solve_state( p );
 #if defined( SAVE_RESULTS )
   direcSTA.open( "test1_STA.dat", std::ios_base::out );
-  LV.record( direcSTA );
+  IVP.record( direcSTA );
 #endif
 
   std::cout << "\nCONTINUOUS-TIME INTEGRATION WITH FORWARD SENSITIVITY ANALYSIS:\n\n";
-  LV.states_FSA( p ); //, xk, f, xpk, fp );
+  IVP.solve_sensitivity( p );
 #if defined( SAVE_RESULTS )
   direcSTA.open( "test1_STA.dat", std::ios_base::out );
   for( unsigned i=0; i<NP; ++i ){
     sprintf( fname, "test1_FSA%d.dat",i );  
     direcFSA[i].open( fname, std::ios_base::out );
   }
-  LV.record( direcSTA, direcFSA );
+  IVP.record( direcSTA, direcFSA );
 #endif
 
   std::cout << "\nCONTINUOUS-TIME INTEGRATION WITH ADJOINT SENSITIVITY ANALYSIS:\n\n";
   //for( unsigned i=0; i<1000; i++ )
-  LV.states_ASA( p ); //, xk, f, lk, fp );
+  IVP.solve_adjoint( p );
 #if defined( SAVE_RESULTS )
   direcSTA.open( "test1_STA.dat", std::ios_base::out );
   for( unsigned i=0; i<NF; ++i ){
     sprintf( fname, "test1_ASA%d.dat",i );  
     direcASA[i].open( fname, std::ios_base::out );
   }
-  LV.record( direcSTA, direcASA );
+  IVP.record( direcSTA, direcASA );
 #endif
 
   return 0;

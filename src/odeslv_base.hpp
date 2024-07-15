@@ -175,6 +175,11 @@ protected:
   static void _vec2D
     ( REALTYPE const* vec, unsigned const n, double* d );
 
+  //! @brief Function converting integrator array to internal format
+  template <typename REALTYPE>
+  static void _D2vec
+    ( double const* d, unsigned const n, REALTYPE* vec );
+
   //! @brief Function to initialize state integration
   bool _INI_D_STA
     ( double const* p );
@@ -304,55 +309,55 @@ ODESLV_BASE<ExtOps...>::_SETUP
 #endif
 
   delete _pT; _pT = nullptr;
-  if( BASE_DE<ExtOps...>::_pT ){
+  if( BASE_DE<ExtOps...>::_vT.size() ){
     _pT  = new FFVar;
-    _dag->insert( BASE_DE<ExtOps...>::_dag, 1, BASE_DE<ExtOps...>::_pT, _pT );
+    _dag->insert( BASE_DE<ExtOps...>::_dag, 1, BASE_DE<ExtOps...>::_vT.data(), _pT );
   }
 
   delete[] _pX; _pX = nullptr;
   if( _nx ){
     _pX  = new FFVar[_nx];
-    _dag->insert( BASE_DE<ExtOps...>::_dag, _nx, BASE_DE<ExtOps...>::_pX, _pX );
+    _dag->insert( BASE_DE<ExtOps...>::_dag, _nx, BASE_DE<ExtOps...>::_vX.data(), _pX );
   }
 
   delete[] _pQ; _pQ = nullptr;
   if( _nq ){
     _pQ  = new FFVar[_nq];
-    _dag->insert( BASE_DE<ExtOps...>::_dag, _nq, BASE_DE<ExtOps...>::_pQ, _pQ );
+    _dag->insert( BASE_DE<ExtOps...>::_dag, _nq, BASE_DE<ExtOps...>::_vQ.data(), _pQ );
   }
 
   delete[] _pP; _pP = nullptr;
   if( _np ){
     _pP  = new FFVar[_np];
-    _dag->insert( BASE_DE<ExtOps...>::_dag, _np, BASE_DE<ExtOps...>::_pP, _pP );
+    _dag->insert( BASE_DE<ExtOps...>::_dag, _np, BASE_DE<ExtOps...>::_vP.data(), _pP );
   }
   
   for( auto& ic : _vIC ) delete[] ic;
   _vIC.clear();
   _vIC.reserve( BASE_DE<ExtOps...>::_vIC.size() );
-  for( auto& ic0 : BASE_DE<ExtOps...>::_vIC ){
+  for( auto const& ic0 : BASE_DE<ExtOps...>::_vIC ){
     FFVar* ic = new FFVar[_nx0];
-    _dag->insert( BASE_DE<ExtOps...>::_dag, _nx0, ic0, ic );
+    _dag->insert( BASE_DE<ExtOps...>::_dag, _nx0, ic0.data(), ic );
     _vIC.push_back( ic );
   }
-    
+
   for( auto& rhs  : _vRHS )  delete[] rhs;
   _vRHS.clear();
-  _vRHS.reserve( BASE_DE<ExtOps...>::_vRHS.size() );
-  for( auto& rhs0 : BASE_DE<ExtOps...>::_vRHS ){
+  _vRHS.reserve( BASE_DE<ExtOps...>::_vDE.size() );
+  for( auto const& rhs0 : BASE_DE<ExtOps...>::_vDE ){
 #ifdef MC__ODESLV_BASE_DEBUG
-    //BASE_DE<ExtOps...>::_dag->output( BASE_DE<ExtOps...>::_dag->subgraph( _nx, rhs0 ), " - Before insert" );
-    FFSubgraph sgrhs0 = BASE_DE<ExtOps...>::_dag->subgraph( _nx, rhs0 );
+    //BASE_DE<ExtOps...>::_dag->output( BASE_DE<ExtOps...>::_dag->subgraph( _nx, rhs0.data() ), " - Before insert" );
+    FFSubgraph sgrhs0 = BASE_DE<ExtOps...>::_dag->subgraph( _nx, rhs0.data() );
     std::vector<FFExpr> exprrhs0 = FFExpr::subgraph( BASE_DE<ExtOps...>::_dag, sgrhs0 ); 
     for( unsigned j=0; j<_nx; ++j )
         std::cout << "RHS0[" << j << "] = " << exprrhs0[j] << std::endl;
 #endif
     FFVar* rhs = new FFVar[_nx];
     //for( unsigned j=0; j<_nx; ++j ){
-    //  BASE_DE<ExtOps...>::_dag->output( BASE_DE<ExtOps...>::_dag->subgraph( 1, rhs0+j ), " - Before insert" );
-    //  _dag->insert( BASE_DE<ExtOps...>::_dag, 1, rhs0+j, rhs+j );
+    //  BASE_DE<ExtOps...>::_dag->output( BASE_DE<ExtOps...>::_dag->subgraph( 1, rhs0.data()+j ), " - Before insert" );
+    //  _dag->insert( BASE_DE<ExtOps...>::_dag, 1, rhs0.data()+j, rhs+j );
     //}
-    _dag->insert( BASE_DE<ExtOps...>::_dag, _nx, rhs0, rhs );
+    _dag->insert( BASE_DE<ExtOps...>::_dag, _nx, rhs0.data(), rhs );
     _vRHS.push_back( rhs );
 #ifdef MC__ODESLV_BASE_DEBUG
     //_dag->output( _dag->subgraph( _nx, rhs ), " - After insert" );
@@ -367,18 +372,18 @@ ODESLV_BASE<ExtOps...>::_SETUP
   for( auto& quad : _vQUAD ) delete[] quad;
   _vQUAD.clear();
   _vQUAD.reserve( BASE_DE<ExtOps...>::_vQUAD.size() );
-  for( auto& quad0 : BASE_DE<ExtOps...>::_vQUAD ){
+  for( auto const& quad0 : BASE_DE<ExtOps...>::_vQUAD ){
     FFVar* quad = new FFVar[_nq];
-    _dag->insert( BASE_DE<ExtOps...>::_dag, _nq, quad0, quad );
+    _dag->insert( BASE_DE<ExtOps...>::_dag, _nq, quad0.data(), quad );
     _vQUAD.push_back( quad );
   }
 
   for( auto& fct  : _vFCT )  delete[] fct;
   _vFCT.clear();
   _vFCT.reserve( BASE_DE<ExtOps...>::_vFCT.size() );
-  for( auto& fct0 : BASE_DE<ExtOps...>::_vFCT ){
+  for( auto const& fct0 : BASE_DE<ExtOps...>::_vFCT ){
     FFVar* fct = new FFVar[_nf];
-    _dag->insert( BASE_DE<ExtOps...>::_dag, _nf, fct0, fct );
+    _dag->insert( BASE_DE<ExtOps...>::_dag, _nf, fct0.data(), fct );
     _vFCT.push_back( fct );
   }
 
@@ -394,7 +399,7 @@ ODESLV_BASE<ExtOps...>::_SETUP
   delete _dag; _dag = new FFGraph<ExtOps...>;
 
   delete _pT; _pT = nullptr;
-  if( BASE_DE<ExtOps...>::_pT ){
+  if( IVP._pT ){
     _pT  = new FFVar;
     _dag->insert( IVP._dag, 1, IVP._pT, _pT );
   }
@@ -492,6 +497,17 @@ ODESLV_BASE<ExtOps...>::_vec2D
 ( REALTYPE const* vec, unsigned const n, double* d )
 {
   for( unsigned i=0; i<n; i++  ) d[i] = vec[i];
+  return;
+}
+
+template <typename... ExtOps>
+template <typename REALTYPE>
+inline
+void
+ODESLV_BASE<ExtOps...>::_D2vec
+( double const* d, unsigned const n, REALTYPE* vec )
+{
+  for( unsigned i=0; i<n; i++  ) vec[i] = d[i];
   return;
 }
 
@@ -743,6 +759,7 @@ ODESLV_BASE<ExtOps...>::_FCT_D_STA
   if( !_nf ) return true;
   *_Dt = t; // current time
   FFVar const* pFCT = _vFCT.at( iFCT );
+  //std::cout << "evaluating functions @" << t << std::endl;
   _dag->eval( _nf, pFCT, _Df.data(), _nVAR, _pVAR, _DVAR, iFCT?true:false );
   return true;
 }

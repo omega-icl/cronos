@@ -4,103 +4,101 @@
 
 int main()
 {
-  mc::FFGraph IVP;  // DAG describing the problem
+  mc::FFGraph IVPDAG;  // DAG describing the problem
 
-  const unsigned int NS = 3;   // Time stages
-  double tk[NS+1]; tk[0] = 0.;
-  for( unsigned k=0; k<NS; k++ ) tk[k+1] = tk[k] + 1./(double)NS;
-  mc::FFVar T; T.set( &IVP );  // Time
+  const unsigned NS = 3;  // Time stages
+  double t0 = 0., tf = 1.;       // Time span
+  std::vector<double> TS( NS+1 );  // Time stages
+  for( unsigned int i=0; i<=NS; i++ ) TS[i] = t0 + i * ( tf - t0 ) / NS; 
+  mc::FFVar T; T.set( &IVPDAG );  // Time
 
-  const unsigned NP = 2+NS;    // Number of parameters
-  const unsigned NX = 2;       // Number of states
-  const unsigned NF = 3;       // Number of state functions
+  const unsigned NP = 2+NS;  // Number of parameters
+  std::vector<mc::FFVar> P(NP);   // Parameters
+  for( unsigned int i=0; i<NP; i++ ) P[i].set( &IVPDAG );
+  mc::FFVar TF = P[0], X10 = P[1], *U = &P[2];
 
-  mc::FFVar P[NP];             // Parameters
-  for( unsigned int i=0; i<NP; i++ ) P[i].set( &IVP );
-  mc::FFVar TF = P[0], X10 = P[1], *U = P+2;
+  const unsigned NX = 2;  // Number of states
+  std::vector<mc::FFVar> X(NX);   // States
+  for( unsigned int i=0; i<NX; i++ ) X[i].set( &IVPDAG );
 
-  mc::FFVar X[NX];             // States
-  for( unsigned int i=0; i<NX; i++ ) X[i].set( &IVP );
-
-  mc::FFVar RHS[NX*NS];        // Right-hand side function
-  for( unsigned k=0; k<NS; k++ ){
-    RHS[NX*k+0] = TF * X[1];
-    RHS[NX*k+1] = TF * ( U[k]*X[0] - 2.*X[1] ) * T;
-  }
-
-  mc::FFVar IC[NX];            // Initial value function
+  std::vector<mc::FFVar> IC(NX);  // Initial value function
   IC[0] = 0.;
   IC[1] = X10;
 
-  mc::FFVar FCT[NF*NS];        // State functions
-  for( unsigned k=0; k<NF*NS; k++ ) FCT[k] = 0.;
+  std::vector<std::vector<mc::FFVar>> RHS(NS); // Right-hand side function
+  for( unsigned k=0; k<NS; k++ )
+    RHS[k].assign( { TF * X[1],
+                     TF * ( U[k]*X[0] - 2.*X[1] ) * T } );
+
+  const unsigned NF = 3;  // Number of state functions
+  std::vector<mc::FFVar> FCT(NF);  // State functions
   FCT[0] = TF;
-  FCT[(NS-1)*NF+1] = X[0]-1.;
-  FCT[(NS-1)*NF+2] = X[1];
+  FCT[1] = X[0]-1.;
+  FCT[2] = X[1];
+
 
   /////////////////////////////////////////////////////////////////////////
   // Compute ODE solutions
 
-  mc::ODESLVS_CVODES LV;
+  mc::ODESLVS_CVODES IVP;
 
-  LV.options.LINSOL    = mc::BASE_CVODES::Options::DIAG;//DENSE;
-  LV.options.INTMETH   = mc::BASE_CVODES::Options::MSBDF;//MSADAMS;
-  LV.options.NMAX      = 0; //20000;
-  LV.options.DISPLAY   = 1;
-  LV.options.ATOL      = LV.options.ATOLB      = LV.options.ATOLS  = 1e-9;
-  LV.options.RTOL      = LV.options.RTOLB      = LV.options.RTOLS  = 1e-9;
+  IVP.options.LINSOL    = mc::BASE_CVODES::Options::DIAG;//DENSE;
+  IVP.options.INTMETH   = mc::BASE_CVODES::Options::MSBDF;//MSADAMS;
+  IVP.options.NMAX      = 0; //20000;
+  IVP.options.DISPLAY   = 1;
+  IVP.options.ATOL      = IVP.options.ATOLB      = IVP.options.ATOLS  = 1e-9;
+  IVP.options.RTOL      = IVP.options.RTOLB      = IVP.options.RTOLS  = 1e-9;
 #if defined( SAVE_RESULTS )
-  LV.options.RESRECORD = true;
+  IVP.options.RESRECORD = true;
 #endif
 
-  LV.set_dag( &IVP );
-  LV.set_time( NS, tk, &T );
-  LV.set_state( NX, X );
-  LV.set_parameter( NP, P );
-  LV.set_differential( NS, NX, RHS );
-  LV.set_initial( NX, IC );
-  LV.set_function( NS, NF, FCT );
-  LV.setup();
+  IVP.set_dag( &IVPDAG );
+  IVP.set_time( TS, &T );
+  IVP.set_state( X );
+  IVP.set_parameter( P );
+  IVP.set_differential( RHS );
+  IVP.set_initial( IC );
+  IVP.set_function( FCT );
+  IVP.setup();
   
-  double p0[NP];
+  std::vector<double> p0(NP);
   p0[0] = 6.;
   p0[1] = 0.5;
-  for( unsigned int is=0; is<NS; is++ )
-    p0[2+is] = 0.5;
+  for( unsigned int k=0; k<NS; k++ )
+    p0[2+k] = 0.5;
 
   std::ofstream direcSTA, direcFSA[NP], direcASA[NF];
   char fname[50];
 
   std::cout << "\nCONTINUOUS-TIME INTEGRATION:\n\n";
-  LV.states( p0 );
+  IVP.solve_state( p0 );
 #if defined( SAVE_RESULTS )
   direcSTA.open( "test2_STA.dat", std::ios_base::out );
-  LV.record( direcSTA );
+  IVP.record( direcSTA );
 #endif
 
   std::cout << "\nCONTINUOUS-TIME INTEGRATION WITH FORWARD SENSITIVITY ANALYSIS:\n\n";
-  LV.states_FSA( p0 );
+  IVP.solve_sensitivity( p0 );
 #if defined( SAVE_RESULTS )
   direcSTA.open( "test2_STA.dat", std::ios_base::out );
   for( unsigned i=0; i<NP; ++i ){
     sprintf( fname, "test2_FSA%d.dat",i );  
     direcFSA[i].open( fname, std::ios_base::out );
   }
-  LV.record( direcSTA, direcFSA );
+  IVP.record( direcSTA, direcFSA );
 #endif
 
   std::cout << "\nCONTINUOUS-TIME INTEGRATION WITH ADJOINT SENSITIVITY ANALYSIS:\n\n";
-  LV.states_ASA( p0 );
+  IVP.solve_adjoint( p0 );
 #if defined( SAVE_RESULTS )
   direcSTA.open( "test2_STA.dat", std::ios_base::out );
   for( unsigned i=0; i<NF; ++i ){
     sprintf( fname, "test2_ASA%d.dat",i );  
     direcASA[i].open( fname, std::ios_base::out );
   }
-  LV.record( direcSTA, direcASA );
+  IVP.record( direcSTA, direcASA );
 #endif
 
   return 0;
 }
-
 

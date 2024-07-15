@@ -4,19 +4,20 @@
 #   and the compiled libraries
 # - `make cleaninstall' removes the libraries, object files, and links
 
-export version = 2.0
+export version = 3.0
 
-export rootpath = $(shell cd .. ; pwd)
-export srcpath  = $(rootpath)/src
-export incpath  = $(rootpath)/include
-export binpath  = $(rootpath)/bin
-export libpath  = $(rootpath)/lib
+export rootpath       = $(shell cd .. ; pwd)
+export srcpath        = $(rootpath)/src
+export interfacepath  = $(rootpath)/src/interface
+export incpath        = $(rootpath)/include
+export binpath        = $(rootpath)/bin
+export libpath        = $(rootpath)/lib
 
 #####
 
-install: dirs cronos_inst
+all: dirs_create cronos_install interface_install
 
-dirs :
+dirs_create :
 	@if test ! -e $(incpath)/; then \
 		echo creating directory for header files; \
 		mkdir $(incpath); \
@@ -25,25 +26,30 @@ dirs :
 		echo creating directory for compiled libraries; \
 		mkdir $(libpath); \
 	fi
-#	@if test ! -e $(binpath)/; then \
-#		echo creating directory for executables; \
-#		mkdir $(binpath); \
-#	fi
 
-cronos_inst:
+cronos_install:
 	-(cd $(srcpath); make -f cronos.mk install)
+
+interface_install:
+	-(cd $(interfacepath); make -f cronos.mk install)
 
 #####
 
-clean: cronos_clean
+clean: cronos_clean interface_clean
 
 cronos_clean:
 	-(cd $(srcpath); make -f cronos.mk clean)
 
+interface_clean:
+	-(cd $(interfacepath); make -f cronos.mk clean)
+
 #####
 
-cleaninstall: cronos_cleandist
+cleaninstall: cronos_cleandist interface_cleandist
 
 cronos_cleandist:
 	-(cd $(srcpath); make -f cronos.mk cleandist)
+
+interface_cleandist:
+	-(cd $(interfacepath); make -f cronos.mk cleandist)
 

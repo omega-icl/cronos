@@ -3,30 +3,33 @@
 PATH_MC = $(shell cd $(HOME)/Programs/bitbucket/mcpp30 ; pwd)
 include $(PATH_MC)/src/makeoptions.mk
 
+PATH_CRONOS    = $(shell cd $(HOME)/Programs/bitbucket/cronos; pwd)
+
 PATH_SUNDIALS = /opt/sundials-7.0.0
 LIB_SUNDIALS = -L$(PATH_SUNDIALS)/lib -lsundials_cvodes -lsundials_nvecserial -lsundials_core -llapack -lblas
 INC_SUNDIALS = -I$(PATH_SUNDIALS)/include
 FLAG_SUNDIALS =
 
-FLAG_DEP = -fPIC $(FLAG_MC) $(FLAG_SUNDIALS) 
-LIB_DEP  = $(LIB_MC) $(LIB_SUNDIALS)
-INC_DEP  = $(INC_MC) $(INC_SUNDIALS)
+#INC_PYBIND11 = -I/usr/include/python3.10 -I$(PATH_EXTERN)/pybind11/include
 
 # COMPILATION <<-- CHANGE AS APPROPRIATE -->>
 
-DEBUG = -g
-#PROF = -pg
-OPTIM = #-O2 #-Ofast
-WARN  = -Wall -Wno-misleading-indentation -Wno-unknown-pragmas -Wno-unused-result
+PROF = #-pg
+OPTIM = -O2
+DEBUG = #-g
+WARN  = -Wall -Wno-misleading-indentation -Wno-unknown-pragmas -Wno-parentheses -Wno-unused-result
 CPP17 = -std=c++17
+CC    = gcc-13
+CPP   = g++-13
+# CPP   = icpc
 
-CC  = gcc-12
-CPP = g++-12
-# CPP = icpc
-FLAG_CPP = $(DEBUG) $(PROF) $(OPTIM) $(CPP17) $(WARN) $(FLAG_DEP) 
+# <<-- NO CHANGE BEYOND THIS POINT -->>
 
-LINK = $(CPP)
-FLAG_LINK = 
+FLAG_CPP  = $(DEBUG) $(OPTIM) $(CPP17) $(WARN) $(PROF)
+LINK      = $(CPP)
+FLAG_LINK = $(PROF)
 
-#LDFLAGS = -ldl -Wl,-rpath,\$$ORIGIN -Wl,-rpath,$(PATH_GAMS)
+FLAG_CRONOS = -fPIC $(FLAG_MC) $(FLAG_SUNDIALS) 
+LIB_CRONOS  = $(LIB_MC) $(LIB_SUNDIALS)
+INC_CRONOS  = -I$(PATH_CRONOS)/src $(INC_MC) $(INC_SUNDIALS)
 

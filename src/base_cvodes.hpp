@@ -63,12 +63,12 @@ public:
     Options():
       INTMETH(MSBDF), NLINSOL(NEWTON), LINSOL(DIAG), 
       H0(0e0), HMIN(1e-12), HMAX(0e0), NMAX(2000),
-      RTOL(1e-8), ATOL(1e-8), ETOL(1e-16),
+      RTOL(1e-7), ATOL(1e-9), ETOL(1e-16),
       QERR(true), MAXFAIL(10), MAXCORR(5),
-      AUTOTOLS(false), RTOLS(1e-8), ATOLS(1e-8), ETOLS(1e-16),
+      AUTOTOLS(false), RTOLS(1e-7), ATOLS(1e-9), ETOLS(1e-14),
       FSACORR(STAGGERED), FSAERR(true), QERRS(true),
-      RTOLB(1e-8), ATOLB(1e-8), ETOLB(1e-16), QERRB(true),
-      ASAINTERP(HERMITE), ASACHKPT(2000)//, RTOLFD(1e-3), ATOLFD(1e-3), CENFD(true)
+      RTOLB(1e-7), ATOLB(1e-9), ETOLB(1e-16), QERRB(true),
+      ASAINTERP(HERMITE), ASACHKPT(2000)
       {}
     //! @brief Assignment operator
     template <typename U> Options& operator=
@@ -99,9 +99,6 @@ public:
         QERRB     = options.QERRB;
         ASAINTERP = options.ASAINTERP;
         ASACHKPT  = options.ASACHKPT;
-        //RTOLFD    = options.RTOLFD;
-        //ATOLFD    = options.ATOLFD;
-        //CENFD     = options.CENFD;
         return *this;
       }
     //! @brief Enumeration type for FSA method
@@ -129,12 +126,12 @@ public:
     enum LINEAR_SOLVER{
       DIAG=0,	//!< Approximate diagonal Jacobian formed by way of a difference quotient
       DENSE,	//!< Use analytic dense Jacobian and internal direct dense linear algebra functions
-      DENSEDQ,	//!< Use approximate dense Jacobian by way of a difference quotient and internal direct dense linear algebra functions
-      SPARSE	//!< Use analytic sparse Jacobian and use of internal direct dense linear algebra functions
+      DENSEDQ	//!< Use approximate dense Jacobian by way of a difference quotient and internal direct dense linear algebra functions
+      //SPARSE	//!< Use analytic sparse Jacobian and use of internal direct dense linear algebra functions
     };
-    //! @brief Numerical integration method [Default: MSADAMS]
+    //! @brief Numerical integration method [Default: MSBDF]
     INTEGRATION_METHOD INTMETH;
-    //! @brief Nonlinear solver method [Default: FIXEDPOINT]
+    //! @brief Nonlinear solver method [Default: NEWTON]
     NONLINEAR_SOLVER NLINSOL;
     //! @brief Linear solver method and Jacobian approximation [Default: DIAG]
     LINEAR_SOLVER LINSOL;
@@ -184,12 +181,6 @@ public:
     ASA_STRATEGY ASAINTERP;
     //! @brief Number of steps between each check point for ASA
     int ASACHKPT;
-    //! @brief Relative tolerance for finite differences
-    double RTOLFD;
-    //! @brief Absolute tolerance for finite differences
-    double ATOLFD;
-    //! @brief Whether or not centered finite differences are used?
-    bool CENFD;
   } options;
 
   //! @brief Structure storing integration statistics
@@ -290,17 +281,19 @@ protected:
   BASE_CVODES& operator=( BASE_CVODES const& ) = delete;
 };
 
-thread_local BASE_CVODES* BASE_CVODES::PTR_BASE_CVODES = nullptr;
-thread_local int (BASE_CVODES::*PTR_CVRHS)  ( sunrealtype, N_Vector, N_Vector, void* ) = nullptr;
-thread_local int (BASE_CVODES::*PTR_CVQUAD) ( sunrealtype, N_Vector, N_Vector, void* ) = nullptr;
-thread_local int (BASE_CVODES::*PTR_CVJAC)  ( sunrealtype, N_Vector, N_Vector, SUNMatrix, void*, N_Vector, N_Vector, N_Vector ) = nullptr;
-thread_local int (BASE_CVODES::*PTR_CVRHSB) ( sunrealtype, N_Vector, N_Vector, N_Vector, void* ) = nullptr;
-thread_local int (BASE_CVODES::*PTR_CVQUADB)( sunrealtype, N_Vector, N_Vector, N_Vector, void* ) = nullptr;
-thread_local int (BASE_CVODES::*PTR_CVJACB) ( sunrealtype, N_Vector, N_Vector, N_Vector, SUNMatrix, void*, N_Vector, N_Vector, N_Vector ) = nullptr;
-thread_local int (BASE_CVODES::*PTR_CVRHSF) ( int, sunrealtype, N_Vector, N_Vector, int, N_Vector, N_Vector, void*, N_Vector, N_Vector ) = nullptr;
-thread_local int (BASE_CVODES::*PTR_CVQUADF)( int, sunrealtype, N_Vector, N_Vector*, N_Vector, N_Vector*, void*, N_Vector, N_Vector ) = nullptr;
+inline thread_local BASE_CVODES* BASE_CVODES::PTR_BASE_CVODES = nullptr;
+inline thread_local int (BASE_CVODES::*PTR_CVRHS)  ( sunrealtype, N_Vector, N_Vector, void* ) = nullptr;
+inline thread_local int (BASE_CVODES::*PTR_CVQUAD) ( sunrealtype, N_Vector, N_Vector, void* ) = nullptr;
+inline thread_local int (BASE_CVODES::*PTR_CVJAC)  ( sunrealtype, N_Vector, N_Vector, SUNMatrix, void*, N_Vector, N_Vector, N_Vector ) = nullptr;
+inline thread_local int (BASE_CVODES::*PTR_CVRHSB) ( sunrealtype, N_Vector, N_Vector, N_Vector, void* ) = nullptr;
+inline thread_local int (BASE_CVODES::*PTR_CVQUADB)( sunrealtype, N_Vector, N_Vector, N_Vector, void* ) = nullptr;
+inline thread_local int (BASE_CVODES::*PTR_CVJACB) ( sunrealtype, N_Vector, N_Vector, N_Vector, SUNMatrix, void*, N_Vector, N_Vector, N_Vector ) = nullptr;
+inline thread_local int (BASE_CVODES::*PTR_CVRHSF) ( int, sunrealtype, N_Vector, N_Vector, int, N_Vector, N_Vector, void*, N_Vector, N_Vector ) = nullptr;
+inline thread_local int (BASE_CVODES::*PTR_CVQUADF)( int, sunrealtype, N_Vector, N_Vector*, N_Vector, N_Vector*, void*, N_Vector, N_Vector ) = nullptr;
 
-void REG_BASE_CVODES
+inline
+void
+REG_BASE_CVODES
 ( BASE_CVODES* CV,
   int (BASE_CVODES::*CVRhsFn)  ( sunrealtype, N_Vector, N_Vector, void* ),
   int (BASE_CVODES::*CVQuadFn) ( sunrealtype, N_Vector, N_Vector, void* ),
@@ -344,7 +337,9 @@ BASE_CVODES::registration
   _is_registered = true;
 }
 
-void UNREG_BASE_CVODES
+inline
+void
+UNREG_BASE_CVODES
 ()
 {
 #ifdef MC__BASE_CVODES_CHECK

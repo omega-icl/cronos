@@ -59,7 +59,7 @@ int main()
 
   IVP.options.INTMETH   = mc::BASE_CVODES::Options::MSBDF;//MSADAMS;
   IVP.options.NLINSOL   = mc::BASE_CVODES::Options::NEWTON;//FIXEDPOINT;
-  IVP.options.LINSOL    = mc::BASE_CVODES::Options::DENSE;//DIAG;
+  IVP.options.LINSOL    = mc::BASE_CVODES::Options::SPARSE;//DENSE;//DIAG;
   IVP.options.FSACORR   = mc::BASE_CVODES::Options::STAGGERED;//STAGGERED1;//SIMULTANEOUS;
   IVP.options.NMAX      = 2000;
   IVP.options.DISPLAY   = 1;

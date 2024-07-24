@@ -15,9 +15,11 @@
 #include <nvector/nvector_serial.h>     /* access to serial N_Vector            */
 //#include <sundials/sundials_math.h>     /* definition of SUNRabs, SUNRexp, etc. */
 #include <sunmatrix/sunmatrix_dense.h>  /* access to dense SUNMatrix            */
-//#include <sunmatrix/sunmatrix_sparse.h> /* access to sparse SUNMatrix           */
+#if defined (CRONOS__WITH_KLU)
+  #include <sunmatrix/sunmatrix_sparse.h> /* access to sparse SUNMatrix           */
+  #include <sunlinsol/sunlinsol_klu.h>    /* access to sparse SUNLinearSolver     */
+#endif
 #include <sunlinsol/sunlinsol_dense.h>  /* access to dense SUNLinearSolver      */
-//#include <sunlinsol/sunlinsol_klu.h>    /* access to sparse SUNLinearSolver     */
 #include <cvodes/cvodes_diag.h>         /* access to CVDIAG linear solver       */
 #include "sunnonlinsol/sunnonlinsol_newton.h"     /* access to the newton SUNNonlinearSolver      */
 #include "sunnonlinsol/sunnonlinsol_fixedpoint.h" /* access to the fixed point SUNNonlinearSolver */
@@ -124,10 +126,16 @@ public:
     };
     //! @brief Enumeration of linear solver strategies (within Newton nonlinear solver)
     enum LINEAR_SOLVER{
+#if defined( CRONOS__WITH_KLU )
       DIAG=0,	//!< Approximate diagonal Jacobian formed by way of a difference quotient
       DENSE,	//!< Use analytic dense Jacobian and internal direct dense linear algebra functions
-      DENSEDQ	//!< Use approximate dense Jacobian by way of a difference quotient and internal direct dense linear algebra functions
-      //SPARSE	//!< Use analytic sparse Jacobian and use of internal direct dense linear algebra functions
+      DENSEDQ,	//!< Use approximate dense Jacobian by way of a difference quotient and internal direct dense linear algebra
+      SPARSE	//!< Use analytic sparse Jacobian and use of internal direct dense linear algebra functions
+#else
+      DIAG=0,	//!< Approximate diagonal Jacobian formed by way of a difference quotient
+      DENSE,	//!< Use analytic dense Jacobian and internal direct dense linear algebra functions
+      DENSEDQ	//!< Use approximate dense Jacobian by way of a difference quotient and internal direct dense linear algebra
+#endif
     };
     //! @brief Numerical integration method [Default: MSBDF]
     INTEGRATION_METHOD INTMETH;

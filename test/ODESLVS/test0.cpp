@@ -6,7 +6,7 @@
 int main()
 {
   mc::FFGraph IVP;  // DAG describing the problem
-s
+
   const unsigned NS = 2;  // Time stages
   double t0 = 0., tf = 10.;       // Time span
   std::vector<double> T( NS+1 );  // Time stages
@@ -58,7 +58,7 @@ s
 
   LV.options.INTMETH   = mc::BASE_CVODES::Options::MSBDF;//MSADAMS;
   LV.options.NLINSOL   = mc::BASE_CVODES::Options::NEWTON;//FIXEDPOINT;
-  LV.options.LINSOL    = mc::BASE_CVODES::Options::DENSE;//DENSEDQ;//DIAG;
+  LV.options.LINSOL    = mc::BASE_CVODES::Options::SPARSE;//DENSE;//DENSEDQ;//DIAG;
   LV.options.NMAX      = 2000;
   LV.options.DISPLAY   = 1;
   LV.options.ATOL      = 1e-9;

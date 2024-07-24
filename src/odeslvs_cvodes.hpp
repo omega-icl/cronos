@@ -94,6 +94,7 @@ class ODESLVS_CVODES
   using ODESLV_CVODES<ExtOps...>::_xk;
   using ODESLV_CVODES<ExtOps...>::_qk;
   using ODESLV_CVODES<ExtOps...>::_f;
+  using ODESLV_CVODES<ExtOps...>::_nnzjac;
 
   //! @brief Dense SUNMatrix for use in linear solves
   SUNMatrix _sun_matB;
@@ -444,9 +445,9 @@ ODESLVS_CVODES<ExtOps...>::_INI_CVODES_ASA
      case Options::DENSEDQ:
        if( !ifct ){
          // Create dense SUNMatrix for use in linear solves
-         _sun_matB = SUNDenseMatrix( NV_LENGTH_S( _Ny[ifct] ), NV_LENGTH_S( _Ny[ifct] ), sunctx );
+         _sun_matB = SUNDenseMatrix( _ny, _ny, sunctx );
          if( _check_cv_flag( (void*)_sun_matB, "SUNDenseMatrix", 0 ) ) return false;
-         // Create dense SUNLinearSolver object for use by CVode
+         // Create dense SUNLinearSolver object for use by CVodeB
          _sun_lsB = SUNLinSol_Dense( _Ny[ifct], _sun_matB, sunctx );
          if( _check_cv_flag( (void *)_sun_lsB, "SUNLinSol_Dense", 0 ) ) return false;
        }
@@ -457,6 +458,27 @@ ODESLVS_CVODES<ExtOps...>::_INI_CVODES_ASA
        _cv_flag = CVodeSetJacFnB( _cv_mem, indexB, options.LINSOL==Options::DENSE? MC_CVJACB__: nullptr );
        if ( _check_cv_flag( &_cv_flag, "CVodeSetJacFnB", 1 ) ) return false;
        break;
+
+#if defined( CRONOS__WITH_KLU )
+     // Sparse Jacobian
+     case Options::SPARSE:
+       if( !ifct ){
+         // Create sparse SUNMatrix for use in linear solves
+         // if( !this->set_sparse() ) return false;
+         _sun_matB = SUNSparseMatrix( _ny, _ny, _nnzjac, CSR_MAT, sunctx );
+         if( _check_cv_flag( (void*)_sun_matB, "SUNSparseMatrix", 0 ) ) return false;
+         // Create sparse SUNLinearSolver object for use by CVodeB
+         _sun_lsB = SUNLinSol_KLU( _Ny[ifct], _sun_matB, sunctx );
+         if( _check_cv_flag( (void *)_sun_lsB, "SUNLinSol_Dense", 0 ) ) return false;
+       }
+       // Attach the matrix and linear solver
+       _cv_flag = CVodeSetLinearSolverB( _cv_mem, indexB, _sun_lsB, _sun_matB );
+       if( _check_cv_flag( &_cv_flag, "CVodeSetLinearSolverB", 1 ) ) return false;
+       // Set the user-supplied Jacobian routine Jac
+       _cv_flag = CVodeSetJacFnB( _cv_mem, indexB, MC_CVJACB__ );
+       if ( _check_cv_flag( &_cv_flag, "CVodeSetJacFnB", 1 ) ) return false;
+       break;
+#endif
     }
     if( !ifct ){
       _sun_nlsB = SUNNonlinSol_Newton( _Ny[ifct], sunctx );
@@ -618,6 +640,22 @@ ODESLVS_CVODES<ExtOps...>::_CC_CVODES_ASA
   _cv_flag = CVodeReInitB( _cv_mem, indexB, _t, _Ny[ifct] );
   if( _check_cv_flag( &_cv_flag, "CVodeReInitB", 1 ) ) return false;
 
+#if defined( CRONOS__WITH_KLU )
+  switch( options.LINSOL ){
+    case Options::SPARSE:
+      // Function SUNLinSol_KLUReInit(SUNLinearSolver S, SUNMatrix A, sunindextype nnz, int reinit_type)
+      // needed to reinitialize memory and flag for a new factorization (symbolic and numeric) to be conducted at
+      // the next solver setup call. This routine is useful in the cases where the number of nonzeroes has changed or if
+      // the structure of the linear system has changed which would require a new symbolic (and numeric factorization).
+      // std::cout << "Calling SUNLinSol_KLUReInit" << std::endl;
+      _cv_flag = SUNLinSol_KLUReInit( _sun_lsB, _sun_matB, _nnzjac, 2 );
+      if( _cv_flag ) return false;
+      break;
+    default:
+      break;
+  }
+#endif
+
   // Reinitialize CVodeS memory block for current adjoint quarature _Nyq
   if( !_np ) return true;
   _cv_flag = CVodeQuadReInitB( _cv_mem, indexB, _Nyq[ifct] );
@@ -685,23 +723,14 @@ ODESLVS_CVODES<ExtOps...>::_INI_ASA
     return false;
 
   // Set SUNDIALS adjoint/quadrature arrays
-  if( _nvec != _nf ){
-    if( _Ny )   N_VDestroyVectorArray( _Ny,  _nvec );
-    if( _Nyq )  N_VDestroyVectorArray( _Nyq, _nvec );
-    _nvec = _nf;
-    _Ny  = N_VCloneVectorArray( _nvec, _Nx );
-    _Nyq = N_VCloneVectorArray( _nvec, _Nx );
-  }
-  for( unsigned i=0; i<_nf; i++ ){
-    if( !_Ny[i] || NV_LENGTH_S( _Ny[i] ) != _ny ){
-      if( _Ny[i] ) N_VDestroy( _Ny[i] );
-      _Ny[i] = N_VNew_Serial( _ny, sunctx );
-    }
-    if( !_Nyq[i] || NV_LENGTH_S( _Nyq[i] ) != (sunindextype)_np ){
-      if( _Nyq[i] ) N_VDestroy( _Nyq[i] );
-      _Nyq[i] = N_VNew_Serial( _np, sunctx );
-    }
-  }
+  if( _Ny )  N_VDestroyVectorArray( _Ny,  _nvec );
+  if( _Nyq ) N_VDestroyVectorArray( _Nyq, _nvec );
+  _nvec = _nf;
+  _Ny = N_VCloneVectorArray( _nvec, _Nx );
+  //_Nyq = N_VCloneVectorArray( _nvec, _Nx );
+  _Nyq = N_VNewVectorArray( _nvec, sunctx );
+  for( unsigned i=0; i<_nvec; i++ )
+    _Nyq[i] = N_VNew_Serial( _np, sunctx );
 
   // Reset result record and statistics
   results_sensitivity.clear();
@@ -775,12 +804,19 @@ ODESLVS_CVODES<ExtOps...>::CVJACB__
   switch( options.LINSOL ){
    case Options::DIAG:
    case Options::DENSEDQ:
-   //case Options::SPARSE:
     flag = false;
     break;
+    
    case Options::DENSE:
     flag = _JAC_D_SEN( t, NV_DATA_S( x ), NV_DATA_S( y ), SM_COLS_D(Jac) );
     break;
+
+#if defined( CRONOS__WITH_KLU )
+   case Options::SPARSE:
+    flag = _JAC_D_SEN( t, NV_DATA_S( x ), NV_DATA_S( y ), SUNSparseMatrix_Data(Jac),
+                       SUNSparseMatrix_IndexPointers(Jac), SUNSparseMatrix_IndexValues(Jac) );
+    break;
+#endif
   }
   stats_sensitivity.numJAC++; // increment JAC counter
   return( flag? 0: -1 );
@@ -880,7 +916,7 @@ ODESLVS_CVODES<ExtOps...>::_states_ASA
        || !_TC_D_SEN( _t, _xk[_nsmax].data(), NV_DATA_S(_Ny[_ifct]) )
        || ( _Nyq && _Nyq[_ifct] && !_TC_D_QUAD_ASA( NV_DATA_S(_Nyq[_ifct]) ) ) )
         { _END_SEN(); return STATUS::FATAL; }
-      _GET_D_SEN( NV_DATA_S(_Ny[_ifct]), _np, _Nyq? NV_DATA_S(_Nyq[_ifct]): 0 );
+      _GET_D_SEN( NV_DATA_S(_Ny[_ifct]), _np, _Nyq? NV_DATA_S(_Nyq[_ifct]): nullptr );
       for( unsigned iq=0; iq<_np; iq++ )
         _Dfp[iq*_nf+_ifct] = _Dyq[iq];
 
@@ -1075,25 +1111,11 @@ ODESLVS_CVODES<ExtOps...>::_INI_FSA
     return false;
 
   // Set SUNDIALS sensitivity/quadrature arrays
-  if( _nvec != _np ){
-    if( _Ny )   N_VDestroyVectorArray( _Ny,  _nvec );
-    _Ny = nullptr;
-    if( _Nyq )  N_VDestroyVectorArray( _Nyq, _nvec );
-    _Nyq = nullptr;
-    _nvec = _np;
-    _Ny  = N_VCloneVectorArray( _np, _Nx );
-    if( _nq ) _Nyq = N_VCloneVectorArray( _np, _Nq );
-  }
-  for( unsigned i=0; i<_np; i++ ){
-    if( !_Ny[i] || NV_LENGTH_S( _Ny[i] ) != (sunindextype)_nx ){
-      if( _Ny[i] ) N_VDestroy( _Ny[i] );
-      _Ny[i] = N_VNew_Serial( _nx, sunctx );
-    }
-    if( _Nyq && (!_Nyq[i] || NV_LENGTH_S( _Nyq[i] ) != (sunindextype)_nq) ){
-      if( _Nyq[i] ) N_VDestroy( _Nyq[i] );
-      _Nyq[i] = _nq? N_VNew_Serial( _nq, sunctx ): nullptr;
-    }
-  }
+  if( _Ny )   N_VDestroyVectorArray( _Ny,  _nvec );
+  if( _Nyq )  N_VDestroyVectorArray( _Nyq, _nvec );
+  _nvec = _np;
+  _Ny  = N_VCloneVectorArray( _nvec, _Nx );
+  _Nyq = _nq? N_VCloneVectorArray( _nvec, _Nq ): nullptr;
 
   // Reset result record and statistics
   results_sensitivity.clear();
@@ -1927,15 +1949,17 @@ const
   assert( pODE && nRes == pODE->nf()*pODE->np() && nVar == pODE->np() );
 #endif
 
-  if( nVar <= 3*nRes ){
+  if( pODE->np() <= 3*pODE->nf() ){
+    //std::cerr << "FFGRADODE::eval ** Forward sensitivity integration\n";
     if( pODE->solve_sensitivity( vVar ) != ODESLVS_CVODES<ExtOps...>::NORMAL ){
-      std::cerr << "FFGRADODE::eval ** Integration failure\n";
+      //std::cerr << "FFGRADODE::eval ** Integration failure\n";
       throw typename ODESLVS_CVODES<ExtOps...>::Exceptions( ODESLVS_CVODES<ExtOps...>::Exceptions::INTERN );
     }
   }
   else{
+    //std::cerr << "FFGRADODE::eval ** Adjoint sensitivity integration\n";
     if( pODE->solve_adjoint( vVar ) != ODESLVS_CVODES<ExtOps...>::NORMAL ){
-      std::cerr << "FFGRADODE::eval ** Integration failure\n";
+      //std::cerr << "FFGRADODE::eval ** Integration failure\n";
       throw typename ODESLVS_CVODES<ExtOps...>::Exceptions( ODESLVS_CVODES<ExtOps...>::Exceptions::INTERN );
     }
   }

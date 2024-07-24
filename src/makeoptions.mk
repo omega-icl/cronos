@@ -5,12 +5,10 @@ include $(PATH_MC)/src/makeoptions.mk
 
 PATH_CRONOS    = $(shell cd $(HOME)/Programs/bitbucket/cronos; pwd)
 
-PATH_SUNDIALS = /opt/sundials-7.0.0
-LIB_SUNDIALS = -L$(PATH_SUNDIALS)/lib -lsundials_cvodes -lsundials_nvecserial -lsundials_core -llapack -lblas
-INC_SUNDIALS = -I$(PATH_SUNDIALS)/include
-FLAG_SUNDIALS =
-
-#INC_PYBIND11 = -I/usr/include/python3.10 -I$(PATH_EXTERN)/pybind11/include
+PATH_SUNDIALS = /opt/sundials-7.1.1
+LIB_SUNDIALS = -L$(PATH_SUNDIALS)/lib -lsundials_sunlinsolklu -lsundials_cvodes -lsundials_nvecserial -lsundials_core -llapack -lblas
+INC_SUNDIALS = -I/usr/include/suitesparse -I$(PATH_SUNDIALS)/include
+FLAG_SUNDIALS = -DCRONOS__WITH_KLU
 
 # COMPILATION <<-- CHANGE AS APPROPRIATE -->>
 

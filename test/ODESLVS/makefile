@@ -11,7 +11,7 @@ test% : test%.o
 	$(CPP) $^ $(LIB_CRONOS) $(LIB_DEP) -o $@
 
 %.o : %.cpp
-	$(CPP) -c $(FLAG_CPP) $(INC_CRONOS) $(INC_DEP) $< -o $@
+	$(CPP) -c $(FLAG_CPP) $(FLAG_CRONOS) $(INC_CRONOS) $(INC_DEP) $< -o $@
 
 #####
 

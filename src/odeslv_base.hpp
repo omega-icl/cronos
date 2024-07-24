@@ -75,6 +75,7 @@ protected:
   using BASE_DE<ExtOps...>::_nf;
   using BASE_DE<ExtOps...>::_t;
   using BASE_DE<ExtOps...>::_istg;
+  using BASE_DE<ExtOps...>::_nnzjac;
 
   //! @brief local copy of DAG
   FFGraph<ExtOps...>* _dag;
@@ -123,6 +124,9 @@ protected:
 
   //! @brief sparse representation of RHS Jacobian in current stage of ODE system
   std::tuple< unsigned, unsigned const*, unsigned const*, FFVar const* > _pJAC;
+
+  //! @brief sparse representation of RHS Jacobian in current stage of ODE system: i-th entry is the index in data where the first non-zero matrix entry of the i-th column is stored (length NEQ + 1), last entry is number of non-zeros
+  std::vector< size_t > _pJACCOLNDX;
 
 #if 0
   //! @brief sparse representation of RHS Jacobian in current stage of ODE system
@@ -249,7 +253,7 @@ protected:
   static void _record
     ( std::ofstream& ofile, VRES const& bnd, unsigned const iprec=5 );
 
-  //! @brief Private methods to block default compiler methods
+  //! @brief Block default compiler methods
   ODESLV_BASE( ODESLV_BASE<ExtOps...> const& ) = delete;
   ODESLV_BASE<ExtOps...>& operator=( ODESLV_BASE<ExtOps...> const& ) = delete;
 };
@@ -621,30 +625,25 @@ ODESLV_BASE<ExtOps...>::_RHS_D_SET
 
   // Generate Jacobian using sparse forward AD
   delete[] std::get<1>(_pJAC); delete[] std::get<2>(_pJAC); delete[] std::get<3>(_pJAC);
-  _pJAC = _dag->SFAD( _nx, _pRHS, _nx, _pX ); // Jacobian in sparse format
+  _pJAC = _dag->SFAD( _nx, _pRHS, _nx, _pX ); // Jacobian in sparse format, ordered columnwise
+  _pJACCOLNDX.resize( _nx+1 );
+  for( unsigned ie=0, ic=0; ie<std::get<0>(_pJAC); ++ie ){
 #ifdef MC__ODESLV_BASE_DEBUG
-  for( unsigned ie=0; ie<std::get<0>(_pJAC); ++ie )
-    std::cout << "  jac[" << std::get<1>(_pJAC)[ie] << ", " << std::get<2>(_pJAC)[ie] << "]" << std::endl;
+    std::cout << "  JAC[" << std::get<1>(_pJAC)[ie] << ", " << std::get<2>(_pJAC)[ie] << "]" << std::endl;
 #endif
-
-#if 0
-  // Set index of the first entry in each row
-  delete[] _NDXPJAC;
-  _NDXPJAC = new int[_nx+1];
-  _NDXPJAC[0] = 0;
-  for( unsigned ie=0, ir=0; ie<std::get<0>(_pJAC); ++ie ){
-    if( std::get<1>(_pJAC)[ie] == ir ) continue;
-    _NDXPJAC[++ir] = ie;
+    for( ; std::get<2>(_pJAC)[ie] >= ic; ++ic ){
+      _pJACCOLNDX[ic] = ie;
+#ifdef MC__ODESLV_BASE_DEBUG
+      std::cout << "  JACCOLNDX[" << ic << "] = " << ie << std::endl;
+#endif
+    }
   }
-  _NDXPJAC[_nx ] = std::get<0>(_pJAC);
+  _pJACCOLNDX[_nx] = std::get<0>(_pJAC);
 #ifdef MC__ODESLV_BASE_DEBUG
-  for( unsigned ip=0; ip<=_nx; ++ip )
-    std::cout << "  ptrs[" << ip << "] = " << _NDXPJAC[ip] << std::endl;
+  std::cout << "  JACCOLNDX[" << _nx << "] = " << std::get<0>(_pJAC) << std::endl;
+  std::cout << "PAUSED - <1> TO CONTINUE"; int dum; std::cin >> dum;
 #endif
 
-  // Reorder sparse Jacobian entries in compressed-sparse-row (CSR) format
-  // TBC
-#endif
   return _RHS_D_SET();
 }
 
@@ -654,23 +653,13 @@ bool
 ODESLV_BASE<ExtOps...>::_RHS_D_SET
 ()
 {
-  //unsigned opmax = 0;
-
-  //_opRHS.clear();
   _opRHS  = _dag->subgraph( _nx, _pRHS );
-  //if( _opRHS.l_op.size() > opmax )  opmax = _opRHS.l_op.size();
 
-  //_opQUAD.clear();
   if( _pQUAD ) _opQUAD = _dag->subgraph( _nq, _pQUAD );
-  //if( _opQUAD.l_op.size() > opmax ) opmax = _opQUAD.l_op.size();
 
-  //_opJAC.clear();
   _opJAC = _dag->subgraph( std::get<0>(_pJAC), std::get<3>(_pJAC) );
   _DJAC.resize( std::get<0>(_pJAC) );
-  //if( _opJAC.l_op.size() > opmax )  opmax = _opJAC.l_op.size();
 
-  //_DWRK.reserve( opmax );
-  //std::cout << "size for: " << opmax << std::endl;
   return true;
 }
 
@@ -696,6 +685,7 @@ ODESLV_BASE<ExtOps...>::_RHS_D_QUAD
 ( double const& t, REALTYPE const* x, REALTYPE* qdot )
 {
   if( !_pQUAD ) return false;
+  // No need to update _DVAR
   _dag->eval( _opQUAD, _DWRK, _nq, _pQUAD, (double*)qdot, _nVAR0, _pVAR, _DVAR );
   return true;
 }
@@ -707,10 +697,9 @@ bool
 ODESLV_BASE<ExtOps...>::_JAC_D_STA
 ( double const& t, REALTYPE const* x, REALTYPE** jac )
 {
-  //*_Dt = t; // current time
-  //_vec2D( x, _nx, _Dx ); // current state
-  //std::cout << "need for: " << _opJAC.size() << std::endl;
-  _dag->eval( _opJAC, _DWRK, std::get<0>(_pJAC), std::get<3>(_pJAC), _DJAC.data(), _nVAR0, _pVAR, _DVAR );
+  // No need to update _DVAR
+  _dag->eval( _opJAC, _DWRK, std::get<0>(_pJAC), std::get<3>(_pJAC),
+              _DJAC.data(), _nVAR0, _pVAR, _DVAR );
   for( unsigned ie=0; ie<std::get<0>(_pJAC); ++ie ){
     jac[std::get<2>(_pJAC)[ie]][std::get<1>(_pJAC)[ie]] = _DJAC[ie];
 #ifdef MC__ODESLV_BASE_DEBUG
@@ -721,7 +710,7 @@ ODESLV_BASE<ExtOps...>::_JAC_D_STA
   return true;
 }
 
-#if 0
+#if defined( CRONOS__WITH_KLU )
 template <typename... ExtOps>
 template <typename REALTYPE, typename INDEXTYPE>
 inline
@@ -729,22 +718,21 @@ bool
 ODESLV_BASE<ExtOps...>::_JAC_D_STA
 ( double const& t, REALTYPE const* x, REALTYPE* jac, INDEXTYPE* ptrs, INDEXTYPE* vals )
 {
-  //*_Dt = t; // current time
-  //_vec2D( x, _nx, _Dx ); // current state
-  //std::cout << "need for: " << _opJAC.size() << std::endl;
-  _dag->eval( _opJAC, _DWRK, std::get<0>(_pJAC), std::get<3>(_pJAC), (double*)jac, _nVAR0, _pVAR, _DVAR );
+  // No need to update _DVAR
+  _dag->eval( _opJAC, _DWRK, std::get<0>(_pJAC), std::get<3>(_pJAC),
+              (double*)jac, _nVAR0, _pVAR, _DVAR );
   for( unsigned ie=0; ie<std::get<0>(_pJAC); ++ie ){
-    vals[ie] = (INDEXTYPE)std::get<2>(_pJAC)[ie];
-//#ifdef MC__ODESLV_BASE_DEBUG
+    vals[ie] = (INDEXTYPE)std::get<1>(_pJAC)[ie];
+#ifdef MC__ODESLV_BASE_DEBUG
     std::cout << "  jac[" << ie << "] = " << jac[ie] << std::endl;
     std::cout << "  vals[" << ie << "] = " << vals[ie] << std::endl;
-//#endif
+#endif
   }
-  for( unsigned ip=0; ip<=_nx; ++ip ){
-    ptrs[ip] = (INDEXTYPE)_NDXPJAC[ip];
-//#ifdef MC__ODESLV_BASE_DEBUG
-    std::cout << "  ptrs[" << ip << "] = " << ptrs[ip] << std::endl;
-//#endif
+  for( unsigned ic=0; ic<=_nx; ++ic ){
+    ptrs[ic] = (INDEXTYPE) _pJACCOLNDX[ic];
+#ifdef MC__ODESLV_BASE_DEBUG
+    std::cout << "  ptrs[" << ic << "] = " << ptrs[ic] << std::endl;
+#endif
   }
   return true;
 }

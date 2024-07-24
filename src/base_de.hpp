@@ -118,6 +118,9 @@ protected:
   //! @brief function parametric dependency 
   std::vector<FFDep> _depF;
 
+  //! @brief state parametric dependency 
+  size_t _nnzjac;
+
   //! @brief current time
   double _t;
 
@@ -129,7 +132,7 @@ public:
   BASE_DE
     ()
     : _dag(nullptr), _nsmax(0), _nd(0), _na(0), _nx(0), _nx0(0),
-      _np(0), _nq(0), _nbm(0), _ni(0), _nf(0)
+      _np(0), _nq(0), _nbm(0), _ni(0), _nf(0), _nnzjac(0)
     {}
 
   //! @brief Class destructor
@@ -386,7 +389,7 @@ public:
     ( BASE_DE<ExtOps...> const& de )
     { _dag = de._dag;
       _nsmax = de._nsmax; _nx = de._nx; _nx0 = de._nx0; _nd = de._nd; _na = de._na;
-      _nq = de._nq; _np = de._np; _ni = de._ni; _nf = de._nf;
+      _nq = de._nq; _np = de._np; _ni = de._ni; _nf = de._nf; _nnzjac = de._nnzjac;
       _dT = de._dT; _vT = de._vT; _vX = de._vX; _vP = de._vP; _vQ = de._vQ; _vDX = de._vDX;
       _ndxX = de._ndxX; _ndxQ = de._ndxQ;
       _nbm = de._nbm; _vML = de._vML; _vMU = de._vMU;
@@ -449,6 +452,10 @@ protected:
   //! @brief Set state/quadrature dependencies w.r.t. parameters
   bool set_depend
     ( size_t const ns );
+
+  //! @brief Set RHS Jacobain sparsity size
+  bool set_sparse
+    ();
 
   //! @brief Function to display intermediate results
   template<typename U>
@@ -517,6 +524,46 @@ BASE_DE<ExtOps...>::_print_interm
 template <typename... ExtOps>
 inline
 bool
+BASE_DE<ExtOps...>::set_sparse
+()
+{
+  _nnzjac = 0;
+  if( _nd != _nx || _nx0 != _nx ) return false; // ODE systems only
+
+  // Intermediates
+  std::vector<FFVar> vVAR = _vX;
+  vVAR.insert( vVAR.end(), _vP.cbegin(), _vP.cend() );
+  vVAR.push_back( _vT.size()? _vT.front(): 0. );
+  size_t const nVAR = vVAR.size();
+  std::vector<FFDep> depSTA( nVAR, 0 ), depRHS( _nx );
+  for( size_t ix=0; ix<_nx; ++ix ) depSTA[ix].indep( ix );
+
+  // RHS dependencies
+  for( size_t is=0; is<_nsmax; ++is ){
+    size_t const pos_rhs  = ( _vDE.size()<=1?  0: is );
+    FFVar const* pRHS  = _pRHS( pos_rhs );
+    if( !pRHS ) return false;
+    _dag->eval( _nx, pRHS, depRHS.data(), nVAR, vVAR.data(), depSTA.data() ); 
+    size_t nnz = 0;
+    for( size_t ix=0; ix<_nx; ix++ ){
+#ifdef MC__DEBUG__BASE_DE
+      std::cout << "RHS[" << is << "][" << ix << "]: " << depRHS[ix] << std::endl;
+#endif
+      nnz += depRHS[ix].dep().size();
+    }
+
+    if( _nnzjac < nnz ) _nnzjac = nnz;
+#ifdef MC__DEBUG__BASE_DE
+    std::cout << "NNZ: " << nnz << "   MAX: " << _nnzjac << std::endl;
+#endif
+  }
+
+  return true;
+}
+
+template <typename... ExtOps>
+inline
+bool
 BASE_DE<ExtOps...>::set_depend
 ( size_t const ns )
 {
@@ -569,12 +616,14 @@ BASE_DE<ExtOps...>::set_depend
       std::cout << "X[" << is+1 << "][" << ix << "]: " << depVAR[_np+1+ix] << std::endl;
 #endif
     _dag->eval( _nx, pRHS, _depX.data()+_nx*is, _np+1+_nx, vVAR.data(), depVAR.data() ); 
+    size_t nnz = 0;
     for( size_t ix=0; ix<_nx; ix++ ){
       depVAR[_np+1+ix] += _depX[_nx*is+ix];
 #ifdef MC__DEBUG__BASE_DE
       std::cout << "X[" << is+1 << "][" << ix << "]: " << depVAR[_np+1+ix] << std::endl;
 #endif
     }
+
     bool iterate = true;
     while( iterate ){
       iterate = false;

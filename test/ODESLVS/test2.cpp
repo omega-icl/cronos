@@ -42,8 +42,9 @@ int main()
 
   mc::ODESLVS_CVODES IVP;
 
-  IVP.options.LINSOL    = mc::BASE_CVODES::Options::DIAG;//DENSE;
   IVP.options.INTMETH   = mc::BASE_CVODES::Options::MSBDF;//MSADAMS;
+  IVP.options.NLINSOL   = mc::BASE_CVODES::Options::NEWTON;//FIXEDPOINT;
+  IVP.options.LINSOL    = mc::BASE_CVODES::Options::SPARSE;//DENSE;//DENSEDQ;//DIAG;
   IVP.options.NMAX      = 0; //20000;
   IVP.options.DISPLAY   = 1;
   IVP.options.ATOL      = IVP.options.ATOLB      = IVP.options.ATOLS  = 1e-9;

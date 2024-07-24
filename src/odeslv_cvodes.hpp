@@ -42,6 +42,7 @@ class ODESLV_CVODES
   using ODESLV_BASE<ExtOps...>::_vRHS;
   using ODESLV_BASE<ExtOps...>::_vQUAD;
   using ODESLV_BASE<ExtOps...>::_vFCT;
+  using ODESLV_BASE<ExtOps...>::_nnzjac;
 
   using ODESLV_BASE<ExtOps...>::_INI_D_STA;
   using ODESLV_BASE<ExtOps...>::_GET_D_STA;
@@ -403,7 +404,7 @@ ODESLV_CVODES<ExtOps...>::_INI_CVODE
      case Options::DENSE:
      case Options::DENSEDQ:
        // Create dense SUNMatrix for use in linear solves
-       _sun_mat = SUNDenseMatrix( NV_LENGTH_S( _Nx ), NV_LENGTH_S( _Nx ), sunctx );
+       _sun_mat = SUNDenseMatrix( _nx, _nx, sunctx );
        if( _check_cv_flag( (void*)_sun_mat, "SUNDenseMatrix", 0 ) ) return false;
        // Create dense SUNLinearSolver object for use by CVode
        _sun_ls = SUNLinSol_Dense( _Nx, _sun_mat, sunctx );
@@ -415,18 +416,17 @@ ODESLV_CVODES<ExtOps...>::_INI_CVODE
        _cv_flag = CVodeSetJacFn( _cv_mem, options.LINSOL==Options::DENSE? MC_CVJAC__: nullptr );
        if ( _check_cv_flag( &_cv_flag, "CVodeSetJacFn", 1 ) ) return false;
        break;
-/*
+       
+#if defined( CRONOS__WITH_KLU )
+     // Sparse Jacobian
      case Options::SPARSE:
        // Create sparse SUNMatrix for use in linear solves
-       _sun_mat = SUNSparseMatrix( NV_LENGTH_S( _Nx ), NV_LENGTH_S( _Nx ), NV_LENGTH_S( _Nx )*NV_LENGTH_S( _Nx ), CSR_MAT, sunctx);
-       if( _check_cv_flag( (void*)_sun_mat, "SUNSSarseMatrix", 0 ) ) return false;
+       if( !this->set_sparse() ) return false;
+       _sun_mat = SUNSparseMatrix( _nx, _nx, _nnzjac, CSC_MAT, sunctx );
+       if( _check_cv_flag( (void*)_sun_mat, "SUNSparseMatrix", 0 ) ) return false;
        // Create sparse SUNLinearSolver object for use by CVode
        _sun_ls = SUNLinSol_KLU( _Nx, _sun_mat, sunctx );
        if( _check_cv_flag( (void *)_sun_ls, "SUNLinSol_Dense", 0 ) ) return false;
-       // Function SUNLinSol_KLUReInit(SUNLinearSolver S, SUNMatrix A, sunindextype nnz, int reinit_type)
-       // needed to reinitialize memory and flag for a new factorization (symbolic and numeric) to be conducted at
-       // the next solver setup call. This routine is useful in the cases where the number of nonzeroes has changed or if
-       // the structure of the linear system has changed which would require a new symbolic (and numeric factorization).
        // Attach the matrix and linear solver
        _cv_flag = CVodeSetLinearSolver( _cv_mem, _sun_ls, _sun_mat );
        if( _check_cv_flag( &_cv_flag, "CVodeSetLinearSolver", 1 ) ) return false;
@@ -434,7 +434,7 @@ ODESLV_CVODES<ExtOps...>::_INI_CVODE
        _cv_flag = CVodeSetJacFn( _cv_mem, MC_CVJAC__ );
        if ( _check_cv_flag( &_cv_flag, "CVodeSetJacFn", 1 ) ) return false;
        break;
-*/
+#endif
     }
   }
 
@@ -483,10 +483,25 @@ bool
 ODESLV_CVODES<ExtOps...>::_CC_CVODE_STA
 ()
 {
-
   // Reinitialize CVode memory block for current time _t and current state _Nx
   _cv_flag = CVodeReInit( _cv_mem, _t, _Nx );
   if( _check_cv_flag( &_cv_flag, "CVodeReInit", 1 ) ) return false;
+
+#if defined( CRONOS__WITH_KLU )
+  switch( options.LINSOL ){
+    case Options::SPARSE:
+      // Function SUNLinSol_KLUReInit(SUNLinearSolver S, SUNMatrix A, sunindextype nnz, int reinit_type)
+      // needed to reinitialize memory and flag for a new factorization (symbolic and numeric) to be conducted at
+      // the next solver setup call. This routine is useful in the cases where the number of nonzeroes has changed or if
+      // the structure of the linear system has changed which would require a new symbolic (and numeric factorization).
+      // std::cout << "Calling SUNLinSol_KLUReInit" << std::endl;
+      _cv_flag = SUNLinSol_KLUReInit( _sun_ls, _sun_mat, _nnzjac, 2 );
+      if( _cv_flag ) return false;
+      break;
+    default:
+      break;
+  }
+#endif
 
   return true;
 }
@@ -535,7 +550,7 @@ ODESLV_CVODES<ExtOps...>::_INI_STA
     _Nx  = N_VNew_Serial( _nx, sunctx );
   }
   if( !_Nq || NV_LENGTH_S( _Nq ) != (sunindextype)_nq ){
-    if( _Nq ) N_VDestroy_Serial( _Nq );
+    if( _Nq ) N_VDestroy( _Nq );
     _Nq  = _nq? N_VNew_Serial( _nq, sunctx ): nullptr;
   }
 
@@ -637,16 +652,18 @@ ODESLV_CVODES<ExtOps...>::CVJAC__
   switch( options.LINSOL ){
    case Options::DIAG:
    case Options::DENSEDQ:
-   //case Options::SPARSE:
    default:
     flag = false;
     break;
+
    case Options::DENSE:
     flag = _JAC_D_STA( t, NV_DATA_S( y ), SM_COLS_D(Jac) );
     break;
-#if 0
+
+#if defined( CRONOS__WITH_KLU )
    case Options::SPARSE:
-    flag = _JAC_D_STA( t, NV_DATA_S( y ), SM_DATA_S(Jac), SM_INDEXPTRS_S(Jac), SM_INDEXVALS_S(Jac) );
+    flag = _JAC_D_STA( t, NV_DATA_S( y ), SUNSparseMatrix_Data(Jac),
+                       SUNSparseMatrix_IndexPointers(Jac), SUNSparseMatrix_IndexValues(Jac) );
     break;
 #endif
   }

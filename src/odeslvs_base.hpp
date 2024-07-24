@@ -58,6 +58,7 @@ protected:
   using ODESLV_BASE<ExtOps...>::_pIC;
   using ODESLV_BASE<ExtOps...>::_pJAC;
   using ODESLV_BASE<ExtOps...>::_DJAC;
+  using ODESLV_BASE<ExtOps...>::_pJACCOLNDX;
 
   //! @brief size of sensitivity variables
   unsigned _ny;
@@ -231,20 +232,28 @@ protected:
     unsigned const ifct );
 
   //! @brief Function to calculate the Jacobian RHS of sensitivity/adjoint ODEs
-  template <typename REALTYPE> bool _JAC_D_SEN
+  template <typename REALTYPE>
+  bool _JAC_D_SEN
     ( double const& t, REALTYPE const* x, REALTYPE const* y, REALTYPE** jac );
 
+  //! @brief Function to calculate the Jacobian RHS of sensitivity/adjoint ODEs
+  template <typename REALTYPE, typename INDEXTYPE>
+  bool _JAC_D_SEN
+    ( double const& t, REALTYPE const* x, REALTYPE const* y, REALTYPE* jac,
+      INDEXTYPE* ptrs, INDEXTYPE* vals );
+
   //! @brief Function to calculate the RHS of sensitivity/adjoint quadrature ODEs
-  template <typename REALTYPE> bool _RHS_D_QUAD
+  template <typename REALTYPE>
+  bool _RHS_D_QUAD
     ( unsigned const nyq, REALTYPE* qdot, unsigned const ifct );
 
   //! @brief Function to calculate the function sensitivities at intermediate/end point
   bool _FCT_D_SEN
     ( unsigned const pos_fct, unsigned const isen, double const& t );
 
-  //! @brief Private methods to block default compiler methods
-  ODESLVS_BASE( ODESLVS_BASE<ExtOps...> const& );
-  ODESLVS_BASE<ExtOps...>& operator=( ODESLVS_BASE<ExtOps...> const& );
+  //! @brief Block default compiler methods
+  ODESLVS_BASE( ODESLVS_BASE<ExtOps...> const& ) = delete;
+  ODESLVS_BASE<ExtOps...>& operator=( ODESLVS_BASE<ExtOps...> const& ) = delete;
 };
 
 template <typename... ExtOps>
@@ -549,7 +558,7 @@ ODESLVS_BASE<ExtOps...>::_RHS_SET_ASA
   }
 
   for( unsigned ifct=0; ifct<_nf; ifct++ ){
-#ifndef MC__ODEBNDS_GSL_USE_BAD
+#ifndef MC__ODESLVS_USE_BAD
     delete[] _vSARHS[ifct];  _vSARHS[ifct]  = _dag->FAD( 1, vHAM.data()+ifct, _nx, _pX   );
     delete[] _vSAQUAD[ifct]; _vSAQUAD[ifct] = _dag->FAD( 1, vHAM.data()+ifct, _np, _pP );
 #else
@@ -560,6 +569,23 @@ ODESLVS_BASE<ExtOps...>::_RHS_SET_ASA
 
   delete[] std::get<1>(_pJAC); delete[] std::get<2>(_pJAC); delete[] std::get<3>(_pJAC);
   _pJAC = _dag->SFAD( _nx, _vSARHS[0], _ny, _pY ); // Jacobian in sparse format
+  _pJACCOLNDX.resize( _nx+1 );
+  for( unsigned ie=0, ic=0; ie<std::get<0>(_pJAC); ++ie ){
+#ifdef MC__ODESLVS_BASE_DEBUG
+    std::cout << "  JACB[" << std::get<1>(_pJAC)[ie] << ", " << std::get<2>(_pJAC)[ie] << "]" << std::endl;
+#endif
+    for( ; std::get<2>(_pJAC)[ie] >= ic; ++ic ){
+      _pJACCOLNDX[ic] = ie;
+#ifdef MC__ODESLVS_BASE_DEBUG
+      std::cout << "  JACBCOLNDX[" << ic << "] = " << ie << std::endl;
+#endif
+    }
+  }
+  _pJACCOLNDX[_nx] = std::get<0>(_pJAC);
+#ifdef MC__ODESLVS_BASE_DEBUG
+  std::cout << "  JACBCOLNDX[" << _nx << "] = " << std::get<0>(_pJAC) << std::endl;
+  std::cout << "PAUSED - <1> TO CONTINUE"; int dum; std::cin >> dum;
+#endif
 
   return true;
 }
@@ -646,27 +672,19 @@ bool
 ODESLVS_BASE<ExtOps...>::_RHS_D_SET
 ( unsigned const nf, unsigned const nyq )
 {
-  //unsigned nWRK = 0;
-
   _opSARHS.resize( nf );
-  for( unsigned ifct=0; ifct<nf; ifct++ ){
+  for( unsigned ifct=0; ifct<nf; ifct++ )
     _opSARHS[ifct]  = _dag->subgraph( _ny, _vSARHS[ifct] );
-    //if( nWRK < _opSARHS[ifct].l_op.size()  ) nWRK = _opSARHS[ifct].l_op.size();
-  }
+
   if( nyq ){
     _opSAQUAD.resize( nf );
-    for( unsigned ifct=0; ifct<nf; ifct++ ){
+    for( unsigned ifct=0; ifct<nf; ifct++ )
       _opSAQUAD[ifct] = _dag->subgraph( nyq, _vSAQUAD[ifct] );
-      //if( nWRK < _opSAQUAD[ifct].l_op.size() ) nWRK = _opSAQUAD[ifct].l_op.size();
-    }
   }
 
-  //_opSAJAC.clear();
   _opSAJAC = _dag->subgraph( std::get<0>(_pJAC), std::get<3>(_pJAC) );
   _DJAC.resize( std::get<0>(_pJAC) );
-  //if( nWRK < _opSAJAC.l_op.size() )  nWRK = _opSAJAC.l_op.size();
 
-  //_DWRK.reserve( nWRK );
   return true;
 }
 
@@ -697,9 +715,7 @@ bool
 ODESLVS_BASE<ExtOps...>::_JAC_D_SEN
 ( double const& t, REALTYPE const* x, REALTYPE const* y, REALTYPE** jac )
 {
-  //*_Dt = t; // current time
-  //_vec2D( x, _nx, _Dx ); // current state
-  //_vec2D( y, _ny, _Dy ); // set current adjoint bounds
+  // No need to update _DVAR
   _dag->eval( _opSAJAC, _DWRK, std::get<0>(_pJAC), std::get<3>(_pJAC),
                _DJAC.data(), _nVAR0, _pVAR, _DVAR );
   for( unsigned ie=0; ie<std::get<0>(_pJAC); ++ie ){
@@ -713,6 +729,33 @@ ODESLVS_BASE<ExtOps...>::_JAC_D_SEN
 }
 
 template <typename... ExtOps>
+template <typename REALTYPE, typename INDEXTYPE>
+inline
+bool
+ODESLVS_BASE<ExtOps...>::_JAC_D_SEN
+( double const& t, REALTYPE const* x, REALTYPE const* y, REALTYPE* jac,
+  INDEXTYPE* ptrs, INDEXTYPE* vals )
+{
+  // No need to update _DVAR
+  _dag->eval( _opSAJAC, _DWRK, std::get<0>(_pJAC), std::get<3>(_pJAC),
+               (double*)jac, _nVAR0, _pVAR, _DVAR );
+  for( unsigned ie=0; ie<std::get<0>(_pJAC); ++ie ){
+    vals[ie] = (INDEXTYPE)std::get<1>(_pJAC)[ie];
+#ifdef MC__ODESLV_BASE_DEBUG
+    std::cout << "  jac[" << ie << "] = " << jac[ie] << std::endl;
+    std::cout << "  vals[" << ie << "] = " << vals[ie] << std::endl;
+#endif
+  }
+  for( unsigned ic=0; ic<=_nx; ++ic ){
+    ptrs[ic] = (INDEXTYPE) _pJACCOLNDX[ic];
+#ifdef MC__ODESLV_BASE_DEBUG
+    std::cout << "  ptrs[" << ic << "] = " << ptrs[ic] << std::endl;
+#endif
+  }
+  return true;
+}
+
+template <typename... ExtOps>
 template <typename REALTYPE>
 inline
 bool
@@ -720,6 +763,7 @@ ODESLVS_BASE<ExtOps...>::_RHS_D_QUAD
 ( unsigned const nyq, REALTYPE* yqdot, unsigned const ifct )
 {
   if( !_vSAQUAD.size() || !_vSAQUAD[ifct] ) return false;
+  // No need to update _DVAR
   _dag->eval( _opSAQUAD[ifct], _DWRK, nyq, _vSAQUAD[ifct], (double*)yqdot,
                _nVAR0, _pVAR, _DVAR );
   return true;

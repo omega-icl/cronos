@@ -325,6 +325,9 @@ py::enum_<ODESLVS::Options::LINEAR_SOLVER>(pyODESLVOptions, "ODESLV.LINEAR_SOLVE
  .value("DIAG",    ODESLVS::Options::LINEAR_SOLVER::DIAG,    "Approximate diagonal Jacobian formed by way of a difference quotient")
  .value("DENSE",   ODESLVS::Options::LINEAR_SOLVER::DENSE,   "Use analytic dense Jacobian and internal direct dense linear algebra functions")
  .value("DENSEDQ", ODESLVS::Options::LINEAR_SOLVER::DENSEDQ, "Use approximate dense Jacobian by way of a difference quotient and internal direct dense linear algebra functions")
+#if defined( CRONOS__WITH_KLU )
+ .value("SPARSE", ODESLVS::Options::LINEAR_SOLVER::SPARSE, "Use analytic sparse Jacobian and KLU for the direct solution of sparse nonsymmetric linear systems of equations")
+#endif
  .export_values()
 ;
 }

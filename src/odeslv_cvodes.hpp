@@ -2,10 +2,10 @@
 // All Rights Reserved.
 // This code is published under the Eclipse Public License.
 
-#ifndef MC__ODESLV_CVODES_HPP
-#define MC__ODESLV_CVODES_HPP
+#ifndef CRONOS__ODESLV_CVODES_HPP
+#define CRONOS__ODESLV_CVODES_HPP
 
-#undef  MC__ODESLV_CVODES_DEBUG
+#undef  CRONOS__ODESLV_CVODES_DEBUG
 
 #include "base_cvodes.hpp"
 #include "odeslv_base.hpp"
@@ -17,45 +17,45 @@ namespace mc
 //! mc::ODESLV_CVODES is a C++ class for solution of IVPs in ODEs
 //! using the code CVODES in SUNDIALS and MC++.
 ////////////////////////////////////////////////////////////////////////
-template <typename... ExtOps>
 class ODESLV_CVODES
 : public virtual BASE_CVODES
-, public virtual ODESLV_BASE<ExtOps...>
-, public virtual BASE_DE<ExtOps...>
+, public virtual ODESLV_BASE
+, public virtual BASE_DE
 {
  protected:
  
-  using ODESLV_BASE<ExtOps...>::_print_interm;
-  using ODESLV_BASE<ExtOps...>::_record;
+  using ODESLV_BASE::_print_interm;
+  using ODESLV_BASE::_record;
 
-  using ODESLV_BASE<ExtOps...>::_nsmax;
-  using ODESLV_BASE<ExtOps...>::_istg;
-  using ODESLV_BASE<ExtOps...>::_t;
-  using ODESLV_BASE<ExtOps...>::_dT;
-  using ODESLV_BASE<ExtOps...>::_nx;
-  using ODESLV_BASE<ExtOps...>::_Dx;
-  using ODESLV_BASE<ExtOps...>::_nq;
-  using ODESLV_BASE<ExtOps...>::_Dq;
-  using ODESLV_BASE<ExtOps...>::_nf;
-  using ODESLV_BASE<ExtOps...>::_Df;
-  using ODESLV_BASE<ExtOps...>::_vIC;
-  using ODESLV_BASE<ExtOps...>::_vRHS;
-  using ODESLV_BASE<ExtOps...>::_vQUAD;
-  using ODESLV_BASE<ExtOps...>::_vFCT;
-  using ODESLV_BASE<ExtOps...>::_nnzjac;
+  using ODESLV_BASE::_nsmax;
+  using ODESLV_BASE::_istg;
+  using ODESLV_BASE::_t;
+  using ODESLV_BASE::_dT;
+  using ODESLV_BASE::_nx;
+  using ODESLV_BASE::_Dx;
+  using ODESLV_BASE::_nq;
+  using ODESLV_BASE::_Dq;
+  using ODESLV_BASE::_nf;
+  using ODESLV_BASE::_Df;
+  using ODESLV_BASE::_vIC;
+  using ODESLV_BASE::_vRHS;
+  using ODESLV_BASE::_vQUAD;
+  using ODESLV_BASE::_vFCT;
+  using ODESLV_BASE::_nnzjac;
 
-  using ODESLV_BASE<ExtOps...>::_INI_D_STA;
-  using ODESLV_BASE<ExtOps...>::_GET_D_STA;
-  using ODESLV_BASE<ExtOps...>::_IC_D_SET;
-  using ODESLV_BASE<ExtOps...>::_IC_D_STA;
-  using ODESLV_BASE<ExtOps...>::_IC_D_QUAD;
-  using ODESLV_BASE<ExtOps...>::_CC_D_SET;
-  using ODESLV_BASE<ExtOps...>::_CC_D_STA;
-  using ODESLV_BASE<ExtOps...>::_RHS_D_SET;
-  using ODESLV_BASE<ExtOps...>::_RHS_D_STA;
-  using ODESLV_BASE<ExtOps...>::_RHS_D_QUAD;
-  using ODESLV_BASE<ExtOps...>::_JAC_D_STA;
-  using ODESLV_BASE<ExtOps...>::_FCT_D_STA;
+  using ODESLV_BASE::_INI_D_STA;
+  using ODESLV_BASE::_END_D_STA;
+  using ODESLV_BASE::_GET_D_STA;
+  using ODESLV_BASE::_IC_D_SET;
+  using ODESLV_BASE::_IC_D_STA;
+  using ODESLV_BASE::_IC_D_QUAD;
+  using ODESLV_BASE::_CC_D_SET;
+  using ODESLV_BASE::_CC_D_STA;
+  using ODESLV_BASE::_RHS_D_SET;
+  using ODESLV_BASE::_RHS_D_STA;
+  using ODESLV_BASE::_RHS_D_QUAD;
+  using ODESLV_BASE::_JAC_D_STA;
+  using ODESLV_BASE::_FCT_D_STA;
 
   //! @brief Pointer to the CVode memory block
   void* _cv_mem;
@@ -107,15 +107,15 @@ class ODESLV_CVODES
 
 public:
 
-  using BASE_DE<ExtOps...>::set;
+  using BASE_DE::set;
 
   /** @ingroup ODESLV
    *  @{
    */
-  typedef typename BASE_DE<ExtOps...>::STATUS STATUS;
-  typedef typename ODESLV_BASE<ExtOps...>::Results Results;
-  using BASE_DE<ExtOps...>::np;
-  using BASE_DE<ExtOps...>::nf;
+  typedef typename BASE_DE::STATUS STATUS;
+  typedef typename ODESLV_BASE::Results Results;
+  using BASE_DE::np;
+  using BASE_DE::nf;
 
   //! @brief Default constructor
   ODESLV_CVODES
@@ -167,7 +167,7 @@ public:
     std::string what(){
       switch( _ierr ){
       case INTERN: default:
-        return "ODESLV_CVODES<ExtOps...>::Exceptions  Internal error";
+        return "ODESLV_CVODES::Exceptions  Internal error";
        }
     }
    private:
@@ -182,21 +182,21 @@ public:
 
   //! @brief Computes solution of parametric ODEs
   STATUS solve_state
-    ( std::vector<double> const& p, std::ostream& os=std::cout );
+    ( std::vector<double> const& p, std::vector<double> const& c=std::vector<double>() , std::ostream& os=std::cout );
 
   //! @brief Computes solution of parametric ODEs
   STATUS solve_state
-    ( double const*p, std::ostream& os=std::cout );
+    ( double const*p, double const*c=nullptr, std::ostream& os=std::cout );
 
   //! @brief Setup local copy of parametric ODEs
   bool setup
     ()
-    { return ODESLV_BASE<ExtOps...>::_SETUP(); }
+    { return ODESLV_BASE::_SETUP(); }
 
   //! @brief Setup local copy of parametric ODEs based on IVP
   bool setup
-    ( ODESLV_CVODES<ExtOps...> const& IVP )
-    { return ODESLV_BASE<ExtOps...>::_SETUP( IVP ); }
+    ( ODESLV_CVODES const& IVP )
+    { return ODESLV_BASE::_SETUP( IVP ); }
 
   //! @brief Record results in file <a>ores</a>, with accuracy of <a>iprec</a> digits
   void record
@@ -243,7 +243,7 @@ protected:
 
   //! @brief Function to initialize state integration
   bool _INI_STA
-    ( double const* p );
+    ( double const* p, double const* c );
 
   //! @brief Function to initialize state integration
   bool _INI_STA
@@ -277,7 +277,7 @@ protected:
 
   //! @brief Solve parametric ODEs forward in time through every time stages
   STATUS _states
-    ( double const* p, bool const store, std::ostream& os );
+    ( double const* p, double const* c, bool const store, std::ostream& os );
 
   //! @brief Solve parametric ODEs forward in time in current time stage
   STATUS _states_stage
@@ -321,20 +321,18 @@ private:
     { throw Exceptions( Exceptions::INTERN ); }
 
   //! @brief Private methods to block default compiler methods
-  ODESLV_CVODES( ODESLV_CVODES<ExtOps...> const& ) = delete;
-  ODESLV_CVODES<ExtOps...>& operator=( ODESLV_CVODES<ExtOps...> const& ) = delete;
+  ODESLV_CVODES( ODESLV_CVODES const& ) = delete;
+  ODESLV_CVODES& operator=( ODESLV_CVODES const& ) = delete;
 };
 
-template <typename... ExtOps>
-ODESLV_CVODES<ExtOps...>::ODESLV_CVODES
+ODESLV_CVODES::ODESLV_CVODES
 ()
-: BASE_CVODES(), BASE_DE<ExtOps...>(), ODESLV_BASE<ExtOps...>(),
+: BASE_CVODES(), BASE_DE(), ODESLV_BASE(),
   _cv_mem(nullptr), _cv_flag(0), _sun_mat(nullptr), _sun_ls(nullptr), _sun_nls(nullptr),
   _Nx(nullptr), _Nq(nullptr)
 {}
 
-template <typename... ExtOps>
-ODESLV_CVODES<ExtOps...>::~ODESLV_CVODES
+ODESLV_CVODES::~ODESLV_CVODES
 ()
 {
   if( _Nx ) N_VDestroy( _Nx );
@@ -346,9 +344,8 @@ ODESLV_CVODES<ExtOps...>::~ODESLV_CVODES
 
 }
 
-template <typename... ExtOps>
 bool
-ODESLV_CVODES<ExtOps...>::_INI_CVODE
+ODESLV_CVODES::_INI_CVODE
 ()
 {
   // Reset CVode memory block
@@ -478,9 +475,8 @@ ODESLV_CVODES<ExtOps...>::_INI_CVODE
   return true;
 }
 
-template <typename... ExtOps>
 bool
-ODESLV_CVODES<ExtOps...>::_CC_CVODE_STA
+ODESLV_CVODES::_CC_CVODE_STA
 ()
 {
   // Reinitialize CVode memory block for current time _t and current state _Nx
@@ -506,9 +502,8 @@ ODESLV_CVODES<ExtOps...>::_CC_CVODE_STA
   return true;
 }
 
-template <typename... ExtOps>
 bool
-ODESLV_CVODES<ExtOps...>::_CC_CVODE_QUAD
+ODESLV_CVODES::_CC_CVODE_QUAD
 ()
 {
 
@@ -520,28 +515,28 @@ ODESLV_CVODES<ExtOps...>::_CC_CVODE_QUAD
   return true;
 }
 
-template <typename... ExtOps>
 void
-ODESLV_CVODES<ExtOps...>::_END_STA()
+ODESLV_CVODES::_END_STA()
 {
+  // Unset constants
+  _END_D_STA();
+
   // Get final CPU time
   _final_stats( stats_state );
 }
 
-template <typename... ExtOps>
 bool
-ODESLV_CVODES<ExtOps...>::_INI_STA
-( double const* p )
+ODESLV_CVODES::_INI_STA
+( double const* p, double const* c )
 {
   // Initialize bound propagation
-  if( !_INI_D_STA( p ) || !_INI_STA() )
+  if( !_INI_D_STA( p, c ) || !_INI_STA() )
     return false;
   return true;
 }
 
-template <typename... ExtOps>
 bool
-ODESLV_CVODES<ExtOps...>::_INI_STA
+ODESLV_CVODES::_INI_STA
 ()
 {
   // Set SUNDIALS state/quadrature arrays
@@ -566,13 +561,12 @@ ODESLV_CVODES<ExtOps...>::_INI_STA
   return true;
 }
 
-template <typename... ExtOps>
 inline
 int
-ODESLV_CVODES<ExtOps...>::MC_CVRHS__
+ODESLV_CVODES::MC_CVRHS__
 ( sunrealtype t, N_Vector y, N_Vector ydot, void *user_data )
 {
-#ifdef MC__BASE_CVODES_CHECK
+#ifdef CRONOS__BASE_CVODES_CHECK
   //std::cout << "BASE_CVODES::PTR_BASE_CVODES: " << BASE_CVODES::PTR_BASE_CVODES
   //          << "  PTR_CVRHS: " << PTR_CVRHS << std::endl;
   assert( BASE_CVODES::PTR_BASE_CVODES != nullptr && PTR_CVRHS != nullptr);
@@ -580,18 +574,17 @@ ODESLV_CVODES<ExtOps...>::MC_CVRHS__
   return (BASE_CVODES::PTR_BASE_CVODES->*PTR_CVRHS)( t, y, ydot, user_data );
 }
 
-template <typename... ExtOps>
 inline
 int
-ODESLV_CVODES<ExtOps...>::CVRHS__
+ODESLV_CVODES::CVRHS__
 ( sunrealtype t, N_Vector y, N_Vector ydot, void *user_data )
 {
-#ifdef MC__ODESLV_CVODES_DEBUG
+#ifdef CRONOS__ODESLV_CVODES_DEBUG
   std::cout << std::scientific << std::setprecision(6) << t;
   for( unsigned i=0; i<NV_LENGTH_S( y ); i++ ) std::cout << "  " << NV_Ith_S( y, i );
 #endif
   bool flag = _RHS_D_STA( t, NV_DATA_S( y ), NV_DATA_S( ydot ) );
-#ifdef MC__ODESLV_CVODES_DEBUG
+#ifdef CRONOS__ODESLV_CVODES_DEBUG
   for( unsigned i=0; i<NV_LENGTH_S( ydot ); i++ ) std::cout << "  " << NV_Ith_S( ydot, i );
   std::cout << std::endl;
   { int dum; std::cin >> dum; }
@@ -600,13 +593,12 @@ ODESLV_CVODES<ExtOps...>::CVRHS__
   return( flag? 0: -1 );
 }
 
-template <typename... ExtOps>
 inline
 int
-ODESLV_CVODES<ExtOps...>::MC_CVQUAD__
+ODESLV_CVODES::MC_CVQUAD__
 ( sunrealtype t, N_Vector y, N_Vector qdot, void *user_data )
 {
-#ifdef MC__BASE_CVODES_CHECK
+#ifdef CRONOS__BASE_CVODES_CHECK
   //std::cout << "BASE_CVODES::PTR_BASE_CVODES: " << BASE_CVODES::PTR_BASE_CVODES
   //          << "  PTR_CVQUAD: " << PTR_CVQUAD << std::endl;
   assert( BASE_CVODES::PTR_BASE_CVODES != nullptr && PTR_CVQUAD != nullptr);
@@ -614,24 +606,22 @@ ODESLV_CVODES<ExtOps...>::MC_CVQUAD__
   return (BASE_CVODES::PTR_BASE_CVODES->*PTR_CVQUAD)( t, y, qdot, user_data );
 }
 
-template <typename... ExtOps>
 inline
 int
-ODESLV_CVODES<ExtOps...>::CVQUAD__
+ODESLV_CVODES::CVQUAD__
 ( sunrealtype t, N_Vector y, N_Vector qdot, void *user_data )
 {
   bool flag = _RHS_D_QUAD( t, NV_DATA_S( y ), NV_DATA_S( qdot ) );
   return( flag? 0: -1 );
 }
 
-template <typename... ExtOps>
 inline
 int
-ODESLV_CVODES<ExtOps...>::MC_CVJAC__
+ODESLV_CVODES::MC_CVJAC__
 ( sunrealtype t, N_Vector y, N_Vector ydot, SUNMatrix Jac, void *user_data,
   N_Vector tmp1, N_Vector tmp2, N_Vector tmp3 )
 {
-#ifdef MC__BASE_CVODES_CHECK
+#ifdef CRONOS__BASE_CVODES_CHECK
   //std::cout << "BASE_CVODES::PTR_BASE_CVODES: " << BASE_CVODES::PTR_BASE_CVODES
   //          << "  PTR_CVJAC: " << PTR_CVJAC << std::endl;
   assert( BASE_CVODES::PTR_BASE_CVODES != nullptr && PTR_CVJAC != nullptr);
@@ -639,14 +629,13 @@ ODESLV_CVODES<ExtOps...>::MC_CVJAC__
   return (BASE_CVODES::PTR_BASE_CVODES->*PTR_CVJAC)( t, y, ydot, Jac, user_data, tmp1, tmp2, tmp3 );
 }
 
-template <typename... ExtOps>
 inline
 int
-ODESLV_CVODES<ExtOps...>::CVJAC__
+ODESLV_CVODES::CVJAC__
 ( sunrealtype t, N_Vector y, N_Vector ydot, SUNMatrix Jac, void *user_data,
   N_Vector tmp1, N_Vector tmp2, N_Vector tmp3 )
 {
-  //std::cerr << "Entering: ODESLV_CVODES<ExtOps...>::CVJAC__\n";
+  //std::cerr << "Entering: ODESLV_CVODES::CVJAC__\n";
   bool flag = false;
   //std::cerr << "Option: " << options.LINSOL << "\n";
   switch( options.LINSOL ){
@@ -671,9 +660,8 @@ ODESLV_CVODES<ExtOps...>::CVJAC__
   return( flag? 0: -1 );
 }
 
-template <typename... ExtOps>
-typename ODESLV_CVODES<ExtOps...>::STATUS
-ODESLV_CVODES<ExtOps...>::_states_stage
+typename ODESLV_CVODES::STATUS
+ODESLV_CVODES::_states_stage
 ( unsigned istg, double& t, N_Vector& Nx, N_Vector& Nq, bool const reinit, bool const store,
   bool const record, std::ostream& os )
 {
@@ -734,14 +722,13 @@ ODESLV_CVODES<ExtOps...>::_states_stage
   return STATUS::NORMAL;
 }
 
-template <typename... ExtOps>
-typename ODESLV_CVODES<ExtOps...>::STATUS
-ODESLV_CVODES<ExtOps...>::_states
-( double const* p, bool const store, std::ostream& os )
+typename ODESLV_CVODES::STATUS
+ODESLV_CVODES::_states
+( double const* p, double const* c, bool const store, std::ostream& os )
 {
   try{
     // Initialize trajectory integration
-    if( !_INI_STA( p ) ) return STATUS::FATAL;
+    if( !_INI_STA( p, c ) ) return STATUS::FATAL;
     _t = _dT[0];
 
     // Initial state/quadrature values
@@ -805,7 +792,7 @@ ODESLV_CVODES<ExtOps...>::_states
       if( (_vFCT.size()>=_nsmax || _istg==_nsmax-1) && !_FCT_D_STA( _pos_fct, _t ) )
         { _END_STA(); return STATUS::FATAL; }
     }
-#ifdef MC__ODESLV_CVODES_DEBUG
+#ifdef CRONOS__ODESLV_CVODES_DEBUG
     if( store ) std::cout << "number of checkpoints: " << _nchk << std::endl;
 #endif
 
@@ -831,7 +818,7 @@ ODESLV_CVODES<ExtOps...>::_states
   long int nstp;
   _cv_flag = CVodeGetNumSteps( _cv_mem, &nstp );
   stats_state.numSteps += nstp;
-#ifdef MC__ODESLV_CVODES_DEBUG
+#ifdef CRONOS__ODESLV_CVODES_DEBUG
   std::cout << "number of steps: " << nstp << std::endl;
 #endif
 
@@ -841,40 +828,40 @@ ODESLV_CVODES<ExtOps...>::_states
   return STATUS::NORMAL;
 }
 
-//! @fn template <typename... ExtOps> inline typename ODESLV_CVODES<ExtOps...>::STATUS ODESLV_CVODES<ExtOps...>::solve_state(
-//! std::vector<double> const& p, std::ostream& os=std::cout )
+//! @fn inline typename ODESLV_CVODES::STATUS ODESLV_CVODES::solve_state(
+//! std::vector<double> const& p, std::vector<double> const& c=std::vector<double>(), std::ostream& os=std::cout )
 //!
 //! This function computes a solution to the parametric ODEs:
 //!   - <a>p</a>  [input]  parameter values
-//!   - <a>os</a> [input]  output stream [default: std::cout]
+//!   - <a>c</a>  [input]  constant values
+//!   - <a>os</a> [input/ouptut]  output stream [default: std::cout]
 //! .
 //! The return value is the status.
-template <typename... ExtOps>
-typename ODESLV_CVODES<ExtOps...>::STATUS
-ODESLV_CVODES<ExtOps...>::solve_state
-( std::vector<double> const& p, std::ostream& os )
+typename ODESLV_CVODES::STATUS
+ODESLV_CVODES::solve_state
+( std::vector<double> const& p, std::vector<double> const& c, std::ostream& os )
 {
   registration();
-  STATUS flag = _states( p.data(), false, os );
+  STATUS flag = _states( p.data(), c.data(), false, os );
   unregistration();
   return flag;
 }
 
-//! @fn template <typename... ExtOps> inline typename ODESLV_CVODES<ExtOps...>::STATUS ODESLV_CVODES<ExtOps...>::solve_state(
-//! double const* p, std::ostream& os=std::cout )
+//! @fn inline typename ODESLV_CVODES::STATUS ODESLV_CVODES::solve_state(
+//! double const* p, double const* c=nullptr, std::ostream& os=std::cout )
 //!
 //! This function computes a solution to the parametric ODEs:
 //!   - <a>p</a>  [input]  parameter values
-//!   - <a>os</a> [input]  output stream [default: std::cout]
+//!   - <a>c</a>  [input]  constant values
+//!   - <a>os</a> [input/output]  output stream [default: std::cout]
 //! .
 //! The return value is the status.
-template <typename... ExtOps>
-typename ODESLV_CVODES<ExtOps...>::STATUS
-ODESLV_CVODES<ExtOps...>::solve_state
-( double const* p, std::ostream& os )
+typename ODESLV_CVODES::STATUS
+ODESLV_CVODES::solve_state
+( double const* p, double const* c, std::ostream& os )
 {
   registration();
-  STATUS flag = _states( p, false, os );
+  STATUS flag = _states( p, c, false, os );
   unregistration();
   return flag;
 }

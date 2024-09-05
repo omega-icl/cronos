@@ -13,39 +13,22 @@ int main()
 
   mc::FFGraph NIFTE;  // DAG describing the problem
 
-  double t0 = 0., tf = 5. ;       // Time span
-
-  // Constant parameters: P0, U0, tau, Lambda, K
-  const unsigned NC = 5;  // Number of constants
-  std::vector<mc::FFVar> C(NC);  // Constants
-  for( unsigned int i=0; i<NC; i++ ) C[i].set( &NIFTE );
-  mc::FFVar &P0     = C[0],
-            &U0     = C[1], 
-            &tau    = C[2],
-            &Lambda = C[3],
-            &K      = C[4];
-  std::vector<double> c( { 1.013e5,  // Pa
-                           8.00e-4,  // m3/s
-                           5.,       // s
-                           330.,     // -
-                           1.37 } ); // -, control gain
+  // Constant parameters  
+  const double P0     = 1.013e5;  // Pa
+  const double U0     = 8.00e-4;  // m3/s
+  const double tau    = 5.;       // s
+  const double Lambda = 330.;     // -
+  const double K      = 1.37;	  // -, control gain
 //  const double psi    = 1.39e5;   // Pa, for converting P_d to P_th
 //  const double chi    = 3.28e-3;  // /Pa, for converting P_d to P_th
+
+  double t0 = 0., tf = 5. ;       // Time span
 
   // Design parameters: R_f, R_l, R_th, L_d, L_f, L_l, L_p, C_ad, C_d, C_p
   const unsigned NP = 10;  // Number of parameters
   std::vector<mc::FFVar> P(NP);  // Parameters
   for( unsigned int i=0; i<NP; i++ ) P[i].set( &NIFTE );
-  mc::FFVar &R_f  = P[0],
-            &R_l  = P[1], 
-            &R_th = P[2],
-            &L_d  = P[3],
-            &L_f  = P[4],
-            &L_l  = P[5],
-            &L_p  = P[6],
-            &C_ad = P[7],
-            &C_d  = P[8],
-            &C_p  = P[9];
+  mc::FFVar &R_f = P[0], &R_l = P[1], &R_th = P[2], &L_d = P[3], &L_f = P[4], &L_l = P[5], &L_p = P[6], &C_ad = P[7], &C_d = P[8], &C_p = P[9];
   std::vector<double> p( { 2.13e6, 4.08e6, 5.02e8, 1.80e5, 4.74e6, 1.27e7, 3.77e5, 1.76e-9, 7.35e-8, 7.43e-8 } );
 
   const unsigned NX = 5;   // Number of states
@@ -99,7 +82,6 @@ int main()
   IVP.set_dag( &NIFTE );
   IVP.set_time( t0, tf );
   IVP.set_state( X );
-  IVP.set_constant( C );
   IVP.set_parameter( P );
   IVP.set_differential( RHS );
   IVP.set_initial( IC );
@@ -112,7 +94,7 @@ int main()
 #endif
 
   std::cout << "\nCONTINUOUS-TIME INTEGRATION:\n\n";
-  IVP.solve_state( p, c );
+  IVP.solve_state( p );
 
 #if defined( SAVE_RESULTS )
   std::ofstream direcSTA;

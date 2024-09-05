@@ -2,10 +2,10 @@
 // All Rights Reserved.
 // This code is published under the Eclipse Public License.
 
-#ifndef MC__AEBND_HPP
-#define MC__AEBND_HPP
+#ifndef CRONOS__AEBND_HPP
+#define CRONOS__AEBND_HPP
 
-//#undef  MC__AEBND_DEBUG
+//#undef  CRONOS__AEBND_DEBUG
 
 #include <stdexcept>
 #include <cassert>
@@ -32,38 +32,37 @@ namespace mc
 ////////////////////////////////////////////////////////////////////////
 template < typename T,
            typename PMT = TModel<T>,
-           typename PVT = TVar<T>,
-           typename... ExtOps >
+           typename PVT = TVar<T> >
 class AEBND
-: public virtual BASE_AE<ExtOps...>
+: public virtual BASE_AE
 {
 public:
 
-  using BASE_AE<ExtOps...>::set;
-  using BASE_AE<ExtOps...>::dag;
-  using BASE_AE<ExtOps...>::set_dag;
-  using BASE_AE<ExtOps...>::par;
-  using BASE_AE<ExtOps...>::set_par;
-  using BASE_AE<ExtOps...>::add_par;
-  using BASE_AE<ExtOps...>::reset_par;
-  using BASE_AE<ExtOps...>::var;
-  using BASE_AE<ExtOps...>::set_var;
-  using BASE_AE<ExtOps...>::add_var;
-  using BASE_AE<ExtOps...>::reset_var;
-  using BASE_AE<ExtOps...>::dep;
-  using BASE_AE<ExtOps...>::set_dep;
-  using BASE_AE<ExtOps...>::add_dep;
-  using BASE_AE<ExtOps...>::reset_dep;
-  using BASE_AE<ExtOps...>::sys;
-  using BASE_AE<ExtOps...>::add_sys;
-  using BASE_AE<ExtOps...>::reset_sys;
+  using BASE_AE::set;
+  using BASE_AE::dag;
+  using BASE_AE::set_dag;
+  using BASE_AE::par;
+  using BASE_AE::set_par;
+  using BASE_AE::add_par;
+  using BASE_AE::reset_par;
+  using BASE_AE::var;
+  using BASE_AE::set_var;
+  using BASE_AE::add_var;
+  using BASE_AE::reset_var;
+  using BASE_AE::dep;
+  using BASE_AE::set_dep;
+  using BASE_AE::add_dep;
+  using BASE_AE::reset_dep;
+  using BASE_AE::sys;
+  using BASE_AE::add_sys;
+  using BASE_AE::reset_sys;
 
 private:
 
-  using BASE_AE<ExtOps...>::_dag;
-  using BASE_AE<ExtOps...>::_sys;
-  using BASE_AE<ExtOps...>::_iblk;
-  using BASE_AE<ExtOps...>::INF;
+  using BASE_AE::_dag;
+  using BASE_AE::_sys;
+  using BASE_AE::_iblk;
+  using BASE_AE::INF;
 
   typedef std::tuple< unsigned, unsigned const*, unsigned const*, FFVar const*> FFSDer;
 
@@ -456,24 +455,24 @@ private:
     ( Stats const& stats, std::ostream& os = std::cout );
 
   //! @brief Private methods to block default compiler methods
-  AEBND( AEBND<T,PMT,PVT,ExtOps...> const& );
-  AEBND<T,PMT,PVT,ExtOps...>& operator=( AEBND<T,PMT,PVT,ExtOps...> const& );
+  AEBND( AEBND<T,PMT,PVT> const& ) = delete;
+  AEBND<T,PMT,PVT>& operator=( AEBND<T,PMT,PVT> const& ) = delete;
 };
 
-template <typename T, typename PMT, typename PVT, typename... ExtOps>
+template <typename T, typename PMT, typename PVT>
 inline
-AEBND<T,PMT,PVT,ExtOps...>::AEBND
+AEBND<T,PMT,PVT>::AEBND
 ()
-: BASE_AE<ExtOps...>()
+: BASE_AE()
 {
   // Initalize state/parameter arrays
   _Ix = _Ip = nullptr;
   _PMp = _PMx = nullptr;
 }
 
-template <typename T, typename PMT, typename PVT, typename... ExtOps>
+template <typename T, typename PMT, typename PVT>
 inline
-AEBND<T,PMT,PVT,ExtOps...>::~AEBND
+AEBND<T,PMT,PVT>::~AEBND
 ()
 {
   auto it = _jac.begin();
@@ -487,10 +486,10 @@ AEBND<T,PMT,PVT,ExtOps...>::~AEBND
   /* DO NOT DELETE _PMx, _PMp */
 }
 
-template <typename T, typename PMT, typename PVT, typename... ExtOps>
+template <typename T, typename PMT, typename PVT>
 inline
 void
-AEBND<T,PMT,PVT,ExtOps...>::_init_stats
+AEBND<T,PMT,PVT>::_init_stats
 ( Stats& stats )
 {
   // Initialize statistics
@@ -498,20 +497,20 @@ AEBND<T,PMT,PVT,ExtOps...>::_init_stats
   stats.cputime = -cpuclock();
 }
 
-template <typename T, typename PMT, typename PVT, typename... ExtOps>
+template <typename T, typename PMT, typename PVT>
 inline
 void
-AEBND<T,PMT,PVT,ExtOps...>::_final_stats
+AEBND<T,PMT,PVT>::_final_stats
 ( Stats& stats )
 {
   // Get final CPU time
   stats.cputime += cpuclock();
 }
 
-template <typename T, typename PMT, typename PVT, typename... ExtOps>
+template <typename T, typename PMT, typename PVT>
 inline 
 void
-AEBND<T,PMT,PVT,ExtOps...>::_output_stats
+AEBND<T,PMT,PVT>::_output_stats
 ( Stats const& stats, std::ostream& os )
 {
   // Statistics
@@ -527,45 +526,45 @@ AEBND<T,PMT,PVT,ExtOps...>::_output_stats
   return;
 }
 
-template <typename T, typename PMT, typename PVT, typename... ExtOps>
+template <typename T, typename PMT, typename PVT>
 inline
-typename AEBND<T,PMT,PVT,ExtOps...>::STATUS
-AEBND<T,PMT,PVT,ExtOps...>::setup
+typename AEBND<T,PMT,PVT>::STATUS
+AEBND<T,PMT,PVT>::setup
 ( int const NB, int const* IOR, int const* IB, int const* IPERM, std::ostream& os )
 {
   _issetup = false;
 
   // Perform block decomposition
-  if( !BASE_AE<ExtOps...>::set_block( NB, IOR, IB, IPERM, options.DISPLEVEL, os ) ) return FAILURE;
-  if( BASE_AE<ExtOps...>::_singsys ) return SINGULAR;
+  if( !BASE_AE::set_block( NB, IOR, IB, IPERM, options.DISPLEVEL, os ) ) return FAILURE;
+  if( BASE_AE::_singsys ) return SINGULAR;
 
   return _setup( os );
 }
 
-template <typename T, typename PMT, typename PVT, typename... ExtOps>
+template <typename T, typename PMT, typename PVT>
 inline
-typename AEBND<T,PMT,PVT,ExtOps...>::STATUS
-AEBND<T,PMT,PVT,ExtOps...>::setup
+typename AEBND<T,PMT,PVT>::STATUS
+AEBND<T,PMT,PVT>::setup
 ( bool const updtdec, std::ostream& os )
 {
   _issetup = false;
 
   // Perform block decomposition
-  if( updtdec && !BASE_AE<ExtOps...>::set_block( options.DISPLEVEL, os ) ) return FAILURE;
-  if( BASE_AE<ExtOps...>::_singsys ) return SINGULAR;
+  if( updtdec && !BASE_AE::set_block( options.DISPLEVEL, os ) ) return FAILURE;
+  if( BASE_AE::_singsys ) return SINGULAR;
 
   return _setup( os );
 }
 
-template <typename T, typename PMT, typename PVT, typename... ExtOps>
+template <typename T, typename PMT, typename PVT>
 inline
-typename AEBND<T,PMT,PVT,ExtOps...>::STATUS
-AEBND<T,PMT,PVT,ExtOps...>::_setup
+typename AEBND<T,PMT,PVT>::STATUS
+AEBND<T,PMT,PVT>::_setup
 ( std::ostream& os )
 {
   // (Re)size variable arrays
-  _ndep = BASE_AE<ExtOps...>::_dep.size();
-  _nvar = _ndep + BASE_AE<ExtOps...>::_var.size();
+  _ndep = BASE_AE::_dep.size();
+  _nvar = _ndep + BASE_AE::_var.size();
   if( _var.size() < _nvar ){
     _var.resize( _nvar );
     _Ivar.clear();  _Iref.clear();
@@ -574,9 +573,9 @@ AEBND<T,PMT,PVT,ExtOps...>::_setup
 
   // Populate variable arrays: dependents first
   unsigned ivar=0;
-  for( auto id=BASE_AE<ExtOps...>::_dep.begin(); id!=BASE_AE<ExtOps...>::_dep.end(); ++id, ivar++ )
+  for( auto id=BASE_AE::_dep.begin(); id!=BASE_AE::_dep.end(); ++id, ivar++ )
     _var[ivar] = *id;
-  for( auto iv=BASE_AE<ExtOps...>::_var.begin(); iv!=BASE_AE<ExtOps...>::_var.end(); ++iv, ivar++ )
+  for( auto iv=BASE_AE::_var.begin(); iv!=BASE_AE::_var.end(); ++iv, ivar++ )
     _var[ivar] = *iv;
 
   // Initialize block computations according to decomposition option
@@ -587,20 +586,20 @@ AEBND<T,PMT,PVT,ExtOps...>::_setup
     _pblk.resize(1); _pblk[0] = 0;
     //_fpdep.resize(_ndep); _rpdep.resize(_ndep);
     //for( unsigned i=0; i<_ndep; i++ ) _fpdep[i] = _rpdep[i] = i;
-    _linblk.resize(1); _linblk[0] = BASE_AE<ExtOps...>::_linsys;
-    _bwblk.resize(1);  _bwblk[0]  = BASE_AE<ExtOps...>::_bwsys;
+    _linblk.resize(1); _linblk[0] = BASE_AE::_linsys;
+    _bwblk.resize(1);  _bwblk[0]  = BASE_AE::_bwsys;
     break;
 
    default:
-    _noblk = BASE_AE<ExtOps...>::_noblk;
-    _nblk  = BASE_AE<ExtOps...>::_nblk;
-    _pblk  = BASE_AE<ExtOps...>::_pblk;
-    _linblk = BASE_AE<ExtOps...>::_linblk;
-    _bwblk  = BASE_AE<ExtOps...>::_bwblk;
+    _noblk = BASE_AE::_noblk;
+    _nblk  = BASE_AE::_nblk;
+    _pblk  = BASE_AE::_pblk;
+    _linblk = BASE_AE::_linblk;
+    _bwblk  = BASE_AE::_bwblk;
   }
-  _fpdep = BASE_AE<ExtOps...>::_fpdep;
-  _rpdep = BASE_AE<ExtOps...>::_rpdep;
-//#ifdef MC__AEBND_SHOW_PERMUTATION
+  _fpdep = BASE_AE::_fpdep;
+  _rpdep = BASE_AE::_rpdep;
+//#ifdef CRONOS__AEBND_SHOW_PERMUTATION
   std::cout << "VARIABLE PERMUTATION:";
   for( unsigned const& i : _fpdep ) std::cout << " " << i;
   std::cout << std::endl;
@@ -654,10 +653,10 @@ AEBND<T,PMT,PVT,ExtOps...>::_setup
   return NORMAL;
 }
 
-template <typename T, typename PMT, typename PVT, typename... ExtOps>
+template <typename T, typename PMT, typename PVT>
 inline
 bool
-AEBND<T,PMT,PVT,ExtOps...>::_init
+AEBND<T,PMT,PVT>::_init
 ()
 {
   if( !_issetup ) return false;
@@ -673,10 +672,10 @@ AEBND<T,PMT,PVT,ExtOps...>::_init
   return true;
 }
 
-template <typename T, typename PMT, typename PVT, typename... ExtOps>
+template <typename T, typename PMT, typename PVT>
 inline
 bool
-AEBND<T,PMT,PVT,ExtOps...>::_init
+AEBND<T,PMT,PVT>::_init
 ( unsigned const np, T const* Ip )
 {
   if( !_init() ) return false;
@@ -703,10 +702,10 @@ AEBND<T,PMT,PVT,ExtOps...>::_init
   return _issetup;
 }
 
-template <typename T, typename PMT, typename PVT, typename... ExtOps>
+template <typename T, typename PMT, typename PVT>
 inline
 bool
-AEBND<T,PMT,PVT,ExtOps...>::_init
+AEBND<T,PMT,PVT>::_init
 ( unsigned const np, PVT const* PMp )
 {
   if( !_init() ) return false;
@@ -737,30 +736,30 @@ AEBND<T,PMT,PVT,ExtOps...>::_init
   return _issetup;
 }
 
-template <typename T, typename PMT, typename PVT, typename... ExtOps>
+template <typename T, typename PMT, typename PVT>
 inline
 bool
-AEBND<T,PMT,PVT,ExtOps...>::_cvgtest
+AEBND<T,PMT,PVT>::_cvgtest
 ( T const& x )
 const
 {
   return Op<T>::diam(x) <= options.ATOL? true: false;
 }
 
-template <typename T, typename PMT, typename PVT, typename... ExtOps>
+template <typename T, typename PMT, typename PVT>
 inline
 bool
-AEBND<T,PMT,PVT,ExtOps...>::_cvgtest
+AEBND<T,PMT,PVT>::_cvgtest
 ( PVT const& x )
 const
 {
   return Op<T>::diam(x.R()) <= options.ATOL? true: false;
 }
 
-template <typename T, typename PMT, typename PVT, typename... ExtOps>
+template <typename T, typename PMT, typename PVT>
 inline
 bool
-AEBND<T,PMT,PVT,ExtOps...>::_crosstest
+AEBND<T,PMT,PVT>::_crosstest
 ( unsigned const nx, T const* x, T const* x0, int* xlodep, int* xupdep )
 const
 {
@@ -771,21 +770,21 @@ const
   for( unsigned i=0; i<nx; i++ ){	
     if( xlodep[i] && Op<T>::l(x[i]) > Op<T>::l(x0[i]) ) xlodep[i] = false;
     if( xupdep[i] && Op<T>::u(x[i]) < Op<T>::u(x0[i]) ) xupdep[i] = false;
-#ifdef MC__AEBND_DEBUG
+#ifdef CRONOS__AEBND_DEBUG
     std::cout << "(" << (xlodep[i]?"T":"F") << "," << (xupdep[i]?"T":"F") << ") ";
 #endif
     cross = xlodep[i] || xupdep[i];
   }
-#ifdef MC__AEBND_DEBUG
+#ifdef CRONOS__AEBND_DEBUG
   std::cout << std::endl;
 #endif
   return cross;
 }
 
-template <typename T, typename PMT, typename PVT, typename... ExtOps>
+template <typename T, typename PMT, typename PVT>
 inline
 bool
-AEBND<T,PMT,PVT,ExtOps...>::_cvgtest
+AEBND<T,PMT,PVT>::_cvgtest
 ( unsigned const nx, T const* x, T const* x0 )
 const
 {
@@ -799,16 +798,16 @@ const
       atol = std::max( atol, std::fabs( diamx0i - diamxi ) );
     }
   }
-#ifdef MC__AEBND_DEBUG
+#ifdef CRONOS__AEBND_DEBUG
   std::cout << "RTOL =" << rtol  << "  ATOL =" << atol << std::endl;
 #endif
   return rtol <= options.RTOL || atol <= options.ATOL? true: false;
 }
 
-template <typename T, typename PMT, typename PVT, typename... ExtOps>
+template <typename T, typename PMT, typename PVT>
 inline
 bool
-AEBND<T,PMT,PVT,ExtOps...>::_crosstest
+AEBND<T,PMT,PVT>::_crosstest
 ( unsigned const nx, PVT const* x, PVT const* x0, int* xlodep, int* xupdep )
 const
 {
@@ -819,7 +818,7 @@ const
   for( unsigned i=0; i<nx; i++ ){	
     if( xlodep[i] && Op<T>::l(x[i].R()) > Op<T>::l(x0[i].R()) ) xlodep[i] = false;
     if( xupdep[i] && Op<T>::u(x[i].R()) < Op<T>::u(x0[i].R()) ) xupdep[i] = false;
-#ifdef MC__AEBND_DEBUG
+#ifdef CRONOS__AEBND_DEBUG
     std::cout << "(" << (xlodep[i]?"T":"F") << "," << (xupdep[i]?"T":"F") << ") ";
 #endif
     cross = xlodep[i] || xupdep[i];
@@ -827,10 +826,10 @@ const
   return cross;
 }
 
-template <typename T, typename PMT, typename PVT, typename... ExtOps>
+template <typename T, typename PMT, typename PVT>
 inline
 bool
-AEBND<T,PMT,PVT,ExtOps...>::_cvgtest
+AEBND<T,PMT,PVT>::_cvgtest
 ( unsigned const nx, PVT const* x, PVT const* x0 )
 const
 {
@@ -838,7 +837,7 @@ const
   // Relative tolerance uses the largest improvement divided by interval width in any direction
   // Absolute tolerance uses the largest improvement in any direction
   double rtol = 0., atol = 0.;
-#ifdef MC__AEBND_DEBUG
+#ifdef CRONOS__AEBND_DEBUG
   std::cout << "diam(R)" << std::scientific << std::setprecision(3);
 #endif
   for( unsigned i=0; i<nx; i++ ){	
@@ -847,41 +846,41 @@ const
       rtol = std::max( rtol, std::fabs( diamx0i - diamxi ) / diamxi );
       atol = std::max( atol, std::fabs( diamx0i - diamxi ) );
     }
-#ifdef MC__AEBND_DEBUG
+#ifdef CRONOS__AEBND_DEBUG
     std::cout << "  " << diamxi;
 #endif
   }
-#ifdef MC__AEBND_DEBUG
+#ifdef CRONOS__AEBND_DEBUG
   std::cout << std::endl;
   std::cout << "RTOL =" << rtol  << "  ATOL =" << atol << std::endl;
 #endif
   return rtol <= options.RTOL || atol <= options.ATOL? true: false;
 }
 
-template <typename T, typename PMT, typename PVT, typename... ExtOps>
+template <typename T, typename PMT, typename PVT>
 inline
 T
-AEBND<T,PMT,PVT,ExtOps...>::_cancelrem
+AEBND<T,PMT,PVT>::_cancelrem
 ( T& x )
 const
 {
   return x;
 }
 
-template <typename T, typename PMT, typename PVT, typename... ExtOps>
+template <typename T, typename PMT, typename PVT>
 inline
 PVT
-AEBND<T,PMT,PVT,ExtOps...>::_cancelrem
+AEBND<T,PMT,PVT>::_cancelrem
 ( PVT& x )
 const
 {
   return x.C().P();
 }
 
-template <typename T, typename PMT, typename PVT, typename... ExtOps>
+template <typename T, typename PMT, typename PVT>
 inline
 void
-AEBND<T,PMT,PVT,ExtOps...>::_reference
+AEBND<T,PMT,PVT>::_reference
 ( unsigned const ib, T* var, T* ref, T* jacvar, bool zeroref )
 {
   _stats_ae.precond -= cpuclock();
@@ -896,10 +895,10 @@ AEBND<T,PMT,PVT,ExtOps...>::_reference
   _stats_ae.precond += cpuclock();
 }
 
-template <typename T, typename PMT, typename PVT, typename... ExtOps>
+template <typename T, typename PMT, typename PVT>
 inline
 void
-AEBND<T,PMT,PVT,ExtOps...>::_reference
+AEBND<T,PMT,PVT>::_reference
 ( unsigned const ib, PVT* var, PVT* ref, PVT* jacvar, bool zeroref )
 {
   _stats_ae.precond -= cpuclock();
@@ -914,10 +913,10 @@ AEBND<T,PMT,PVT,ExtOps...>::_reference
   _stats_ae.precond += cpuclock();
 }
 
-template <typename T, typename PMT, typename PVT, typename... ExtOps>
+template <typename T, typename PMT, typename PVT>
 inline
 void
-AEBND<T,PMT,PVT,ExtOps...>::_reference
+AEBND<T,PMT,PVT>::_reference
 ( unsigned const ib, PVT* var, PVT* ref, T* jacvar, bool zeroref )
 {
   _stats_ae.precond -= cpuclock();
@@ -937,11 +936,11 @@ AEBND<T,PMT,PVT,ExtOps...>::_reference
   _stats_ae.precond += cpuclock();
 }
 
-template <typename T, typename PMT, typename PVT, typename... ExtOps> 
+template <typename T, typename PMT, typename PVT> 
 template <typename U, typename V>
 inline
 void
-AEBND<T,PMT,PVT,ExtOps...>::_precondlin
+AEBND<T,PMT,PVT>::_precondlin
 ( unsigned const ib, std::vector<U>& G, std::vector<U>& b,
   std::vector<U>& wkf, U* f, U* ref, std::vector<V>& wkjacf, std::vector<V>* jacf,
   V* jacvar, std::ostream& os )
@@ -954,7 +953,7 @@ AEBND<T,PMT,PVT,ExtOps...>::_precondlin
       const unsigned *cJAC = std::get<2>(_jac[ib]);
       const FFVar *pJAC = std::get<3>(_jac[ib]);
       V *vJAC = jacf[ib].data();
-#ifdef MC__AEBND_DEBUG
+#ifdef CRONOS__AEBND_DEBUG
       std::ofstream o_jacf( "jacf.dot", std::ios_base::out );
       _dag->dot_script( neJAC, pJAC, o_jacf );
       o_jacf.close();
@@ -966,7 +965,7 @@ AEBND<T,PMT,PVT,ExtOps...>::_precondlin
       _dag->eval( _sgjac[ib], wkjacf, neJAC, pJAC, vJAC, _nvar-_pblk[ib],
                   _var.data()+_pblk[ib], jacvar+_pblk[ib] );
       _stats_ae.evaljac += cpuclock();
-#ifdef MC__AEBND_DEBUG
+#ifdef CRONOS__AEBND_DEBUG
       std::cout << "Non-Preconditioned LHS Block #" << ib+1 << ":\n";
       for( unsigned ie=0; ie<neJAC; ie++ )
         std::cout << "(" << rJAC[ie] << "," << cJAC[ie] << ") : "
@@ -986,7 +985,7 @@ AEBND<T,PMT,PVT,ExtOps...>::_precondlin
         for( unsigned ie=0; ie<neJAC; ie++ )
           if( cJAC[ie] < _nblk[ib] )
             mA(rJAC[ie],cJAC[ie]) = Op<U>::mid( vJAC[ie] );
-#ifdef MC__AEBND_DEBUG
+#ifdef CRONOS__AEBND_DEBUG
         std::cout << "Mid-point of LHS Block #" << ib+1 << ":\n" << mA << std::endl;
 #endif
         if( _nblk[ib]==1 ){
@@ -1002,7 +1001,7 @@ AEBND<T,PMT,PVT,ExtOps...>::_precondlin
         for( unsigned ie=0; ie<neJAC; ie++ )
           if( cJAC[ie] < _nblk[ib] )
             mB(rJAC[ie],cJAC[ie]) = Op<U>::mid( vJAC[ie] );
-#ifdef MC__AEBND_DEBUG
+#ifdef CRONOS__AEBND_DEBUG
         std::cout << "Mid-point of LHS Block #" << ib+1 << ":\n" << mB << std::endl;
 #endif
         if( _nblk[ib]==1 ){
@@ -1018,7 +1017,7 @@ AEBND<T,PMT,PVT,ExtOps...>::_precondlin
         for( unsigned ie=0; ie<neJAC; ie++ )
           if( cJAC[ie] < _nblk[ib] )
             mA(rJAC[ie],cJAC[ie]) = Op<U>::mid( vJAC[ie] );
-#ifdef MC__AEBND_DEBUG
+#ifdef CRONOS__AEBND_DEBUG
         std::cout << "Mid-point of LHS Block #" << ib+1 << ":\n" << mA << std::endl;
 #endif
         if( _nblk[ib]==1 ){
@@ -1026,7 +1025,7 @@ AEBND<T,PMT,PVT,ExtOps...>::_precondlin
           Y.resize(1,1); Y(0,0) = 1.; break;
         }
         if( dgeqrf( mA, Q, R ) ) goto nocond;//throw Exceptions( Exceptions::PRECOND );
-#ifdef MC__AEBND_DEBUG
+#ifdef CRONOS__AEBND_DEBUG
         std::cout << "QR decomposition of LHS Block #" << ib+1 << ":\n" << Q << R << Q*R << std::endl;
 #endif
         Y = t(Q);
@@ -1037,7 +1036,7 @@ AEBND<T,PMT,PVT,ExtOps...>::_precondlin
         Y.resize(_nblk[ib],_nblk[ib]); Y.identity();
         break;
       }
-#ifdef MC__AEBND_DEBUG
+#ifdef CRONOS__AEBND_DEBUG
       std::cout << "Preconditioning matrix Block #" << ib+1 << ":\n" << Y << std::endl;
 #endif
       for( unsigned i=0; i<_nblk[ib]; i++ )
@@ -1056,11 +1055,11 @@ AEBND<T,PMT,PVT,ExtOps...>::_precondlin
             mC(rJAC[ie],*it.first) = Op<U>::mid( vJAC[ie] );
             //mC(rJAC[ie],cJAC[ie]-_nblk[ib]) = Op<U>::mid( vJAC[ie] );
           }
-#ifdef MC__AEBND_DEBUG
+#ifdef CRONOS__AEBND_DEBUG
         std::cout << "Intermediate matrix Yii:\n" << Y << std::endl;
 #endif
         Y *= mC;
-#ifdef MC__AEBND_DEBUG
+#ifdef CRONOS__AEBND_DEBUG
         std::cout << "Intermediate matrix Yii·mC:\n" << Y << std::endl << " { ";
         for( auto&& kt=colY.begin(); kt!=colY.end(); ++kt ) std::cout << *kt << " ";
         std::cout << "}" << std::endl;
@@ -1073,7 +1072,7 @@ AEBND<T,PMT,PVT,ExtOps...>::_precondlin
                 -= Y(i,*kt) * _Y(_pblk[ib]+_nblk[ib]+*kt,_pblk[ib]+_nblk[ib]+j);
           }
       }
-#ifdef MC__AEBND_SHOW_PRECONDITIONING
+#ifdef CRONOS__AEBND_SHOW_PRECONDITIONING
         std::cout << std::scientific << std::setprecision(5)
                   << "Full preconditioning matrix:\n" << _Y << std::endl;
 #endif
@@ -1102,7 +1101,7 @@ AEBND<T,PMT,PVT,ExtOps...>::_precondlin
           if( _nblk[ib] == _ldblk[ib] ) break; // diagonal preconditioning
         }
       }
-#ifdef MC__AEBND_DEBUG
+#ifdef CRONOS__AEBND_DEBUG
       std::cout << "Preconditioned LHS Block #" << ib+1 << ":\n";
       for( unsigned i=0; i<_nblk[ib]; i++ ){
         for( unsigned j=0; j<_ldblk[ib]; j++ )
@@ -1131,7 +1130,7 @@ AEBND<T,PMT,PVT,ExtOps...>::_precondlin
         //std::cout << "NO BREAK!" << std::endl; int dum; std::cin >> dum;
       }
       _stats_ae.evalrhs += cpuclock();
-#ifdef MC__AEBND_DEBUG
+#ifdef CRONOS__AEBND_DEBUG
       //_dag->output( _sgsys[ib] );
       //std::cout << "Intermediates in Block #" << ib+1 << ":\n";
       //for (unsigned i=0; i<_sgsys[ib].size(); i++ ) std::cout << opf[i] << std::endl;
@@ -1151,7 +1150,7 @@ AEBND<T,PMT,PVT,ExtOps...>::_precondlin
           b[i] -= _Y(_pblk[ib]+i,_pblk[ib]+j) * f[_pblk[ib]+j];
       }
       _stats_ae.precond += cpuclock();
-#ifdef MC__AEBND_DEBUG
+#ifdef CRONOS__AEBND_DEBUG
       std::cout << "Preconditioned RHS Block #" << ib+1 << ":\n";
       for (unsigned i=0; i<_nblk[ib]; i++ ) std::cout << b[i] << std::endl;
       std::cout << std::endl;
@@ -1163,11 +1162,11 @@ AEBND<T,PMT,PVT,ExtOps...>::_precondlin
   }
 }
 
-template <typename T, typename PMT, typename PVT, typename... ExtOps>
+template <typename T, typename PMT, typename PVT>
 template <typename U, typename V>
 inline
-typename AEBND<T,PMT,PVT,ExtOps...>::STATUS
-AEBND<T,PMT,PVT,ExtOps...>::_gs
+typename AEBND<T,PMT,PVT>::STATUS
+AEBND<T,PMT,PVT>::_gs
 ( unsigned const ib, U* var, std::vector<U>& wkf, U* f, U* ref,
   std::vector<V>& wkjacf, std::vector<V>* jacf, V* jacvar, bool usekraw,
   std::ostream& os )
@@ -1189,7 +1188,7 @@ AEBND<T,PMT,PVT,ExtOps...>::_gs
     // Cancel remainder
     for( unsigned i=0; options.PMNOREM && i<_nblk[ib]; i++ ){
        varblk[i] = _cancelrem( varblk[i] );
-#ifdef  MC__AEBND_DEBUG
+#ifdef  CRONOS__AEBND_DEBUG
       std::cout << "X[" << i << "] = " << varblk[i];
 #endif
     }
@@ -1227,7 +1226,7 @@ AEBND<T,PMT,PVT,ExtOps...>::_gs
           }
           Xk = refblk[i] + b[i] + temp;
         }
-#ifdef  MC__AEBND_DEBUG
+#ifdef  CRONOS__AEBND_DEBUG
         std::cout << "varblk[" << i << "] = " << varblk[i];
         std::cout << "refblk[" << i << "] = " << refblk[i];
         std::cout << "b[" << i << "] = " << b[i];
@@ -1239,10 +1238,10 @@ AEBND<T,PMT,PVT,ExtOps...>::_gs
         if( options.PMNOREM ) varblk[i] = _cancelrem( Xk );
         else if( !options.INTERBND ) varblk[i] = Xk;
         else if( !Op<U>::inter( varblk[i], Xk, varblk[i] ) ){
-#ifdef  MC__AEBND_SHOW_INTER_FAIL
+#ifdef  CRONOS__AEBND_SHOW_INTER_FAIL
           os << _var[_pblk[ib]+i] << " = " << Xk << " && " << varblk[i] << std::endl;
 #endif
-#ifdef  MC__AEBND_IGNORE_INTER_FAIL
+#ifdef  CRONOS__AEBND_IGNORE_INTER_FAIL
           varblk[i] = Xk;
 #else
           return EMPTY;
@@ -1250,7 +1249,7 @@ AEBND<T,PMT,PVT,ExtOps...>::_gs
         }
       }
 
-#ifdef MC__AEBND_DEBUG
+#ifdef CRONOS__AEBND_DEBUG
       std::cout << "Iter #" << iter << " bounds:\n";
       for( unsigned i=0; i<_nblk[ib]; i++ ) std::cout << varblk[i] << std::endl;
 #endif
@@ -1283,11 +1282,11 @@ AEBND<T,PMT,PVT,ExtOps...>::_gs
 
   return NORMAL;
 }
-template <typename T, typename PMT, typename PVT, typename... ExtOps>
+template <typename T, typename PMT, typename PVT>
 template <typename U>
 inline
-typename AEBND<T,PMT,PVT,ExtOps...>::STATUS
-AEBND<T,PMT,PVT,ExtOps...>::_ge
+typename AEBND<T,PMT,PVT>::STATUS
+AEBND<T,PMT,PVT>::_ge
 ( unsigned const ib, U* var, std::vector<U>& wk, U* f, U* ref,
   std::vector<U>* jacf, std::ostream& os )
 {
@@ -1318,7 +1317,7 @@ AEBND<T,PMT,PVT,ExtOps...>::_ge
         b[i] -= factor * b[k];
       }
     }
-#ifdef MC__AEBND_DEBUG
+#ifdef CRONOS__AEBND_DEBUG
     std::cout << "LHS Block #" << ib+1 << " After Forward Elimination:\n";
     for( unsigned i=0; i<_nblk[ib]; i++ ){
       for( unsigned j=0; j<_nblk[ib]; j++ )
@@ -1364,7 +1363,7 @@ AEBND<T,PMT,PVT,ExtOps...>::_ge
   return NORMAL;
 }
 
-//! @fn template <typename T, typename PMT, typename PVT, typename... ExtOps> inline typename AEBND<T,PMT,PVT,ExtOps...>::STATUS AEBND<T,PMT,PVT,ExtOps...>::solve( const T*Ip, T*Ix, const T*Ix0=0, std::ostream&os=std::cout )
+//! @fn template <typename T, typename PMT, typename PVT> inline typename AEBND<T,PMT,PVT>::STATUS AEBND<T,PMT,PVT>::solve( const T*Ip, T*Ix, const T*Ix0=0, std::ostream&os=std::cout )
 //!
 //! This function computes an interval enclosure of the solution set of
 //! the parametric AEs:
@@ -1374,16 +1373,16 @@ AEBND<T,PMT,PVT,ExtOps...>::_ge
 //!   - <a>os</a> [input] output stream (default: std::cout)
 //! .
 //! The return value is the status.
-template <typename T, typename PMT, typename PVT, typename... ExtOps>
+template <typename T, typename PMT, typename PVT>
 inline
-typename AEBND<T,PMT,PVT,ExtOps...>::STATUS
-AEBND<T,PMT,PVT,ExtOps...>::solve
+typename AEBND<T,PMT,PVT>::STATUS
+AEBND<T,PMT,PVT>::solve
 ( T const* Ip, T* Ix, T const* Ix0, std::ostream& os )
 {
   _init_stats( _stats_ae );
   _iblk=0;
-  if( BASE_AE<ExtOps...>::_singsys )  return SINGULAR;
-  if( !_init( BASE_AE<ExtOps...>::_var.size(), Ip ) ) return FAILURE;
+  if( BASE_AE::_singsys )  return SINGULAR;
+  if( !_init( BASE_AE::_var.size(), Ip ) ) return FAILURE;
 
   // Loop over each block
   STATUS flag = NORMAL;
@@ -1501,7 +1500,7 @@ AEBND<T,PMT,PVT,ExtOps...>::solve
   return NORMAL;
 }
 
-//! @fn template <typename T, typename PMT, typename PVT, typename... ExtOps> inline typename AEBND<T,PMT,PVT,ExtOps...>::STATUS AEBND<T,PMT,PVT,ExtOps...>::solve( const PVT*PMp, PVT*PMx, const PVT*PMx0=0, std::ostream&os=std::cout )
+//! @fn template <typename T, typename PMT, typename PVT> inline typename AEBND<T,PMT,PVT>::STATUS AEBND<T,PMT,PVT>::solve( const PVT*PMp, PVT*PMx, const PVT*PMx0=0, std::ostream&os=std::cout )
 //!
 //! This function computes an interval enclosure of the solution set of
 //! the parametric AEs:
@@ -1511,17 +1510,17 @@ AEBND<T,PMT,PVT,ExtOps...>::solve
 //!   - <a>os</a> [input] output stream (default: std::cout)
 //! .
 //! The return value is the status.
-template <typename T, typename PMT, typename PVT, typename... ExtOps>
+template <typename T, typename PMT, typename PVT>
 template <typename INI>
 inline
-typename AEBND<T,PMT,PVT,ExtOps...>::STATUS
-AEBND<T,PMT,PVT,ExtOps...>::solve
+typename AEBND<T,PMT,PVT>::STATUS
+AEBND<T,PMT,PVT>::solve
 ( PVT const* PMp, PVT* PMx, INI const* PMx0, std::ostream& os )
 {
   _init_stats( _stats_ae );
   _iblk=0;
-  if( BASE_AE<ExtOps...>::_singsys )   return SINGULAR;
-  if( !_init( BASE_AE<ExtOps...>::_var.size(), PMp ) ) return FAILURE;
+  if( BASE_AE::_singsys )   return SINGULAR;
+  if( !_init( BASE_AE::_var.size(), PMp ) ) return FAILURE;
 
   // Loop over each block
   STATUS flag = NORMAL;
@@ -1645,9 +1644,9 @@ AEBND<T,PMT,PVT,ExtOps...>::solve
   return NORMAL;
 }
 #if 0
-template <typename T, typename PMT, typename PVT, typename... ExtOps>
-inline typename AEBND<T,PMT,PVT,ExtOps...>::STATUS
-AEBND<T,PMT,PVT,ExtOps...>::_ge
+template <typename T, typename PMT, typename PVT>
+inline typename AEBND<T,PMT,PVT>::STATUS
+AEBND<T,PMT,PVT>::_ge
 ( std::vector<FFVar>&X, std::ostream&os )
 {
  try{
@@ -1661,19 +1660,19 @@ AEBND<T,PMT,PVT,ExtOps...>::_ge
     FFVar*Xblk = X.data() + _pblk[ib];
     const FFVar*Fblk = _sys.data() + _pblk[ib];
     std::vector<FFVar> A( _nblk[ib]*_nblk[ib], 0. ), b( _nblk[ib] );
-#ifdef MC__AEBND_DEBUG
+#ifdef CRONOS__AEBND_DEBUG
     std::cout << "\nBefore forward substitution:\n";
 #endif
     //for( unsigned i=0; i<_nblk[ib]*_nblk[ib]; i++ ){
     //  A[i] = _jac[ib][i];
-#ifdef MC__AEBND_DEBUG
+#ifdef CRONOS__AEBND_DEBUG
     //  std::cout << "A[" << i << "]: " << A[i] << std::endl;
 #endif
     //}
     for( unsigned ie=0; ie<neJAC; ie++ ){
       if( cJAC[ie] < _nblk[ib] )
         A[_ndx(rJAC[ie],cJAC[ie],_nblk[ib])] = pJAC[ie];
-#ifdef MC__AEBND_DEBUG
+#ifdef CRONOS__AEBND_DEBUG
       std::cout << "A[" << _ndx(rJAC[ie],cJAC[ie],_nblk[ib]) << "]: "
                 << A[_ndx(rJAC[ie],cJAC[ie],_nblk[ib])] << std::endl;
 #endif
@@ -1683,7 +1682,7 @@ AEBND<T,PMT,PVT,ExtOps...>::_ge
                                        _var.data()+_pblk[ib], zeros.data() );
     for( unsigned i=0; i<_nblk[ib]; i++ ){
       b[i] = -Fblk0[i];
-#ifdef MC__AEBND_DEBUG
+#ifdef CRONOS__AEBND_DEBUG
       std::cout << "b[" << i << "]: " << b[i] << std::endl;
 #endif
     }
@@ -1698,7 +1697,7 @@ AEBND<T,PMT,PVT,ExtOps...>::_ge
         b[i] -= factor * b[k];
       }
     }
-#ifdef MC__AEBND_DEBUG
+#ifdef CRONOS__AEBND_DEBUG
     std::cout << "\nAfter forward substitution:\n";
     for( unsigned i=0; i<_nblk[ib]*_nblk[ib]; i++ )
       std::cout << "A[" << i << "]: " << A[i] << std::endl;
@@ -1717,7 +1716,7 @@ AEBND<T,PMT,PVT,ExtOps...>::_ge
 
     // Compose with Solutions of previous blocks
     if( ib ){
-#ifdef MC__AEBND_DEBUG
+#ifdef CRONOS__AEBND_DEBUG
       std::cout << "\nComposition with previous solutions:\n";
       for( unsigned i=0; i<_ndep-_pblk[ib]-_nblk[ib]; i++ )
         std::cout << (_var.data()+_pblk[ib]+_nblk[ib])[i] << " -> " << (Xblk+_nblk[ib])[i] << std::endl;
@@ -1727,7 +1726,7 @@ AEBND<T,PMT,PVT,ExtOps...>::_ge
       for( unsigned i=0; i<_nblk[ib]; i++ ) Xblk[i] = Xblkcomp[i];
       delete[] Xblkcomp;
     }
-#ifdef MC__AEBND_DEBUG
+#ifdef CRONOS__AEBND_DEBUG
     std::cout << "\nAfter backward elimination:\n";
     for( unsigned i=0; i<_nblk[ib]*_nblk[ib]; i++ )
       std::cout << "A[" << i << "] :" << A[i] << std::endl;
@@ -1741,13 +1740,13 @@ AEBND<T,PMT,PVT,ExtOps...>::_ge
   catch(...){
     return FAILURE;
   }
-#ifdef MC__AEBND_DEBUG
+#ifdef CRONOS__AEBND_DEBUG
     std::cout << *_dag << std::endl;
 #endif
   return NORMAL;
 }
 
-//! @fn template <typename T, typename PMT, typename PVT, typename... ExtOps> inline typename AEBND<T,PMT,PVT,ExtOps...>::STATUS AEBND<T,PMT,PVT,ExtOps...>::bounds(
+//! @fn template <typename T, typename PMT, typename PVT> inline typename AEBND<T,PMT,PVT>::STATUS AEBND<T,PMT,PVT>::bounds(
 //! FFVar*X, std::ostream&os=std::cout )
 //!
 //! This function computes a symbolic expression of the solution set of
@@ -1756,14 +1755,14 @@ AEBND<T,PMT,PVT,ExtOps...>::_ge
 //!   - <a>os</a> [input] output stream (default: std::cout)
 //! .
 //! The return value is the status.
-template <typename T, typename PMT, typename PVT, typename... ExtOps>
-inline typename AEBND<T,PMT,PVT,ExtOps...>::STATUS
-AEBND<T,PMT,PVT,ExtOps...>::solve
+template <typename T, typename PMT, typename PVT>
+inline typename AEBND<T,PMT,PVT>::STATUS
+AEBND<T,PMT,PVT>::solve
 ( FFVar*X, std::ostream&os )
 {
   _init_stats( _stats_ae );
   if( !_issetup )   return FAILURE;
-  if( BASE_AE<ExtOps...>::_singsys ) return SINGULAR;
+  if( BASE_AE::_singsys ) return SINGULAR;
   std::vector<FFVar> var(_ndep);
   STATUS flag = NORMAL;
 
@@ -1772,7 +1771,7 @@ AEBND<T,PMT,PVT,ExtOps...>::solve
   // Gauss Elimination method
   case Options::ALGORITHM::AUTO:
   case Options::ALGORITHM::GE:
-    if( !BASE_AE<ExtOps...>::_linsys ) throw Exceptions( Exceptions::DAG );
+    if( !BASE_AE::_linsys ) throw Exceptions( Exceptions::DAG );
     flag = _ge( var, os );
     break;
 

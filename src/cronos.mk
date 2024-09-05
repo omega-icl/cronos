@@ -6,7 +6,7 @@ include $(srcpath)/makeoptions.mk
 #####
 
 incobjs = base_ae.hpp base_de.hpp base_rk.hpp base_expand.hpp base_sundials.hpp base_cvodes.hpp \
-          aebnd.hpp odeslv_base.hpp odeslv_cvodes.hpp odeslvs_base.hpp odeslvs_cvodes.hpp \
+          aebnd.hpp odeslv_base.hpp odeslv_cvodes.hpp odeslvs_base.hpp odeslvs_cvodes.hpp ffode.hpp \
           odebnd_base.hpp odebnd_sundials.hpp odebnd_val.hpp odebnd_expand.hpp \
           iodebnd_base.hpp iodebnd_sundials.hpp odebnds_base.hpp odebnds_sundials.hpp
 

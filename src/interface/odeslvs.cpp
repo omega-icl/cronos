@@ -2,15 +2,16 @@
 #include <pybind11/operators.h>
 #include <pybind11/stl.h>
 
-#include "odeslvs_cvodes.hpp" 
+#include "ffode.hpp"
+//#include "odeslvs_cvodes.hpp" 
 
 namespace py = pybind11;
 
 void mc_odeslvs( py::module_ &m )
 {
 
-typedef mc::FFGraph<> FFGraph;
-typedef mc::ODESLVS_CVODES<> ODESLVS;
+typedef mc::FFGraph FFGraph;
+typedef mc::ODESLVS_CVODES ODESLVS;
 
 py::class_<ODESLVS> pyODESLV( m, "ODESLV" );
 pyODESLV
@@ -57,6 +58,17 @@ pyODESLV
    []( ODESLVS const& self ){ return self.val_stage(); },
    py::return_value_policy::reference_internal,
    "time stages"
+ )
+ .def(
+   "set_constant",
+   []( ODESLVS& self, std::vector<mc::FFVar> const& c ){ self.set_constant( c ); },
+   "set constants"
+ )
+ .def_property_readonly(
+   "var_constant",
+   []( ODESLVS const& self ){ return self.var_constant(); },
+   py::return_value_policy::reference_internal,
+   "constants"
  )
  .def(
    "set_parameter",
@@ -156,18 +168,27 @@ pyODESLV
    "setup initial value problem before solve"
  )
  .def(
+   "fdiff",
+   []( ODESLVS& self, std::vector<mc::FFVar> const& p ){ return self.fdiff( p ); },
+   py::return_value_policy::take_ownership,
+   "differentiate initial value problem with respect to selected parameters"
+ )
+ .def(
    "solve_state",
-   []( ODESLVS& self, std::vector<double> const& p ){ return self.solve_state( p ); },
+   []( ODESLVS& self, std::vector<double> const& p, std::vector<double> const& c ){ return self.solve_state( p, c ); },
+   py::arg("p"), py::arg("c") = std::vector<double>(),
    "solve initial value problem"
  )
  .def(
    "solve_sensitivity",
-   []( ODESLVS& self, std::vector<double> const& p ){ return self.solve_sensitivity( p ); },
+   []( ODESLVS& self, std::vector<double> const& p, std::vector<double> const& c ){ return self.solve_sensitivity( p, c ); },
+   py::arg("p"), py::arg("c") = std::vector<double>(),
    "solve initial value problem with forward sensitivity"
  )
  .def(
    "solve_adjoint",
-   []( ODESLVS& self, std::vector<double> const& p ){ return self.solve_adjoint( p ); },
+   []( ODESLVS& self, std::vector<double> const& p, std::vector<double> const& c ){ return self.solve_adjoint( p, c ); },
+   py::arg("p"), py::arg("c") = std::vector<double>(),
    "solve initial value problem with adjoint sensitivity"
  )
  .def_property_readonly(
@@ -242,6 +263,7 @@ py::enum_<ODESLVS::STATUS>(pyODESLV, "ODESLV.STATUS", py::module_local())
 ;
 
 py::class_<ODESLVS::Results> pyODESLVResults( pyODESLV, "ODESLV.Results" );
+
 pyODESLVResults
  .def_readonly( "t", &ODESLVS::Results::t, "time" )
  .def_readonly( "x", &ODESLVS::Results::x, "values" )
@@ -265,7 +287,8 @@ pyODESLVResults
  )
 ;
 
-py::class_<ODESLVS::Options> pyODESLVOptions( pyODESLV, "ODESLV.Options", py::module_local() );
+py::class_<ODESLVS::Options> pyODESLVOptions( pyODESLV, "ODESLV.Options" );//, py::module_local() );
+
 pyODESLVOptions
  .def( py::init<>() )
  .def( py::init<ODESLVS::Options const&>() )
@@ -328,6 +351,131 @@ py::enum_<ODESLVS::Options::LINEAR_SOLVER>(pyODESLVOptions, "ODESLV.LINEAR_SOLVE
 #if defined( CRONOS__WITH_KLU )
  .value("SPARSE", ODESLVS::Options::LINEAR_SOLVER::SPARSE, "Use analytic sparse Jacobian and KLU for the direct solution of sparse nonsymmetric linear systems of equations")
 #endif
+ .export_values()
+;
+}
+
+void mc_ffode( py::module_ &m )
+{
+
+typedef mc::ODESLVS_CVODES ODESLVS;
+
+py::class_<mc::FFODE, mc::FFOp> pyFFODE( m, "FFODE" );//, py::module_local() );
+
+pyFFODE
+ .def(
+   py::init<>(),
+   "default constructor"
+ )
+ .def_readwrite_static(
+   "options",
+   &mc::FFODE::options
+ )
+ .def(
+   "__call__",
+   []( mc::FFODE& self, std::vector<mc::FFVar> const& vVar, ODESLVS* pODE )
+   {
+     auto pDep = self( vVar.size(), vVar.data(), pODE );
+     return std::vector<mc::FFVar*>( pDep, pDep+pODE->nf() );
+   },
+   py::return_value_policy::reference_internal,
+   "define ODE operation in DAG"
+ )
+ .def(
+   "__call__",
+   []( mc::FFODE& self, std::vector<mc::FFVar> const& vVar, std::vector<mc::FFVar> vCst, ODESLVS* pODE )
+   {
+     auto pDep = self( vVar.size(), vVar.data(), vCst.size(), vCst.data(), pODE );
+     return std::vector<mc::FFVar*>( pDep, pDep+pODE->nf() );
+   },
+   py::return_value_policy::reference_internal,
+   "define ODE operation in DAG"
+ )
+// .def_property(
+//   "options",
+//   []( mc::FFODE& self )
+//   {
+//     return self.pODESLV()->options;
+//   },
+//   []( mc::FFODE& self, ODESLVS::Options& options )
+//   {
+//     self.pODESLV()->options = options;
+//   },
+//   py::return_value_policy::reference_internal,
+//   "ODE options"
+// )
+// .def(
+//   "setup",
+//   []( mc::FFODE& self )
+//   {
+//     ODESLVS* data = static_cast<ODESLVS*>( self.data );
+//     data->setup();
+//   },
+//   "ODE setup"
+// )
+// .def_property_readonly(
+//   "ODESLV",
+//   []( mc::FFODE& self ) -> mc::ODESLVS_CVODES*
+//   {
+//     return self.pODESLV();
+//   },
+//   "ODE object"
+// )
+ .def_readwrite(
+   "type",
+   &mc::FFODE::type,
+   "retreive operation type"
+ )
+ .def_readwrite(
+   "info",
+   &mc::FFODE::info,
+   "retreive operation id"
+ )
+ .def_readwrite(
+   "varin",
+   &mc::FFODE::varin
+ )
+ .def_readwrite(
+   "varout",
+   &mc::FFODE::varout
+ )
+ .def( "name",
+   &mc::FFODE::name,
+   "retreive operation name"
+ )
+ .def(
+   "__str__",
+   []( mc::FFODE const& O )
+   {
+     std::ostringstream Oss;
+     Oss << O;
+     return Oss.str();
+   }
+ )
+ .def(
+   "__repr__",
+   []( mc::FFODE const& O )
+   {
+     std::ostringstream Oss;
+     Oss << O;
+     return Oss.str();
+   }
+ )
+;
+
+py::class_<mc::FFODE::Options>  pyFFODEOptions( pyFFODE, "FFODE.Options" );
+
+pyFFODEOptions
+ .def( py::init<>() )
+ .def( py::init<mc::FFODE::Options const&>() )
+ .def_readwrite( "DIFF", &mc::FFODE::Options::DIFF,   "method of ODE differentiation [Default: NUM_P]" )
+;
+
+py::enum_<mc::FFODE::Options::DERIV_TYPE>( pyFFODEOptions, "FFODE.DERIV_TYPE" )
+ .value("NUM_P", mc::FFODE::Options::DERIV_TYPE::NUM_P, "Derivatives w.r.t. parameters only through forward or adjoint sensitivity integration")
+ .value("SYM_P", mc::FFODE::Options::DERIV_TYPE::SYM_P, "Derivatives w.r.t. parameters only through symbolic differentiation of ODEs")
+ .value("SYM_C", mc::FFODE::Options::DERIV_TYPE::SYM_C, "Derivatives w.r.t. constants only through symbolic differentiation of ODEs")
+ .value("SYM_PC", mc::FFODE::Options::DERIV_TYPE::SYM_PC, "Derivatives w.r.t. parameters and constants jointly through symbolic differentiation of ODEs")
  .export_values()
 ;
 }

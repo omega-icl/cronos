@@ -26,7 +26,7 @@ typedef mc::SCModel<I> PM;
 typedef mc::SCVar<I> PV;
 
 #include "aebnd.hpp"
-typedef mc::FFGraph<> t_DAG;
+typedef mc::FFGraph t_DAG;
 typedef mc::AEBND<I,PM,PV> t_AEBND;
 
 int main()

@@ -1,6 +1,6 @@
 #define SAVE_RESULTS		// <- Whether to save bounds to file
 
-#include "odeslvs_cvodes.hpp"
+#include "ffode.hpp"
 
 int main()
 {
@@ -84,15 +84,14 @@ int main()
   /////////////////////////////////////////////////////////////////////////
   // Define DAG
 
-  mc::FFGraph< mc::FFODE<0>, mc::FFGRADODE<0> > DAG;
+  mc::FFGraph DAG;
   mc::FFVar PP[NP];  // Parameters
   for( unsigned int i=0; i<NP; i++ ) PP[i].set( &DAG );
-  mc::FFODE<0> OpODE;
+  mc::FFODE OpODE;
   mc::FFVar F[NF];
-  mc::ODESLVS_CVODES<>* pIVP = &IVP;
-  for( unsigned int j=0; j<NF; j++ ) F[j] = OpODE( j, NP, PP, pIVP );
+  for( unsigned int j=0; j<NF; j++ ) F[j] = OpODE( j, NP, PP, &IVP, false );
   std::cout << DAG;
-  
+
   auto F_op  = DAG.subgraph( NF, F );
   DAG.output( F_op );
 
@@ -110,7 +109,7 @@ int main()
 #if defined( SAVE_RESULTS )
   std::ofstream of_state;
   of_state.open( "test1b_STA.dat", std::ios_base::out );
-  pIVP->record( of_state );
+  IVP.record( of_state );
 #endif
 
   // DAG evaluation in fadbad<double> arithmetic

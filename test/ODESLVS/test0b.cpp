@@ -3,7 +3,7 @@
 
 #include "odeslv_cvodes.hpp"
 
-void solve_state( mc::ODESLV_CVODES<>& ivp, std::vector<double>& p, std::vector<double>& f )
+void solve_state( mc::ODESLV_CVODES& ivp, std::vector<double>& p, std::vector<double>& f )
 {
   ivp.solve_state( p );
   f = ivp.val_function();
@@ -87,7 +87,7 @@ int main()
 #if defined( USE_THREADS )
   std::vector<std::thread> vth( NTH );
 #endif
-  std::vector<mc::ODESLV_CVODES<>> vivp( NTH );
+  std::vector<mc::ODESLV_CVODES> vivp( NTH );
   std::vector<std::vector<double>> vf( NTH );
   std::vector<std::vector<double>> vp( NTH );
   double p0 = 3.0, dp = 0.1/(NTH-1.), pL = p0 - 0.1/2.;

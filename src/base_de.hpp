@@ -2,10 +2,10 @@
 // All Rights Reserved.
 // This code is published under the Eclipse Public License.
 
-#ifndef MC__BASE_DE_HPP
-#define MC__BASE_DE_HPP
+#ifndef CRONOS__BASE_DE_HPP
+#define CRONOS__BASE_DE_HPP
 
-#undef  MC__DEBUG__BASE_DE
+#undef  CRONOS__DEBUG__BASE_DE
 
 #include <assert.h>
 #include "ffunc.hpp"
@@ -18,12 +18,11 @@ namespace mc
 //! parameters and functions participating in parametric differential-
 //! algebraic equations (DAEs)
 ////////////////////////////////////////////////////////////////////////
-template <typename... ExtOps>
 class BASE_DE
 {
 protected:
   //! @brief pointer to DAG of equation
-  FFGraph<ExtOps...>* _dag;
+  FFGraph* _dag;
 
   //! @brief max size of time stages
   size_t _nsmax;
@@ -60,6 +59,12 @@ protected:
 
 //  //! @brief pointer to sensitivity/adjoint variables
 //  std::vector<FFVar> _vY;
+
+  //! @brief size of constants
+  size_t _nc;
+
+  //! @brief pointer to parameters
+  std::vector<FFVar> _vC;
 
   //! @brief size of parameters
   size_t _np;
@@ -132,7 +137,7 @@ public:
   BASE_DE
     ()
     : _dag(nullptr), _nsmax(0), _nd(0), _na(0), _nx(0), _nx0(0),
-      _np(0), _nq(0), _nbm(0), _ni(0), _nf(0), _nnzjac(0)
+      _nc(0), _np(0), _nq(0), _nbm(0), _ni(0), _nf(0), _nnzjac(0)
     {}
 
   //! @brief Class destructor
@@ -148,14 +153,14 @@ public:
   };
 
   //! @brief Get pointer to DAG
-  FFGraph<ExtOps...>* dag
+  FFGraph* dag
     ()
     const
     { return _dag; }
 
   //! @brief Set pointer to DAG
   void set_dag
-    ( FFGraph<ExtOps...>* dag )
+    ( FFGraph* dag )
     { _dag = dag; }
 
   //! @brief Get size of state
@@ -200,6 +205,23 @@ public:
         if( vDX.size() > ix ) _vDX[ix] = vDX[ix];
         else                  _vDX[ix].set( _dag );
       } }
+
+  //! @brief Return size of constant
+  size_t nc
+    ()
+    const
+    { return _nc; }
+
+  //! @brief Get pointer to constant
+  std::vector<FFVar> const& var_constant
+    ()
+    const
+    { return _vC; }
+
+  //! @brief Set constant
+  void set_constant
+    ( std::vector<FFVar> const& vC )
+    { _nc = vC.size(); _vC = vC; }
 
   //! @brief Return size of parameter
   size_t np
@@ -386,11 +408,11 @@ public:
 
   //! @brief Copy DAE-IVP
   void set
-    ( BASE_DE<ExtOps...> const& de )
+    ( BASE_DE const& de )
     { _dag = de._dag;
       _nsmax = de._nsmax; _nx = de._nx; _nx0 = de._nx0; _nd = de._nd; _na = de._na;
-      _nq = de._nq; _np = de._np; _ni = de._ni; _nf = de._nf; _nnzjac = de._nnzjac;
-      _dT = de._dT; _vT = de._vT; _vX = de._vX; _vP = de._vP; _vQ = de._vQ; _vDX = de._vDX;
+      _nq = de._nq; _nc = de._nc; _np = de._np; _ni = de._ni; _nf = de._nf; _nnzjac = de._nnzjac;
+      _dT = de._dT; _vT = de._vT; _vX = de._vX; _vC = de._vC; _vP = de._vP; _vQ = de._vQ; _vDX = de._vDX;
       _ndxX = de._ndxX; _ndxQ = de._ndxQ;
       _nbm = de._nbm; _vML = de._vML; _vMU = de._vMU;
       _vIC = de._vIC; _vDE = de._vDE; _vAE = de._vAE; _vQUAD = de._vQUAD;
@@ -449,10 +471,16 @@ protected:
     const
     { return( is<_vQUAD.size()? _vQUAD.at( is ).data(): nullptr ); }
 
+  //! @brief Get pointer to state function
+  const FFVar* _pFCT
+    ( size_t const is )
+    const
+    { return( is<_vFCT.size()? _vFCT.at( is ).data(): nullptr ); }
+/*
   //! @brief Set state/quadrature dependencies w.r.t. parameters
   bool set_depend
     ( size_t const ns );
-
+*/
   //! @brief Set RHS Jacobain sparsity size
   bool set_sparse
     ();
@@ -475,15 +503,32 @@ protected:
       std::string const& var, std::ostream& os=std::cout );
 
   //! @brief Private methods to block default compiler methods
-  BASE_DE( BASE_DE<ExtOps...> const& ) = delete;
-  BASE_DE<ExtOps...>& operator=( BASE_DE<ExtOps...> const& ) = delete;
+  BASE_DE( BASE_DE const& ) = delete;
+  BASE_DE& operator=( BASE_DE const& ) = delete;
 };
 
-template <typename... ExtOps>
+//! @brief Display IVP-DAE
+inline std::ostream&
+operator <<
+( std::ostream & out, BASE_DE const& IVP )
+{
+//  out << std::left << std::endl
+//      << std::setfill('_') << std::setw(72) << "#" << std::endl << "#" << std::endl << std::setfill(' ')
+//      << "#  LOCAL MIXED-INTEGER NONLINEAR OPTIMIZATION IN CANON\n"
+//      << std::setfill('_') << std::setw(72) << "#" << std::endl << "#" << std::endl << std::setfill(' ');
+
+//  // Display MINLPSLV Options
+//  MINLP.options.display( out );
+
+//  out << std::left
+//      << std::setfill('_') << std::setw(72) << "#" << std::endl << std::endl << std::setfill(' ');
+  return out;
+}
+
 template <typename U>
 inline
 void
-BASE_DE<ExtOps...>::_print_interm
+BASE_DE::_print_interm
 ( double const& t, size_t const nx, U const* x, std::string const& var,
   std::ostream& os )
 {
@@ -493,11 +538,10 @@ BASE_DE<ExtOps...>::_print_interm
   return;
 }
 
-template <typename... ExtOps>
 template <typename U, typename V>
 inline
 void
-BASE_DE<ExtOps...>::_print_interm
+BASE_DE::_print_interm
 ( double const& t, size_t const nx, U const* x, V const& r,
   std::string const& var, std::ostream& os )
 {
@@ -508,11 +552,10 @@ BASE_DE<ExtOps...>::_print_interm
   return;
 }
 
-template <typename... ExtOps>
 template <typename U>
 inline
 void
-BASE_DE<ExtOps...>::_print_interm
+BASE_DE::_print_interm
 ( size_t const nx, U const* x, std::string const& var, std::ostream& os )
 {
   if( !x ) return;
@@ -521,10 +564,9 @@ BASE_DE<ExtOps...>::_print_interm
   return;
 }
 
-template <typename... ExtOps>
 inline
 bool
-BASE_DE<ExtOps...>::set_sparse
+BASE_DE::set_sparse
 ()
 {
   _nnzjac = 0;
@@ -543,28 +585,29 @@ BASE_DE<ExtOps...>::set_sparse
     size_t const pos_rhs  = ( _vDE.size()<=1?  0: is );
     FFVar const* pRHS  = _pRHS( pos_rhs );
     if( !pRHS ) return false;
-    _dag->eval( _nx, pRHS, depRHS.data(), nVAR, vVAR.data(), depSTA.data() ); 
+    if( !_nc ) _dag->eval( _nx, pRHS, depRHS.data(), nVAR, vVAR.data(), depSTA.data() ); 
+    else       _dag->eval( _nx, pRHS, depRHS.data(), nVAR, vVAR.data(), depSTA.data(),
+                           _nc, _vC.data(), std::vector<FFDep>(_nc, 0 ).data() ); 
     size_t nnz = 0;
     for( size_t ix=0; ix<_nx; ix++ ){
-#ifdef MC__DEBUG__BASE_DE
+#ifdef CRONOS__DEBUG__BASE_DE
       std::cout << "RHS[" << is << "][" << ix << "]: " << depRHS[ix] << std::endl;
 #endif
       nnz += depRHS[ix].dep().size();
     }
 
     if( _nnzjac < nnz ) _nnzjac = nnz;
-#ifdef MC__DEBUG__BASE_DE
+#ifdef CRONOS__DEBUG__BASE_DE
     std::cout << "NNZ: " << nnz << "   MAX: " << _nnzjac << std::endl;
 #endif
   }
 
   return true;
 }
-
-template <typename... ExtOps>
+/*
 inline
 bool
-BASE_DE<ExtOps...>::set_depend
+BASE_DE::set_depend
 ( size_t const ns )
 {
   if( _nd != _nx || _nx0 != _nx ) return false; // ODE systems only
@@ -589,7 +632,7 @@ BASE_DE<ExtOps...>::set_depend
   _dag->eval( _nx, pIC, _depX.data(), _np+1, vVAR.data(), depVAR.data() ); 
   for( size_t ix=0; ix<_nx; ix++ ){
     depVAR[_np+1+ix] = _depX[ix];
-#ifdef MC__DEBUG__BASE_DE
+#ifdef CRONOS__DEBUG__BASE_DE
     std::cout << "X[0][" << ix << "]: " << _depX[ix] << std::endl;
 #endif
   }
@@ -602,7 +645,7 @@ BASE_DE<ExtOps...>::set_depend
       _dag->eval( _nx, pIC, _depX.data()+_nx*is, _np+1+_nx, vVAR.data(), depVAR.data() ); 
       for( size_t ix=0; ix<_nx; ix++ ){
         depVAR[_np+1+ix] = _depX[ix];
-#ifdef MC__DEBUG__BASE_DE
+#ifdef CRONOS__DEBUG__BASE_DE
         std::cout << "X[" << is+1 << "][" << ix << "]: " << _depX[_nx*is+ix] << std::endl;
 #endif
       }
@@ -611,15 +654,14 @@ BASE_DE<ExtOps...>::set_depend
     size_t const pos_rhs  = ( _vDE.size()<=1?  0: is );
     FFVar const* pRHS  = _pRHS( pos_rhs );
     if( !pRHS ) return false;
-#ifdef MC__DEBUG__BASE_DE
+#ifdef CRONOS__DEBUG__BASE_DE
     for( size_t ix=0; ix<_nx; ix++ )
       std::cout << "X[" << is+1 << "][" << ix << "]: " << depVAR[_np+1+ix] << std::endl;
 #endif
     _dag->eval( _nx, pRHS, _depX.data()+_nx*is, _np+1+_nx, vVAR.data(), depVAR.data() ); 
-    size_t nnz = 0;
     for( size_t ix=0; ix<_nx; ix++ ){
       depVAR[_np+1+ix] += _depX[_nx*is+ix];
-#ifdef MC__DEBUG__BASE_DE
+#ifdef CRONOS__DEBUG__BASE_DE
       std::cout << "X[" << is+1 << "][" << ix << "]: " << depVAR[_np+1+ix] << std::endl;
 #endif
     }
@@ -632,7 +674,7 @@ BASE_DE<ExtOps...>::set_depend
         if( depVAR[_np+1+ix] == depVAR[_np+1+ix]+_depX[_nx*is+ix] ) continue;
         iterate = true;
         depVAR[_np+1+ix] += _depX[_nx*is+ix];
-#ifdef MC__DEBUG__BASE_DE
+#ifdef CRONOS__DEBUG__BASE_DE
         std::cout << "X[" << is+1 << "][" << ix << "]: " << depVAR[_np+1+ix] << std::endl;
 #endif
       }
@@ -643,12 +685,12 @@ BASE_DE<ExtOps...>::set_depend
       size_t const pos_quad = ( _vQUAD.size()<=1? 0: is );
       FFVar const* pQUAD = _pQUAD( pos_quad );
       if( !pQUAD ) return false;
-#ifdef MC__DEBUG__BASE_DE
+#ifdef CRONOS__DEBUG__BASE_DE
       _dag->output( _dag->subgraph( _nq, pQUAD ) );
 #endif
       _dag->eval( _nq, pQUAD, _depQ.data()+_nq*is, _np+1+_nx, vVAR.data(), depVAR.data() ); 
       for( size_t iq=0; iq<_nq; iq++ ){
-#ifdef MC__DEBUG__BASE_DE
+#ifdef CRONOS__DEBUG__BASE_DE
         std::cout << "Q[" << is+1 << "][" << iq << "]: " << _depQ[_nq*is+iq] << std::endl;
 #endif
         depVAR[_np+1+_nx+iq] += _depQ[_nq*is+iq];
@@ -656,10 +698,12 @@ BASE_DE<ExtOps...>::set_depend
     }
 
     // Function stage contribution
-    if( _nf ){
-      FFVar const* pFCT = _vFCT.at( is );
+    size_t const pos_fct = ( _vFCT.size()<=1? 0: is );
+    FFVar const* pFCT = _pFCT( pos_fct );
+    if( _nf && ((is && pos_fct == is) || (!is && ){
+
       _dag->eval( _nf, pFCT, _depF.data(), nVAR, vVAR.data(), depVAR.data(), true );
-#ifdef MC__DEBUG__BASE_DE
+#ifdef CRONOS__DEBUG__BASE_DE
       for( size_t ic=0; ic<_nf; ic++ )
         std::cout << "G[" << is+1 << "][" << ic << "]: " << _depF[ic] << std::endl;
 #endif
@@ -668,7 +712,7 @@ BASE_DE<ExtOps...>::set_depend
 
   return true;
 }
-
+*/
 } // end namescape mc
 
 #endif

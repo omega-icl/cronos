@@ -2,7 +2,7 @@
 #include <fstream>
 #include <iomanip>
 
-#include "odeslvs_cvodes.hpp"
+#include "ffode.hpp"
 
 ////////////////////////////////////////////////////////////////////////
 int main()
@@ -76,15 +76,14 @@ int main()
   /////////////////////////////////////////////////////////////////////////
   // Define DAG
 
-  mc::FFGraph< mc::FFODE<0>, mc::FFGRADODE<0> > DAG;
+  mc::FFGraph DAG;
 
   mc::FFVar PP[NP];  // Parameters
   for( unsigned int i=0; i<NP; i++ ) PP[i].set( &DAG );
 
-  mc::FFODE<0> OpODE;
-  mc::ODESLVS_CVODES<>* pIVP = &IVP;
+  mc::FFODE OpODE;
   mc::FFVar F[NF];
-  for( unsigned int j=0; j<NF; j++ ) F[j] = OpODE( j, NP, PP, pIVP );
+  for( unsigned int j=0; j<NF; j++ ) F[j] = OpODE( j, NP, PP, &IVP );
   std::cout << DAG;
 
   std::vector<double> dP( NP, -1e0 ), dF( NF );

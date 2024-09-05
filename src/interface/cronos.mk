@@ -5,8 +5,9 @@ include $(srcpath)/makeoptions.mk
 
 #####
 
-#libobjs = odeslvs.o main.o
-libobjs = odeslvs.o ffunc.o main.o
+libobjs = odeslvs.o main.o
+#libobjs = mcode.o main.o
+#libobjs = odeslvs.o ffode.o main.o
 libname = cronos.so
 libdep  = pymc.so
 
@@ -17,12 +18,12 @@ install: dispBuild $(libname) dispInstall
 		echo creating symolic link to shared library $(libname); \
 		cd $(libpath) ; ln -s $(interfacepath)/$(libname); \
 	fi
+	@if test ! -e $(libdep); then \
+		ln -s $(PATH_MC)/lib/$(libdep); \
+	fi
 	@if test ! -e $(libpath)/$(libdep); then \
 		echo creating symolic link to shared library $(libdep); \
 		cd $(libpath) ; ln -s $(PATH_MC)/lib/$(libdep); \
-	fi
-	@if test ! -e $(libdep); then \
-		ln -s $(PATH_MC)/lib/$(libdep); \
 	fi
 	@echo
 

@@ -1,9 +1,9 @@
 # THIRD-PARTY LIBRARIES <<-- CHANGE AS APPROPRIATE -->>
 
-PATH_MC = $(shell cd $(HOME)/Programs/bitbucket/mcpp30 ; pwd)
+PATH_MC = $(shell cd $(HOME)/Programs/bitbucket/mcpp40 ; pwd)
 include $(PATH_MC)/src/makeoptions.mk
 
-PATH_CRONOS    = $(shell cd $(HOME)/Programs/bitbucket/cronos; pwd)
+PATH_CRONOS    = $(shell cd $(HOME)/Programs/bitbucket/cronos40; pwd)
 
 PATH_SUNDIALS = /opt/sundials-7.1.1
 LIB_SUNDIALS = -L$(PATH_SUNDIALS)/lib -lsundials_sunlinsolklu -lsundials_cvodes -lsundials_nvecserial -lsundials_core -llapack -lblas

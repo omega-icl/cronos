@@ -2,12 +2,13 @@
 // All Rights Reserved.
 // This code is published under the Eclipse Public License.
 
-#ifndef MC__BASE_AE_HPP
-#define MC__BASE_AE_HPP
+#ifndef CRONOS__BASE_AE_HPP
+#define CRONOS__BASE_AE_HPP
 
 #include <assert.h>
 #include "ffunc.hpp"
-
+#include "mclapack.hpp"
+ 
 namespace mc
 {
 //! @brief C++ base class for defining of parametric nonlinear equations
@@ -16,7 +17,6 @@ namespace mc
 //! equations, distinguishing between independent and dependent
 //! variables
 ////////////////////////////////////////////////////////////////////////
-template <typename... ExtOps>
 class BASE_AE
 {
 public:
@@ -25,7 +25,7 @@ public:
 
 protected:
   //! @brief pointer to DAG of equation
-  FFGraph<ExtOps...>* _dag;
+  FFGraph* _dag;
 
   //! @brief parameters
   std::vector<FFVar> _par;
@@ -106,13 +106,13 @@ public:
     {}
 
   //! @brief Get pointer to DAG
-  FFGraph<ExtOps...>* dag()
+  FFGraph* dag()
     const
     { return _dag; }
 
   //! @brief Set pointer to DAG
   void set_dag
-    ( FFGraph<ExtOps...>* dag )
+    ( FFGraph* dag )
     { _dag = dag; }
 
   //! @brief Get parameters
@@ -269,7 +269,7 @@ public:
 
   //! @brief Copy algebraic system and structure
   void set
-    ( BASE_AE<ExtOps...> const& aes )
+    ( BASE_AE const& aes )
     { _dag = aes._dag; //std::cout << "DAG: " << aes._dag << std::endl;
       _var = aes._var; _dep = aes._dep; _sys = aes._sys; _newsys = aes._newsys;
       _noblk = aes._noblk; _pblk  = aes._pblk;  _nblk   = aes._nblk;
@@ -347,17 +347,15 @@ public:
 protected:
 
   //! @brief Private methods to block default compiler methods
-  BASE_AE( BASE_AE<ExtOps...> const& );
-  BASE_AE<ExtOps...>& operator=( BASE_AE<ExtOps...> const& );
+  BASE_AE( BASE_AE const& ) = delete;
+  BASE_AE& operator=( BASE_AE const& ) = delete;
 };
 
-template <typename... ExtOps>
-inline double BASE_AE<ExtOps...>::INF = 1E30;
+inline double BASE_AE::INF = 1E30;
 
-template <typename... ExtOps>
 inline
 bool
-BASE_AE<ExtOps...>::reset_block
+BASE_AE::reset_block
 ()
 {
   const unsigned int ndep = _dep.size();
@@ -370,10 +368,9 @@ BASE_AE<ExtOps...>::reset_block
   return true;
 }
 
-template <typename... ExtOps>
 inline
 bool
-BASE_AE<ExtOps...>::set_block
+BASE_AE::set_block
 ( const bool disp, std::ostream&os )
 {
   const unsigned int ndep = _dep.size();
@@ -391,10 +388,9 @@ BASE_AE<ExtOps...>::set_block
   return set_block( NB, IOR.data(), IB.data(), IPERM.data() );
 }
 
-template <typename... ExtOps>
 inline
 bool
-BASE_AE<ExtOps...>::set_block
+BASE_AE::set_block
 ( int const NB, int const* IOR, int const* IB, int const* IPERM,
   const bool disp, std::ostream&os )
 {
@@ -507,7 +503,7 @@ BASE_AE<ExtOps...>::set_block
       }
       //if( !_linblk[ib] ) _linsys = false; // Overall linearity
     }
-#ifdef MC__BASE_AE_DEBUG
+#ifdef CRONOS__BASE_AE_DEBUG
     std::cout << "BLOCK #" << ib << ": "
               << (_linblk[ib]?"L":"NL") << ", BW "
               << _bwblk[ib].first << "," << _bwblk[ib].second << std::endl;

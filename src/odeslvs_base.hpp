@@ -2,10 +2,10 @@
 // All Rights Reserved.
 // This code is published under the Eclipse Public License.
 
-#ifndef MC__ODESLVS_BASE_HPP
-#define MC__ODESLVS_BASE_HPP
+#ifndef CRONOS__ODESLVS_BASE_HPP
+#define CRONOS__ODESLVS_BASE_HPP
 
-#undef  MC__ODESLVS_BASE_DEBUG
+#undef  CRONOS__ODESLVS_BASE_DEBUG
 
 #include "odeslv_base.hpp"
 
@@ -18,10 +18,9 @@ namespace mc
 //! adjoint sensitivity analysis using continuous-time real-valued
 //! integration.
 ////////////////////////////////////////////////////////////////////////
-template <typename... ExtOps>
 class ODESLVS_BASE
-: public virtual ODESLV_BASE<ExtOps...>
-, public virtual BASE_DE<ExtOps...>
+: public virtual ODESLV_BASE
+, public virtual BASE_DE
 {
 public:
   /** @ingroup ODESLV
@@ -35,30 +34,30 @@ public:
   /** @} */
 
 protected:
-  using BASE_DE<ExtOps...>::_nsmax;
-  using BASE_DE<ExtOps...>::_nx;
-  using BASE_DE<ExtOps...>::_nx0;
-  using BASE_DE<ExtOps...>::_np;
-  using BASE_DE<ExtOps...>::_nq;
-  using BASE_DE<ExtOps...>::_nf;
-  using BASE_DE<ExtOps...>::_t;
-  using BASE_DE<ExtOps...>::_istg;
+  using BASE_DE::_nsmax;
+  using BASE_DE::_nx;
+  using BASE_DE::_nx0;
+  using BASE_DE::_np;
+  using BASE_DE::_nq;
+  using BASE_DE::_nf;
+  using BASE_DE::_t;
+  using BASE_DE::_istg;
 
-  using ODESLV_BASE<ExtOps...>::_dag;
-  using ODESLV_BASE<ExtOps...>::_vIC;
-  using ODESLV_BASE<ExtOps...>::_vRHS;
-  using ODESLV_BASE<ExtOps...>::_vQUAD;
-  using ODESLV_BASE<ExtOps...>::_vFCT;
-  using ODESLV_BASE<ExtOps...>::_pT;
-  using ODESLV_BASE<ExtOps...>::_pX;
-  using ODESLV_BASE<ExtOps...>::_pQ;
-  using ODESLV_BASE<ExtOps...>::_pP;
+  using ODESLV_BASE::_dag;
+  using ODESLV_BASE::_vIC;
+  using ODESLV_BASE::_vRHS;
+  using ODESLV_BASE::_vQUAD;
+  using ODESLV_BASE::_vFCT;
+  using ODESLV_BASE::_pT;
+  using ODESLV_BASE::_pX;
+  using ODESLV_BASE::_pQ;
+  using ODESLV_BASE::_pP;
 
-  using ODESLV_BASE<ExtOps...>::_vec2D;
-  using ODESLV_BASE<ExtOps...>::_pIC;
-  using ODESLV_BASE<ExtOps...>::_pJAC;
-  using ODESLV_BASE<ExtOps...>::_DJAC;
-  using ODESLV_BASE<ExtOps...>::_pJACCOLNDX;
+  using ODESLV_BASE::_vec2D;
+  using ODESLV_BASE::_pIC;
+  using ODESLV_BASE::_pJAC;
+  using ODESLV_BASE::_DJAC;
+  using ODESLV_BASE::_pJACCOLNDX;
 
   //! @brief size of sensitivity variables
   unsigned _ny;
@@ -141,7 +140,7 @@ protected:
 
   //! @brief Function setting up DAG of IVP
   bool _SETUP
-    ( ODESLVS_BASE<ExtOps...> const& IVP );
+    ( ODESLVS_BASE const& IVP );
 
   //! @brief Function to initialize sensitivity for parameter <a>isen</a>
   bool _IC_SET_FSA
@@ -252,15 +251,14 @@ protected:
     ( unsigned const pos_fct, unsigned const isen, double const& t );
 
   //! @brief Block default compiler methods
-  ODESLVS_BASE( ODESLVS_BASE<ExtOps...> const& ) = delete;
-  ODESLVS_BASE<ExtOps...>& operator=( ODESLVS_BASE<ExtOps...> const& ) = delete;
+  ODESLVS_BASE( ODESLVS_BASE const& ) = delete;
+  ODESLVS_BASE& operator=( ODESLVS_BASE const& ) = delete;
 };
 
-template <typename... ExtOps>
 inline
-ODESLVS_BASE<ExtOps...>::ODESLVS_BASE
+ODESLVS_BASE::ODESLVS_BASE
 ()
-: BASE_DE<ExtOps...>(), ODESLV_BASE<ExtOps...>(),
+: BASE_DE(), ODESLV_BASE(),
   _ny(0), _pY(nullptr), _nyq(0), _pYQ(nullptr),
   _pRHS(nullptr),  _pQUAD(nullptr), _pSACFCT(nullptr), _pSAFCT(nullptr),
   _nVAR(0), _nVAR0(0), _pVAR(nullptr)
@@ -268,9 +266,8 @@ ODESLVS_BASE<ExtOps...>::ODESLVS_BASE
   _DVAR = _Dt = _Dp = _Dy = _Dx = _Dq = _Dyq = nullptr;
 }
 
-template <typename... ExtOps>
 inline
-ODESLVS_BASE<ExtOps...>::~ODESLVS_BASE
+ODESLVS_BASE::~ODESLVS_BASE
 ()
 {
   delete[] _pVAR;
@@ -284,13 +281,12 @@ ODESLVS_BASE<ExtOps...>::~ODESLVS_BASE
   delete[] _pYQ;
 }
 
-template <typename... ExtOps>
 inline
 bool
-ODESLVS_BASE<ExtOps...>::_SETUP
+ODESLVS_BASE::_SETUP
 ()
 {
-  if( !ODESLV_BASE<ExtOps...>::_SETUP() ) return false;
+  if( !ODESLV_BASE::_SETUP() ) return false;
   
   delete[] _pY; _pY = nullptr;
   _ny = _nx;
@@ -311,13 +307,12 @@ ODESLVS_BASE<ExtOps...>::_SETUP
   return true;
 }
 
-template <typename... ExtOps>
 inline
 bool
-ODESLVS_BASE<ExtOps...>::_SETUP
-( ODESLVS_BASE<ExtOps...> const& IVP )
+ODESLVS_BASE::_SETUP
+( ODESLVS_BASE const& IVP )
 {
-  if( !ODESLV_BASE<ExtOps...>::_SETUP( IVP) ) return false;
+  if( !ODESLV_BASE::_SETUP( IVP) ) return false;
 
   delete[] _pY; _pY = nullptr;
   _ny = _nx;
@@ -338,10 +333,9 @@ ODESLVS_BASE<ExtOps...>::_SETUP
   return true;
 }
 
-template <typename... ExtOps>
 inline
 bool
-ODESLVS_BASE<ExtOps...>::_INI_D_SEN
+ODESLVS_BASE::_INI_D_SEN
 ( double const* p, unsigned const nvec, unsigned const nyq )
 {
   // Size and set DAG evaluation arrays
@@ -374,22 +368,20 @@ ODESLVS_BASE<ExtOps...>::_INI_D_SEN
   return true;
 }
 
-template <typename... ExtOps>
 template <typename REALTYPE>
 inline
 void
-ODESLVS_BASE<ExtOps...>::_GET_D_SEN
+ODESLVS_BASE::_GET_D_SEN
 ( REALTYPE const* y, unsigned const nyq, REALTYPE const* yq )
 {
   _vec2D( y, _ny, _Dy );
   if( yq ) _vec2D( yq, nyq, _Dyq );
 }
 
-template <typename... ExtOps>
 template <typename REALTYPE>
 inline
 void
-ODESLVS_BASE<ExtOps...>::_GET_D_SEN
+ODESLVS_BASE::_GET_D_SEN
 ( REALTYPE const* x, REALTYPE const* y, REALTYPE const* q,
   unsigned const nyq, REALTYPE const* yq )
 {
@@ -399,10 +391,9 @@ ODESLVS_BASE<ExtOps...>::_GET_D_SEN
   if( yq ) _vec2D( yq, nyq, _Dyq );
 }
 
-template <typename... ExtOps>
 inline
 bool
-ODESLVS_BASE<ExtOps...>::_IC_SET_FSA
+ODESLVS_BASE::_IC_SET_FSA
 ( unsigned const isen )
 {
   _pIC = _vIC.at(0);
@@ -411,16 +402,15 @@ ODESLVS_BASE<ExtOps...>::_IC_SET_FSA
   return true;
 }
 
-template <typename... ExtOps>
 inline
 bool
-ODESLVS_BASE<ExtOps...>::_IC_SET_ASA
+ODESLVS_BASE::_IC_SET_ASA
 ()
 {
   FFVar const* pIC = _vIC.at(0);
   FFVar pHAM( 0. );
   for( unsigned ix=0; ix<_nx; ix++ ) pHAM += _pY[ix] * pIC[ix];
-#ifndef MC__ODEBNDS_GSL_USE_BAD
+#ifndef CRONOS__ODEBNDS_GSL_USE_BAD
   delete[] _pSACFCT; _pSACFCT = _dag->FAD( 1, &pHAM, _np, _pP );
 #else
   delete[] _pSACFCT; _pSACFCT = _dag->BAD( 1, &pHAM, _np, _pP );
@@ -428,10 +418,9 @@ ODESLVS_BASE<ExtOps...>::_IC_SET_ASA
   return true;
 }
 
-template <typename... ExtOps>
 inline
 bool
-ODESLVS_BASE<ExtOps...>::_CC_SET_FSA
+ODESLVS_BASE::_CC_SET_FSA
 ( unsigned const pos_ic, unsigned const isen )
 {
   _pIC = _vIC.at( pos_ic );
@@ -443,20 +432,19 @@ ODESLVS_BASE<ExtOps...>::_CC_SET_FSA
   return true;
 }
 
-template <typename... ExtOps>
 inline
 bool
-ODESLVS_BASE<ExtOps...>::_CC_SET_ASA
+ODESLVS_BASE::_CC_SET_ASA
 ( unsigned const pos_ic, unsigned const pos_fct, unsigned const ifct )
 {
   _pIC = _vIC.at( pos_ic );
   FFVar pHAM = (pos_fct? _vFCT.at(pos_fct-1)[ifct]: 0.);
-#ifdef MC__ODESLVS_BASE_DEBUG
+#ifdef CRONOS__ODESLVS_BASE_DEBUG
   std::cout << "pos_ic: " << pos_ic << std::endl;
   std::cout << "pos_fct: " << pos_fct << std::endl;
 #endif
   for( unsigned ix=0; ix<_nx; ix++ ) pHAM += _pY[ix] * (pos_ic? _pIC[ix]: _pX[ix] );
-#ifndef MC__ODEBNDS_GSL_USE_BAD
+#ifndef CRONOS__ODEBNDS_GSL_USE_BAD
   delete[] _pSACFCT; _pSACFCT = _dag->FAD( 1, &pHAM, _nx+_np, _pVAR+_ny );
 #else
   delete[] _pSACFCT; _pSACFCT = _dag->BAD( 1, &pHAM, _nx+_np, _pVAR+_ny );
@@ -467,15 +455,14 @@ ODESLVS_BASE<ExtOps...>::_CC_SET_ASA
   return true;
 }
 
-template <typename... ExtOps>
 inline
 bool
-ODESLVS_BASE<ExtOps...>::_TC_SET_ASA
+ODESLVS_BASE::_TC_SET_ASA
 ( unsigned const pos_fct, unsigned const ifct )
 {
   FFVar const* _pIC = _vFCT.at(pos_fct)+ifct;
 
-#ifndef MC__ODEBNDS_GSL_USE_BAD
+#ifndef CRONOS__ODEBNDS_GSL_USE_BAD
   delete[] _pSACFCT; _pSACFCT = _dag->FAD( 1, _pIC, _nx+_np, _pVAR+_nx );
 #else
   delete[] _pSACFCT; _pSACFCT = _dag->BAD( 1, _pIC, _nx+_np, _pVAR+_nx );
@@ -484,17 +471,16 @@ ODESLVS_BASE<ExtOps...>::_TC_SET_ASA
   return true;
 }
 
-template <typename... ExtOps>
 inline
 bool
-ODESLVS_BASE<ExtOps...>::_RHS_SET_FSA
+ODESLVS_BASE::_RHS_SET_FSA
 ( unsigned const iRHS, unsigned const iQUAD )
 {
   if( _vRHS.size() <= iRHS ) return false; 
   if( _nq && _vQUAD.size() <= iQUAD ) return false;
 
   _pRHS =  _vRHS.at( iRHS );
-#ifdef MC__ODESLVS_BASE_DEBUG
+#ifdef CRONOS__ODESLVS_BASE_DEBUG
   std::ostringstream ofilename;
   ofilename << "vRHS.dot";
   std::ofstream ofile( ofilename.str(), std::ios_base::out );
@@ -508,7 +494,7 @@ ODESLVS_BASE<ExtOps...>::_RHS_SET_FSA
   for( unsigned ip=0; ip<_np; ip++ ){
     for( unsigned jp=0; jp<_np; jp++ ) _pSAFCT[_nx+jp] = (ip==jp? 1.: 0.);
     delete[] _vSARHS[ip];  _vSARHS[ip]  = _dag->DFAD( _nx, _pRHS, _nx+_np, _pVAR+_nx, _pSAFCT );
-#ifdef MC__ODESLVS_BASE_DEBUG
+#ifdef CRONOS__ODESLVS_BASE_DEBUG
     std::ostringstream ofilename;
     ofilename << "vSARHS" << ip << ".dot";
     std::ofstream ofile( ofilename.str(), std::ios_base::out );
@@ -523,10 +509,9 @@ ODESLVS_BASE<ExtOps...>::_RHS_SET_FSA
   return true;
 }
 
-template <typename... ExtOps>
 inline
 bool
-ODESLVS_BASE<ExtOps...>::_RHS_SET_ASA
+ODESLVS_BASE::_RHS_SET_ASA
 ( unsigned const iRHS, unsigned const iQUAD,
   unsigned const pos_fct, bool const neg )
 {
@@ -544,7 +529,7 @@ ODESLVS_BASE<ExtOps...>::_RHS_SET_ASA
   if( pos_fct ){
     FFVar const* pFCT = _vFCT.at(pos_fct-1);
     for( unsigned ifct=0; ifct<_nf; ifct++ ){
-#ifndef MC__ODEBNDS_GSL_USE_BAD
+#ifndef CRONOS__ODEBNDS_GSL_USE_BAD
       delete[] _pSACFCT; _pSACFCT = _nq? _dag->FAD( 1, pFCT+ifct, _nq, _pQ ): nullptr;
 #else
       delete[] _pSACFCT; _pSACFCT = _nq? _dag->BAD( 1, pFCT+ifct, _nq, _pQ ): nullptr;
@@ -558,7 +543,7 @@ ODESLVS_BASE<ExtOps...>::_RHS_SET_ASA
   }
 
   for( unsigned ifct=0; ifct<_nf; ifct++ ){
-#ifndef MC__ODESLVS_USE_BAD
+#ifndef CRONOS__ODESLVS_USE_BAD
     delete[] _vSARHS[ifct];  _vSARHS[ifct]  = _dag->FAD( 1, vHAM.data()+ifct, _nx, _pX   );
     delete[] _vSAQUAD[ifct]; _vSAQUAD[ifct] = _dag->FAD( 1, vHAM.data()+ifct, _np, _pP );
 #else
@@ -571,18 +556,18 @@ ODESLVS_BASE<ExtOps...>::_RHS_SET_ASA
   _pJAC = _dag->SFAD( _nx, _vSARHS[0], _ny, _pY ); // Jacobian in sparse format
   _pJACCOLNDX.resize( _nx+1 );
   for( unsigned ie=0, ic=0; ie<std::get<0>(_pJAC); ++ie ){
-#ifdef MC__ODESLVS_BASE_DEBUG
+#ifdef CRONOS__ODESLVS_BASE_DEBUG
     std::cout << "  JACB[" << std::get<1>(_pJAC)[ie] << ", " << std::get<2>(_pJAC)[ie] << "]" << std::endl;
 #endif
     for( ; std::get<2>(_pJAC)[ie] >= ic; ++ic ){
       _pJACCOLNDX[ic] = ie;
-#ifdef MC__ODESLVS_BASE_DEBUG
+#ifdef CRONOS__ODESLVS_BASE_DEBUG
       std::cout << "  JACBCOLNDX[" << ic << "] = " << ie << std::endl;
 #endif
     }
   }
   _pJACCOLNDX[_nx] = std::get<0>(_pJAC);
-#ifdef MC__ODESLVS_BASE_DEBUG
+#ifdef CRONOS__ODESLVS_BASE_DEBUG
   std::cout << "  JACBCOLNDX[" << _nx << "] = " << std::get<0>(_pJAC) << std::endl;
   std::cout << "PAUSED - <1> TO CONTINUE"; int dum; std::cin >> dum;
 #endif
@@ -590,11 +575,10 @@ ODESLVS_BASE<ExtOps...>::_RHS_SET_ASA
   return true;
 }
 
-template <typename... ExtOps>
 template <typename REALTYPE>
 inline
 bool
-ODESLVS_BASE<ExtOps...>::_TC_D_SEN
+ODESLVS_BASE::_TC_D_SEN
 ( double const& t, REALTYPE const* x, REALTYPE* y )
 {
   *_Dt = t; // current time
@@ -603,22 +587,20 @@ ODESLVS_BASE<ExtOps...>::_TC_D_SEN
   return true;
 }
 
-template <typename... ExtOps>
 template <typename REALTYPE>
 inline
 bool
-ODESLVS_BASE<ExtOps...>::_TC_D_QUAD_ASA
+ODESLVS_BASE::_TC_D_QUAD_ASA
 ( REALTYPE* yq )
 {
   _dag->eval( _np, _pSACFCT+_ny, (double*)yq, _nx+_np+1, _pVAR+_ny, _DVAR+_ny );
   return true;
 }
 
-template <typename... ExtOps>
 template <typename REALTYPE>
 inline
 bool
-ODESLVS_BASE<ExtOps...>::_IC_D_SEN
+ODESLVS_BASE::_IC_D_SEN
 ( double const& t, REALTYPE const* x, REALTYPE const* y )
 {
   *_Dt = t; // current time
@@ -627,11 +609,10 @@ ODESLVS_BASE<ExtOps...>::_IC_D_SEN
   return true;
 }
 
-template <typename... ExtOps>
 template <typename REALTYPE>
 inline
 bool
-ODESLVS_BASE<ExtOps...>::_IC_D_QUAD_ASA
+ODESLVS_BASE::_IC_D_QUAD_ASA
 ( REALTYPE* yq )
 {
   _vec2D( yq, _np, _Dyq );
@@ -640,11 +621,10 @@ ODESLVS_BASE<ExtOps...>::_IC_D_QUAD_ASA
   return true;
 }
 
-template <typename... ExtOps>
 template <typename REALTYPE>
 inline
 bool
-ODESLVS_BASE<ExtOps...>::_CC_D_SEN
+ODESLVS_BASE::_CC_D_SEN
 ( double const& t, REALTYPE const* x, REALTYPE* y )
 {
   *_Dt = t; // current time
@@ -654,11 +634,10 @@ ODESLVS_BASE<ExtOps...>::_CC_D_SEN
   return true;
 }
 
-template <typename... ExtOps>
 template <typename REALTYPE>
 inline
 bool
-ODESLVS_BASE<ExtOps...>::_CC_D_QUAD_ASA
+ODESLVS_BASE::_CC_D_QUAD_ASA
 ( REALTYPE* yq )
 {
   _vec2D( yq, _np, _Dyq );
@@ -666,10 +645,9 @@ ODESLVS_BASE<ExtOps...>::_CC_D_QUAD_ASA
   return true;
 }
 
-template <typename... ExtOps>
 inline
 bool
-ODESLVS_BASE<ExtOps...>::_RHS_D_SET
+ODESLVS_BASE::_RHS_D_SET
 ( unsigned const nf, unsigned const nyq )
 {
   _opSARHS.resize( nf );
@@ -688,11 +666,10 @@ ODESLVS_BASE<ExtOps...>::_RHS_D_SET
   return true;
 }
 
-template <typename... ExtOps>
 template <typename REALTYPE>
 inline
 bool
-ODESLVS_BASE<ExtOps...>::_RHS_D_SEN
+ODESLVS_BASE::_RHS_D_SEN
 ( double const& t, REALTYPE const* x, REALTYPE const* y, REALTYPE* ydot,
   unsigned const ifct )
 {
@@ -700,7 +677,7 @@ ODESLVS_BASE<ExtOps...>::_RHS_D_SEN
   *_Dt = t; // set current time
   _vec2D( x, _nx, _Dx ); // set current state bounds
   _vec2D( y, _ny, _Dy ); // set current sensitivity/adjoint bounds
-#ifdef MC__ODESLVS_BASE_DEBUG
+#ifdef CRONOS__ODESLVS_BASE_DEBUG
   _dag->output( _opSARHS[ifct] );
 #endif
   _dag->eval( _opSARHS[ifct], _DWRK, _ny, _vSARHS[ifct], (double*)ydot,
@@ -708,11 +685,10 @@ ODESLVS_BASE<ExtOps...>::_RHS_D_SEN
   return true;
 }
 
-template <typename... ExtOps>
 template <typename REALTYPE>
 inline
 bool
-ODESLVS_BASE<ExtOps...>::_JAC_D_SEN
+ODESLVS_BASE::_JAC_D_SEN
 ( double const& t, REALTYPE const* x, REALTYPE const* y, REALTYPE** jac )
 {
   // No need to update _DVAR
@@ -720,7 +696,7 @@ ODESLVS_BASE<ExtOps...>::_JAC_D_SEN
                _DJAC.data(), _nVAR0, _pVAR, _DVAR );
   for( unsigned ie=0; ie<std::get<0>(_pJAC); ++ie ){
     jac[std::get<1>(_pJAC)[ie]][std::get<2>(_pJAC)[ie]] = _DJAC[ie];
-#ifdef MC__ODESLVS_BASE_DEBUG
+#ifdef CRONOS__ODESLVS_BASE_DEBUG
     std::cout << "  jac[" << std::get<1>(_pJAC)[ie] << ", "
               << std::get<2>(_pJAC)[ie] << "] = " << _DJAC[ie] << std::endl;
 #endif
@@ -728,11 +704,10 @@ ODESLVS_BASE<ExtOps...>::_JAC_D_SEN
   return true;
 }
 
-template <typename... ExtOps>
 template <typename REALTYPE, typename INDEXTYPE>
 inline
 bool
-ODESLVS_BASE<ExtOps...>::_JAC_D_SEN
+ODESLVS_BASE::_JAC_D_SEN
 ( double const& t, REALTYPE const* x, REALTYPE const* y, REALTYPE* jac,
   INDEXTYPE* ptrs, INDEXTYPE* vals )
 {
@@ -741,25 +716,24 @@ ODESLVS_BASE<ExtOps...>::_JAC_D_SEN
                (double*)jac, _nVAR0, _pVAR, _DVAR );
   for( unsigned ie=0; ie<std::get<0>(_pJAC); ++ie ){
     vals[ie] = (INDEXTYPE)std::get<1>(_pJAC)[ie];
-#ifdef MC__ODESLV_BASE_DEBUG
+#ifdef CRONOS__ODESLV_BASE_DEBUG
     std::cout << "  jac[" << ie << "] = " << jac[ie] << std::endl;
     std::cout << "  vals[" << ie << "] = " << vals[ie] << std::endl;
 #endif
   }
   for( unsigned ic=0; ic<=_nx; ++ic ){
     ptrs[ic] = (INDEXTYPE) _pJACCOLNDX[ic];
-#ifdef MC__ODESLV_BASE_DEBUG
+#ifdef CRONOS__ODESLV_BASE_DEBUG
     std::cout << "  ptrs[" << ic << "] = " << ptrs[ic] << std::endl;
 #endif
   }
   return true;
 }
 
-template <typename... ExtOps>
 template <typename REALTYPE>
 inline
 bool
-ODESLVS_BASE<ExtOps...>::_RHS_D_QUAD
+ODESLVS_BASE::_RHS_D_QUAD
 ( unsigned const nyq, REALTYPE* yqdot, unsigned const ifct )
 {
   if( !_vSAQUAD.size() || !_vSAQUAD[ifct] ) return false;
@@ -769,10 +743,9 @@ ODESLVS_BASE<ExtOps...>::_RHS_D_QUAD
   return true;
 }
 
-template <typename... ExtOps>
 inline
 bool
-ODESLVS_BASE<ExtOps...>::_FCT_D_SEN
+ODESLVS_BASE::_FCT_D_SEN
 ( unsigned const iFCT, unsigned const isen, double const& t )
 {
   if( !_nf ) return true;

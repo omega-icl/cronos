@@ -2,8 +2,8 @@
 // All Rights Reserved.
 // This code is published under the Eclipse Public License.
 
-#ifndef MC__BASE_CVODES_HPP
-#define MC__BASE_CVODES_HPP
+#ifndef CRONOS__BASE_CVODES_HPP
+#define CRONOS__BASE_CVODES_HPP
 
 #include <iostream>
 #include <iomanip>
@@ -312,7 +312,7 @@ REG_BASE_CVODES
   int (BASE_CVODES::*CVRhsFnF) ( int, sunrealtype, N_Vector, N_Vector, int, N_Vector, N_Vector, void*, N_Vector, N_Vector ),
   int (BASE_CVODES::*CVQuadFnF)( int, sunrealtype, N_Vector, N_Vector*, N_Vector, N_Vector*, void*, N_Vector, N_Vector ) )
 {
-#ifdef MC__BASE_CVODES_CHECK
+#ifdef CRONOS__BASE_CVODES_CHECK
   assert( BASE_CVODES::PTR_BASE_CVODES == nullptr && PTR_CVRHS == nullptr );
 #endif
   BASE_CVODES::PTR_BASE_CVODES = CV;
@@ -350,7 +350,7 @@ void
 UNREG_BASE_CVODES
 ()
 {
-#ifdef MC__BASE_CVODES_CHECK
+#ifdef CRONOS__BASE_CVODES_CHECK
   assert( BASE_CVODES::PTR_BASE_CVODES != nullptr
        && PTR_CVRHS   != nullptr
        && PTR_CVQUAD  != nullptr

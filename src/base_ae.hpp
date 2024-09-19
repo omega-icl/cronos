@@ -8,7 +8,10 @@
 #include <assert.h>
 #include "ffunc.hpp"
 #include "mclapack.hpp"
- 
+#ifdef MC__USE_HSL
+  #include "mchsl.hpp"
+#endif
+
 namespace mc
 {
 //! @brief C++ base class for defining of parametric nonlinear equations
@@ -373,6 +376,7 @@ bool
 BASE_AE::set_block
 ( const bool disp, std::ostream&os )
 {
+#ifdef MC__USE_HSL
   const unsigned int ndep = _dep.size();
   if( !ndep || _sys.size() != ndep ) return false;
   if( !_newsys ) return true;
@@ -381,11 +385,16 @@ BASE_AE::set_block
   // Perform block lower-triangular decomposition using MC21A/MC13D
   int NB = 1;
   std::vector<int> IPERM(ndep), IOR(ndep), IB(ndep);
-  _singsys = !_dag->MC13( ndep, _sys.data(), _dep.data(), IPERM.data(),
-                          IOR.data(), IB.data(), NB, disp?true:false, os );
+  FFHSL hsl( _dag );
+  _singsys = !hsl.MC13( ndep, _sys.data(), _dep.data(), IPERM.data(),
+                        IOR.data(), IB.data(), NB, disp?true:false, os );
   if( _singsys ) return reset_block();
 
   return set_block( NB, IOR.data(), IB.data(), IPERM.data() );
+#else
+  reset_block();
+  throw std::runtime_error("mc::BASE_AE ** Missing HSL library");
+#endif
 }
 
 inline

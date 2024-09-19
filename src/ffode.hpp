@@ -6,6 +6,7 @@
 #define CRONOS__FFODE_HPP
 
 #include "ffexpr.hpp"
+#include "ffdep.hpp"
 #include "slift.hpp"
 #include "odeslvs_cvodes.hpp"
 
@@ -84,8 +85,6 @@ public:
       }
       else
         _pODESLV   = Op._pODESLV;
-      _nPar = Op._nPar;
-      _nCst = Op._nCst;
     }
 
   // Define operation
@@ -455,7 +454,8 @@ protected:
 
       _ownODESLV = false;
       FFOp* pOp = (*ppRes)->opdef().first;
-      _pODESLV = dynamic_cast<FFGRADODE*>(pOp)->_pODESLV;
+      if( policy > 0 )
+        _pODESLV = dynamic_cast<FFGRADODE*>(pOp)->_pODESLV; // set pointer to DAG copy
 #ifdef CRONOS__FFODE_TRACE
       std::cerr << "GRADODE address in DAG: " << _pODESLV << std::endl;
 #endif

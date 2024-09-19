@@ -391,6 +391,24 @@ pyFFODE
    py::return_value_policy::reference_internal,
    "define ODE operation in DAG"
  )
+ .def(
+   "__call__",
+   []( mc::FFODE& self, unsigned const idep, std::vector<mc::FFVar> const& vVar, ODESLVS* pODE )
+   {
+     return self( idep, vVar.size(), vVar.data(), pODE );
+   },
+   py::return_value_policy::reference_internal,
+   "define ODE operation in DAG"
+ )
+ .def(
+   "__call__",
+   []( mc::FFODE& self, unsigned const idep, std::vector<mc::FFVar> const& vVar, std::vector<mc::FFVar> vCst, ODESLVS* pODE )
+   {
+     return self( idep, vVar.size(), vVar.data(), vCst.size(), vCst.data(), pODE );
+   },
+   py::return_value_policy::reference_internal,
+   "define ODE operation in DAG"
+ )
 // .def_property(
 //   "options",
 //   []( mc::FFODE& self )

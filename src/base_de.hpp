@@ -8,6 +8,7 @@
 #undef  CRONOS__DEBUG__BASE_DE
 
 #include <assert.h>
+#include "ffdep.hpp"
 #include "ffunc.hpp"
 
 namespace mc

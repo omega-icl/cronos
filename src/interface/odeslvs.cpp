@@ -40,6 +40,11 @@ pyODESLV
    py::return_value_policy::reference_internal,
    "get DAG"
  )
+ .def_property_readonly(
+   "ns",
+   []( ODESLVS const& self ){ return self.nsmax(); },
+   "number of stages"
+ )
  .def(
    "set_time",
    []( ODESLVS& self, std::vector<double> const& ts, mc::FFVar const* t ){ self.set_time( ts, t ); },
@@ -59,6 +64,11 @@ pyODESLV
    py::return_value_policy::reference_internal,
    "time stages"
  )
+ .def_property_readonly(
+   "nc",
+   []( ODESLVS const& self ){ return self.nc(); },
+   "number of constants"
+ )
  .def(
    "set_constant",
    []( ODESLVS& self, std::vector<mc::FFVar> const& c ){ self.set_constant( c ); },
@@ -70,6 +80,11 @@ pyODESLV
    py::return_value_policy::reference_internal,
    "constants"
  )
+ .def_property_readonly(
+   "np",
+   []( ODESLVS const& self ){ return self.np(); },
+   "number of parameters"
+ )
  .def(
    "set_parameter",
    []( ODESLVS& self, std::vector<mc::FFVar> const& p ){ self.set_parameter( p ); },
@@ -80,6 +95,11 @@ pyODESLV
    []( ODESLVS const& self ){ return self.var_parameter(); },
    py::return_value_policy::reference_internal,
    "parameters"
+ )
+ .def_property_readonly(
+   "nx",
+   []( ODESLVS const& self ){ return self.nx(); },
+   "number of states"
  )
  .def(
    "set_state",
@@ -107,6 +127,11 @@ pyODESLV
    []( ODESLVS const& self ){ return self.eqn_differential(); },
    py::return_value_policy::reference_internal,
    "differential equations"
+ )
+ .def_property_readonly(
+   "nq",
+   []( ODESLVS const& self ){ return self.nq(); },
+   "number of quadratures"
  )
  .def(
    "set_quadrature",
@@ -145,6 +170,11 @@ pyODESLV
    []( ODESLVS const& self ){ return self.eqn_initial(); },
    py::return_value_policy::reference_internal,
    "initial conditions"
+ )
+ .def_property_readonly(
+   "nf",
+   []( ODESLVS const& self ){ return self.nf(); },
+   "number of functions"
  )
  .def(
    "set_function",

@@ -120,14 +120,14 @@ def ode_dag2( ODE ):
   DAG.output( SGF )
   DAG.dot_script( F12, "F12.dot" )
 
-  print( "F12 @(2.95,3.05): ", DAG.eval( F12, [P1,P2], [2.95,3.05] ) )
+  print( "F12 @(2.95,3.05,1.1): ", DAG.eval( F12, [P1,P2,C], [2.95,3.05,1.1] ) )
 
   DF12DP = DAG.bdiff( F12, [P1,P2] )
   SGF12 = DAG.subgraph( DF12DP[2] )
   DAG.output( SGF12 )
   DAG.dot_script( DF12DP[2], "DF12DP.dot" )
 
-  print( "DF12DP @(2.95,3.05): ", DAG.eval( DF12DP[2], [P1,P2], [2.95,3.05] ) )
+  print( "DF12DP @(2.95,3.05,1.1): ", DAG.eval( DF12DP[2], [P1,P2,C], [2.95,3.05,1.1] ) )
 
 
 def ode2_define( NS ):
@@ -174,9 +174,9 @@ def ode2_define( NS ):
 
 ODE = ode_define()
 #ode_copy( ODE )
-ode_dag( ODE )
-ode_diff( ODE )
-#ode_dag2( ODE )
+#ode_dag( ODE )
+#ode_diff( ODE )
+ode_dag2( ODE )
 
 #ode2_define( 5 )
 

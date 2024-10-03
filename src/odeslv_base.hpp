@@ -755,7 +755,8 @@ ODESLV_BASE::_FCT_D_STA
   *_Dt = t; // current time
   FFVar const* pFCT = _vFCT.at( iFCT );
   //std::cout << "evaluating functions @" << t << std::endl;
-  _dag->eval( _nf, pFCT, _Df.data(), _nVAR, _pVAR, _DVAR, iFCT?true:false );
+  static double const one = 1.;
+  _dag->eval( _nf, pFCT, _Df.data(), _nVAR, _pVAR, _DVAR, iFCT? &one: nullptr );
   return true;
 }
 

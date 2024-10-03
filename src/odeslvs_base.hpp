@@ -616,7 +616,8 @@ ODESLVS_BASE::_IC_D_QUAD_ASA
 ( REALTYPE* yq )
 {
   _vec2D( yq, _np, _Dyq );
-  _dag->eval( _np, _pSACFCT, (double*)yq, _nVAR0, _pVAR, _DVAR, true );
+  static double const one = 1.;
+  _dag->eval( _np, _pSACFCT, (double*)yq, _nVAR0, _pVAR, _DVAR, &one );
   _vec2D( yq, _np, _Dyq );
   return true;
 }
@@ -641,7 +642,8 @@ ODESLVS_BASE::_CC_D_QUAD_ASA
 ( REALTYPE* yq )
 {
   _vec2D( yq, _np, _Dyq );
-  _dag->eval( _np, _pSACFCT+_ny, (double*)yq, _nVAR0, _pVAR, _DVAR, true );
+  static double const one = 1.;
+  _dag->eval( _np, _pSACFCT+_ny, (double*)yq, _nVAR0, _pVAR, _DVAR, &one );
   return true;
 }
 
@@ -755,7 +757,8 @@ ODESLVS_BASE::_FCT_D_SEN
   for( unsigned ip=0; ip<_np+1; ip++ ) _pSAFCT[_ny+ip] = (ip==isen? 1.: 0.); // includes time
   for( unsigned iq=0; iq<_nq; iq++ )   _pSAFCT[_nx+_np+1+iq] = _pYQ[iq];
   delete[] _pSACFCT; _pSACFCT = _dag->DFAD( _nf, _pIC, _nx+_np+1+_nq, _pVAR+_ny, _pSAFCT );
-  _dag->eval( _nf, _pSACFCT, _Dfp.data()+isen*_nf, _nVAR, _pVAR, _DVAR, iFCT?true:false );
+  static double const one = 1.;
+  _dag->eval( _nf, _pSACFCT, _Dfp.data()+isen*_nf, _nVAR, _pVAR, _DVAR, iFCT? &one: nullptr );
 
   return true;
 }

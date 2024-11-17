@@ -941,7 +941,7 @@ ODESLVS_CVODES::_states_ASA
       if( _istg<_nsmax && _vIC.size()>=_nsmax ){
         _t = _dT[_istg-1];
         _D2vec( _xk[_istg-1].data(), _nx, NV_DATA_S( _Nx ) );
-        _IC_D_QUAD( NV_DATA_S( _Nq ) );
+        if(_Nq ) _IC_D_QUAD( NV_DATA_S( _Nq ) );
         std::cout << "RESTARTING FORWARD INTEGRATION at t=" << _t << std::endl;
         _states_stage( _istg-1, _t, _Nx, _Nq, true, true, false, os );
       }

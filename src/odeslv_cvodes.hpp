@@ -763,6 +763,7 @@ ODESLV_CVODES::_states
 
       // Integrate states over stage
       _states_stage( _istg, _t, _Nx, _Nq, false, store, options.RESRECORD, os );
+//      _states_stage( _istg, _t, _Nx, _Nq, false, (_istg<_nsmax-1? false: store), options.RESRECORD, os );
 
 //      // Store full state at stage time
 //      if( store ){

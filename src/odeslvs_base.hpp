@@ -410,7 +410,7 @@ ODESLVS_BASE::_IC_SET_ASA
   FFVar const* pIC = _vIC.at(0);
   FFVar pHAM( 0. );
   for( unsigned ix=0; ix<_nx; ix++ ) pHAM += _pY[ix] * pIC[ix];
-#ifndef CRONOS__ODEBNDS_GSL_USE_BAD
+#ifndef CRONOS__ODESLVS_USE_BAD
   delete[] _pSACFCT; _pSACFCT = _dag->FAD( 1, &pHAM, _np, _pP );
 #else
   delete[] _pSACFCT; _pSACFCT = _dag->BAD( 1, &pHAM, _np, _pP );
@@ -444,7 +444,8 @@ ODESLVS_BASE::_CC_SET_ASA
   std::cout << "pos_fct: " << pos_fct << std::endl;
 #endif
   for( unsigned ix=0; ix<_nx; ix++ ) pHAM += _pY[ix] * (pos_ic? _pIC[ix]: _pX[ix] );
-#ifndef CRONOS__ODEBNDS_GSL_USE_BAD
+  //_dag->output( _dag->subgraph( 1, &pHAM ) );
+#ifndef CRONOS__ODESLVS_USE_BAD
   delete[] _pSACFCT; _pSACFCT = _dag->FAD( 1, &pHAM, _nx+_np, _pVAR+_ny );
 #else
   delete[] _pSACFCT; _pSACFCT = _dag->BAD( 1, &pHAM, _nx+_np, _pVAR+_ny );
@@ -462,7 +463,7 @@ ODESLVS_BASE::_TC_SET_ASA
 {
   FFVar const* _pIC = _vFCT.at(pos_fct)+ifct;
 
-#ifndef CRONOS__ODEBNDS_GSL_USE_BAD
+#ifndef CRONOS__ODESLVS_USE_BAD
   delete[] _pSACFCT; _pSACFCT = _dag->FAD( 1, _pIC, _nx+_np, _pVAR+_nx );
 #else
   delete[] _pSACFCT; _pSACFCT = _dag->BAD( 1, _pIC, _nx+_np, _pVAR+_nx );
@@ -529,7 +530,7 @@ ODESLVS_BASE::_RHS_SET_ASA
   if( pos_fct ){
     FFVar const* pFCT = _vFCT.at(pos_fct-1);
     for( unsigned ifct=0; ifct<_nf; ifct++ ){
-#ifndef CRONOS__ODEBNDS_GSL_USE_BAD
+#ifndef CRONOS__ODESLVS_USE_BAD
       delete[] _pSACFCT; _pSACFCT = _nq? _dag->FAD( 1, pFCT+ifct, _nq, _pQ ): nullptr;
 #else
       delete[] _pSACFCT; _pSACFCT = _nq? _dag->BAD( 1, pFCT+ifct, _nq, _pQ ): nullptr;

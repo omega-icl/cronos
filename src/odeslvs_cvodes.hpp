@@ -56,7 +56,9 @@ class ODESLVS_CVODES
   using ODESLVS_BASE::_vRHS;
   using ODESLVS_BASE::_vQUAD;
   using ODESLVS_BASE::_vFCT;
-
+  
+  using ODESLV_BASE::_END_D_STA;
+  
   using ODESLVS_BASE::_IC_SET_ASA;
   using ODESLVS_BASE::_CC_SET_ASA;
   using ODESLVS_BASE::_TC_SET_ASA;
@@ -696,6 +698,9 @@ void
 ODESLVS_CVODES::_END_SEN
 ()
 {
+  // Unset constants - only if states are not stored for adjoints
+  _END_D_STA();
+  
   // Get final CPU time
   _final_stats( stats_sensitivity );
 }
@@ -885,6 +890,9 @@ typename ODESLVS_CVODES::STATUS
 ODESLVS_CVODES::_states_ASA
 ( double const* p, double const* c, std::ostream& os )
 {
+  //std::cerr << "&c: " << c << std::endl;
+  //if( c ) std::cerr << "c[0]: " << c[0] << std::endl;
+
   // Compute state bounds and store intermediate results
   STATUS flag = STATUS::NORMAL;
   flag = ODESLV_CVODES::_states( p, c, true, os );
@@ -892,6 +900,9 @@ ODESLVS_CVODES::_states_ASA
 
   // Nothing to do if no functions or parameters are defined
   if( !_nf || !_np ) return STATUS::NORMAL;
+
+  //std::cerr << "&c: " << c << std::endl;
+  //if( c ) std::cerr << "c[0]: " << c[0] << std::endl;
 
   try{
     // Initialize adjoint integration

@@ -15,12 +15,13 @@ namespace mc
 
 //! @brief C++ class defining IVP in parametric ODEs as external DAG operations in MC++.
 ////////////////////////////////////////////////////////////////////////
-//! mc::FFODE is a C++ class for defining an IVP in parametric ODEs as
-//! external DAG operations in MC++.
+//! mc::FFBASEODE is a C++ base class for defining the options in an
+//! IVP in parametric ODEs as external DAG operations in MC++.
 ////////////////////////////////////////////////////////////////////////
-class FFODE
+class FFBaseODE
 : public FFOp
 {
+
 protected:
 
   // Pointer to ODE solver
@@ -34,15 +35,8 @@ protected:
 
 public:
 
-  //! @brief Enumeration type for ODE copy policy
-  enum POLICY_TYPE{
-    SHALLOW=0,  //!< Shallow copy of ODE system in FFGraph (without ownership)
-    COPY=1,     //!< Deep copy of ODE system in FFGraph (with ownership)
-    TRANSFER=-1 //!< Shallow copy of ODE system in FFGraph (with ownership transfer)
-  };
-
   // Default constructor
-  FFODE
+  FFBaseODE
     ()
     : FFOp( EXTERN ),
       _pODESLV( nullptr ),
@@ -50,28 +44,28 @@ public:
     {}
 
   // Destructor
-  virtual ~FFODE
+  virtual ~FFBaseODE
     ()
     {
 #ifdef CRONOS__FFODE_TRACE
-      std::cout << "FFODE::copy constructor\n";
+      std::cout << "FFBaseODE::destructor\n";
 #endif
       if( _ownODESLV && _pODESLV )
         delete _pODESLV;
     }
 
   // Copy constructor
-  FFODE
-    ( FFODE const& Op )
+  FFBaseODE
+    ( FFBaseODE const& Op )
     : FFOp( Op ),
       _nPar( Op._nPar ),
       _nCst( Op._nCst )
     {
 #ifdef CRONOS__FFODE_TRACE
-      std::cout << "FFODE::copy constructor\n";
+      std::cout << "FFBaseODE::copy constructor\n";
 #endif
       if( !Op._pODESLV )
-        throw std::runtime_error( "FFODE::copy constructor ** Undefined ODE solver\n" );
+        throw std::runtime_error( "FFBaseODE::copy constructor ** Undefined ODE solver\n" );
 
       _ownODESLV = Op._ownODESLV;      
       if( _ownODESLV ){
@@ -86,6 +80,63 @@ public:
       else
         _pODESLV   = Op._pODESLV;
     }
+
+  //! @brief MCODE options
+  static struct Options
+  {
+    //! @brief Constructor
+    Options():
+      DIFF(NUM_P), NP2NF(3)
+      {}
+    //! @brief Assignment operator
+    Options& operator= ( Options const& options ){
+        DIFF   = options.DIFF;
+        return *this;
+      }
+    //! @brief Enumeration type for ODE differentiation
+    enum DERIV_TYPE{
+      NUM_P=0,  //!< Derivatives w.r.t. parameters only through forward or adjoint sensitivity integration
+      SYM_P,    //!< Derivatives w.r.t. parameters only through symbolic differentiation of ODEs
+      SYM_C,    //!< Derivatives w.r.t. constants only through symbolic differentiation of ODEs
+      SYM_PC,   //!< Derivatives w.r.t. parameters and constants jointly through symbolic differentiation of ODEs
+    };
+    //! @brief Selected ODE differentiation
+    DERIV_TYPE                DIFF;
+    //! @brief parameter-to-function-size ratio above which adjoint sensitivity is applied instead of forward sensitivity
+    double                    NP2NF;
+  } options;
+};
+
+inline FFBaseODE::Options FFBaseODE::options;
+
+//! @brief C++ class defining IVP in parametric ODEs as external DAG operations in MC++.
+////////////////////////////////////////////////////////////////////////
+//! mc::FFODE is a C++ class for defining an IVP in parametric ODEs as
+//! external DAG operations in MC++.
+////////////////////////////////////////////////////////////////////////
+class FFODE
+: public FFBaseODE
+{
+
+public:
+
+  //! @brief Enumeration type for ODE copy policy
+  enum POLICY_TYPE{
+    SHALLOW=0,  //!< Shallow copy of ODE system in FFGraph (without ownership)
+    COPY=1,     //!< Deep copy of ODE system in FFGraph (with ownership)
+    TRANSFER=-1 //!< Shallow copy of ODE system in FFGraph (with ownership transfer)
+  };
+
+  // Default constructor
+  FFODE
+    ()
+    : FFBaseODE()
+    {}
+
+  // Destructor
+  virtual ~FFODE
+    ()
+    {}
 
   // Define operation
   FFVar& operator()
@@ -123,29 +174,6 @@ public:
     {
       return _set( nPar, pPar, nCst, pCst, pODESLV, policy );
     }
-
-  //! @brief MCODE options
-  static struct Options
-  {
-    //! @brief Constructor
-    Options():
-      DIFF(NUM_P)
-      {}
-    //! @brief Assignment operator
-    Options& operator= ( Options const& options ){
-        DIFF   = options.DIFF;
-        return *this;
-      }
-    //! @brief Enumeration type for ODE differentiation
-    enum DERIV_TYPE{
-      NUM_P=0,  //!< Derivatives w.r.t. parameters only through forward or adjoint sensitivity integration
-      SYM_P,    //!< Derivatives w.r.t. parameters only through symbolic differentiation of ODEs
-      SYM_C,    //!< Derivatives w.r.t. constants only through symbolic differentiation of ODEs
-      SYM_PC,   //!< Derivatives w.r.t. parameters and constants jointly through symbolic differentiation of ODEs
-    };
-    //! @brief Selected ODE differentiation
-    DERIV_TYPE                DIFF;
-  } options;
 
   ODESLVS_CVODES* pODESLV
     ()
@@ -261,10 +289,7 @@ protected:
 #endif
       return ppRes;
     }
-
 };
-
-inline FFODE::Options FFODE::options;
 
 //! @brief C++ class defining gradient of IVP in parametric ODEs as external DAG operations in MC++.
 ////////////////////////////////////////////////////////////////////////
@@ -272,20 +297,9 @@ inline FFODE::Options FFODE::options;
 //! in parametric ODEs as external DAG operations in MC++.
 ////////////////////////////////////////////////////////////////////////
 class FFGRADODE
-: public FFOp
+: public FFBaseODE
 {
   friend class FFODE;
-
-private:
-
-  // Pointer to ODE solver
-  ODESLVS_CVODES*    _pODESLV;
-  // Whether this class owns _pODESLV
-  bool               _ownODESLV;
-  // Number of parameters
-  size_t              _nPar;
-  // Number of constants
-  size_t              _nCst;
 
 public:
 
@@ -298,45 +312,13 @@ public:
   // Constructors
   FFGRADODE
     ()
-    : FFOp( EXTERN ),
-      _pODESLV( nullptr ),
-      _ownODESLV( false )
+    : FFBaseODE()
     {}
-
-  // Copy constructor
-  FFGRADODE
-    ( FFGRADODE const& Op )
-    : FFOp( Op ),
-      _nPar( Op._nPar ),
-      _nCst( Op._nCst )
-    {
-#ifdef CRONOS__FFODE_TRACE
-      std::cout << "FFGRADODE::copy constructor\n";
-#endif
-      if( !Op._pODESLV )
-        throw std::runtime_error( "FFGRADODE::copy constructor ** Undefined ODE solver\n" );
-
-      _ownODESLV = Op._ownODESLV;      
-      if( _ownODESLV ){
-        _pODESLV = new ODESLVS_CVODES;
-        _pODESLV->set( *Op._pODESLV );
-        _pODESLV->options = Op._pODESLV->options;
-        _pODESLV->setup( *Op._pODESLV ); // Create IVP copy from local ICV copy in Op._pODESLV
-      }
-      else
-        _pODESLV   = Op._pODESLV;
-    }
 
   // Destructor
   virtual ~FFGRADODE
     ()
-    {
-#ifdef CRONOS__FFODE_TRACE
-      std::cout << "FFGRADODE::destructor\n";
-#endif
-      if( _ownODESLV && _pODESLV )
-        delete _pODESLV;
-    }
+    {}
 
   // Define operation
   FFVar& operator()
@@ -543,7 +525,7 @@ const
 
   std::vector<double> vVarVal( nVar );
   for( unsigned i=0; i<nVar; ++i ) vVarVal[i] = vVar[i].val();
-  if( _nPar <= 3*nRes ){
+  if( _nPar <= options.NP2NF * nRes ){
     if( _pODESLV->solve_sensitivity( vVarVal.data(), _nCst? vVarVal.data()+_nPar: nullptr ) != ODESLVS_CVODES::NORMAL )
       throw std::runtime_error( "FFODE::eval fadbad::F<double> ** Forward sensitivity integration failure\n" );
   }
@@ -793,7 +775,7 @@ const
   assert( _pODESLV && nVar == _nPar+_nCst && nRes == _pODESLV->nf()*_nPar );
 #endif
 
-  if( _nPar <= 3*_pODESLV->nf() ){
+  if( _nPar <= options.NP2NF * _pODESLV->nf() ){
     if( _pODESLV->solve_sensitivity( vVar, _nCst? vVar+_nPar: nullptr ) != ODESLVS_CVODES::NORMAL )
       throw std::runtime_error( "FFGRADODE::eval double ** Forward sensitivity integration failure\n" );
   }

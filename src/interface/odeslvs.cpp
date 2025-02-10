@@ -517,6 +517,7 @@ pyFFODEOptions
  .def( py::init<>() )
  .def( py::init<mc::FFODE::Options const&>() )
  .def_readwrite( "DIFF", &mc::FFODE::Options::DIFF,   "method of ODE differentiation [Default: NUM_P]" )
+ .def_readwrite( "NP2NF", &mc::FFODE::Options::NP2NF, "parameter-to-function-size ratio above which adjoint sensitivity is applied instead of forward sensitivity [Default: 3]" )
 ;
 
 py::enum_<mc::FFODE::Options::DERIV_TYPE>( pyFFODEOptions, "FFODE.DERIV_TYPE" )

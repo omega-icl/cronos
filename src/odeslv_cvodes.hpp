@@ -239,7 +239,7 @@ protected:
 
   //! @brief Function to finalize state integration
   void _END_STA
-    ();
+    ( bool const store=false );
 
   //! @brief Function to initialize state integration
   bool _INI_STA
@@ -516,10 +516,11 @@ ODESLV_CVODES::_CC_CVODE_QUAD
 }
 
 void
-ODESLV_CVODES::_END_STA()
+ODESLV_CVODES::_END_STA
+( bool const store )
 {
-  // Unset constants
-  _END_D_STA();
+  // Unset constants - only if states are not stored for adjoints
+  if( !store ) _END_D_STA();
 
   // Get final CPU time
   _final_stats( stats_state );
@@ -823,7 +824,7 @@ ODESLV_CVODES::_states
   std::cout << "number of steps: " << nstp << std::endl;
 #endif
 
-  _END_STA();
+  _END_STA( store );
   if( options.DISPLAY >= 1 ) _print_stats( stats_state, os );
   //std::cout << "normal status: " << STATUS::NORMAL << std::endl;
   return STATUS::NORMAL;

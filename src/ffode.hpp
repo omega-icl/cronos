@@ -199,8 +199,8 @@ public:
         return eval( nRes, static_cast<fadbad::F<double>*>(vRes), nVar, static_cast<fadbad::F<double> const*>(vVar), mVar );
       else if( idU == typeid( SLiftVar ) )
         return eval( nRes, static_cast<SLiftVar*>(vRes), nVar, static_cast<SLiftVar const*>(vVar), mVar );
-//      else if( idU == typeid( FFExpr ) )
-//        return eval( nRes, static_cast<FFExpr*>(vRes), nVar, static_cast<FFExpr const*>(vVar), mVar );
+      else if( idU == typeid( FFExpr ) )
+        return eval( nRes, static_cast<FFExpr*>(vRes), nVar, static_cast<FFExpr const*>(vVar), mVar );
 
       throw std::runtime_error( "FFODE::feval ** No evaluation method for type"+std::string(idU.name())+"\n" );
     }
@@ -229,6 +229,10 @@ public:
 
   void eval
     ( unsigned const nRes, SLiftVar* vRes, unsigned const nVar, SLiftVar const* vVar, unsigned const* mVar )
+    const;
+
+  void eval
+    ( unsigned const nRes, FFExpr* vRes, unsigned const nVar, FFExpr const* vVar, unsigned const* mVar )
     const;
 
   // Derivatives
@@ -371,8 +375,8 @@ public:
         return eval( nRes, static_cast<double*>(vRes), nVar, static_cast<double const*>(vVar), mVar );
       else if( idU == typeid( SLiftVar ) )
         return eval( nRes, static_cast<SLiftVar*>(vRes), nVar, static_cast<SLiftVar const*>(vVar), mVar );
-//      else if( idU == typeid( FFExpr ) )
-//        return eval( nRes, static_cast<FFExpr*>(vRes), nVar, static_cast<FFExpr const*>(vVar), mVar );
+      else if( idU == typeid( FFExpr ) )
+        return eval( nRes, static_cast<FFExpr*>(vRes), nVar, static_cast<FFExpr const*>(vVar), mVar );
 
       throw std::runtime_error( "FFGRADODE::feval ** No evaluation method for type"+std::string(idU.name())+"\n" );
     }
@@ -391,6 +395,10 @@ public:
 
   void eval
     ( unsigned const nRes, SLiftVar* vRes, unsigned const nVar, SLiftVar const* vVar, unsigned const* mVar )
+    const;
+
+  void eval
+    ( unsigned const nRes, FFExpr* vRes, unsigned const nVar, FFExpr const* vVar, unsigned const* mVar )
     const;
 
 //  // Ordering
@@ -485,6 +493,32 @@ const
   for( unsigned i=0; i<nVar; ++i ) vRes[0] += vVar[i];
   vRes[0].update( FFDep::TYPE::N );
   for( unsigned j=1; j<nRes; ++j ) vRes[j] = vRes[0];
+}
+
+inline void
+FFODE::eval
+( unsigned const nRes, FFExpr* vRes, unsigned const nVar, FFExpr const* vVar,
+  unsigned const* mVar )
+const
+{
+#ifdef CRONOS__FFODE_TRACE
+  std::cout << "FFODE::eval: FFExpr\n";
+#endif
+#ifdef CRONOS__FFODE_CHECK
+  assert( _pODESLV && nVar == _nPar+_nCst && nRes == _pODESLV->nf()*_nPar );
+#endif
+
+  switch( FFExpr::options.LANG ){
+   case FFExpr::Options::DAG:
+    for( unsigned j=0; j<nRes; ++j ){
+      std::ostringstream os; os << name() << "[" << j << "]";
+      vRes[j] = FFExpr::compose( os.str(), nVar, vVar );
+    }
+    break;
+   case FFExpr::Options::GAMS:
+   default:
+    throw typename FFExpr::Exceptions( FFExpr::Exceptions::UNDEF );
+  }
 }
 
 inline void
@@ -760,6 +794,32 @@ const
   for( unsigned i=0; i<nVar; ++i ) vRes[0] += vVar[i];
   vRes[0].update( FFDep::TYPE::N );
   for( unsigned j=1; j<nRes; ++j ) vRes[j] = vRes[0];
+}
+
+inline void
+FFGRADODE::eval
+( unsigned const nRes, FFExpr* vRes, unsigned const nVar, FFExpr const* vVar,
+  unsigned const* mVar )
+const
+{
+#ifdef CRONOS__FFODE_TRACE
+  std::cout << "FFGRADODE::eval: FFExpr\n";
+#endif
+#ifdef CRONOS__FFODE_CHECK
+  assert( _pODESLV && nVar == _nPar+_nCst && nRes == _pODESLV->nf()*_nPar );
+#endif
+
+  switch( FFExpr::options.LANG ){
+   case FFExpr::Options::DAG:
+    for( unsigned j=0; j<nRes; ++j ){
+      std::ostringstream os; os << name() << "[" << j << "]";
+      vRes[j] = FFExpr::compose( os.str(), nVar, vVar );
+    }
+    break;
+   case FFExpr::Options::GAMS:
+   default:
+    throw typename FFExpr::Exceptions( FFExpr::Exceptions::UNDEF );
+  }
 }
 
 inline void

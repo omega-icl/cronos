@@ -285,14 +285,14 @@ pyODESLV
  )
 ;
 
-py::enum_<ODESLVS::STATUS>(pyODESLV, "ODESLV.STATUS", py::module_local())
- .value("NORMAL",  ODESLVS::STATUS::NORMAL )
- .value("FAILURE", ODESLVS::STATUS::FAILURE)
- .value("FATAL",   ODESLVS::STATUS::FATAL  )
+py::enum_<ODESLVS::STATUS>(pyODESLV, "Status", py::module_local())
+ .value("Normal",  ODESLVS::STATUS::NORMAL )
+ .value("Failure", ODESLVS::STATUS::FAILURE)
+ .value("Fatal",   ODESLVS::STATUS::FATAL  )
  .export_values()
 ;
 
-py::class_<ODESLVS::Results> pyODESLVResults( pyODESLV, "ODESLV.Results" );
+py::class_<ODESLVS::Results> pyODESLVResults( pyODESLV, "Results" );
 
 pyODESLVResults
  .def_readonly( "t", &ODESLVS::Results::t, "time" )
@@ -317,7 +317,7 @@ pyODESLVResults
  )
 ;
 
-py::class_<ODESLVS::Options> pyODESLVOptions( pyODESLV, "ODESLV.Options" );//, py::module_local() );
+py::class_<ODESLVS::Options> pyODESLVOptions( pyODESLV, "Options" );//, py::module_local() );
 
 pyODESLVOptions
  .def( py::init<>() )
@@ -349,32 +349,32 @@ pyODESLVOptions
  .def_readwrite( "ASACHKPT",  &ODESLVS::Options::ASACHKPT,  "Number of steps between each check point for ASA [Default: 2000]" )
 ;
 
-py::enum_<ODESLVS::Options::INTEGRATION_METHOD>(pyODESLVOptions, "ODESLV.INTEGRATION_METHOD")
+py::enum_<ODESLVS::Options::INTEGRATION_METHOD>(pyODESLVOptions, "INTEGRATION_METHOD")
  .value("MSADAMS", ODESLVS::Options::INTEGRATION_METHOD::MSADAMS, "Variable-coefficient linear multistep Adams method (non-stiff systems)")
  .value("MSBDF",   ODESLVS::Options::INTEGRATION_METHOD::MSBDF,   "Variable-coefficient linear multistep backward differentiation formula (BDF) method (stiff systems)")
  .export_values()
 ;
 
-py::enum_<ODESLVS::Options::FSA_STRATEGY>(pyODESLVOptions, "ODESLV.FSA_STRATEGY")
+py::enum_<ODESLVS::Options::FSA_STRATEGY>(pyODESLVOptions, "FSA_STRATEGY")
  .value("SIMULTANEOUS", ODESLVS::Options::FSA_STRATEGY::SIMULTANEOUS, "Simultaneous state/sensitivity correction")
  .value("STAGGERED",    ODESLVS::Options::FSA_STRATEGY::STAGGERED,    "Simultaneous sensitivity corrections after state corrections")
  .value("STAGGERED1",   ODESLVS::Options::FSA_STRATEGY::STAGGERED1,   "Sequential sensitivity corrections after state corrections")
  .export_values()
 ;
 
-py::enum_<ODESLVS::Options::ASA_STRATEGY>(pyODESLVOptions, "ODESLV.ASA_STRATEGY")
+py::enum_<ODESLVS::Options::ASA_STRATEGY>(pyODESLVOptions, "ASA_STRATEGY")
  .value("HERMITE",    ODESLVS::Options::ASA_STRATEGY::HERMITE,    "Cubic Hermite interpolation")
  .value("POLYNOMIAL", ODESLVS::Options::ASA_STRATEGY::POLYNOMIAL, "Variable degree polynomial interpolation")
  .export_values()
 ;
 
-py::enum_<ODESLVS::Options::NONLINEAR_SOLVER>(pyODESLVOptions, "ODESLV.NONLINEAR_SOLVER")
+py::enum_<ODESLVS::Options::NONLINEAR_SOLVER>(pyODESLVOptions, "NONLINEAR_SOLVER")
  .value("FIXEDPOINT", ODESLVS::Options::NONLINEAR_SOLVER::FIXEDPOINT, "Fixed point nonlinear solver")
  .value("NEWTON",     ODESLVS::Options::NONLINEAR_SOLVER::NEWTON,     "Newton nonlinear solver")
  .export_values()
 ;
 
-py::enum_<ODESLVS::Options::LINEAR_SOLVER>(pyODESLVOptions, "ODESLV.LINEAR_SOLVER")
+py::enum_<ODESLVS::Options::LINEAR_SOLVER>(pyODESLVOptions, "LINEAR_SOLVER")
  .value("DIAG",    ODESLVS::Options::LINEAR_SOLVER::DIAG,    "Approximate diagonal Jacobian formed by way of a difference quotient")
  .value("DENSE",   ODESLVS::Options::LINEAR_SOLVER::DENSE,   "Use analytic dense Jacobian and internal direct dense linear algebra functions")
  .value("DENSEDQ", ODESLVS::Options::LINEAR_SOLVER::DENSEDQ, "Use approximate dense Jacobian by way of a difference quotient and internal direct dense linear algebra functions")
@@ -511,7 +511,7 @@ pyFFODE
  )
 ;
 
-py::class_<mc::FFODE::Options>  pyFFODEOptions( pyFFODE, "FFODE.Options" );
+py::class_<mc::FFODE::Options>  pyFFODEOptions( pyFFODE, "Options" );
 
 pyFFODEOptions
  .def( py::init<>() )
@@ -520,7 +520,7 @@ pyFFODEOptions
  .def_readwrite( "NP2NF", &mc::FFODE::Options::NP2NF, "parameter-to-function-size ratio above which adjoint sensitivity is applied instead of forward sensitivity [Default: 3]" )
 ;
 
-py::enum_<mc::FFODE::Options::DERIV_TYPE>( pyFFODEOptions, "FFODE.DERIV_TYPE" )
+py::enum_<mc::FFODE::Options::DERIV_TYPE>( pyFFODEOptions, "DERIV_TYPE" )
  .value("NUM_P", mc::FFODE::Options::DERIV_TYPE::NUM_P, "Derivatives w.r.t. parameters only through forward or adjoint sensitivity integration")
  .value("SYM_P", mc::FFODE::Options::DERIV_TYPE::SYM_P, "Derivatives w.r.t. parameters only through symbolic differentiation of ODEs")
  .value("SYM_C", mc::FFODE::Options::DERIV_TYPE::SYM_C, "Derivatives w.r.t. constants only through symbolic differentiation of ODEs")

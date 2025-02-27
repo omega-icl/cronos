@@ -1,7 +1,7 @@
 #define SAVE_RESULTS		// <- Whether to save bounds to file
 #define MC__BASE_CVODES_CHECK
 
-#include "odeslv_cvodes.hpp"
+#include "odeslvs_cvodes.hpp"
 
 int main()
 {
@@ -30,7 +30,7 @@ int main()
 /*
   std::vector<mc::FFVar> IC(NX);  // Initial value function
   IC[0] = 1.2;
-  IC[1] = 1.1 + 0.01*(P[0]-3.);
+  IC[1] = 1.1 + 0.01*P[0];
 */
   std::vector<std::vector<mc::FFVar>> IC(NS);   // Initial value function
   IC[0].assign( { 1.2, 1.1 + 0.01*P[0] } );
@@ -39,22 +39,30 @@ int main()
 
   std::vector<mc::FFVar> QUAD(NQ);  // Quadrature function
   QUAD[0] = X[1];
-/*
+
   const unsigned NF = 2;  // Number of state functions
-  std::vector<mc::FFVar> FCT(NF);  // State functions
-  FCT[0] = X[0] * X[1];
-  FCT[1] = P[0] * pow( X[0], 2 );
-*/
-  std::vector<std::vector<mc::FFVar>> FCT(NS);  // State functions
-  for( unsigned k=0; k<NS-1; k++ )
+/*
+  std::map<size_t,mc::FFVar> FCT{ { 0, X[0] * X[1] }, { 1, Q[0] } };
+
+  std::vector<mc::FFVar> FCT{ X[0] * X[1], Q[0] };
+
+  std::vector<std::vector<mc::FFVar>> FCT(NS+1);  // State functions
+  for( unsigned k=0; k<NS; k++ )
     FCT[k].assign( { 0., Q[0] } );
-  FCT[NS-1].assign( { X[0] * X[1], Q[0] } );
+  FCT[NS].assign( { X[0] * X[1], Q[0] } );
+*/
+  std::vector<std::map<size_t,mc::FFVar>> FCT(NS+1); // State functions
+  //FCT[0].insert( { 0, P[0] } );
+  for( unsigned k=1; k<NS; k++ )
+    FCT[k].insert( { 1, Q[0] } );
+  FCT[NS].insert( { 0, X[0] * X[1] } );
+  FCT[NS].insert(  { 1, Q[0] } );
 
 
   /////////////////////////////////////////////////////////////////////////
   // Compute ODE solutions
 
-  mc::ODESLV_CVODES LV;
+  mc::ODESLVS_CVODES LV;
 
   LV.options.INTMETH   = mc::BASE_CVODES::Options::MSBDF;//MSADAMS;
   LV.options.NLINSOL   = mc::BASE_CVODES::Options::NEWTON;//FIXEDPOINT;
@@ -77,7 +85,7 @@ int main()
   LV.set_function( FCT );
   LV.setup();
 
-  std::cout << "\nCONTINUOUS-TIME INTEGRATION:\n\n";
+  std::cout << "\nCONTINUOUS-TIME STATE INTEGRATION:\n\n";
   std::vector<double> p( { 2.95 } );  // Parameter values
   LV.solve_state( p );
 #if defined( SAVE_RESULTS )
@@ -85,6 +93,39 @@ int main()
   direcSTA.open( "test0_STA.dat", std::ios_base::out );
   LV.record( direcSTA );
 #endif
+
+  std::cout << "\nCONTINUOUS-TIME STATE SENSITIVITY INTEGRATION:\n\n";
+  LV.solve_sensitivity( p );
+#if defined( SAVE_RESULTS )
+  std::ofstream direcFSA[NP];
+  char fname[50];
+  direcSTA.open( "test0_STA.dat", std::ios_base::out );
+  for( unsigned i=0; i<NP; ++i ){
+    sprintf( fname, "test0_FSA%d.dat",i );  
+    direcFSA[i].open( fname, std::ios_base::out );
+  }
+  LV.record( direcSTA, direcFSA );
+#endif
+  
+  std::cout << "\nCONTINUOUS-TIME ADJOINT SENSITIVITY INTEGRATION:\n\n";
+  LV.solve_adjoint( p );
+#if defined( SAVE_RESULTS )
+  std::ofstream direcASA[NF];
+  direcSTA.open( "test0_STA.dat", std::ios_base::out );
+  for( unsigned i=0; i<NF; ++i ){
+    sprintf( fname, "test0_ASA%d.dat",i );  
+    direcASA[i].open( fname, std::ios_base::out );
+  }
+  LV.record( direcSTA, direcASA );
+#endif
+
+  /////////////////////////////////////////////////////////////////////////
+  // Differentiate ODE system
+
+  mc::ODESLVS_CVODES* GradLV = LV.fdiff( P );
+  GradLV->setup();
+  GradLV->solve_state( p );
+  delete GradLV;
 
   return 0;
 }

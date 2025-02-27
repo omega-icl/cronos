@@ -139,14 +139,14 @@ def ode2_define( NS ):
   U    = []
   RHS  = []
   QUAD = []
-  F    = []
+  F    = [ {} ]
   for i in range(NS):
     U.append( pymc.FFVar(DAG,"U"+str(i)) )
     RHS.append( [ U[i] - X[0] ] )
     QUAD.append( [ 0.5 * pymc.sqr( U[i] ) ] )
-    F.append( [ Q[0], pymc.FFVar(0.) ] )
-  F[NS-1][1] = X[0]
-   
+    F.append( { 0: Q[0] } )
+  F[NS][1] = X[0]
+
   # Define IVP
   ODE = cronos.ODESLV()
   ODE.set_dag( DAG )
@@ -178,7 +178,7 @@ ODE = ode_define()
 #ode_diff( ODE )
 ode_dag2( ODE )
 
-#ode2_define( 5 )
+ode2_define( 5 )
 
 #help(cronos)
 #help(cronos.ODESLV.solve_state)

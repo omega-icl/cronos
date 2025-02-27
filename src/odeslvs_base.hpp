@@ -34,7 +34,6 @@ public:
   /** @} */
 
 protected:
-  using BASE_DE::_nsmax;
   using BASE_DE::_nx;
   using BASE_DE::_nx0;
   using BASE_DE::_np;
@@ -54,7 +53,7 @@ protected:
   using ODESLV_BASE::_pP;
 
   using ODESLV_BASE::_vec2D;
-  using ODESLV_BASE::_pIC;
+  //using ODESLV_BASE::_pIC;
   using ODESLV_BASE::_pJAC;
   using ODESLV_BASE::_DJAC;
   using ODESLV_BASE::_pJACCOLNDX;
@@ -148,7 +147,7 @@ protected:
 
   //! @brief Function to add initial state contribution to adjoint quadrature values
   bool _IC_SET_ASA
-    ();
+    ( unsigned const ifct ); // ();
 
   //! @brief Function to reinitialize sensitivity at stage times for parameter <a>isen</a>
   bool _CC_SET_FSA
@@ -196,7 +195,12 @@ protected:
   bool _TC_D_QUAD_ASA
    ( REALTYPE* yq ); 
 
-  //! @brief Function to add initial state contribution to sensitivity/adjoint quadrature values
+//  //! @brief Function to add initial state contribution to sensitivity values
+  template <typename REALTYPE>
+  bool _IC_D_SEN
+    ( double const& t, REALTYPE* y );
+
+  //! @brief Function to add initial state contributionvto adjoint values
   template <typename REALTYPE>
   bool _IC_D_SEN
     ( double const& t, REALTYPE const* x, REALTYPE const* y );
@@ -363,7 +367,7 @@ ODESLVS_BASE::_INI_D_SEN
   _Dyq = _Dq + _nq;
   for( unsigned ip=0; ip<_np; ip++ ) _Dp[ip] = p[ip];
 
-  _Dfp.resize( _nf*_np );
+  _Dfp.assign( _nf*_np, 0. );
 
   return true;
 }
@@ -396,18 +400,18 @@ bool
 ODESLVS_BASE::_IC_SET_FSA
 ( unsigned const isen )
 {
-  _pIC = _vIC.at(0);
-  delete[] _pSACFCT; _pSACFCT = _dag->FAD( _nx, _pIC, 1, _pVAR+_ny+_nx+isen );
-  _pIC = _pSACFCT;
+  FFVar const* pIC = _vIC.at( 0 ).data();
+  delete[] _pSACFCT; _pSACFCT = _dag->FAD( _nx, pIC, 1, _pVAR+_ny+_nx+isen );
+  pIC = _pSACFCT;
   return true;
 }
-
+/*
 inline
 bool
 ODESLVS_BASE::_IC_SET_ASA
 ()
 {
-  FFVar const* pIC = _vIC.at(0);
+  FFVar const* pIC = _vIC.at( 0 );
   FFVar pHAM( 0. );
   for( unsigned ix=0; ix<_nx; ix++ ) pHAM += _pY[ix] * pIC[ix];
 #ifndef CRONOS__ODESLVS_USE_BAD
@@ -417,17 +421,40 @@ ODESLVS_BASE::_IC_SET_ASA
 #endif
   return true;
 }
+*/
+inline
+bool
+ODESLVS_BASE::_IC_SET_ASA
+( unsigned const ifct )
+{
+  FFVar const* pIC = _vIC.at( 0 ).data();
+  FFVar pHAM = (!_vFCT.at( 0 ).empty()? _vFCT.at( 0 )[ifct]: 0.);
+  for( unsigned ix=0; ix<_nx; ix++ ) pHAM += _pY[ix] * pIC[ix];
+  //_dag->output( _dag->subgraph( 1, &pHAM ) );
+#ifndef CRONOS__ODESLVS_USE_BAD
+  delete[] _pSACFCT; _pSACFCT = _dag->FAD( 1, &pHAM, _nx+_np, _pVAR+_ny );
+#else
+  delete[] _pSACFCT; _pSACFCT = _dag->BAD( 1, &pHAM, _nx+_np, _pVAR+_ny );
+#endif
+  for( unsigned ip=0; ip<_np; ip++ ){
+    _pSAFCT[ip] = _pSACFCT[_nx+ip];
+      for( unsigned ix=0; ix<_nx; ix++ )
+        _pSAFCT[ip] += _pSACFCT[ix] * pIC[ix];
+  }    
+
+  return true;
+}
 
 inline
 bool
 ODESLVS_BASE::_CC_SET_FSA
 ( unsigned const pos_ic, unsigned const isen )
 {
-  _pIC = _vIC.at( pos_ic );
-  for( unsigned iy=0; iy<_ny; iy++ )   _pSAFCT[iy] = _pVAR[iy];
+  FFVar const* pIC = _vIC.at( pos_ic ).data();
+  for( unsigned iy=0; iy<_ny; iy++ ) _pSAFCT[iy] = _pVAR[iy];
   for( unsigned ip=0; ip<_np; ip++ ) _pSAFCT[_ny+ip] = (ip==isen? 1.: 0.);
-  delete[] _pSACFCT; _pSACFCT = _dag->DFAD( _nx, _pIC, _nx+_np, _pVAR+_ny, _pSAFCT );
-  for( unsigned iy=0; iy<_ny; iy++ )   _pSAFCT[iy] = _pSACFCT[iy];
+  delete[] _pSACFCT; _pSACFCT = _dag->DFAD( _nx, pIC, _nx+_np, _pVAR+_ny, _pSAFCT );
+  for( unsigned iy=0; iy<_ny; iy++ ) _pSAFCT[iy] = _pSACFCT[iy];
 
   return true;
 }
@@ -437,13 +464,14 @@ bool
 ODESLVS_BASE::_CC_SET_ASA
 ( unsigned const pos_ic, unsigned const pos_fct, unsigned const ifct )
 {
-  _pIC = _vIC.at( pos_ic );
-  FFVar pHAM = (pos_fct? _vFCT.at(pos_fct-1)[ifct]: 0.);
+  FFVar const* pIC = _vIC.at( pos_ic ).data();
+  FFVar pHAM = (!_vFCT.at(pos_fct).empty()? _vFCT.at(pos_fct)[ifct]: 0.);
+  //FFVar pHAM = (pos_fct? _vFCT.at(pos_fct-1)[ifct]: 0.);
 #ifdef CRONOS__ODESLVS_BASE_DEBUG
   std::cout << "pos_ic: " << pos_ic << std::endl;
   std::cout << "pos_fct: " << pos_fct << std::endl;
 #endif
-  for( unsigned ix=0; ix<_nx; ix++ ) pHAM += _pY[ix] * (pos_ic? _pIC[ix]: _pX[ix] );
+  for( unsigned ix=0; ix<_nx; ix++ ) pHAM += _pY[ix] * (pos_ic? pIC[ix]: _pX[ix] );
   //_dag->output( _dag->subgraph( 1, &pHAM ) );
 #ifndef CRONOS__ODESLVS_USE_BAD
   delete[] _pSACFCT; _pSACFCT = _dag->FAD( 1, &pHAM, _nx+_np, _pVAR+_ny );
@@ -461,12 +489,13 @@ bool
 ODESLVS_BASE::_TC_SET_ASA
 ( unsigned const pos_fct, unsigned const ifct )
 {
-  FFVar const* _pIC = _vFCT.at(pos_fct)+ifct;
+  FFVar const* pFCT = _vFCT.at(pos_fct).data();
+  //FFVar const* _pIC = _vFCT.at(pos_fct);//+ifct;
 
 #ifndef CRONOS__ODESLVS_USE_BAD
-  delete[] _pSACFCT; _pSACFCT = _dag->FAD( 1, _pIC, _nx+_np, _pVAR+_nx );
+  delete[] _pSACFCT; _pSACFCT = _dag->FAD( 1, pFCT+ifct, _nx+_np, _pVAR+_nx );
 #else
-  delete[] _pSACFCT; _pSACFCT = _dag->BAD( 1, _pIC, _nx+_np, _pVAR+_nx );
+  delete[] _pSACFCT; _pSACFCT = _dag->BAD( 1, pFCT+ifct, _nx+_np, _pVAR+_nx );
 #endif
 
   return true;
@@ -480,7 +509,7 @@ ODESLVS_BASE::_RHS_SET_FSA
   if( _vRHS.size() <= iRHS ) return false; 
   if( _nq && _vQUAD.size() <= iQUAD ) return false;
 
-  _pRHS =  _vRHS.at( iRHS );
+  _pRHS =  _vRHS.at( iRHS ).data();
 #ifdef CRONOS__ODESLVS_BASE_DEBUG
   std::ostringstream ofilename;
   ofilename << "vRHS.dot";
@@ -488,7 +517,7 @@ ODESLVS_BASE::_RHS_SET_FSA
   _dag->dot_script( _nx, _pRHS, ofile );
   ofile.close();
 #endif
-  _pQUAD  = _nq? _vQUAD.at( iQUAD ): nullptr;
+  _pQUAD = _nq? _vQUAD.at( iQUAD ).data(): nullptr;
 
   // Set sensitivity ODEs using directional derivatives
   for( unsigned iy=0; iy<_nx; iy++ ) _pSAFCT[iy] = _pVAR[iy];
@@ -514,26 +543,28 @@ inline
 bool
 ODESLVS_BASE::_RHS_SET_ASA
 ( unsigned const iRHS, unsigned const iQUAD,
-  unsigned const pos_fct, bool const neg )
+  unsigned const iFCT, bool const neg )
 {
   if( _vRHS.size() <= iRHS ) return false; 
   if( _nq && _vQUAD.size() <= iQUAD ) return false;
 
-  _pRHS = _vRHS.at( iRHS );
+  _pRHS = _vRHS.at( iRHS ).data();
   FFVar pHAM( 0. );
   for( unsigned ix=0; ix<_nx; ix++ ){
     if( neg ) pHAM -= _pVAR[ix] * _pRHS[ix];
     else      pHAM += _pVAR[ix] * _pRHS[ix];
   }
-  _pQUAD  = _nq? _vQUAD.at( iQUAD ): 0;
+  _pQUAD  = _nq? _vQUAD.at( iQUAD ).data(): nullptr;
   std::vector<FFVar> vHAM( _nf, pHAM );
-  if( pos_fct ){
-    FFVar const* pFCT = _vFCT.at(pos_fct-1);
+  
+  if( _nq && !_vFCT.at(iFCT).empty() ){
+    FFVar const* pFCT = _vFCT.at(iFCT).data();
+    //FFVar const* pFCT = _vFCT.at(pos_fct).data();
     for( unsigned ifct=0; ifct<_nf; ifct++ ){
 #ifndef CRONOS__ODESLVS_USE_BAD
-      delete[] _pSACFCT; _pSACFCT = _nq? _dag->FAD( 1, pFCT+ifct, _nq, _pQ ): nullptr;
+      delete[] _pSACFCT; _pSACFCT = _dag->FAD( 1, pFCT+ifct, _nq, _pQ );
 #else
-      delete[] _pSACFCT; _pSACFCT = _nq? _dag->BAD( 1, pFCT+ifct, _nq, _pQ ): nullptr;
+      delete[] _pSACFCT; _pSACFCT = _dag->BAD( 1, pFCT+ifct, _nq, _pQ );
 #endif
       for( unsigned iq=0; iq<_nq; iq++ ){
         if( !_pSACFCT[iq].cst() ) return false; // quadrature appears nonlinearly in function
@@ -582,6 +613,12 @@ bool
 ODESLVS_BASE::_TC_D_SEN
 ( double const& t, REALTYPE const* x, REALTYPE* y )
 {
+  if( !_pSACFCT ){
+    for( unsigned iy=0; iy<_ny; ++iy )
+      y[iy] = 0.;
+    return true;
+  }
+  
   *_Dt = t; // current time
   _vec2D( x, _nx, _Dx );
   _dag->eval( _ny, _pSACFCT, (double*)y, _nx+_np+1, _pVAR+_ny, _DVAR+_ny );
@@ -594,7 +631,24 @@ bool
 ODESLVS_BASE::_TC_D_QUAD_ASA
 ( REALTYPE* yq )
 {
+  if( !_pSACFCT ){
+    for( unsigned iy=0; iy<_np; ++iy )
+      yq[iy] = 0.;
+    return true;
+  }
+
   _dag->eval( _np, _pSACFCT+_ny, (double*)yq, _nx+_np+1, _pVAR+_ny, _DVAR+_ny );
+  return true;
+}
+
+template <typename REALTYPE>
+inline
+bool
+ODESLVS_BASE::_IC_D_SEN
+( double const& t, REALTYPE* y )
+{
+  *_Dt = t; // current time
+  _dag->eval( _nx, _pSACFCT, (double*)y, _np+1, _pVAR+_ny, _DVAR+_ny );
   return true;
 }
 
@@ -618,7 +672,7 @@ ODESLVS_BASE::_IC_D_QUAD_ASA
 {
   _vec2D( yq, _np, _Dyq );
   static double const one = 1.;
-  _dag->eval( _np, _pSACFCT, (double*)yq, _nVAR0, _pVAR, _DVAR, &one );
+  _dag->eval( _np, _pSAFCT, (double*)yq, _nVAR0, _pVAR, _DVAR, &one );
   _vec2D( yq, _np, _Dyq );
   return true;
 }
@@ -751,15 +805,18 @@ bool
 ODESLVS_BASE::_FCT_D_SEN
 ( unsigned const iFCT, unsigned const isen, double const& t )
 {
-  if( !_nf ) return true;
+  if( !_nf || _vFCT.at( iFCT ).empty() ) return true; // nothing to do if no function
+
   *_Dt = t; // set current time
-  _pIC = _vFCT.at( iFCT );
+  FFVar const* pFCT = _vFCT.at( iFCT ).data();
+  //_pIC = _vFCT.at( pos_fct ).data();
   for( unsigned iy=0; iy<_ny; iy++ )   _pSAFCT[iy] = _pY[iy];
   for( unsigned ip=0; ip<_np+1; ip++ ) _pSAFCT[_ny+ip] = (ip==isen? 1.: 0.); // includes time
   for( unsigned iq=0; iq<_nq; iq++ )   _pSAFCT[_nx+_np+1+iq] = _pYQ[iq];
-  delete[] _pSACFCT; _pSACFCT = _dag->DFAD( _nf, _pIC, _nx+_np+1+_nq, _pVAR+_ny, _pSAFCT );
+  delete[] _pSACFCT;
+  _pSACFCT = _dag->DFAD( _nf, pFCT, _nx+_np+1+_nq, _pVAR+_ny, _pSAFCT );
   static double const one = 1.;
-  _dag->eval( _nf, _pSACFCT, _Dfp.data()+isen*_nf, _nVAR, _pVAR, _DVAR, iFCT? &one: nullptr );
+  _dag->eval( _nf, _pSACFCT, _Dfp.data()+isen*_nf, _nVAR, _pVAR, _DVAR, &one );//iFCT? &one: nullptr );
 
   return true;
 }

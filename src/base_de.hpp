@@ -26,12 +26,12 @@ protected:
   FFGraph* _dag;
 
   //! @brief max size of time stages
-  size_t _nsmax;
+  size_t _ns;
 
-  //! @brief pointer to stage times (size _nsmax+1)
+  //! @brief stage times (size _ns+1)
   std::vector<double> _dT;
 
-  //! @brief pointer to time/independent variable
+  //! @brief time/independent variable
   std::vector<FFVar> _vT;
 
   //! @brief size of differential states
@@ -40,13 +40,13 @@ protected:
   //! @brief size of algebraic states
   size_t _na;
 
-  //! @brief pointer to state time derivatives
+  //! @brief state time derivatives
   std::vector<FFVar> _vDX;
 
   //! @brief size of states
   size_t _nx;
 
-  //! @brief vector of state variables - first _nd are differential states, next _na algebraic states
+  //! @brief state variables - first _nd are differential states, next _na algebraic states
   std::vector<FFVar> _vX;
 
   //! @brief map between DAG index and state index
@@ -58,25 +58,25 @@ protected:
 //  //! @brief size of sensitivity/adjoint variables
 //  size_t _ny;
 
-//  //! @brief pointer to sensitivity/adjoint variables
+//  //! @brief sensitivity/adjoint variables
 //  std::vector<FFVar> _vY;
 
   //! @brief size of constants
   size_t _nc;
 
-  //! @brief pointer to parameters
+  //! @brief constants
   std::vector<FFVar> _vC;
 
   //! @brief size of parameters
   size_t _np;
 
-  //! @brief pointer to parameters
+  //! @brief parameters
   std::vector<FFVar> _vP;
 
   //! @brief size of quadratures
   size_t _nq;
 
-  //! @brief pointer to quadrature variables
+  //! @brief quadrature variables
   std::vector<FFVar> _vQ;
 
   //! @brief map between DAG index and quadrature index
@@ -91,29 +91,29 @@ protected:
   //! @brief pointer to upper bound multipliers
   std::vector<FFVar>  _vMU;
 
-  //! @brief vector of const pointers to initial value in each stage of IVP-DAE system
+  //! @brief vector of initial value at start of each stage of IVP-DAE system
   std::vector<std::vector<FFVar>> _vIC;
 
-  //! @brief vector of const pointers to RHS of differential equations in each stage of IVP-DAE system
+  //! @brief vector of RHS of differential equations in each stage of IVP-DAE system
   std::vector<std::vector<FFVar>> _vDE;
 
-  //! @brief vector of const pointers to algebraic equations in each stage of IVP-DAE system
+  //! @brief vector of algebraic equations in each stage of IVP-DAE system
   std::vector<std::vector<FFVar>> _vAE;
 
-  //! @brief vector of const pointers to integrand of quadratures in each stage of IVP-DAE system
+  //! @brief vector of integrand of quadratures in each stage of IVP-DAE system
   std::vector<std::vector<FFVar>> _vQUAD;
 
   //! @brief size of invariants
   size_t _ni;
 
-  //! @brief vector of const pointers to invariant equations in each stage of IVP-DAE system
+  //! @brief vector of invariant equations in each stage of IVP-DAE system
   std::vector<std::vector<FFVar>> _vINV;
 
   //! @brief size of state functionals
   size_t _nf;
 
-  //! @brief vector of const pointers to functionals (assumes additive contributions) in each stage of IVP-DAE system
-  std::vector<std::vector<FFVar>> _vFCT;
+  //! @brief vector of functions (assumes additive contributions) at stage times of IVP-DAE system
+  std::vector<std::map<size_t,FFVar>> _vFCT;
 
   //! @brief state parametric dependency 
   std::vector<FFDep> _depX;
@@ -137,7 +137,7 @@ public:
   //! @brief Class constructor
   BASE_DE
     ()
-    : _dag(nullptr), _nsmax(0), _nd(0), _na(0), _nx(0), _nx0(0),
+    : _dag(nullptr), _ns(0), _nd(0), _na(0), _nx(0), _nx0(0),
       _nc(0), _np(0), _nq(0), _nbm(0), _ni(0), _nf(0), _nnzjac(0)
     {}
 
@@ -241,11 +241,11 @@ public:
     ( std::vector<FFVar> const& vP )
     { _np = vP.size(); _vP = vP; }
 
-  //! @brief Return max size of time stages
-  size_t nsmax
+  //! @brief Return size of time stages
+  size_t ns
     ()
     const
-    { return _nsmax; }
+    { return _ns; }
 
   //! @brief Get pointer to stage times
   std::vector<double> const& val_stage
@@ -267,22 +267,22 @@ public:
   //! @brief Set time
   void set_time
     ( std::vector<double> const& dT, FFVar const* pT=nullptr )
-    { _nsmax = dT.size()-1; _dT = dT;
+    { _ns = dT.size()-1; _dT = dT;
       if( pT ) _vT.assign( pT, pT+1 );
       else     _vT.clear(); }
 
-  //! @brief Get pointer to differential expressions
+  //! @brief Get RHS of differential expressions
   std::vector<std::vector<FFVar>> const& eqn_differential
     ()
     const
     { return _vDE; }
 
-  //! @brief Define differential equations in single-stage problem
+  //! @brief Define RHS of differential equations in all stages of DE
   void set_differential
     ( std::vector<FFVar> const& vDE )
     { _nd = vDE.size(); _vDE.assign( { vDE } ); }
 
-  //! @brief Define differential equations in multi-stage IVP-DAE
+  //! @brief Define RHS of differential equations in each stage of DE
   void set_differential
     ( std::vector<std::vector<FFVar>> const& vDE )
     { _nd = vDE.front().size(); _vDE = vDE; }
@@ -293,12 +293,12 @@ public:
     const
     { return _vAE; }
 
-  //! @brief Define algebraic equations in single-stage IVP-DAE
+  //! @brief Define algebraic equations in all stages of DE
   void set_algebraic
     ( std::vector<FFVar> const& vAE )
     { _na = vAE.size(); _vAE.assign( { vAE } ); }
 
-  //! @brief Define algebraic equations in multi-stage IVP-DAE
+  //! @brief Define algebraic equations in each stage of DE
   void set_algebraic
     ( std::vector<std::vector<FFVar>> const& vAE )
     { _na = vAE.front().size(); _vAE = vAE; }
@@ -321,12 +321,12 @@ public:
     const
     { return _vQUAD; }
 
-  //! @brief Define quadrature equations in single-stage IVP-DAE
+  //! @brief Define quadrature equations in all stages of DE
   void set_quadrature
     ( std::vector<FFVar> const& vQUAD, std::vector<FFVar> const& vQ )
     { set_quadrature( std::vector<std::vector<FFVar>>({vQUAD}), vQ ); }
 
-  //! @brief Define quadrature equations in multi-stage IVP-DAE with <a>ns</a> stages
+  //! @brief Define quadrature equations in each stage of DE
   void set_quadrature
     ( std::vector<std::vector<FFVar>> const& vQUAD, std::vector<FFVar> const& vQ )
     { _nq = vQ.size();
@@ -348,12 +348,12 @@ public:
     const
     { return _vINV; }
 
-  //! @brief Define invariant equations in single-stage IVP-DAE
+  //! @brief Define invariant equations in all stages of DE
   void set_invariant
     ( std::vector<FFVar> const& vINV )
     { _ni = vINV.size(); _vINV.assign( { vINV } ); }
 
-  //! @brief Define initial conditions in multi-stage IVP-DAE
+  //! @brief Define invariant equations in each stage of DE
   void set_invariant
     ( std::vector<std::vector<FFVar>> const& vINV )
     { _ni = vINV.front().size(); _vINV = vINV; }
@@ -370,12 +370,12 @@ public:
     const
     { return _vIC; }
 
-  //! @brief Define initial conditions in single-stage IVP-DAE
+  //! @brief Define initial conditions in initial stage of DE
   void set_initial
     ( std::vector<FFVar> const& vIC )
     { _nx0 = vIC.size(); _vIC.assign( { vIC } ); }
 
-  //! @brief Define initial conditions in multi-stage IVP-DAE
+  //! @brief Define initial conditions in each stage of DE
   void set_initial
     ( std::vector<std::vector<FFVar>> const& vIC )
     { _nx0 = vIC.front().size(); _vIC = vIC; }
@@ -386,21 +386,63 @@ public:
     const
     { return _nf; }
 
-  //! @brief Get initial conditions
-  std::vector<std::vector<FFVar>> const& eqn_function
+  //! @brief Get state function
+  std::vector<std::map<size_t,FFVar>> const& eqn_function
     ()
     const
     { return _vFCT; }
 
-  //! @brief Define state function in single-stage IVP-DAE
+  //! @brief Define state function in stage k of DE
+  void add_function
+    ( size_t const k, std::vector<FFVar> const& vFCTk )
+    { if( _vFCT.size() < k+1 ) _vFCT.resize( k+1 );
+      _vFCT[k].clear();
+      for( size_t i=0; i<vFCTk.size(); ++i )
+        if( !vFCTk[i].cst() && vFCTk[i].num().val() != 0 )
+          _vFCT[k][i] = vFCTk[i];
+      if( _nf < vFCTk.size() ) _nf = vFCTk.size(); }
+
+  //! @brief Define state function in stage k of DE
+  void add_function
+    ( size_t const k, std::map<size_t,FFVar> const& mFCTk )
+    { if( _vFCT.size() < k+1 ) _vFCT.resize( k+1 );
+      _vFCT[k] = mFCTk;
+      if( !mFCTk.empty() && _nf < mFCTk.rbegin()->first+1 )
+        _nf = mFCTk.rbegin()->first+1; }
+
+  //! @brief Define state function in final stage of DE
+  void set_function
+    ( std::map<size_t,FFVar> const& vFCT )
+    { _vFCT.resize( 1 );
+      _vFCT[0] = vFCT;
+      if( !vFCT.empty() && _nf < vFCT.rbegin()->first+1 )
+        _nf = vFCT.rbegin()->first+1; }
+
+  //! @brief Define state function in final stage of DE
   void set_function
     ( std::vector<FFVar> const& vFCT )
-    { _nf = vFCT.size(); _vFCT.assign( { vFCT } ); }
+    { _nf = vFCT.size();
+      _vFCT.resize( 1 );
+      _vFCT[0].clear();
+      for( size_t i=0; i<vFCT.size(); ++i )
+        if( !vFCT[i].cst() && vFCT[i].num().val() != 0 )
+          _vFCT[0][i] = vFCT[i]; }
 
-  //! @brief Define state functions in multi-stage IVP-DAE
+  //! @brief Define state functions in each stage DE
   void set_function
     ( std::vector<std::vector<FFVar>> const& vFCT )
-    { _nf = vFCT.front().size(); _vFCT = vFCT; }
+    { reset_function();
+      for( size_t k=0; k<vFCT.size(); ++k )
+        add_function( k, vFCT[k] ); }
+
+  //! @brief Define state functions in each stage DE
+  void set_function
+    ( std::vector<std::map<size_t,FFVar>> const& vFCT )
+    { _vFCT = vFCT; 
+      _nf = 0;
+      for( auto const& fct: vFCT )
+        if( !fct.empty() && _nf < fct.rbegin()->first+1 )
+          _nf = fct.rbegin()->first+1; }
 
   //! @brief Reset state functions
   void reset_function
@@ -411,7 +453,7 @@ public:
   void set
     ( BASE_DE const& de )
     { _dag = de._dag;
-      _nsmax = de._nsmax; _nx = de._nx; _nx0 = de._nx0; _nd = de._nd; _na = de._na;
+      _ns = de._ns; _nx = de._nx; _nx0 = de._nx0; _nd = de._nd; _na = de._na;
       _nq = de._nq; _nc = de._nc; _np = de._np; _ni = de._ni; _nf = de._nf; _nnzjac = de._nnzjac;
       _dT = de._dT; _vT = de._vT; _vX = de._vX; _vC = de._vC; _vP = de._vP; _vQ = de._vQ; _vDX = de._vDX;
       _ndxX = de._ndxX; _ndxQ = de._ndxQ;
@@ -453,19 +495,19 @@ protected:
       for( auto& ML : _vML ) ML.set( _dag );
       _vMU.resize( _np );
       for( auto& MU : _vMU ) MU.set( _dag ); }
-
+/*
   //! @brief Get pointer to initial/transition value function
   FFVar const* _pIC
     ( size_t const is=0 )
     const
     { return( is<_vIC.size()? _vIC.at( is ).data(): nullptr ); }
-
+*/
   //! @brief Get pointer to right-hand-side function
   const FFVar* _pRHS
     ( size_t const is )
     const
     { return( is<_vDE.size()? _vDE.at( is ).data(): nullptr ); }
-
+/*
   //! @brief Get pointer to quadrature function
   const FFVar* _pQUAD
     ( size_t const is )
@@ -477,7 +519,7 @@ protected:
     ( size_t const is )
     const
     { return( is<_vFCT.size()? _vFCT.at( is ).data(): nullptr ); }
-/*
+
   //! @brief Set state/quadrature dependencies w.r.t. parameters
   bool set_depend
     ( size_t const ns );
@@ -582,7 +624,7 @@ BASE_DE::set_sparse
   for( size_t ix=0; ix<_nx; ++ix ) depSTA[ix].indep( ix );
 
   // RHS dependencies
-  for( size_t is=0; is<_nsmax; ++is ){
+  for( size_t is=0; is<_ns; ++is ){
     size_t const pos_rhs  = ( _vDE.size()<=1?  0: is );
     FFVar const* pRHS  = _pRHS( pos_rhs );
     if( !pRHS ) return false;

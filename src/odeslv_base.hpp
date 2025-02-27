@@ -17,10 +17,6 @@
 
 #include "base_de.hpp"
 
-//#ifdef CRONOS__MBDOE_SETUP_DEBUG
-// #include "ffexpr.hpp"
-//#endif
-
 namespace mc
 {
 //! @brief C++ base class for computing solutions of parametric ODEs using continuous-time real-valued integration.
@@ -66,7 +62,7 @@ class ODESLV_BASE
   /** @} */
 
 protected:
-  using BASE_DE::_nsmax;
+  using BASE_DE::_ns;
   using BASE_DE::_nx;
   using BASE_DE::_nx0;
   using BASE_DE::_nc;
@@ -81,16 +77,16 @@ protected:
   FFGraph* _dag;
 
   //! @brief local copy of initial value functions
-  std::vector<FFVar*> _vIC;
+  std::vector<std::vector<FFVar>> _vIC;
 
   //! @brief local copy of right-hand-side functions
-  std::vector<FFVar*> _vRHS;
+  std::vector<std::vector<FFVar>> _vRHS;
 
   //! @brief local copy of quadrature functions
-  std::vector<FFVar*> _vQUAD;
+  std::vector<std::vector<FFVar>> _vQUAD;
 
   //! @brief local copy of output functions
-  std::vector<FFVar*> _vFCT;
+  std::vector<std::vector<FFVar>> _vFCT;
 
   //! @brief local copy of constants
   FFVar* _pC;
@@ -130,11 +126,6 @@ protected:
 
   //! @brief sparse representation of RHS Jacobian in current stage of ODE system: i-th entry is the index in data where the first non-zero matrix entry of the i-th column is stored (length NEQ + 1), last entry is number of non-zeros
   std::vector< size_t > _pJACCOLNDX;
-
-#if 0
-  //! @brief sparse representation of RHS Jacobian in current stage of ODE system
-  int* _NDXPJAC;
-#endif
 
   //! @brief number of variables for DAG evaluation
   unsigned _nVAR;
@@ -271,8 +262,7 @@ ODESLV_BASE::ODESLV_BASE
 : BASE_DE(),
   _dag(nullptr),
   _pC(nullptr), _pP(nullptr), _pT(nullptr), _pX(nullptr), _pQ(nullptr),
-  _pRHS(nullptr), _pQUAD(nullptr), _pIC(nullptr),
-  _pJAC(0,nullptr,nullptr,nullptr), 
+  _pJAC(0,nullptr,nullptr,nullptr),
   _nVAR(0), _nVAR0(0), _pVAR(nullptr),
   _DVAR(nullptr), _Dt(nullptr), _Dx(nullptr), _Dp(nullptr), _Dq(nullptr)
 {}
@@ -282,11 +272,6 @@ ODESLV_BASE::~ODESLV_BASE
 ()
 {
   /* DO NOT FREE _pRHS, _pQUAD, _pIC */
-  for( auto& ic   : _vIC )   delete[] ic;
-  for( auto& rhs  : _vRHS )  delete[] rhs;
-  for( auto& quad : _vQUAD ) delete[] quad;
-  for( auto& fct  : _vFCT )  delete[] fct;
-
   delete[] std::get<1>(_pJAC);  std::get<1>(_pJAC) = nullptr;
   delete[] std::get<2>(_pJAC);  std::get<2>(_pJAC) = nullptr;
   delete[] std::get<3>(_pJAC);  std::get<3>(_pJAC) = nullptr;
@@ -340,60 +325,32 @@ ODESLV_BASE::_SETUP
     _pQ  = new FFVar[_nq];
     _dag->insert( BASE_DE::_dag, _nq, BASE_DE::_vQ.data(), _pQ );
   }
-  
-  for( auto& ic : _vIC ) delete[] ic;
-  _vIC.clear();
-  _vIC.reserve( BASE_DE::_vIC.size() );
-  for( auto const& ic0 : BASE_DE::_vIC ){
-    FFVar* ic = new FFVar[_nx0];
-    _dag->insert( BASE_DE::_dag, _nx0, ic0.data(), ic );
-    _vIC.push_back( ic );
-  }
 
-  for( auto& rhs  : _vRHS )  delete[] rhs;
-  _vRHS.clear();
-  _vRHS.reserve( BASE_DE::_vDE.size() );
-  for( auto const& rhs0 : BASE_DE::_vDE ){
-#ifdef CRONOS__ODESLV_BASE_DEBUG
-    //BASE_DE::_dag->output( BASE_DE::_dag->subgraph( _nx, rhs0.data() ), " - Before insert" );
-    FFSubgraph sgrhs0 = BASE_DE::_dag->subgraph( _nx, rhs0.data() );
-    std::vector<FFExpr> exprrhs0 = FFExpr::subgraph( BASE_DE::_dag, sgrhs0 ); 
-    for( unsigned j=0; j<_nx; ++j )
-        std::cout << "RHS0[" << j << "] = " << exprrhs0[j] << std::endl;
-#endif
-    FFVar* rhs = new FFVar[_nx];
-    //for( unsigned j=0; j<_nx; ++j ){
-    //  BASE_DE::_dag->output( BASE_DE::_dag->subgraph( 1, rhs0.data()+j ), " - Before insert" );
-    //  _dag->insert( BASE_DE::_dag, 1, rhs0.data()+j, rhs+j );
-    //}
-    _dag->insert( BASE_DE::_dag, _nx, rhs0.data(), rhs );
-    _vRHS.push_back( rhs );
-#ifdef CRONOS__ODESLV_BASE_DEBUG
-    //_dag->output( _dag->subgraph( _nx, rhs ), " - After insert" );
-    FFSubgraph sgrhs = _dag->subgraph( _nx, rhs );
-    std::vector<FFExpr> exprrhs = FFExpr::subgraph( _dag, sgrhs ); 
-    for( unsigned j=0; j<_nx; ++j )
-        std::cout << "RHS[" << j << "] = " << exprrhs[j] << std::endl;
-#endif
-  }
-  //std::cout << *_dag;
+  _vIC.assign( BASE_DE::_vIC.size(), std::vector<FFVar>(_nx0) );
+  size_t k = 0;
+  for( auto const& vICk : BASE_DE::_vIC )
+    _dag->insert( BASE_DE::_dag, _nx0, vICk.data(), _vIC[k++].data() );
 
-  for( auto& quad : _vQUAD ) delete[] quad;
-  _vQUAD.clear();
-  _vQUAD.reserve( BASE_DE::_vQUAD.size() );
-  for( auto const& quad0 : BASE_DE::_vQUAD ){
-    FFVar* quad = new FFVar[_nq];
-    _dag->insert( BASE_DE::_dag, _nq, quad0.data(), quad );
-    _vQUAD.push_back( quad );
-  }
+  _vRHS.assign( BASE_DE::_vDE.size(), std::vector<FFVar>(_nx) );
+  k = 0;
+  for( auto const& vRHSk : BASE_DE::_vDE )
+    _dag->insert( BASE_DE::_dag, _nx, vRHSk.data(), _vRHS[k++].data() );
 
-  for( auto& fct  : _vFCT )  delete[] fct;
-  _vFCT.clear();
-  _vFCT.reserve( BASE_DE::_vFCT.size() );
-  for( auto const& fct0 : BASE_DE::_vFCT ){
-    FFVar* fct = new FFVar[_nf];
-    _dag->insert( BASE_DE::_dag, _nf, fct0.data(), fct );
-    _vFCT.push_back( fct );
+  _vQUAD.assign( BASE_DE::_vQUAD.size(), std::vector<FFVar>(_nq) );
+  k = 0;
+  for( auto const& vQUADk : BASE_DE::_vQUAD )
+    _dag->insert( BASE_DE::_dag, _nq, vQUADk.data(), _vQUAD[k++].data() );
+
+  if( BASE_DE::_vFCT.size() == 1 ){
+    _vFCT.assign( _ns+1, std::vector<FFVar>() ); // empty vectors except last stage
+    _vFCT[_ns].resize( _nf );
+    _dag->insert( BASE_DE::_dag, BASE_DE::_vFCT[0], _vFCT[_ns] );
+  }
+  else{// if( BASE_DE::_vFCT.size() == _ns+1 ){
+    _vFCT.assign( BASE_DE::_vFCT.size(), std::vector<FFVar>(_nf, 0. ) );
+    k = 0;
+    for( auto const& mFCTk : BASE_DE::_vFCT )
+      _dag->insert( BASE_DE::_dag, mFCTk, _vFCT[k++] );
   }
 
   return true;
@@ -405,7 +362,10 @@ ODESLV_BASE::_SETUP
 ( ODESLV_BASE const& IVP )
 {
   delete _dag; _dag = new FFGraph;
-
+#ifdef CRONOS__ODESLV_BASE_DEBUG
+  std::cout << "ODESLV_BASE:: IVP DAG:   " << IVP._dag << std::endl;
+#endif
+  
   delete _pT; _pT = nullptr;
   if( IVP._pT ){
     _pT  = new FFVar;
@@ -435,46 +395,27 @@ ODESLV_BASE::_SETUP
     _pP  = new FFVar[_np];
     _dag->insert( IVP._dag, _np, IVP._pP, _pP );
   }
-  
-  for( auto& ic : _vIC ) delete[] ic;
-  _vIC.clear();
-  _vIC.reserve( IVP._vIC.size() );
-  for( auto const& ic0 : IVP._vIC ){
-    FFVar* ic = new FFVar[_nx0];
-    _dag->insert( IVP._dag, _nx0, ic0, ic );
-    _vIC.push_back( ic );
-  }
+
+  _vIC.assign( IVP._vIC.size(), std::vector<FFVar>(_nx0) );
+  size_t k = 0;
+  for( auto const& vICk : IVP._vIC )
+    _dag->insert( IVP._dag, _nx0, vICk.data(), _vIC[k++].data() );
     
-  for( auto& rhs : _vRHS )  delete[] rhs;
-  _vRHS.clear();
-  _vRHS.reserve( IVP._vRHS.size() );
-  for( auto const& rhs0 : IVP._vRHS ){
-    //IVP._dag->output( IVP._dag->subgraph( 1, rhs0 ), " - Before insert" );
-    FFVar* rhs = new FFVar[_nx];
-    _dag->insert( IVP._dag, _nx, rhs0, rhs );
-    _vRHS.push_back( rhs );
-    //_dag->output( _dag->subgraph( 1, rhs ), " - After insert" );
-  }
-  //std::cout << *_dag;
+  _vQUAD.assign( IVP._vQUAD.size(), std::vector<FFVar>(_nq) );
+  k = 0;
+  for( auto const& vQUADk : IVP._vQUAD )
+    _dag->insert( IVP._dag, _nq, vQUADk.data(), _vQUAD[k++].data() );
 
-  for( auto& quad : _vQUAD ) delete[] quad;
-  _vQUAD.clear();
-  _vQUAD.reserve( IVP._vQUAD.size() );
-  for( auto const& quad0 : IVP._vQUAD ){
-    FFVar* quad = new FFVar[_nq];
-    _dag->insert( IVP._dag, _nq, quad0, quad );
-    _vQUAD.push_back( quad );
-  }
+  _vRHS.assign( IVP._vDE.size(), std::vector<FFVar>(_nx) );
+  k = 0;
+  for( auto const& vRHSk : IVP._vRHS )
+    _dag->insert( IVP._dag, _nx, vRHSk.data(), _vRHS[k++].data() );
 
-  for( auto& fct : _vFCT )  delete[] fct;
-  _vFCT.clear();
-  _vFCT.reserve( IVP._vFCT.size() );
-  for( auto const& fct0 : IVP._vFCT ){
-    FFVar* fct = new FFVar[_nf];
-    _dag->insert( IVP._dag, _nf, fct0, fct );
-    _vFCT.push_back( fct );
-  }
-
+  _vFCT.assign( IVP._vFCT.size(), std::vector<FFVar>(_nf, 0. ) );
+  k = 0;
+  for( auto const& vFCTk : IVP._vFCT )
+    _dag->insert( IVP._dag, vFCTk, _vFCT[k++] );
+  
   return true;
 }
 
@@ -546,7 +487,7 @@ ODESLV_BASE::_INI_D_STA
   _Dq = _Dt + 1;
   for( unsigned ip=0; ip<_np; ip++ ) _Dp[ip] = p[ip];
 
-  _Df.resize( _nf );
+  _Df.assign( _nf, 0. );
 
   return true;
 }
@@ -578,7 +519,7 @@ ODESLV_BASE::_IC_D_SET
 ()
 {
   if( !_vIC.size() || _nx0 != _nx ) return false;
-  _pIC = _vIC.at(0);
+  _pIC = _vIC.at(0).data();
   return true;
 }
 
@@ -609,7 +550,7 @@ ODESLV_BASE::_CC_D_SET
 ( unsigned const iIC )
 {
   if( _vIC.size() <= iIC || _nx0 != _nx ) return false;
-  _pIC = _vIC.at( iIC );
+  _pIC = _vIC.at( iIC ).data();
   return true;
 }
 
@@ -631,10 +572,10 @@ ODESLV_BASE::_RHS_D_SET
 ( unsigned const iRHS, unsigned const iQUAD )
 {
   if( _vRHS.size() <= iRHS ) return false;
-  _pRHS = _vRHS.at( iRHS );
+  _pRHS = _vRHS.at( iRHS ).data();
 
   if( _nq && _vQUAD.size() <= iQUAD ) return false;
-  _pQUAD = _nq? _vQUAD.at( iQUAD ): 0;
+  _pQUAD = _nq? _vQUAD.at( iQUAD ).data(): nullptr;
 
   // Generate Jacobian using sparse forward AD
   delete[] std::get<1>(_pJAC); delete[] std::get<2>(_pJAC); delete[] std::get<3>(_pJAC);
@@ -751,12 +692,14 @@ bool
 ODESLV_BASE::_FCT_D_STA
 ( unsigned const iFCT, double const& t )
 {
-  if( !_nf ) return true;
+  if( !_nf || _vFCT.at( iFCT ).empty() ) return true; // nothing to do if no function
+
   *_Dt = t; // current time
-  FFVar const* pFCT = _vFCT.at( iFCT );
+  FFVar const* pFCT = _vFCT.at( iFCT ).data();
   //std::cout << "evaluating functions @" << t << std::endl;
   static double const one = 1.;
-  _dag->eval( _nf, pFCT, _Df.data(), _nVAR, _pVAR, _DVAR, iFCT? &one: nullptr );
+  _dag->eval( _nf, pFCT, _Df.data(), _nVAR, _pVAR, _DVAR, &one );//iFCT? &one: nullptr );
+  
   return true;
 }
 

@@ -42,7 +42,7 @@ pyODESLV
  )
  .def_property_readonly(
    "ns",
-   []( ODESLVS const& self ){ return self.nsmax(); },
+   []( ODESLVS const& self ){ return self.ns(); },
    "number of stages"
  )
  .def(
@@ -177,14 +177,39 @@ pyODESLV
    "number of functions"
  )
  .def(
+   "add_function",
+   []( ODESLVS& self, size_t const stg, std::vector<mc::FFVar> const& fct ){ self.add_function( stg, fct ); },
+   "add stage contributions to state functions"
+ )
+ .def(
+   "add_function",
+   []( ODESLVS& self, size_t const stg, std::map<size_t,mc::FFVar> const& fct ){ self.add_function( stg, fct ); },
+   "add stage contributions to state functions"
+ )
+ .def(
    "set_function",
    []( ODESLVS& self, std::vector<mc::FFVar> const& fct ){ self.set_function( fct ); },
    "set state functions"
  )
  .def(
    "set_function",
+   []( ODESLVS& self, std::map<size_t,mc::FFVar> const& fct ){ self.set_function( fct ); },
+   "set state functions"
+ )
+ .def(
+   "set_function",
    []( ODESLVS& self, std::vector<std::vector<mc::FFVar>> const& fct ){ self.set_function( fct ); },
    "set state functions"
+ )
+ .def(
+   "set_function",
+   []( ODESLVS& self, std::vector<std::map<size_t,mc::FFVar>> const& fct ){ self.set_function( fct ); },
+   "set state functions"
+ )
+ .def(
+   "reset_function",
+   []( ODESLVS& self ){ self.reset_function(); },
+   "reset state functions"
  )
  .def_property_readonly(
    "eqn_function",

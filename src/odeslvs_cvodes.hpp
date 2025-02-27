@@ -40,7 +40,7 @@ class ODESLVS_CVODES
   using ODESLV_BASE::_Dq;
   using ODESLV_BASE::_Df;
       
-  using ODESLVS_BASE::_nsmax;
+  using ODESLVS_BASE::_ns;
   using ODESLVS_BASE::_istg;
   using ODESLVS_BASE::_t;
   using ODESLVS_BASE::_dT;
@@ -710,9 +710,9 @@ ODESLVS_CVODES::_REINI_SEN
 ()
 {
   // reset at time stages
-  _xpk.clear(); _xpk.reserve(_nsmax);
-  _lk.clear();  _lk.reserve(_nsmax);
-  _qpk.clear(); _qpk.reserve(_nsmax);
+  _xpk.clear(); _xpk.reserve(_ns);
+  _lk.clear();  _lk.reserve(_ns);
+  _qpk.clear(); _qpk.reserve(_ns);
   _fp.clear();  _fp.reserve(_nf);
 
   return true;
@@ -907,17 +907,17 @@ ODESLVS_CVODES::_states_ASA
   try{
     // Initialize adjoint integration
     if( !_INI_ASA( p ) ) return STATUS::FATAL;
-    _t = _dT[_nsmax];
+    _t = _dT[_ns];
     const unsigned NSTEP = options.RESRECORD? options.RESRECORD: 1;
 
     // Terminal adjoint & quadrature values
-    _lk.resize( _nsmax+1, std::vector<std::vector<double>>( _nf ) );
-    _qpk.resize( _nsmax+1, std::vector<std::vector<double>>( _nf ) );
-//    if( lk && !lk[_nsmax] ) lk[_nsmax] = new double[(_nx+_np)*_nf];
-    _pos_fct = ( _vFCT.size()>=_nsmax? _nsmax-1:0 );
+    _lk.resize( _ns+1, std::vector<std::vector<double>>( _nf ) );
+    _qpk.resize( _ns+1, std::vector<std::vector<double>>( _nf ) );
+//    if( lk && !lk[_ns] ) lk[_ns] = new double[(_nx+_np)*_nf];
+    _pos_fct = _ns;// ( _vFCT.size()>=_ns? _ns-1:0 );
     for( _ifct=0; _ifct < _nf; _ifct++ ){
       if( !_TC_SET_ASA( _pos_fct, _ifct )
-       || !_TC_D_SEN( _t, _xk[_nsmax].data(), NV_DATA_S(_Ny[_ifct]) )
+       || !_TC_D_SEN( _t, _xk[_ns].data(), NV_DATA_S(_Ny[_ifct]) )
        || ( _Nyq && _Nyq[_ifct] && !_TC_D_QUAD_ASA( NV_DATA_S(_Nyq[_ifct]) ) ) )
         { _END_SEN(); return STATUS::FATAL; }
       _GET_D_SEN( NV_DATA_S(_Ny[_ifct]), _np, _Nyq? NV_DATA_S(_Nyq[_ifct]): nullptr );
@@ -925,11 +925,11 @@ ODESLVS_CVODES::_states_ASA
         _Dfp[iq*_nf+_ifct] = _Dyq[iq];
 
       // Display / record / return adjoint terminal values
-      _lk[_nsmax].push_back( std::vector<double>( _Dy, _Dy+_ny ) );
-      _qpk[_nsmax].push_back( std::vector<double>( _Dyq, _Dyq+_np ) );
+      _lk[_ns].push_back( std::vector<double>( _Dy, _Dy+_ny ) );
+      _qpk[_ns].push_back( std::vector<double>( _Dyq, _Dyq+_np ) );
       if( options.DISPLAY >= 1 ){
         std::ostringstream ol; ol << " l[" << _ifct << "]";
-        if( !_ifct ) _print_interm( _dT[_nsmax], _nx, _Dy, ol.str(), os );
+        if( !_ifct ) _print_interm( _dT[_ns], _nx, _Dy, ol.str(), os );
         else         _print_interm( _nx, _Dy, ol.str(), os );
         std::ostringstream oq; oq << " qp[" << _ifct << "]";
         _print_interm( _np, _Dyq, oq.str(), os );
@@ -937,7 +937,7 @@ ODESLVS_CVODES::_states_ASA
       if( options.RESRECORD )
         results_sensitivity[_ifct].push_back( Results( _t, _nx, _Dy, _np, _Dyq ) );
 //      for( unsigned iy=0; lk && iy<_ny+_np; iy++ )
-//        lk[_nsmax][_ifct*(_nx+_np)+iy] = iy<_ny? _Dy[iy]: _Dyq[iy-_ny];
+//        lk[_ns][_ifct*(_nx+_np)+iy] = iy<_ny? _Dy[iy]: _Dyq[iy-_ny];
     }
 
     // Initialization of adjoint integration
@@ -946,22 +946,24 @@ ODESLVS_CVODES::_states_ASA
         { _END_SEN(); return STATUS::FATAL;}
 
     // Integrate adjoint ODEs through each stage using SUNDIALS
-    for( _istg=_nsmax; _istg>0; _istg-- ){
+    for( _istg=_ns; _istg>0; _istg-- ){
 
       // Is forward state evaluation needed after discontinuity?
-      if( _istg<_nsmax && _vIC.size()>=_nsmax ){
+      if( _istg<_ns && _vIC.size()>=_ns ){
         _t = _dT[_istg-1];
         _D2vec( _xk[_istg-1].data(), _nx, NV_DATA_S( _Nx ) );
         if(_Nq ) _IC_D_QUAD( NV_DATA_S( _Nq ) );
+#ifdef CRONOS__ODESLVS_CVODES_DEBUG
         std::cout << "RESTARTING FORWARD INTEGRATION at t=" << _t << std::endl;
+#endif
         _states_stage( _istg-1, _t, _Nx, _Nq, true, true, false, os );
       }
 
       // Update list of operations in RHSADJ and QUADADJ
       _pos_rhs  = ( _vRHS.size() <=1? 0: _istg-1 );
       _pos_quad = ( _vQUAD.size()<=1? 0: _istg-1 );
-      _pos_fct  = ( _vFCT.size()>=_nsmax? _istg: ( _vFCT.size()==1 && _istg==_nsmax? 1: 0 ) );   
-      //_vFCT.size()>=_nsmax? _istg: 0 );
+      _pos_fct  = _istg;// ( _vFCT.size()>=_ns? _istg: ( _vFCT.size()==1 && _istg==_ns? 1: 0 ) );   
+      //_vFCT.size()>=_ns? _istg: 0 );
 #ifdef CRONOS__ODESLVS_CVODES_DEBUG
       std::cout << "pos_fct: " << _pos_fct << std::endl;
 #endif
@@ -970,7 +972,7 @@ ODESLVS_CVODES::_states_ASA
        || !_RHS_D_SET( _nf, _np ) )
         { _END_SEN(); return STATUS::FATAL; }
 
-      // Propagate bounds backward to previous stage time
+      // Propagate adjoints backward to previous stage time
       _t = _dT[_istg];
       const double TSTEP = ( _t - _dT[_istg-1] ) / NSTEP;
       double TSTOP = _t-TSTEP;
@@ -1035,33 +1037,43 @@ ODESLVS_CVODES::_states_ASA
           std::cout << "_Nyq" << _ifct << "[" << ip << "] = " << NV_Ith_S(_Nyq[_ifct],ip) << std::endl;
 #endif
         // Add function contribution to adjoint values (discontinuities)
-        if( _istg > 1  ){
-          _pos_ic  = ( _vIC.size() >=_nsmax? _istg-1: 0 );
-          _pos_fct = ( _vFCT.size()>=_nsmax? _istg-1: 0 );
+        if( _istg > 1 ){
+          _pos_ic  = ( _vIC.size() >=_ns? _istg-1: 0 );
+          _pos_fct = _istg-1;//( _vFCT.size()>=_ns? _istg-1: 0 );
           if( ( _pos_fct || _pos_ic )
            && ( !_CC_SET_ASA( _pos_ic, _pos_fct, _ifct )
              || !_CC_D_SEN( _t, _xk[_istg-1].data(), NV_DATA_S(_Ny[_ifct]) )
              || ( _Nyq && _Nyq[_ifct] && !_CC_D_QUAD_ASA( NV_DATA_S(_Nyq[_ifct]) ) ) ) )
             { _END_SEN(); return STATUS::FATAL; }
-          //else if( !_pos_fct )
-            _GET_D_SEN( NV_DATA_S(_Ny[_ifct]), _np, _Nyq && _Nyq[_ifct]? NV_DATA_S(_Nyq[_ifct]): 0 );
+
 #ifdef CRONOS__ODESLVS_CVODES_DEBUG
           for( unsigned iy=0; iy<_ny; iy++ )
             std::cout << "_Ny" << _ifct << "[" << iy << "] = " << NV_Ith_S(_Ny[_ifct],iy) << std::endl;
           for( unsigned ip=0; ip<_np; ip++ )
             std::cout << "_Nyq" << _ifct << "[" << ip << "] = " << NV_Ith_S(_Nyq[_ifct],ip) << std::endl;
 #endif
-
+          _GET_D_SEN( NV_DATA_S(_Ny[_ifct]), _np, _Nyq && _Nyq[_ifct]? NV_DATA_S(_Nyq[_ifct]): 0 );
+          
           // Reset ODE solver - needed in case of discontinuity
           if( !_CC_CVODES_ASA( _ifct, _indexB[_ifct] ) )
             { _END_SEN(); return STATUS::FATAL; }
         }
         
         // Add initial state contribution to function derivatives 
-        else if( !_IC_SET_ASA()
-              || !_IC_D_SEN( _t, _xk[_istg-1].data(), NV_DATA_S(_Ny[_ifct]) )
-              || ( _Nyq && _Nyq[_ifct] && !_IC_D_QUAD_ASA( NV_DATA_S(_Nyq[_ifct]) ) ) )
+        else{
+          if( !_IC_SET_ASA( _ifct )
+           || !_IC_D_SEN( _t, _xk[_istg-1].data(), NV_DATA_S(_Ny[_ifct]) )
+           || ( _Nyq && _Nyq[_ifct] && !_IC_D_QUAD_ASA( NV_DATA_S(_Nyq[_ifct]) ) ) )
           { _END_SEN(); return STATUS::FATAL; }
+          
+#ifdef CRONOS__ODESLVS_CVODES_DEBUG
+          for( unsigned iy=0; iy<_ny; iy++ )
+            std::cout << "_Ny" << _ifct << "[" << iy << "] = " << NV_Ith_S(_Ny[_ifct],iy) << std::endl;
+          for( unsigned ip=0; ip<_np; ip++ )
+            std::cout << "_Nyq" << _ifct << "[" << ip << "] = " << NV_Ith_S(_Nyq[_ifct],ip) << std::endl;
+#endif
+          _GET_D_SEN( NV_DATA_S(_Ny[_ifct]), _np, _Nyq && _Nyq[_ifct]? NV_DATA_S(_Nyq[_ifct]): 0 );
+        }
 
         // Display / record / return adjoint terminal values
         _lk[_istg-1].push_back( std::vector<double>( _Dy, _Dy+_ny ) );
@@ -1274,6 +1286,11 @@ ODESLVS_CVODES::_states_FSA
       { _END_STA(); _END_SEN(); return STATUS::FATAL; }
     ODESLV_BASE::_GET_D_STA( NV_DATA_S(_Nx), _nq && _Nq? NV_DATA_S(_Nq): nullptr );
 
+    // Add initial function terms
+    _pos_fct = 0;
+    if( !ODESLV_BASE::_FCT_D_STA( _pos_fct, _t ) )
+      { _END_STA(); _END_SEN(); return STATUS::FATAL; }
+
     // Display / record / return initial results
     _xk.push_back( std::vector<double>( _Dx, _Dx+_nx ) );
     if( _nq ) _qk.push_back( std::vector<double>( _Dq, _Dq+_nq ) );
@@ -1289,7 +1306,7 @@ ODESLVS_CVODES::_states_FSA
     if( _nq ) _qpk.push_back( std::vector<std::vector<double>>( _np ) );
     for( _isen=0; _isen<_np; _isen++ ){
       if( !_IC_SET_FSA( _isen )
-       || !ODESLV_BASE::_IC_D_STA( _t, NV_DATA_S(_Ny[_isen]) )
+       || !_IC_D_SEN( _t, NV_DATA_S(_Ny[_isen]) )
        || ( _Nyq && _Nyq[_isen] && !ODESLV_BASE::_IC_D_QUAD( NV_DATA_S(_Nyq[_isen]) ) ) ) 
         { _END_STA(); _END_SEN(); return STATUS::FATAL; }
       _GET_D_SEN( NV_DATA_S(_Ny[_isen]), _nq, _nq && _Nyq? NV_DATA_S(_Nyq[_isen]): nullptr );
@@ -1307,6 +1324,10 @@ ODESLVS_CVODES::_states_FSA
 //        results_sensitivity[_isen].push_back( Results( _t, _nx, NV_DATA_S(_Ny[_isen]), _nq, _nq? NV_DATA_S(_Nyq[_isen]):nullptr ) );
 //      for( unsigned ix=0; xpk && ix<_nx+_nq; ix++ )
 //        xpk[0][(_nx+_nq)*_isen+ix] = ix<_nx? _Dy[ix]: _Dyq[ix-_nx];
+
+      // Add initial function derivative terms
+      if( !_FCT_D_SEN( _pos_fct, _isen, _t ) )
+          { _END_STA(); _END_SEN(); return STATUS::FATAL; }
     }
 
     // Integrate ODEs through each stage using SUNDIALS
@@ -1314,11 +1335,11 @@ ODESLVS_CVODES::_states_FSA
      || !_INI_CVODES_FSA() )
       { _END_STA(); _END_SEN(); return STATUS::FATAL; }
 
-    for( _istg=0; _istg<_nsmax; _istg++ ){
+    for( _istg=0; _istg<_ns; _istg++ ){
     
       // Account for state/sensitivity discontinuities (if any) at stage times
       // and solver reinitialization (if applicable)
-      _pos_ic = ( _vIC.size()>=_nsmax? _istg:0 );
+      _pos_ic = ( _vIC.size()>=_ns? _istg:0 );
       if( _pos_ic
        && ( !ODESLV_BASE::_CC_D_SET( _pos_ic )
          || !ODESLV_BASE::_CC_D_STA( _t, NV_DATA_S( _Nx ) )
@@ -1417,9 +1438,10 @@ ODESLVS_CVODES::_states_FSA
       }
 
       // Add intermediate function terms
-      _pos_fct = ( _vFCT.size()>=_nsmax? _istg:0 );
-      if( (_vFCT.size()>=_nsmax || _istg==_nsmax-1)
-       && !ODESLV_BASE::_FCT_D_STA( _pos_fct, _t ) )
+      _pos_fct = _istg+1;//( _vFCT.size()>=_ns? _istg:0 );
+//      if( (_vFCT.size()>=_ns || _istg==_ns-1)
+//       && !ODESLV_BASE::_FCT_D_STA( _pos_fct, _t ) )
+      if( !ODESLV_BASE::_FCT_D_STA( _pos_fct, _t ) )
         { _END_STA(); _END_SEN(); return STATUS::FATAL; }
 
       // Intermediate state and quadrature sensitivities
@@ -1452,8 +1474,9 @@ ODESLVS_CVODES::_states_FSA
 //          xpk[_istg+1][(_nx+_nq)*_isen+ix] = ix<_nx? _Dy[ix]: _Dyq[ix-_nx];
 
         // Add intermediate function derivative terms
-        if( (_vFCT.size()>=_nsmax || _istg==_nsmax-1)
-         && !_FCT_D_SEN( _pos_fct, _isen, _t ) )
+//        if( (_vFCT.size()>=_ns || _istg==_ns-1)
+//         && !_FCT_D_SEN( _pos_fct, _isen, _t ) )
+        if( !_FCT_D_SEN( _pos_fct, _isen, _t ) )
           { _END_STA(); _END_SEN(); return STATUS::FATAL; }
       }
     }
@@ -1630,23 +1653,33 @@ const
 #ifdef CRONOS__ODESLVS_FDIFF_DEBUG
     k = 0;
 #endif
-    std::vector<std::vector<FFVar>> vFCT;
+    std::vector<std::map<size_t,FFVar>> vFCT;
     for( auto& fct : BASE_DE::_vFCT ){
-      vFCT.push_back( std::vector<FFVar>(_nf*nPar) );
+      vFCT.push_back( std::map<size_t,FFVar>() );
+      std::vector<FFVar> vFCTk( _nf, 0. );
+      for( auto const& [j, fctj]: fct )
+        vFCTk[j] = fctj;
+
+//      vFCT.push_back( std::vector<FFVar>(_nf*nPar) );
       for( unsigned i=0; i<nPar; ++i ){
         mc::FFVar* fct_i = _nq? 
-          _dag->DFAD( _nf, fct.data(), _nx, vX.data(), vX.data()+_nx*(1+i), _nq, vQ.data(), vQ.data()+_nq*(1+i), 1, &pPar[i], &FFOne ):
-          _dag->DFAD( _nf, fct.data(), _nx, vX.data(), vX.data()+_nx*(1+i), 1, &pPar[i], &FFOne );
-        for( size_t j=0; j<_nf; ++j ) vFCT.back()[_nf*i+j] = fct_i[j];
+          _dag->DFAD( _nf, vFCTk.data(), _nx, vX.data(), vX.data()+_nx*(1+i), _nq, vQ.data(), vQ.data()+_nq*(1+i), 1, &pPar[i], &FFOne ):
+          _dag->DFAD( _nf, vFCTk.data(), _nx, vX.data(), vX.data()+_nx*(1+i), 1, &pPar[i], &FFOne );
+        for( auto const& [j,_]: fct ) vFCT.back()[_nf*i+j] = fct_i[j];  
+        //for( size_t j=0; j<_nf; ++j ) vFCT.back()[_nf*i+j] = fct_i[j];
         //for( size_t j=0; j<_nf; ++j ) vFCT.back()[i+j*nPar] = fct_i[j];
         delete[] fct_i;
       }
 #ifdef CRONOS__ODESLVS_FDIFF_DEBUG
-      FFSubgraph sgFCT = _dag->subgraph( _nf*nPar, vFCT.back().data() );
-      std::vector<FFExpr> exprFCT = FFExpr::subgraph( _dag, sgFCT ); 
-      for( unsigned i=0, ij=0; i<nPar; ++i )
-        for( unsigned j=0; j<_nf; ++j, ++ij )
-          std::cout << "FCT[" << k << "][" << i << "][" << j << "] = " << exprFCT[ij] << std::endl;
+      FFSubgraph sgFCT = _dag->subgraph( vFCT.back() );
+      _dag->output( sgFCT );
+      //FFSubgraph sgFCT = _dag->subgraph( _nf*nPar, vFCT.back().data() );
+      std::vector<FFExpr> exprFCT = FFExpr::subgraph( _dag, sgFCT );
+      size_t ij = 0;
+      for( auto const& exprFCTij : exprFCT )
+      //for( unsigned i=0, ij=0; i<nPar; ++i )
+        //for( unsigned j=0; j<_nf; ++j, ++ij )
+          std::cout << "FCT[" << k << "][" << ij++ << "] = " << exprFCTij << std::endl;
       ++k;
 #endif
     }

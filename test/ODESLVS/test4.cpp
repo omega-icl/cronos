@@ -42,10 +42,10 @@ int main()
     QUAD[k].assign( { 0.5 * mc::sqr( P[k] ) } );
 
   const unsigned NF = 2;  // Number of state functions
-  std::vector<std::vector<mc::FFVar>> FCT(NS);  // State functions
-  for( unsigned k=0; k<NS-1; k++ )
-    FCT[k].assign( { 0., Q[0] } );
-  FCT[NS-1].assign( { X[0], Q[0] } );
+  std::vector<std::map<size_t,mc::FFVar>> FCT(NS+1);  // State functions
+  for( unsigned k=1; k<NS; k++ )
+    FCT[k] = { { 1, Q[0] } };
+  FCT[NS] = { { 0, X[0] }, { 1, Q[0] } };
 
 
   mc::ODESLVS_CVODES IVP;

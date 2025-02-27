@@ -27,7 +27,7 @@ class ODESLV_CVODES
   using ODESLV_BASE::_print_interm;
   using ODESLV_BASE::_record;
 
-  using ODESLV_BASE::_nsmax;
+  using ODESLV_BASE::_ns;
   using ODESLV_BASE::_istg;
   using ODESLV_BASE::_t;
   using ODESLV_BASE::_dT;
@@ -157,6 +157,7 @@ public:
    public:
     //! @brief Enumeration type for ODESLV_CVODES exception handling
     enum TYPE{
+      BADSIZE=-1,	//!< Inconsistent model size
       INTERN=-33	//!< Internal error
     };
     //! @brief Constructor for error <a>ierr</a>
@@ -166,6 +167,8 @@ public:
     //! @brief Inline function returning the error description
     std::string what(){
       switch( _ierr ){
+      case BADSIZE:
+        return "ODESLV_CVODES::Exceptions  Inconsistent model size";
       case INTERN: default:
         return "ODESLV_CVODES::Exceptions  Internal error";
        }
@@ -551,8 +554,8 @@ ODESLV_CVODES::_INI_STA
   }
 
   // reset at time stages
-  _xk.clear(); _xk.reserve(_nsmax);
-  _qk.clear(); _qk.reserve(_nsmax);
+  _xk.clear(); _xk.reserve(_ns);
+  _qk.clear(); _qk.reserve(_ns);
   _f.clear();  _f.reserve(_nf);
 
   // Reset result record and statistics
@@ -668,7 +671,7 @@ ODESLV_CVODES::_states_stage
 {
   // State discontinuities (if any) at stage times
   // and integrator reinitialization (if applicable)
-  _pos_ic = ( _vIC.size()>=_nsmax? istg:0 );
+  _pos_ic = ( _vIC.size()>=_ns? istg:0 );
   if( _pos_ic && ( !_CC_D_SET( _pos_ic )
                 || !_CC_D_STA( t, NV_DATA_S( Nx ) )
                 || !_CC_CVODE_STA() ) )
@@ -756,15 +759,20 @@ ODESLV_CVODES::_states
 //    if( options.RESRECORD )
 //      results_state.push_back( Results( _t, _nx, NV_DATA_S(_Nx), _nq, _nq? NV_DATA_S(_Nq): nullptr ) );
 
+    // Add initial function terms (if any)
+    _pos_fct = 0;
+    if( !_FCT_D_STA( _pos_fct, _t ) )
+      { _END_STA(); return STATUS::FATAL; }
+
     // Integrate ODEs through each stage using SUNDIALS
     if( !_INI_CVODE() )
       { _END_STA(); return STATUS::FATAL; }
 
-    for( _istg=0; _istg<_nsmax; _istg++ ){
+    for( _istg=0; _istg<_ns; _istg++ ){
 
       // Integrate states over stage
       _states_stage( _istg, _t, _Nx, _Nq, false, store, options.RESRECORD, os );
-//      _states_stage( _istg, _t, _Nx, _Nq, false, (_istg<_nsmax-1? false: store), options.RESRECORD, os );
+//      _states_stage( _istg, _t, _Nx, _Nq, false, (_istg<_ns-1? false: store), options.RESRECORD, os );
 
 //      // Store full state at stage time
 //      if( store ){
@@ -789,9 +797,9 @@ ODESLV_CVODES::_states
         _print_interm( _nq, _Dq, " q", os );
       }
 
-      // Add intermediate function terms
-      _pos_fct = ( _vFCT.size()>=_nsmax? _istg:0 );
-      if( (_vFCT.size()>=_nsmax || _istg==_nsmax-1) && !_FCT_D_STA( _pos_fct, _t ) )
+      // Add intermediate/terminal function terms (if any)
+      _pos_fct = _istg+1;//( _vFCT.size()>=_ns+1? _istg+1:0 );
+      if( !_FCT_D_STA( _pos_fct, _t ) )
         { _END_STA(); return STATUS::FATAL; }
     }
 #ifdef CRONOS__ODESLV_CVODES_DEBUG

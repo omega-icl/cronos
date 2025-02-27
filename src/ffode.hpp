@@ -138,17 +138,34 @@ public:
     ()
     {}
 
+  FFVar** operator()
+    ( std::vector<FFVar> const& vPar, std::vector<FFVar> const& vCst, ODESLVS_CVODES* pODESLV, int policy=COPY )
+//    const
+    {
+      return _set( vPar.size(), vPar.data(), vCst.size(), vCst.data(), pODESLV, policy );
+    }
+
+  FFVar& operator()
+    ( unsigned const idep, std::vector<FFVar> const& vPar, std::vector<FFVar> const& vCst, ODESLVS_CVODES* pODESLV, int policy=COPY )
+//    const
+    {
+#ifdef CRONOS__FFODE_CHECK
+      assert( idep < pODESLV->nf() );
+#endif
+      return *(_set( vPar.size(), vPar.data(), vCst.size(), vCst.data(), pODESLV, policy )[idep]);
+    }
+
   // Define operation
   FFVar& operator()
     ( unsigned const idep, unsigned const nPar, FFVar const* pPar, ODESLVS_CVODES* pODESLV, int policy=COPY )
 //    const
     {
 #ifdef CRONOS__FFODE_CHECK
-      assert( idep < pODESLV->nf()*nPar );
+      assert( idep < pODESLV->nf() );
 #endif
       return *(_set( nPar, pPar, 0, nullptr, pODESLV, policy )[idep]);
     }
-
+    
   FFVar** operator()
     ( unsigned const nPar, FFVar const* pPar, ODESLVS_CVODES* pODESLV, int policy=COPY )
 //    const
@@ -162,7 +179,7 @@ public:
 //    const
     {
 #ifdef CRONOS__FFODE_CHECK
-      assert( idep < pODESLV->nf()*nPar );
+      assert( idep < pODESLV->nf() );
 #endif
       return *(_set( nPar, pPar, nCst, pCst, pODESLV, policy )[idep]);
     }

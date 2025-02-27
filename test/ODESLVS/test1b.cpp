@@ -49,10 +49,10 @@ int main()
 //  FCT[1] = Q[0]; //P[0] * pow( X[0], 2 );
 //  //FCT[0] = Q[0]; //P[0] * pow( X[0], 2 );
 
-  std::vector<std::vector<mc::FFVar>> FCT(NS);  // State functions
-  for( unsigned k=0; k<NS-1; k++ )
-    FCT[k].assign( { X[0] * X[1], Q[0] } );
-  FCT[NS-1].assign( { X[0] * X[1], Q[0] } );
+  std::vector<std::map<size_t,mc::FFVar>> FCT(NS+1);  // State functions
+  for( unsigned k=1; k<NS; k++ )
+    FCT[k] = { { 1, Q[0] } };
+  FCT[NS] = { { 0, X[0] * X[1] }, { 1, Q[0] } };
 
 
   mc::ODESLVS_CVODES IVP;

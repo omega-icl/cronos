@@ -65,7 +65,7 @@ public:
       std::cout << "FFBaseODE::copy constructor\n";
 #endif
       if( !Op._pODESLV )
-        throw std::runtime_error( "FFBaseODE::copy constructor ** Undefined ODE solver\n" );
+        throw std::runtime_error( "FFBaseODE::copy constructor ** Null pointer to ODE solver\n" );
 
       _ownODESLV = Op._ownODESLV;      
       if( _ownODESLV ){
@@ -81,7 +81,7 @@ public:
         _pODESLV   = Op._pODESLV;
     }
 
-  //! @brief MCODE options
+  //! @brief FFODE options - static so that can still be accessed/modified after setup
   static struct Options
   {
     //! @brief Constructor
@@ -138,16 +138,15 @@ public:
     ()
     {}
 
+  // Define operation
   FFVar** operator()
     ( std::vector<FFVar> const& vPar, std::vector<FFVar> const& vCst, ODESLVS_CVODES* pODESLV, int policy=COPY )
-//    const
     {
       return _set( vPar.size(), vPar.data(), vCst.size(), vCst.data(), pODESLV, policy );
     }
 
   FFVar& operator()
     ( unsigned const idep, std::vector<FFVar> const& vPar, std::vector<FFVar> const& vCst, ODESLVS_CVODES* pODESLV, int policy=COPY )
-//    const
     {
 #ifdef CRONOS__FFODE_CHECK
       assert( idep < pODESLV->nf() );
@@ -155,10 +154,8 @@ public:
       return *(_set( vPar.size(), vPar.data(), vCst.size(), vCst.data(), pODESLV, policy )[idep]);
     }
 
-  // Define operation
   FFVar& operator()
     ( unsigned const idep, unsigned const nPar, FFVar const* pPar, ODESLVS_CVODES* pODESLV, int policy=COPY )
-//    const
     {
 #ifdef CRONOS__FFODE_CHECK
       assert( idep < pODESLV->nf() );
@@ -168,7 +165,6 @@ public:
     
   FFVar** operator()
     ( unsigned const nPar, FFVar const* pPar, ODESLVS_CVODES* pODESLV, int policy=COPY )
-//    const
     {
       return _set( nPar, pPar, 0, nullptr, pODESLV, policy );
     }
@@ -176,7 +172,6 @@ public:
   FFVar& operator()
     ( unsigned const idep, unsigned const nPar, FFVar const* pPar, unsigned const nCst, FFVar const* pCst,
       ODESLVS_CVODES* pODESLV, int policy=COPY )
-//    const
     {
 #ifdef CRONOS__FFODE_CHECK
       assert( idep < pODESLV->nf() );
@@ -187,7 +182,6 @@ public:
   FFVar** operator()
     ( unsigned const nPar, FFVar const* pPar, unsigned const nCst, FFVar const* pCst,
       ODESLVS_CVODES* pODESLV, int policy=COPY )
-//    const
     {
       return _set( nPar, pPar, nCst, pCst, pODESLV, policy );
     }
@@ -344,7 +338,6 @@ public:
   // Define operation
   FFVar& operator()
     ( unsigned const idep, unsigned const nPar, FFVar const* pPar, ODESLVS_CVODES* pODESLV, int policy=COPY )
-//    const
     {
 #ifdef CRONOS__FFODE_CHECK
       assert( idep < pODESLV->nf()*nPar );
@@ -354,7 +347,6 @@ public:
 
   FFVar** operator()
     ( unsigned const nPar, FFVar const* pPar, ODESLVS_CVODES* pODESLV, int policy=COPY )
-//    const
     {
       return _set( nPar, pPar, 0, nullptr, pODESLV, policy );
     }
@@ -362,7 +354,6 @@ public:
   FFVar& operator()
     ( unsigned const idep, unsigned const nPar, FFVar const* pPar, unsigned const nCst, FFVar const* pCst,
       ODESLVS_CVODES* pODESLV, int policy=COPY )
-//    const
     {
 #ifdef CRONOS__FFODE_CHECK
       assert( idep < pODESLV->nf()*nPar );
@@ -373,7 +364,6 @@ public:
   FFVar** operator()
     ( unsigned const nPar, FFVar const* pPar, unsigned const nCst, FFVar const* pCst,
       ODESLVS_CVODES* pODESLV, int policy=COPY )
-//    const
     {
       return _set( nPar, pPar, nCst, pCst, pODESLV, policy );
     }
@@ -441,7 +431,6 @@ protected:
   FFVar** _set
     ( unsigned const nPar, FFVar const* pPar, unsigned const nCst, FFVar const* pCst,
       ODESLVS_CVODES* pODESLV, int policy )
-//    const
     {
 #ifdef CRONOS__FFODE_CHECK
   assert( pODESLV && nPar == _pODESLV->np() && ( !pCst || nCst == _pODESLV->nc() ) );
@@ -468,7 +457,6 @@ protected:
 #endif
       return ppRes;
     }
-
 };
 
 inline void
@@ -733,17 +721,24 @@ const
     FFVar const*const* vResDer = ResDer._set( _nPar, vVar, _nCst, vVar+_nPar, pODESLVSEN, -1 ); // ask to transfer ownership of ODE data
     for( unsigned k=0; k<nRes; ++k )
       for( unsigned i=0; i<nVar; ++i )
-        vDer[k][i] = i<_nPar? *vResDer[k+nRes*i]: 0;
+        vDer[k][i] = (i<_nPar? *vResDer[k+nRes*i]: 0);
   }
 
   else if( options.DIFF == Options::SYM_C ){
     FFODE ResDer;
+#ifdef CRONOS__FFODE_CHECK
+    std::cout << "Constants:\n";
+    for( unsigned i=0; i<_nCst; ++i )
+      std::cout << "C[" << i << "]: " << _pODESLV->var_constant()[i] << "  " << vVar[_nPar+i] << std::endl;
+#endif    
     auto pODESLVSEN = _pODESLV->fdiff( _nCst, _pODESLV->var_constant().data() );
     pODESLVSEN->setup();
     FFVar const*const* vResDer = ResDer._set( _nPar, vVar, _nCst, vVar+_nPar, pODESLVSEN, -1 ); // ask to transfer ownership of ODE data
     for( unsigned k=0; k<nRes; ++k )
-      for( unsigned i=0; i<nVar; ++i )
-        vDer[k][i] = i>=_nPar? *vResDer[k+nRes*(i-_nPar)]: 0;
+      for( unsigned i=0; i<nVar; ++i ){
+        //std::cout << "vDer[" << k << "][" << i << "]\n"; 
+        vDer[k][i] = (i>=_nPar? *vResDer[k+nRes*(i-_nPar)]: 0);
+      }
   }
 
   else if( options.DIFF == Options::SYM_PC ){

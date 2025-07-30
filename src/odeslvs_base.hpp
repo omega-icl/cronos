@@ -7,6 +7,7 @@
 
 #undef  CRONOS__ODESLVS_BASE_DEBUG
 
+#include "ffexpr.hpp"
 #include "odeslv_base.hpp"
 
 namespace mc
@@ -401,6 +402,16 @@ ODESLVS_BASE::_IC_SET_FSA
 ( unsigned const isen )
 {
   FFVar const* pIC = _vIC.at( 0 ).data();
+#ifdef CRONOS__ODESLVS_BASE_DEBUG
+  auto sgIC = _dag->subgraph( _nx, pIC );
+  //_dag->output( sgIC, " pIC" );
+  std::vector<FFExpr> exIC = FFExpr::subgraph( _dag, sgIC ); 
+  for( size_t i=0; i<_nx; ++i )
+    std::cout << "IC[" << i << "] = " << exIC[i] << std::endl;
+  std::cout << "P[" << isen << "] = " << _pVAR[_ny+_nx+isen] << std::endl;
+  {std::cout << "Enter <1> to continue"; int dum; std::cin >> dum;}
+#endif
+
   delete[] _pSACFCT; _pSACFCT = _dag->FAD( _nx, pIC, 1, _pVAR+_ny+_nx+isen );
   pIC = _pSACFCT;
   return true;
@@ -551,8 +562,8 @@ ODESLVS_BASE::_RHS_SET_ASA
   _pRHS = _vRHS.at( iRHS ).data();
   FFVar pHAM( 0. );
   for( unsigned ix=0; ix<_nx; ix++ ){
-    if( neg ) pHAM -= _pVAR[ix] * _pRHS[ix];
-    else      pHAM += _pVAR[ix] * _pRHS[ix];
+    if( neg ) pHAM -= _pY[ix] * _pRHS[ix];
+    else      pHAM += _pY[ix] * _pRHS[ix];
   }
   _pQUAD  = _nq? _vQUAD.at( iQUAD ).data(): nullptr;
   std::vector<FFVar> vHAM( _nf, pHAM );
@@ -573,6 +584,9 @@ ODESLVS_BASE::_RHS_SET_ASA
       }
     }
   }
+#ifdef CRONOS__ODESLVS_BASE_DEBUG
+  _dag->output( _dag->subgraph( _nf, vHAM.data() ) );
+#endif
 
   for( unsigned ifct=0; ifct<_nf; ifct++ ){
 #ifndef CRONOS__ODESLVS_USE_BAD
@@ -584,10 +598,22 @@ ODESLVS_BASE::_RHS_SET_ASA
 #endif
   }
 
-  delete[] std::get<1>(_pJAC); delete[] std::get<2>(_pJAC); delete[] std::get<3>(_pJAC);
-  _pJAC = _dag->SFAD( _nx, _vSARHS[0], _ny, _pY ); // Jacobian in sparse format
+  // Generate Jacobian transpose using sparse forward AD
+  //std::cout << "_RHS_SET_ASA:: pJAC address: "
+  //          << std::get<1>(_pJAC) << " " << std::get<2>(_pJAC) << " " << std::get<3>(_pJAC) << std::endl;
+  std::swap( std::get<1>(_pJAC), std::get<2>(_pJAC) );
+//  delete[] std::get<1>(_pJAC); delete[] std::get<2>(_pJAC); delete[] std::get<3>(_pJAC);
+//  std::cout << "Computing Jacobian" << std::endl;
+//#ifdef CRONOS__ODESLVS_BASE_DEBUG
+//  _dag->output( _dag->subgraph( _ny, _pY ) );
+//  _dag->output( _dag->subgraph( _nx, _vSARHS[0] ) );
+//#endif
+//  _pJAC = _dag->SFAD( _nx, _vSARHS[0], _ny, _pY ); // Jacobian in sparse format
+//  std::cout << "_RHS_SET_ASA:: pJAC address: "
+//            << std::get<1>(_pJAC) << " " << std::get<2>(_pJAC) << " " << std::get<3>(_pJAC) << std::endl;
   _pJACCOLNDX.resize( _nx+1 );
   for( unsigned ie=0, ic=0; ie<std::get<0>(_pJAC); ++ie ){
+    if( neg ) std::get<3>(_pJAC)[ie] = -std::get<3>(_pJAC)[ie];
 #ifdef CRONOS__ODESLVS_BASE_DEBUG
     std::cout << "  JACB[" << std::get<1>(_pJAC)[ie] << ", " << std::get<2>(_pJAC)[ie] << "]" << std::endl;
 #endif
@@ -647,8 +673,19 @@ bool
 ODESLVS_BASE::_IC_D_SEN
 ( double const& t, REALTYPE* y )
 {
+#ifdef CRONOS__ODESLVS_BASE_DEBUG
+  auto sgSACFCT = _dag->subgraph( _nx, _pSACFCT );
+  //_dag->output( sgSACFCT ), " _pSACFCT" );
+  std::vector<FFExpr> exSACFCT = FFExpr::subgraph( _dag, sgSACFCT ); 
+  for( size_t i=0; i<_nx; ++i )
+    std::cout << "SACFCT[" << i << "] = " << exSACFCT[i] << std::endl;
+  for( size_t i=0; i<_np+1; ++i )
+    std::cout << "P[" << i << "] = " << _pVAR[_ny+_nx+i] << std::endl;
+  {std::cout << "Enter <1> to continue"; int dum; std::cin >> dum;}
+#endif
+
   *_Dt = t; // current time
-  _dag->eval( _nx, _pSACFCT, (double*)y, _np+1, _pVAR+_ny, _DVAR+_ny );
+  _dag->eval( _nx, _pSACFCT, (double*)y, _np+1, _pVAR+_ny+_nx, _DVAR+_ny+_nx );
   return true;
 }
 
@@ -773,14 +810,14 @@ ODESLVS_BASE::_JAC_D_SEN
                (double*)jac, _nVAR0, _pVAR, _DVAR );
   for( unsigned ie=0; ie<std::get<0>(_pJAC); ++ie ){
     vals[ie] = (INDEXTYPE)std::get<1>(_pJAC)[ie];
-#ifdef CRONOS__ODESLV_BASE_DEBUG
+#ifdef CRONOS__ODESLVS_BASE_DEBUG
     std::cout << "  jac[" << ie << "] = " << jac[ie] << std::endl;
     std::cout << "  vals[" << ie << "] = " << vals[ie] << std::endl;
 #endif
   }
   for( unsigned ic=0; ic<=_nx; ++ic ){
     ptrs[ic] = (INDEXTYPE) _pJACCOLNDX[ic];
-#ifdef CRONOS__ODESLV_BASE_DEBUG
+#ifdef CRONOS__ODESLVS_BASE_DEBUG
     std::cout << "  ptrs[" << ic << "] = " << ptrs[ic] << std::endl;
 #endif
   }

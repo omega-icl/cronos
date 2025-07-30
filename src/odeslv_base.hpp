@@ -122,7 +122,7 @@ protected:
   FFVar const* _pIC;
 
   //! @brief sparse representation of RHS Jacobian in current stage of ODE system
-  std::tuple< unsigned, unsigned const*, unsigned const*, FFVar const* > _pJAC;
+  std::tuple< unsigned, unsigned*, unsigned*, FFVar* > _pJAC;
 
   //! @brief sparse representation of RHS Jacobian in current stage of ODE system: i-th entry is the index in data where the first non-zero matrix entry of the i-th column is stored (length NEQ + 1), last entry is number of non-zeros
   std::vector< size_t > _pJACCOLNDX;
@@ -518,6 +518,8 @@ bool
 ODESLV_BASE::_IC_D_SET
 ()
 {
+  //std::cout << "ENTERING _IC_D_SET\n";
+  //std::cout << _vIC.size() << " " << _nx0 << " " << _nx << std::endl;
   if( !_vIC.size() || _nx0 != _nx ) return false;
   _pIC = _vIC.at(0).data();
   return true;

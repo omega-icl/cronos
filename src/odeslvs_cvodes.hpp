@@ -361,6 +361,7 @@ class ODESLVS_CVODES
   ODESLVS_CVODES& operator=( ODESLVS_CVODES const& ) = delete;
 };
 
+inline
 ODESLVS_CVODES::ODESLVS_CVODES
 ()
 : _sun_matB(nullptr), _sun_lsB(nullptr), _sun_nlsB(nullptr), _sun_nlsF(nullptr),
@@ -368,6 +369,7 @@ ODESLVS_CVODES::ODESLVS_CVODES
   _indexB(nullptr), _iusrB(nullptr)
 {}
 
+inline
 ODESLVS_CVODES::~ODESLVS_CVODES
 ()
 {
@@ -381,6 +383,7 @@ ODESLVS_CVODES::~ODESLVS_CVODES
   if( _sun_matB ) SUNMatDestroy( _sun_matB );    /* Free the matrix memory */
 }
 
+inline
 bool
 ODESLVS_CVODES::_INI_CVODE
 ()
@@ -399,6 +402,7 @@ ODESLVS_CVODES::_INI_CVODE
   return true;
 }
 
+inline
 bool
 ODESLVS_CVODES::_INI_CVODES_ASA
 ( unsigned const ifct, int& indexB, unsigned& iusrB )
@@ -530,6 +534,7 @@ ODESLVS_CVODES::_INI_CVODES_ASA
   return true;
 }
 
+inline
 bool
 ODESLVS_CVODES::_INI_CVODES_FSA
 ()
@@ -637,6 +642,7 @@ ODESLVS_CVODES::_INI_CVODES_FSA
   return true;
 }
 
+inline
 bool
 ODESLVS_CVODES::_CC_CVODES_ASA
 ( unsigned const ifct, int const indexB )
@@ -671,6 +677,7 @@ ODESLVS_CVODES::_CC_CVODES_ASA
   return true;
 }
 
+inline
 bool
 ODESLVS_CVODES::_CC_CVODES_FSA
 ()
@@ -682,6 +689,7 @@ ODESLVS_CVODES::_CC_CVODES_FSA
   return true;
 }
 
+inline
 bool
 ODESLVS_CVODES::_CC_CVODES_QUAD
 ()
@@ -694,6 +702,7 @@ ODESLVS_CVODES::_CC_CVODES_QUAD
   return true;
 }
 
+inline
 void
 ODESLVS_CVODES::_END_SEN
 ()
@@ -705,6 +714,7 @@ ODESLVS_CVODES::_END_SEN
   _final_stats( stats_sensitivity );
 }
 
+inline
 bool
 ODESLVS_CVODES::_REINI_SEN
 ()
@@ -755,7 +765,13 @@ ODESLVS_CVODES::MC_CVRHSB__
   //          << "  PTR_CVRHSB: " << PTR_CVRHSB << std::endl;
   assert( BASE_CVODES::PTR_BASE_CVODES != nullptr && PTR_CVRHSB != nullptr);
 #endif
-  return (BASE_CVODES::PTR_BASE_CVODES->*PTR_CVRHSB)( t, x, y, ydot, user_data );
+  //return (BASE_CVODES::PTR_BASE_CVODES->*PTR_CVRHSB)( t, x, y, ydot, user_data );
+  BASE_CVODES::PTR_BASE_CVODES->reregistration();
+  auto PTR_BASE_CVODES_ = BASE_CVODES::PTR_BASE_CVODES;
+  auto flag = (BASE_CVODES::PTR_BASE_CVODES->*PTR_CVRHSB)( t, x, y, ydot, user_data );
+  BASE_CVODES::PTR_BASE_CVODES = PTR_BASE_CVODES_;
+  //std::cout << "BASE_CVODES::PTR_BASE_CVODES: RHS Exit " << BASE_CVODES::PTR_BASE_CVODES << std::endl;
+  return flag;
 }
 
 inline
@@ -791,7 +807,13 @@ ODESLVS_CVODES::MC_CVJACB__
   //          << "  PTR_CVJACB: " << PTR_CVJACB << std::endl;
   assert( BASE_CVODES::PTR_BASE_CVODES != nullptr && PTR_CVJACB != nullptr);
 #endif
-  return (BASE_CVODES::PTR_BASE_CVODES->*PTR_CVJACB)( t, x, y, fy, Jac, user_data, tmp1, tmp2, tmp3 );
+  //return (BASE_CVODES::PTR_BASE_CVODES->*PTR_CVJACB)( t, x, y, fy, Jac, user_data, tmp1, tmp2, tmp3 );
+  BASE_CVODES::PTR_BASE_CVODES->reregistration();
+  auto PTR_BASE_CVODES_ = BASE_CVODES::PTR_BASE_CVODES;
+  auto flag = (BASE_CVODES::PTR_BASE_CVODES->*PTR_CVJACB)( t, x, y, fy, Jac, user_data, tmp1, tmp2, tmp3 );
+  BASE_CVODES::PTR_BASE_CVODES = PTR_BASE_CVODES_;
+  //std::cout << "BASE_CVODES::PTR_BASE_CVODES: RHS Exit " << BASE_CVODES::PTR_BASE_CVODES << std::endl;
+  return flag;
 }
 
 inline
@@ -833,7 +855,13 @@ ODESLVS_CVODES::MC_CVQUADB__
   //          << "  PTR_CVQUADB: " << PTR_CVQUADB << std::endl;
   assert( BASE_CVODES::PTR_BASE_CVODES != nullptr && PTR_CVQUADB != nullptr);
 #endif
-  return (BASE_CVODES::PTR_BASE_CVODES->*PTR_CVQUADB)( t, x, y, qdot, user_data );
+  //return (BASE_CVODES::PTR_BASE_CVODES->*PTR_CVQUADB)( t, x, y, qdot, user_data );
+  BASE_CVODES::PTR_BASE_CVODES->reregistration();
+  auto PTR_BASE_CVODES_ = BASE_CVODES::PTR_BASE_CVODES;
+  auto flag = (BASE_CVODES::PTR_BASE_CVODES->*PTR_CVQUADB)( t, x, y, qdot, user_data );
+  BASE_CVODES::PTR_BASE_CVODES = PTR_BASE_CVODES_;
+  //std::cout << "BASE_CVODES::PTR_BASE_CVODES: RHS Exit " << BASE_CVODES::PTR_BASE_CVODES << std::endl;
+  return flag;
 }
 
 inline
@@ -856,6 +884,7 @@ ODESLVS_CVODES::CVQUADB__
 //!  - <a>os</a> [input/output]  output stream [default: std::cout]
 //! .
 //! The return value is the status.
+inline
 typename ODESLVS_CVODES::STATUS
 ODESLVS_CVODES::solve_adjoint
 ( std::vector<double> const& p, std::vector<double> const& c, std::ostream& os )
@@ -876,6 +905,7 @@ ODESLVS_CVODES::solve_adjoint
 //!  - <a>os</a> [input/output]  output stream [default: std::cout]
 //! .
 //! The return value is the status.
+inline
 typename ODESLVS_CVODES::STATUS
 ODESLVS_CVODES::solve_adjoint
 ( double const* p, double const* c, std::ostream& os )
@@ -886,6 +916,7 @@ ODESLVS_CVODES::solve_adjoint
   return flag;
 }
 
+inline
 typename ODESLVS_CVODES::STATUS
 ODESLVS_CVODES::_states_ASA
 ( double const* p, double const* c, std::ostream& os )
@@ -1117,6 +1148,7 @@ ODESLVS_CVODES::_states_ASA
   return STATUS::NORMAL;
 }
 
+inline
 bool
 ODESLVS_CVODES::_INI_FSA
 ( double const* p )
@@ -1151,7 +1183,13 @@ ODESLVS_CVODES::MC_CVRHSF__
   //          << "  PTR_CVRHSF: " << PTR_CVRHSF << std::endl;
   assert( BASE_CVODES::PTR_BASE_CVODES != nullptr && PTR_CVRHSF != nullptr);
 #endif
-  return (BASE_CVODES::PTR_BASE_CVODES->*PTR_CVRHSF)( Ns, t, x, xdot, is, y, ydot, user_data, tmp1, tmp2 );
+  //return (BASE_CVODES::PTR_BASE_CVODES->*PTR_CVRHSF)( Ns, t, x, xdot, is, y, ydot, user_data, tmp1, tmp2 );
+  BASE_CVODES::PTR_BASE_CVODES->reregistration();
+  auto PTR_BASE_CVODES_ = BASE_CVODES::PTR_BASE_CVODES;
+  auto flag = (BASE_CVODES::PTR_BASE_CVODES->*PTR_CVRHSF)( Ns, t, x, xdot, is, y, ydot, user_data, tmp1, tmp2 );
+  BASE_CVODES::PTR_BASE_CVODES = PTR_BASE_CVODES_;
+  //std::cout << "BASE_CVODES::PTR_BASE_CVODES: RHS Exit " << BASE_CVODES::PTR_BASE_CVODES << std::endl;
+  return flag;
 }
 
 inline
@@ -1187,7 +1225,13 @@ ODESLVS_CVODES::MC_CVQUADF__
   //          << "  PTR_CVQUADF: " << PTR_CVQUADF << std::endl;
   assert( BASE_CVODES::PTR_BASE_CVODES != nullptr && PTR_CVQUADF != nullptr);
 #endif
-  return (BASE_CVODES::PTR_BASE_CVODES->*PTR_CVQUADF)( Ns, t, x, y, qdot, qSdot, user_data, tmp1, tmp2 );
+  //return (BASE_CVODES::PTR_BASE_CVODES->*PTR_CVQUADF)( Ns, t, x, y, qdot, qSdot, user_data, tmp1, tmp2 );
+  BASE_CVODES::PTR_BASE_CVODES->reregistration();
+  auto PTR_BASE_CVODES_ = BASE_CVODES::PTR_BASE_CVODES;
+  auto flag = (BASE_CVODES::PTR_BASE_CVODES->*PTR_CVQUADF)( Ns, t, x, y, qdot, qSdot, user_data, tmp1, tmp2 );
+  BASE_CVODES::PTR_BASE_CVODES = PTR_BASE_CVODES_;
+  //std::cout << "BASE_CVODES::PTR_BASE_CVODES: RHS Exit " << BASE_CVODES::PTR_BASE_CVODES << std::endl;
+  return flag;
 }
 
 inline
@@ -1229,8 +1273,8 @@ ODESLVS_CVODES::CVQUADF__
 //!  - <a>os</a>  [input/output]  output stream [default: std::cout]
 //! .
 //! The return value is the status.
-typename ODESLVS_CVODES::STATUS
 inline
+typename ODESLVS_CVODES::STATUS
 ODESLVS_CVODES::solve_sensitivity
 ( std::vector<double> const& p, std::vector<double> const& c, std::ostream& os )
 {
@@ -1250,8 +1294,8 @@ ODESLVS_CVODES::solve_sensitivity
 //!  - <a>os</a>  [input/output]  output stream [default: std::cout]
 //! .
 //! The return value is the status.
-typename ODESLVS_CVODES::STATUS
 inline
+typename ODESLVS_CVODES::STATUS
 ODESLVS_CVODES::solve_sensitivity
 ( double const* p, double const* c, std::ostream& os )
 {
@@ -1261,8 +1305,8 @@ ODESLVS_CVODES::solve_sensitivity
   return flag;
 }
 
-typename ODESLVS_CVODES::STATUS
 inline
+typename ODESLVS_CVODES::STATUS
 ODESLVS_CVODES::_states_FSA
 ( double const* p, double const* c, std::ostream& os )
 {
@@ -1545,7 +1589,8 @@ const
 //! .
 //! The return value is a pointer to the sensitivity parametric ODEs, whose associated
 //! memory needs to be freed after use.
-inline ODESLVS_CVODES*
+inline
+ODESLVS_CVODES*
 ODESLVS_CVODES::fdiff
 ( size_t const nPar, FFVar const* pPar )
 const

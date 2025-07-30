@@ -328,6 +328,7 @@ private:
   ODESLV_CVODES& operator=( ODESLV_CVODES const& ) = delete;
 };
 
+inline
 ODESLV_CVODES::ODESLV_CVODES
 ()
 : BASE_CVODES(), BASE_DE(), ODESLV_BASE(),
@@ -335,6 +336,7 @@ ODESLV_CVODES::ODESLV_CVODES
   _Nx(nullptr), _Nq(nullptr)
 {}
 
+inline
 ODESLV_CVODES::~ODESLV_CVODES
 ()
 {
@@ -347,6 +349,7 @@ ODESLV_CVODES::~ODESLV_CVODES
 
 }
 
+inline
 bool
 ODESLV_CVODES::_INI_CVODE
 ()
@@ -478,6 +481,7 @@ ODESLV_CVODES::_INI_CVODE
   return true;
 }
 
+inline
 bool
 ODESLV_CVODES::_CC_CVODE_STA
 ()
@@ -505,6 +509,7 @@ ODESLV_CVODES::_CC_CVODE_STA
   return true;
 }
 
+inline
 bool
 ODESLV_CVODES::_CC_CVODE_QUAD
 ()
@@ -518,6 +523,7 @@ ODESLV_CVODES::_CC_CVODE_QUAD
   return true;
 }
 
+inline
 void
 ODESLV_CVODES::_END_STA
 ( bool const store )
@@ -529,6 +535,7 @@ ODESLV_CVODES::_END_STA
   _final_stats( stats_state );
 }
 
+inline
 bool
 ODESLV_CVODES::_INI_STA
 ( double const* p, double const* c )
@@ -539,6 +546,7 @@ ODESLV_CVODES::_INI_STA
   return true;
 }
 
+inline
 bool
 ODESLV_CVODES::_INI_STA
 ()
@@ -575,7 +583,14 @@ ODESLV_CVODES::MC_CVRHS__
   //          << "  PTR_CVRHS: " << PTR_CVRHS << std::endl;
   assert( BASE_CVODES::PTR_BASE_CVODES != nullptr && PTR_CVRHS != nullptr);
 #endif
-  return (BASE_CVODES::PTR_BASE_CVODES->*PTR_CVRHS)( t, y, ydot, user_data );
+  //return (BASE_CVODES::PTR_BASE_CVODES->*PTR_CVRHS)( t, y, ydot, user_data );
+  //std::cout << "BASE_CVODES::PTR_BASE_CVODES: RHS Enter " << BASE_CVODES::PTR_BASE_CVODES << std::endl;
+  BASE_CVODES::PTR_BASE_CVODES->reregistration();
+  auto PTR_BASE_CVODES_ = BASE_CVODES::PTR_BASE_CVODES;
+  auto flag = (BASE_CVODES::PTR_BASE_CVODES->*PTR_CVRHS)( t, y, ydot, user_data );
+  BASE_CVODES::PTR_BASE_CVODES = PTR_BASE_CVODES_;
+  //std::cout << "BASE_CVODES::PTR_BASE_CVODES: RHS Exit " << BASE_CVODES::PTR_BASE_CVODES << std::endl;
+  return flag;
 }
 
 inline
@@ -607,7 +622,15 @@ ODESLV_CVODES::MC_CVQUAD__
   //          << "  PTR_CVQUAD: " << PTR_CVQUAD << std::endl;
   assert( BASE_CVODES::PTR_BASE_CVODES != nullptr && PTR_CVQUAD != nullptr);
 #endif
-  return (BASE_CVODES::PTR_BASE_CVODES->*PTR_CVQUAD)( t, y, qdot, user_data );
+  //return (BASE_CVODES::PTR_BASE_CVODES->*PTR_CVQUAD)( t, y, qdot, user_data );
+  //std::cout << "BASE_CVODES::PTR_BASE_CVODES: QUAD Enter " << BASE_CVODES::PTR_BASE_CVODES << std::endl;
+  BASE_CVODES::PTR_BASE_CVODES->reregistration();
+  auto PTR_BASE_CVODES_ = BASE_CVODES::PTR_BASE_CVODES;
+  auto flag = (BASE_CVODES::PTR_BASE_CVODES->*PTR_CVQUAD)( t, y, qdot, user_data );
+  BASE_CVODES::PTR_BASE_CVODES = PTR_BASE_CVODES_;
+  //std::cout << "BASE_CVODES::PTR_BASE_CVODES: QUAD Exit " << BASE_CVODES::PTR_BASE_CVODES << std::endl;
+  return flag;
+
 }
 
 inline
@@ -630,7 +653,14 @@ ODESLV_CVODES::MC_CVJAC__
   //          << "  PTR_CVJAC: " << PTR_CVJAC << std::endl;
   assert( BASE_CVODES::PTR_BASE_CVODES != nullptr && PTR_CVJAC != nullptr);
 #endif
-  return (BASE_CVODES::PTR_BASE_CVODES->*PTR_CVJAC)( t, y, ydot, Jac, user_data, tmp1, tmp2, tmp3 );
+  //return (BASE_CVODES::PTR_BASE_CVODES->*PTR_CVJAC)( t, y, ydot, Jac, user_data, tmp1, tmp2, tmp3 );
+  //std::cout << "BASE_CVODES::PTR_BASE_CVODES: JAC Enter " << BASE_CVODES::PTR_BASE_CVODES << std::endl;
+  BASE_CVODES::PTR_BASE_CVODES->reregistration();
+  auto PTR_BASE_CVODES_ = BASE_CVODES::PTR_BASE_CVODES;
+  auto flag = (BASE_CVODES::PTR_BASE_CVODES->*PTR_CVJAC)( t, y, ydot, Jac, user_data, tmp1, tmp2, tmp3 );
+  BASE_CVODES::PTR_BASE_CVODES = PTR_BASE_CVODES_;
+  //std::cout << "BASE_CVODES::PTR_BASE_CVODES: JAC Exit " << BASE_CVODES::PTR_BASE_CVODES << std::endl;
+  return flag;
 }
 
 inline
@@ -664,6 +694,7 @@ ODESLV_CVODES::CVJAC__
   return( flag? 0: -1 );
 }
 
+inline
 typename ODESLV_CVODES::STATUS
 ODESLV_CVODES::_states_stage
 ( unsigned istg, double& t, N_Vector& Nx, N_Vector& Nq, bool const reinit, bool const store,
@@ -694,38 +725,57 @@ ODESLV_CVODES::_states_stage
     { _END_STA(); return STATUS::FATAL; }
 
   // integrate till end of time stage
-  _cv_flag = CVodeSetStopTime( _cv_mem, _dT[istg+1] );
-  if( _check_cv_flag( &_cv_flag, "CVodeSetStopTime", 1 ) )
-    { _END_STA(); return STATUS::FATAL; }
-
+  //_cv_flag = CVodeSetInterpolateStopTime( _cv_mem, true );
+  //if( _check_cv_flag( &_cv_flag, "CVodeSetInterpolateStopTime", 1 ) )
+  //  { _END_STA(); return STATUS::FATAL; }
+ 
   unsigned const NSTEP = options.RESRECORD? options.RESRECORD: 1;
   double const TSTEP = ( _dT[istg+1] - t ) / NSTEP;
   double TSTOP = t + TSTEP;
   for( unsigned k=0; k<NSTEP; k++, TSTOP+=TSTEP ){
 
     if( k+1 == NSTEP ) TSTOP = _dT[istg+1];
+    _cv_flag = CVodeSetStopTime( _cv_mem, TSTOP );
+    if( _check_cv_flag( &_cv_flag, "CVodeSetStopTime", 1 ) )
+      { _END_STA(); return STATUS::FATAL; }
+
     if( !store )
       _cv_flag = CVode( _cv_mem, TSTOP, Nx, &t, CV_NORMAL );
     else
       _cv_flag = CVodeF( _cv_mem, TSTOP, Nx, &t, CV_NORMAL, &_nchk );
+      //while( t < TSTOP ){
+      //  _cv_flag = CVodeF( _cv_mem, TSTOP, Nx, &t, CV_ONE_STEP, &_nchk );
+      //  std::cout << "Reached t=" << t << " of TSTOP=" << TSTOP << std::endl;
+      //}
     if( _check_cv_flag( &_cv_flag, store?"CVodeF":"CVode", 1 ) )
      //|| (options.NMAX && stats_state.numSteps > options.NMAX) )
       throw Exceptions( Exceptions::INTERN );
 
     // intermediate record
     if( record ){
+      // Intermediate states and quadratures
+      //_cv_flag = CVodeGetDky( _cv_mem, TSTOP, 0, Nx );
       if( _nq ){
-        _cv_flag = CVodeGetQuad( _cv_mem, &t, Nq );
+        //_cv_flag = CVodeGetQuad( _cv_mem, &t, Nq );
+        _cv_flag = CVodeGetQuadDky( _cv_mem, TSTOP, 0, Nq );
         if( _check_cv_flag(&_cv_flag, "CVodeGetQuad", 1) )
           { _END_STA(); return STATUS::FATAL; }
       }
-      results_state.push_back( Results( t, _nx, NV_DATA_S(Nx), _nq, _nq? NV_DATA_S(Nq): nullptr ) );
+      results_state.push_back( Results( TSTOP, _nx, NV_DATA_S(Nx), _nq, _nq? NV_DATA_S(Nq): nullptr ) );
+
+      // Display / return stage results
+      //_GET_D_STA( NV_DATA_S(Nx), _nq && Nq? NV_DATA_S(Nq): nullptr );
+      //if( options.DISPLAY >= 1 ){
+      //  _print_interm( TSTOP, _nx, _Dx, " x", os );
+      //  _print_interm( _nq, _Dq, " q", os );
+      //}
     }
   }
 
   return STATUS::NORMAL;
 }
 
+inline
 typename ODESLV_CVODES::STATUS
 ODESLV_CVODES::_states
 ( double const* p, double const* c, bool const store, std::ostream& os )
@@ -734,7 +784,7 @@ ODESLV_CVODES::_states
     // Initialize trajectory integration
     if( !_INI_STA( p, c ) ) return STATUS::FATAL;
     _t = _dT[0];
-
+    
     // Initial state/quadrature values
     if( !_IC_D_SET()
      || !_IC_D_STA( _t, NV_DATA_S( _Nx ) )
@@ -787,7 +837,7 @@ ODESLV_CVODES::_states
         if( _check_cv_flag(&_cv_flag, "CVodeGetQuad", 1) )
           { _END_STA(); return STATUS::FATAL; }
       }
-     _GET_D_STA( NV_DATA_S(_Nx), _nq && _Nq? NV_DATA_S(_Nq): 0 );
+     _GET_D_STA( NV_DATA_S(_Nx), _nq && _Nq? NV_DATA_S(_Nq): nullptr );
 
       // Display / return stage results
       _xk.push_back( std::vector<double>( _Dx, _Dx+_nx ) );
@@ -847,6 +897,7 @@ ODESLV_CVODES::_states
 //!   - <a>os</a> [input/ouptut]  output stream [default: std::cout]
 //! .
 //! The return value is the status.
+inline
 typename ODESLV_CVODES::STATUS
 ODESLV_CVODES::solve_state
 ( std::vector<double> const& p, std::vector<double> const& c, std::ostream& os )
@@ -866,6 +917,7 @@ ODESLV_CVODES::solve_state
 //!   - <a>os</a> [input/output]  output stream [default: std::cout]
 //! .
 //! The return value is the status.
+inline
 typename ODESLV_CVODES::STATUS
 ODESLV_CVODES::solve_state
 ( double const* p, double const* c, std::ostream& os )

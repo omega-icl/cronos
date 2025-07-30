@@ -49,9 +49,13 @@ public:
   //! @brief Class destructor
   virtual ~BASE_CVODES()
     {}
-    
+
   //! @brief Function registering thread
   void registration
+    ();
+
+  //! @brief Function re-registering thread
+  void reregistration
     ();
 
   //! @brief Function unregistering thread
@@ -149,7 +153,7 @@ public:
     double HMIN;
     //! @brief Maximum step-size [Default: 0e0 (+inf)]
     double HMAX;
-    //! @brief Maximum number of steps in a time stage [Default: 0 (500)]
+    //! @brief Maximum number of steps in a time stage [Default: 0 (2000)]
     unsigned int NMAX;
     //! @brief Relative (scalar) integration tolerance
     sunrealtype RTOL;
@@ -331,6 +335,7 @@ void
 BASE_CVODES::registration
 ()
 {
+  //std::cout << "_is_registered? " << _is_registered << std::endl;
   if( _is_registered ) return;
   REG_BASE_CVODES( this,
                    &BASE_CVODES::CVRHS__,
@@ -343,6 +348,27 @@ BASE_CVODES::registration
                    &BASE_CVODES::CVQUADF__
                  );
   _is_registered = true;
+}
+
+inline
+void
+BASE_CVODES::reregistration
+()
+{
+  assert( _is_registered );
+  //std::cout << "reregistration? " << this << ": " << (BASE_CVODES::PTR_BASE_CVODES != this) << std::endl;
+  //if( BASE_CVODES::PTR_BASE_CVODES == this )
+  //  return;
+  REG_BASE_CVODES( this,
+                   &BASE_CVODES::CVRHS__,
+                   &BASE_CVODES::CVQUAD__,
+                   &BASE_CVODES::CVJAC__,
+                   &BASE_CVODES::CVRHSB__,
+                   &BASE_CVODES::CVQUADB__,
+                   &BASE_CVODES::CVJACB__,
+                   &BASE_CVODES::CVRHSF__,
+                   &BASE_CVODES::CVQUADF__
+                 );
 }
 
 inline

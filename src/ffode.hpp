@@ -86,22 +86,22 @@ public:
   {
     //! @brief Constructor
     Options():
-      DIFF(NUM_P), NP2NF(3)
+      SYMDIFF(), NP2NF(3)
       {}
     //! @brief Assignment operator
     Options& operator= ( Options const& options ){
-        DIFF   = options.DIFF;
+        SYMDIFF   = options.SYMDIFF;
         return *this;
       }
-    //! @brief Enumeration type for ODE differentiation
-    enum DERIV_TYPE{
-      NUM_P=0,  //!< Derivatives w.r.t. parameters only through forward or adjoint sensitivity integration
-      SYM_P,    //!< Derivatives w.r.t. parameters only through symbolic differentiation of ODEs
-      SYM_C,    //!< Derivatives w.r.t. constants only through symbolic differentiation of ODEs
-      SYM_PC,   //!< Derivatives w.r.t. parameters and constants jointly through symbolic differentiation of ODEs
-    };
-    //! @brief Selected ODE differentiation
-    DERIV_TYPE                DIFF;
+//    //! @brief Enumeration type for ODE differentiation
+//    enum DERIV_TYPE{
+//      NUM_P=0,  //!< Derivatives w.r.t. parameters only through forward or adjoint sensitivity integration
+//      SYM_P,    //!< Derivatives w.r.t. parameters only through symbolic differentiation of ODEs
+//      SYM_C,    //!< Derivatives w.r.t. constants only through symbolic differentiation of ODEs
+//      SYM_PC,   //!< Derivatives w.r.t. parameters and constants jointly through symbolic differentiation of ODEs
+//    };
+    //! @brief Variable selection for symbolic differentiation - needs to be participating parameters or constants. Applies numerical differentiation w.r.t. parameters if empty
+    std::vector<FFVar>        SYMDIFF;
     //! @brief parameter-to-function-size ratio above which adjoint sensitivity is applied instead of forward sensitivity
     double                    NP2NF;
   } options;
@@ -605,9 +605,8 @@ const
     vVarVal[i] = vVar[i].val();
   FFVar const*const* vResVal = ( _nCst? insert_external_operation( *this, nRes, _nPar, vVarVal.data(), _nCst, vVarVal.data()+_nPar ):
                                         insert_external_operation( *this, nRes, _nPar, vVarVal.data() ) );
-  //FFVar const*const* vResVal = _set( _nPar, vVarVal.data(), _nCst, vVarVal.data()+_nPar, static_cast<ODESLVS_CVODES*>(data), _ownODESLV );
 
-  if( options.DIFF == Options::NUM_P ){
+  if( options.SYMDIFF.empty() ){
     FFGRADODE ResDer;
     // No DAG copy of ODE - reuse FFODE DAG copy
     // Caveat is that passing a pointer to the orginal ODESLV object will create a separate object
@@ -629,6 +628,42 @@ const
     }
   }
 
+  else{
+    // Match DAG variables to IVP parameters
+    std::vector<FFVar> vPar;
+    vPar.reserve( options.SYMDIFF.size() );
+    std::vector<unsigned> ndxPar;
+    ndxPar.reserve( options.SYMDIFF.size() );
+    for( auto const& dVar : options.SYMDIFF ){
+      for( unsigned i=0; i<nVar; ++i ){
+        if( dVar.id() != vVarVal[i].id() ) continue;
+#ifdef CRONOS__FFODE_CHECK
+        std::cout << "Sensitivity parameter #" << i << ": " << dVar << std::endl;
+#endif
+        vPar.push_back( i<_nPar? _pODESLV->var_parameter()[i]: _pODESLV->var_constant()[i-_nPar] );
+        ndxPar.push_back( i );
+        break;
+      }
+    }
+
+    FFODE ResDer;
+    auto pODESLVSEN = _pODESLV->fdiff( vPar );
+    pODESLVSEN->setup();
+    FFVar const*const* vResDer = ResDer._set( _nPar, vVarVal.data(), _nCst, vVarVal.data()+_nPar, pODESLVSEN, -1 ); // transfer ownership of ODE data to DAG
+    for( unsigned k=0; k<nRes; ++k ){
+      vRes[k] = *vResVal[k];
+      for( unsigned ii=0; ii<ndxPar.size(); ++ii )
+        vRes[k].setDepend( vVar[ndxPar[ii]] );
+      for( unsigned j=0; j<vRes[k].size(); ++j ){
+        vRes[k][j] = 0.;
+        for( unsigned ii=0; ii<ndxPar.size(); ++ii ){
+          if( vVar[ndxPar[ii]][j].cst() && vVar[ndxPar[ii]][j].num().val() == 0. ) continue;
+          vRes[k][j] += *vResDer[k+nRes*ii] * vVar[ndxPar[ii]][j];
+        }
+      }
+    }
+  }
+/*
   else if( options.DIFF == Options::SYM_P ){
     FFODE ResDer;
     auto pODESLVSEN = _pODESLV->fdiff( _nPar, _pODESLV->var_parameter().data() );
@@ -687,6 +722,7 @@ const
       }
     }
   }
+*/
 }
 
 inline void
@@ -701,7 +737,7 @@ const
   assert( _pODESLV && nRes == _pODESLV->nf() && nVar == _nPar+_nCst );
 #endif
 
-  if( options.DIFF == Options::NUM_P ){
+  if( options.SYMDIFF.empty() ){
     FFGRADODE ResDer;
     // No DAG copy of ODE - reuse FFODE DAG copy
     // Caveat is that passing a pointer to the orginal ODESLV object will create a separate object
@@ -714,11 +750,41 @@ const
         vDer[k][i] = i<_nPar? *vResDer[k+nRes*i]: 0;
   }
 
+  else{
+    // Match DAG variables to IVP parameters
+    std::vector<FFVar> vPar; 
+    vPar.reserve( options.SYMDIFF.size() );
+    std::vector<unsigned> ndxPar; 
+    ndxPar.reserve( options.SYMDIFF.size() );
+    for( auto const& dVar : options.SYMDIFF ){
+      for( unsigned i=0; i<nVar; ++i ){
+        if( dVar.id() != vVar[i].id() ) continue;
+#ifdef CRONOS__FFODE_CHECK
+        std::cout << "Sensitivity parameter #" << i << ": " << dVar << std::endl;
+#endif
+        vPar.push_back( i<_nPar? _pODESLV->var_parameter()[i]: _pODESLV->var_constant()[i-_nPar] );
+        ndxPar.push_back( i );
+        break;
+      }
+    }
+
+    FFODE ResDer;
+    auto pODESLVSEN = _pODESLV->fdiff( vPar );
+    pODESLVSEN->setup();
+    FFVar const*const* vResDer = ResDer._set( _nPar, vVar, _nCst, vVar+_nPar, pODESLVSEN, -1 ); // transfer ownership of ODE data to DAG
+    for( unsigned k=0; k<nRes; ++k ){
+      for( unsigned i=0; i<nVar; ++i )
+        vDer[k][i] = 0;
+      for( unsigned ii=0; ii<ndxPar.size(); ++ii )
+        vDer[k][ndxPar[ii]] = *vResDer[k+nRes*ii];
+    }
+  }
+/*
   else if( options.DIFF == Options::SYM_P ){
     FFODE ResDer;
     auto pODESLVSEN = _pODESLV->fdiff( _nPar, _pODESLV->var_parameter().data() );
     pODESLVSEN->setup();
-    FFVar const*const* vResDer = ResDer._set( _nPar, vVar, _nCst, vVar+_nPar, pODESLVSEN, -1 ); // ask to transfer ownership of ODE data
+    FFVar const*const* vResDer = ResDer._set( _nPar, vVar, _nCst, vVar+_nPar, pODESLVSEN, -1 ); // transfer ownership of ODE data to DAG
     for( unsigned k=0; k<nRes; ++k )
       for( unsigned i=0; i<nVar; ++i )
         vDer[k][i] = (i<_nPar? *vResDer[k+nRes*i]: 0);
@@ -752,6 +818,7 @@ const
       for( unsigned i=0; i<nVar; ++i )
         vDer[k][i] = *vResDer[k+nRes*i];
   }
+*/
 }
 
 inline void

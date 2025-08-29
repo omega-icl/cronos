@@ -138,16 +138,16 @@ py::class_<mc::FFODE::Options>  pyFFODEOptions( pyFFODE, "Options" );
 pyFFODEOptions
  .def( py::init<>() )
  .def( py::init<mc::FFODE::Options const&>() )
- .def_readwrite( "DIFF", &mc::FFODE::Options::DIFF,   "method of ODE differentiation [Default: NUM_P]" )
+ .def_readwrite( "SYMDIFF", &mc::FFODE::Options::SYMDIFF,   "method of ODE differentiation [Default: -]" )
  .def_readwrite( "NP2NF", &mc::FFODE::Options::NP2NF, "parameter-to-function-size ratio above which adjoint sensitivity is applied instead of forward sensitivity [Default: 3]" )
 ;
 
-py::enum_<mc::FFODE::Options::DERIV_TYPE>( pyFFODEOptions, "DERIV_TYPE" )
- .value("NUM_P", mc::FFODE::Options::DERIV_TYPE::NUM_P, "Derivatives w.r.t. parameters only through forward or adjoint sensitivity integration")
- .value("SYM_P", mc::FFODE::Options::DERIV_TYPE::SYM_P, "Derivatives w.r.t. parameters only through symbolic differentiation of ODEs")
- .value("SYM_C", mc::FFODE::Options::DERIV_TYPE::SYM_C, "Derivatives w.r.t. constants only through symbolic differentiation of ODEs")
- .value("SYM_PC", mc::FFODE::Options::DERIV_TYPE::SYM_PC, "Derivatives w.r.t. parameters and constants jointly through symbolic differentiation of ODEs")
- .export_values()
-;
+//py::enum_<mc::FFODE::Options::DERIV_TYPE>( pyFFODEOptions, "DERIV_TYPE" )
+// .value("NUM_P", mc::FFODE::Options::DERIV_TYPE::NUM_P, "Derivatives w.r.t. parameters only through forward or adjoint sensitivity integration")
+// .value("SYM_P", mc::FFODE::Options::DERIV_TYPE::SYM_P, "Derivatives w.r.t. parameters only through symbolic differentiation of ODEs")
+// .value("SYM_C", mc::FFODE::Options::DERIV_TYPE::SYM_C, "Derivatives w.r.t. constants only through symbolic differentiation of ODEs")
+// .value("SYM_PC", mc::FFODE::Options::DERIV_TYPE::SYM_PC, "Derivatives w.r.t. parameters and constants jointly through symbolic differentiation of ODEs")
+// .export_values()
+//;
 }
 

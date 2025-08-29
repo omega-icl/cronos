@@ -116,7 +116,7 @@ int main()
 #endif
 */
   // DAG symbolic differentiation
-  mc::FFODE::options.DIFF = mc::FFODE::Options::SYM_C;
+  mc::FFODE::options.SYMDIFF = C;//mc::FFODE::Options::SYM_C;
   mc::FFVar const* dFdC = DAG.FAD( NF, F.data(), NC, C.data() );
   //std::cout << DAG;
 
@@ -137,7 +137,7 @@ int main()
   delete[] dFdC;
 
   // DAG symbolic differentiation
-  mc::FFODE::options.DIFF = mc::FFODE::Options::SYM_P;
+  mc::FFODE::options.SYMDIFF = P;//mc::FFODE::Options::SYM_P;
   mc::FFVar const* dFdP = DAG.FAD( NF, F.data(), NP, P.data() );
   //std::cout << DAG;
 
@@ -158,7 +158,8 @@ int main()
   delete[] dFdP;
 
   // DAG symbolic differentiation
-  mc::FFODE::options.DIFF = mc::FFODE::Options::SYM_PC;
+  mc::FFODE::options.SYMDIFF = P; //mc::FFODE::Options::SYM_PC;
+  mc::FFODE::options.SYMDIFF.insert( mc::FFODE::options.SYMDIFF.end(), C.cbegin(), C.cend() ); 
   mc::FFVar const* dFdPC = DAG.FAD( NF, F.data(), NP, P.data(), NC, C.data() );
   //std::cout << DAG;
 
@@ -181,7 +182,7 @@ int main()
   delete[] dFdPC;
 
   // DAG numerical differentiation
-  mc::FFODE::options.DIFF = mc::FFODE::Options::NUM_P;
+  mc::FFODE::options.SYMDIFF = {};//mc::FFODE::Options::NUM_P;
   dFdP = DAG.BAD( NF, F.data(), NP, P.data() );
   //std::cout << DAG;
 

@@ -1694,6 +1694,7 @@ const
   }
 
   // State function sensitivities
+  //auto vFCT = BASE_DE::_vFCT;
   if( _nf ){
 #ifdef CRONOS__ODESLVS_FDIFF_DEBUG
     k = 0;
@@ -1710,6 +1711,7 @@ const
         mc::FFVar* fct_i = _nq? 
           _dag->DFAD( _nf, vFCTk.data(), _nx, vX.data(), vX.data()+_nx*(1+i), _nq, vQ.data(), vQ.data()+_nq*(1+i), 1, &pPar[i], &FFOne ):
           _dag->DFAD( _nf, vFCTk.data(), _nx, vX.data(), vX.data()+_nx*(1+i), 1, &pPar[i], &FFOne );
+        //for( auto const& [j,_]: fct ) vFCT.back()[_nf*(1+i)+j] = fct_i[j];  
         for( auto const& [j,_]: fct ) vFCT.back()[_nf*i+j] = fct_i[j];  
         //for( size_t j=0; j<_nf; ++j ) vFCT.back()[_nf*i+j] = fct_i[j];
         //for( size_t j=0; j<_nf; ++j ) vFCT.back()[i+j*nPar] = fct_i[j];

@@ -5,7 +5,6 @@ include $(PATH_MC)/src/makeoptions.mk
 
 PATH_CRONOS    = $(shell cd $(HOME)/Programs/bitbucket/cronos40; pwd)
 
-#PATH_SUNDIALS = /opt/sundials-7.1.1
 PATH_SUNDIALS = /opt/sundials-7.4.0
 LIB_SUNDIALS = -L$(PATH_SUNDIALS)/lib -lsundials_sunlinsolklu -lsundials_cvodes -lsundials_nvecserial -lsundials_core -llapack -lblas
 INC_SUNDIALS = -I/usr/include/suitesparse -I$(PATH_SUNDIALS)/include

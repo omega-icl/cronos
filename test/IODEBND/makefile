@@ -9,18 +9,17 @@ INC_HSL =
 LIB_GSL = -lgsl -lgslcblas -lm
 INC_GSL = 
 
-PATH_SUNDIALS = /opt/sundials-2.5.0
-#PATH_SUNDIALS = /usr/local
+PATH_SUNDIALS = $(SUNDIALS_HOME)
 LIB_SUNDIALS = -L$(PATH_SUNDIALS)/lib -lsundials_cvodes -lsundials_nvecserial \
                -llapack -lblas
 INC_SUNDIALS = -I$(PATH_SUNDIALS)/include -I$(PATH_SUNDIALS)/include/sundials \
                -I$(PATH_SUNDIALS)/include/cvodes -I$(PATH_SUNDIALS)/include/nvector
 
-PATH_PROFIL = /home/bchachua/Programs/ThirdParty/Profil-2.0.8
+PATH_PROFIL = $(PROFIL_HOME)
 LIB_PROFIL = -L$(PATH_PROFIL)/lib -lProfilPackages -lProfil -lBias -llr
 INC_PROFIL = -I$(PATH_PROFIL)/include
 
-PATH_FILIB = /opt/filib++
+PATH_FILIB = $(FILIB_HOME)
 LIB_FILIB  = -L$(PATH_FILIB)/lib -lprim
 INC_FILIB  = -I$(PATH_FILIB)/include/ -I$(PATH_FILIB)/include/interval
 FLAG_FILIB = -frounding-math -ffloat-store

@@ -1,8 +1,5 @@
 # This is the main makefile for CRONOS
-# - 'make install' creates the directories 'include' and 'lib' (if not already
-#   existing), compiles a shared library, and creates symbolic links to header files
-#   and the compiled libraries
-# - `make cleaninstall' removes the libraries, object files, and links
+# Run `make help' for a list of available targets
 
 export version = 4.0
 
@@ -15,7 +12,7 @@ export libpath        = $(rootpath)/lib
 
 #####
 
-all: dirs_create cronos_install interface_install
+install: dirs_create cronos_install interface_install
 
 dirs_create :
 	@if test ! -e $(incpath)/; then \
@@ -45,11 +42,23 @@ interface_clean:
 
 #####
 
-cleaninstall: cronos_cleandist interface_cleandist
+uninstall: cronos_uninstall interface_uninstall
 
-cronos_cleandist:
-	-(cd $(srcpath); make -f cronos.mk cleandist)
+cronos_uninstall:
+	-(cd $(srcpath); make -f cronos.mk uninstall)
 
-interface_cleandist:
-	-(cd $(interfacepath); make -f cronos.mk cleandist)
+interface_uninstall:
+	-(cd $(interfacepath); make -f cronos.mk uninstall)
 
+#####
+
+help:
+	@echo
+	@echo "CRONOS Makefile (ver. $(version))"
+	@echo "Available targets:"
+	@echo "  install      - Create 'include' and 'lib' directories, compile a shared library,"
+	@echo "                 create symbolic links to header files and compiled libraries"
+	@echo "  clean        - Remove object files"
+	@echo "  uninstall    - Remove libraries, object files, and symbolic links"
+	@echo "  help         - Show this help message"
+	@echo

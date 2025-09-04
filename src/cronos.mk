@@ -1,4 +1,4 @@
-# This makefile compiles a chared library of CRONOS and it creates symbolic links
+# This makefile compiles a shared library of CRONOS and it creates symbolic links
 # to the library in $(libpath) and to the header files in $(incpath)
 
 include $(srcpath)/makeoptions.mk
@@ -42,13 +42,13 @@ cronos_inc:
 		fi; \
 	done
 
-%.o : %.cpp
+%.o: %.cpp
 	$(CPP) -c $(FLAG_CPP) $(INC_DEP) $< -o $@
 
-%.o : %.c
+%.o: %.c
 	$(CPP) -c $(FLAG_CPP) $(INC_DEP) $< -o $@
 
-%.c : $(PATH_GAMS)/apifiles/C/api/%.c
+%.c: $(PATH_GAMS)/apifiles/C/api/%.c
 	cp $< $@
 
 dispBuild:
@@ -73,13 +73,13 @@ dispClean:
 
 #####
 
-cleandist: dispCleanInstall
+uninstall: dispUninstall
 	-(cd $(thirdppath); make -f sobol.mk clean)
 	rm -f $(libobjs) $(libname)
-	-(cd $(incpath) ; rm -f $(incobjs))
-	-(cd $(libpath) ; rm -f $(libname))
+	-(cd $(incpath); rm -f $(incobjs))
+	-(cd $(libpath); rm -f $(libname))
 
-dispCleanInstall:
+dispUninstall:
 	@echo
 	@(echo '***Uninstalling CRONOS library (ver.' $(version)')***')
 	@echo

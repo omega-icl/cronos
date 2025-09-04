@@ -13,22 +13,22 @@ libdep  = pymc.so
 
 install: dispBuild $(libname) dispInstall
 	@if test ! -e $(libpath)/$(libname); then \
-		echo creating symolic link to shared library $(libname); \
-		cd $(libpath) ; ln -s $(interfacepath)/$(libname); \
+		echo creating symbolic link to shared library $(libname); \
+		cd $(libpath); ln -s $(interfacepath)/$(libname); \
 	fi
 	@if test ! -e $(libdep); then \
 		ln -s $(PATH_MC)/lib/$(libdep); \
 	fi
 	@if test ! -e $(libpath)/$(libdep); then \
-		echo creating symolic link to shared library $(libdep); \
-		cd $(libpath) ; ln -s $(PATH_MC)/lib/$(libdep); \
+		echo creating symbolic link to shared library $(libdep); \
+		cd $(libpath); ln -s $(PATH_MC)/lib/$(libdep); \
 	fi
 	@echo
 
 $(libname): $(libobjs)
-	$(CPP) -shared -Wl,--export-dynamic $(libobjs) $(LIB_CRONOS) -o $(libname) 
+	$(CPP) -shared -Wl,--export-dynamic $(libobjs) $(LIB_CRONOS) -o $(libname)
 
-%.o : %.cpp
+%.o: %.cpp
 	$(CPP) $(FLAG_CPP) $(FLAG_CRONOS) $(INC_CRONOS) $(INC_PYBIND11) -I$(incpath) -c $< -o $@
 
 dispBuild:
@@ -54,12 +54,11 @@ dispClean:
 
 #####
 
-cleandist: dispCleanInstall
-	rm -fi $(libobjs) $(libname) $(libdeo)
-	-(cd $(libpath) ; rm -f $(libname) $(libdep))
+uninstall: dispUninstall
+	rm -f $(libobjs) $(libname) $(libdep)
+	-(cd $(libpath); rm -f $(libname) $(libdep))
 
-dispCleanInstall:
+dispUninstall:
 	@echo
 	@(echo '***Uninstalling CRONOS library (ver.' $(version)')***')
 	@echo
-

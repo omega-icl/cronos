@@ -5,7 +5,7 @@ PATH_CRONOS_MK := $(dir $(lastword $(MAKEFILE_LIST)))
 include $(abspath $(PATH_CRONOS_MK)../../mcpp/src/makeoptions.mk)
 PATH_MC = $(abspath $(PATH_CRONOS_MK)../../mcpp)
 
-PATH_CRONOS = $(abspath ../)
+PATH_CRONOS = $(abspath $(PATH_CRONOS_MK)../)
 
 PATH_SUNDIALS = $(SUNDIALS_HOME)
 LIB_SUNDIALS = -L$(PATH_SUNDIALS)/lib -lsundials_sunlinsolklu -lsundials_cvodes -lsundials_nvecserial -lsundials_core -llapack -lblas

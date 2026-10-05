@@ -1,0 +1,33 @@
+[build-system]
+requires = [
+  "scikit-build-core>=0.10",
+  "pybind11>=2.13",
+  "pybind11-stubgen>=2.5"
+]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "cronos"
+version = "5.0.0"
+description = "Python interface to CRONOS"
+readme = "README.md"
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES.txt"]
+requires-python = ">=3.10"
+dependencies = []
+
+[tool.scikit-build]
+cmake.version = ">=3.18"
+build.verbose = true
+install.components = ["python_modules"] # Only install the python module component, not headers
+wheel.packages = []
+# Keep restrictively-licensed vendored sources (fadbad++, cpplapack) and local
+# junk out of the published source tarball.
+sdist.exclude = ["src/3rdparty", "build", "dist", ".cache"]
+
+[tool.scikit-build.cmake.define]
+ENABLE_TORCH        = "OFF"
+ENABLE_HSL          = "OFF"
+ENABLE_SPQR         = "OFF"
+ENABLE_EXAMPLES     = "OFF"
+MC_INTERVAL_LIBRARY = "BOOST"
+CRONOS_INSTALL_DIR = "."

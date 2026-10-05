@@ -20,7 +20,7 @@ namespace mc
 class ODESLV_CVODES
 : public virtual BASE_CVODES
 , public virtual ODESLV_BASE
-, public virtual BASE_DE
+, public virtual FFModel
 {
  protected:
  
@@ -99,6 +99,36 @@ class ODESLV_CVODES
   //! @brief state values at stage times
   std::vector< std::vector< double > > _xk;
 
+  //! @brief Does the integrator restart at the boundary entering stage @p istg?  True when this stage's
+  //! right-hand side or quadrature differs from the previous one, so the BDF history describes a problem
+  //! that no longer exists.  _pos_rhs / _pos_quad are set before this is consulted.
+  bool _stage_restart
+    ( unsigned const istg )
+    const
+    { return istg && ( _pos_rhs || _pos_quad ); }
+
+  //! @brief Does ANY stage boundary of a forward sweep restart the integrator?  If not, the whole sweep
+  //! is one uninterrupted integration and a horizon-wide CVodeF is valid -- which is the ONLY condition
+  //! a one-go checkpointed sweep needs.  Derived from the same rule as _stage_restart so the two cannot
+  //! drift apart.
+  bool _sweep_restarts
+    ()
+    const
+    { return _ns > 1 && ( _vRHS.size() > 1 || _vQUAD.size() > 1
+                          || _vIC.size() >= _ns ); }   // 2026-09-29: PER-STAGE initial values reinitialise the integrator
+                                                      // at every stage boundary too (_CC_CVODE_STA) -- omitting them ran a
+                                                      // transition model as ONE armed CVodeF with a reset mid-sweep, and the
+                                                      // adjoint interpolated the stage before the reset from corrupted data
+
+  //! @brief Checkpoint only the LAST stage of a forward sweep, rather than every stage.
+  //! CVodeF's contract is that the checkpoints it lays down describe ONE uninterrupted forward
+  //! integration -- the backward pass replays from a checkpoint expecting to reproduce the same step
+  //! size and order sequence.  So with a single horizon-wide sweep every stage must be checkpointed,
+  //! which is today's policy and this flag's default.  A per-stage backward cycle re-integrates each
+  //! stage itself, and then only the last stage's checkpoints are needed from the sweep -- saving one
+  //! stage in ns of double integration.  Set by the adjoint solver, never by the user.
+  bool _storeLastStageOnly = false;
+
   //! @brief quadrature values at stage times
   std::vector< std::vector< double > > _qk;
 
@@ -107,15 +137,22 @@ class ODESLV_CVODES
 
 public:
 
-  using BASE_DE::set;
+  using FFModel::set_model;
 
   /** @ingroup ODESLV
    *  @{
    */
-  typedef typename BASE_DE::STATUS STATUS;
+  typedef typename ODESLV_BASE::STATUS STATUS;
   typedef typename ODESLV_BASE::Results Results;
-  using BASE_DE::np;
-  using BASE_DE::nf;
+  using ODESLV_BASE::np;
+  using ODESLV_BASE::nf;
+
+  //! @brief Constructor taking the DAG.  FFModel is a VIRTUAL base, so the MOST-DERIVED class must initialise
+  //! it -- delegating and then calling FFModel::set( dag ) is what FFModel's own constructor does.
+  ODESLV_CVODES
+    ( FFGraph* dag )
+    : ODESLV_CVODES()
+    { FFModel::set( dag ); }
 
   //! @brief Default constructor
   ODESLV_CVODES
@@ -125,12 +162,18 @@ public:
   virtual ~ODESLV_CVODES
     ();
 
-  //! @brief Integrator options
-  struct Options:
-   public BASE_CVODES::Options
+  //! @brief Options: the MODEL's and the INTEGRATOR's in ONE object.
+  //! This class now inherits both FFModel (which carries FFModel::Options) and BASE_CVODES (which carries its own),
+  //! so an unqualified `options` would be ambiguous.  This one inherits from both, and setup() SPLITS it back into
+  //! the two parents -- each of which goes on reading its own copy internally.  The discipline is OCFESLV's: an
+  //! option set here reaches FFModel::options when setup() runs, not before.
+  struct Options
+  : public FFModel::Options
+  , public BASE_CVODES::Options
    {
     //! @brief Constructor
-    Options():
+    Options()
+    : FFModel::Options(),
       BASE_CVODES::Options(),
       DISPLAY(1), RESRECORD(0)
       {}
@@ -140,6 +183,7 @@ public:
     Options& operator=
       ( OPT const& options )
       {
+        FFModel::Options::operator=( options );
         BASE_CVODES::Options::operator=( options );
         DISPLAY   = options.DISPLAY;
         RESRECORD = options.RESRECORD;
@@ -149,7 +193,10 @@ public:
     int DISPLAY;
     //! @brief Whether or not to record results (default: 0)
     unsigned RESRECORD;
-   } options;
+   };
+
+  //! @brief The options of this solver
+  Options options;
 
   //! @brief Structure for setting up storing the solver exceptions
   class Exceptions
@@ -178,34 +225,61 @@ public:
    };
 
   //! @brief Vector storing results (upon request only)
-  std::vector< Results > results_state;
+  std::vector< Results > results_solve;
 
   //! @brief Statistics for state integration
-  Stats stats_state;
+  Stats stats_solve;
+
+  //! @brief CVodeGetNumSteps is cumulative SINCE INIT, so the step count is accumulated as a per-stage
+  //! delta against this and rebased whenever the integrator is reinitialised.
+  long int _nstpPrev = 0;
 
   //! @brief Computes solution of parametric ODEs
-  STATUS solve_state
+  STATUS solve
     ( std::vector<double> const& p, std::vector<double> const& c=std::vector<double>() , std::ostream& os=std::cout );
 
   //! @brief Computes solution of parametric ODEs
-  STATUS solve_state
+  STATUS solve
     ( double const*p, double const*c=nullptr, std::ostream& os=std::cout );
+
+  //! @brief Solve with the input and constant values given BY NAME: { {w, {v1,...,vn}}, ..., {K, {k}} } -- every
+  //! declared input (except a fixed one) and every constant exactly once, each a value list in control_dofs()
+  //! order or a generator.  Throws std::invalid_argument, naming the entry, on an incomplete or inconsistent list.
+  STATUS solve
+    ( std::vector<FFModel::InputVal> const& vIn, std::ostream& os=std::cout )
+    {
+      std::vector<double> P, c;  std::string err;
+      if( !assemble_values( vIn, P, c, err ) ) throw std::invalid_argument( "ODESLV::solve ** " + err + "\n" );
+      return solve( P, c, os );
+    }
 
   //! @brief Setup local copy of parametric ODEs
   bool setup
     ()
-    { return ODESLV_BASE::_SETUP(); }
+    { std::lock_guard<std::recursive_mutex> dag_lock_( dag_mutex() );   // see FFModel::dag_mutex()
+      // the solver IS the model now, so one call does both halves: the split of `options` into the two parents,
+      // FFModel::setup() unless it has already run (it is idempotent to skip, not to repeat), then the local copy.
+      FFModel::options     = static_cast<FFModel::Options const&>( options );
+      BASE_CVODES::options = static_cast<BASE_CVODES::Options const&>( options );
+      // The DESCRIPTION path (set_dag/set_state/set_initial/..., the fdiff sink) writes the staging
+      // vectors directly and populates no FFModel model, so FFModel::setup() -- which validates domains,
+      // states and equations -- must be skipped for it.  _SETUP() then takes the description as given.
+      if( !FFModel::is_setup() && !FFModel::setup() ){
+        _extractError = std::string( "model setup refused: " ) + setup_status_str( setup_status() );
+        return false;
+      }
+      return ODESLV_BASE::_SETUP(); }
 
   //! @brief Setup local copy of parametric ODEs based on IVP
   bool setup
     ( ODESLV_CVODES const& IVP )
-    { return ODESLV_BASE::_SETUP( IVP ); }
+    { std::lock_guard<std::recursive_mutex> dag_lock_( dag_mutex() );  _copy_description( IVP ); options = IVP.options; return setup(); }
 
   //! @brief Record results in file <a>ores</a>, with accuracy of <a>iprec</a> digits
   void record
     ( std::ofstream& ores, unsigned const iprec=5 )
     const
-    { return _record( ores, results_state, iprec ); }
+    { return _record( ores, results_solve, iprec ); }
     
   //! @brief Retreive state values at stage times
   std::vector< std::vector< double > > const& val_state
@@ -331,7 +405,7 @@ private:
 inline
 ODESLV_CVODES::ODESLV_CVODES
 ()
-: BASE_CVODES(), BASE_DE(), ODESLV_BASE(),
+: BASE_CVODES(), ODESLV_BASE(),
   _cv_mem(nullptr), _cv_flag(0), _sun_mat(nullptr), _sun_ls(nullptr), _sun_nls(nullptr),
   _Nx(nullptr), _Nq(nullptr)
 {}
@@ -489,6 +563,7 @@ ODESLV_CVODES::_CC_CVODE_STA
   // Reinitialize CVode memory block for current time _t and current state _Nx
   _cv_flag = CVodeReInit( _cv_mem, _t, _Nx );
   if( _check_cv_flag( &_cv_flag, "CVodeReInit", 1 ) ) return false;
+  _nstpPrev = 0;   // the integrator's own step counter restarts with it
 
 #if defined( CRONOS__WITH_KLU )
   switch( options.LINSOL ){
@@ -532,7 +607,7 @@ ODESLV_CVODES::_END_STA
   if( !store ) _END_D_STA();
 
   // Get final CPU time
-  _final_stats( stats_state );
+  _final_stats( stats_solve );
 }
 
 inline
@@ -567,8 +642,9 @@ ODESLV_CVODES::_INI_STA
   _f.clear();  _f.reserve(_nf);
 
   // Reset result record and statistics
-  results_state.clear();
-  _init_stats( stats_state );
+  results_solve.clear();
+  _init_stats( stats_solve );
+  _nstpPrev = 0;   // CVodeGetNumSteps restarts with the integrator, so the delta base must too
 
   return true;
 }
@@ -608,7 +684,7 @@ ODESLV_CVODES::CVRHS__
   std::cout << std::endl;
   { int dum; std::cin >> dum; }
 #endif
-  stats_state.numRHS++;
+  stats_solve.numRHS++;
   return( flag? 0: -1 );
 }
 
@@ -690,7 +766,7 @@ ODESLV_CVODES::CVJAC__
     break;
 #endif
   }
-  stats_state.numJAC++; // increment JAC counter
+  stats_solve.numJAC++; // increment JAC counter
   return( flag? 0: -1 );
 }
 
@@ -700,6 +776,11 @@ ODESLV_CVODES::_states_stage
 ( unsigned istg, double& t, N_Vector& Nx, N_Vector& Nq, bool const reinit, bool const store,
   bool const record, std::ostream& os )
 {
+  // Which right-hand side this stage uses -- computed BEFORE the reinitialisation decision, because
+  // whether it DIFFERS from the last stage's is what decides it.
+  _pos_rhs  = ( _vRHS.size()<=1? 0: istg );
+  _pos_quad = ( _vQUAD.size()<=1? 0: istg );
+
   // State discontinuities (if any) at stage times
   // and integrator reinitialization (if applicable)
   _pos_ic = ( _vIC.size()>=_ns? istg:0 );
@@ -707,7 +788,13 @@ ODESLV_CVODES::_states_stage
                 || !_CC_D_STA( t, NV_DATA_S( Nx ) )
                 || !_CC_CVODE_STA() ) )
     { _END_STA(); return STATUS::FAILURE; }
-  else if( !istg && reinit && !_CC_CVODE_STA() )
+  // A stage-wise right-hand side means f CHANGES here, so the BDF history describes a problem that no
+  // longer exists: restart rather than let the error test discover it.  Gated on _pos_rhs, never
+  // unconditional -- where f is the same on every stage a restart is pure loss (measured +60%).
+  // `reinit` means "resume THIS stage from the state handed in" -- the adjoint's per-stage re-integration
+  // re-enters stage k from _xk[k] whether or not the right-hand side changed there, so it is honoured at
+  // every istg, not only at 0.  The forward sweep passes false.
+  else if( ( _stage_restart( istg ) || reinit ) && !_CC_CVODE_STA() )
     { _END_STA(); return STATUS::FAILURE; }
   //if( istg && !_CC_CVODE_QUAD() )
   if( ( istg || reinit )
@@ -715,11 +802,9 @@ ODESLV_CVODES::_states_stage
      || !_CC_CVODE_QUAD() ) )
     { _END_STA(); return STATUS::FAILURE; }
   if( record )
-    results_state.push_back( Results( t, _nx, NV_DATA_S(Nx), _nq, _nq? NV_DATA_S(Nq): nullptr ) );
+    results_solve.push_back( Results( t, _nx, NV_DATA_S(Nx), _nq, _nq? NV_DATA_S(Nq): nullptr ) );
 
   // update list of operations in RHS, JAC and QUAD
-  _pos_rhs  = ( _vRHS.size()<=1? 0: istg );
-  _pos_quad = ( _vQUAD.size()<=1? 0: istg );
   if( (!istg || _pos_rhs || _pos_quad)
     && !_RHS_D_SET( _pos_rhs, _pos_quad ) )
     { _END_STA(); return STATUS::FATAL; }
@@ -748,7 +833,7 @@ ODESLV_CVODES::_states_stage
       //  std::cout << "Reached t=" << t << " of TSTOP=" << TSTOP << std::endl;
       //}
     if( _check_cv_flag( &_cv_flag, store?"CVodeF":"CVode", 1 ) )
-     //|| (options.NMAX && stats_state.numSteps > options.NMAX) )
+     //|| (options.NMAX && stats_solve.numSteps > options.NMAX) )
       throw Exceptions( Exceptions::INTERN );
 
     // intermediate record
@@ -761,7 +846,7 @@ ODESLV_CVODES::_states_stage
         if( _check_cv_flag(&_cv_flag, "CVodeGetQuad", 1) )
           { _END_STA(); return STATUS::FATAL; }
       }
-      results_state.push_back( Results( TSTOP, _nx, NV_DATA_S(Nx), _nq, _nq? NV_DATA_S(Nq): nullptr ) );
+      results_solve.push_back( Results( TSTOP, _nx, NV_DATA_S(Nx), _nq, _nq? NV_DATA_S(Nq): nullptr ) );
 
       // Display / return stage results
       //_GET_D_STA( NV_DATA_S(Nx), _nq && Nq? NV_DATA_S(Nq): nullptr );
@@ -772,6 +857,8 @@ ODESLV_CVODES::_states_stage
     }
   }
 
+  { long int nstp = 0;   // this stage's steps, so a mid-solve restart cannot lose the earlier ones
+    if( !CVodeGetNumSteps( _cv_mem, &nstp ) ){ stats_solve.numSteps += nstp - _nstpPrev; _nstpPrev = nstp; } }
   return STATUS::NORMAL;
 }
 
@@ -807,7 +894,7 @@ ODESLV_CVODES::_states
       _print_interm( _nq, _Dq, " q", os );
     }
 //    if( options.RESRECORD )
-//      results_state.push_back( Results( _t, _nx, NV_DATA_S(_Nx), _nq, _nq? NV_DATA_S(_Nq): nullptr ) );
+//      results_solve.push_back( Results( _t, _nx, NV_DATA_S(_Nx), _nq, _nq? NV_DATA_S(_Nq): nullptr ) );
 
     // Add initial function terms (if any)
     _pos_fct = 0;
@@ -821,8 +908,8 @@ ODESLV_CVODES::_states
     for( _istg=0; _istg<_ns; _istg++ ){
 
       // Integrate states over stage
-      _states_stage( _istg, _t, _Nx, _Nq, false, store, options.RESRECORD, os );
-//      _states_stage( _istg, _t, _Nx, _Nq, false, (_istg<_ns-1? false: store), options.RESRECORD, os );
+      bool const store_stg = ( _storeLastStageOnly && _istg+1 < _ns )? false: store;
+      _states_stage( _istg, _t, _Nx, _Nq, false, store_stg, options.RESRECORD, os );
 
 //      // Store full state at stage time
 //      if( store ){
@@ -869,26 +956,26 @@ ODESLV_CVODES::_states
     _END_STA();
     long int nstp;
     _cv_flag = CVodeGetNumSteps( _cv_mem, &nstp );
-    stats_state.numSteps += nstp;
-    if( options.DISPLAY >= 1 ) _print_stats( stats_state, os );
+    stats_solve.numSteps += nstp - _nstpPrev; _nstpPrev = nstp;   // delta, not cumulative
+    if( options.DISPLAY >= 1 ) _print_stats( stats_solve, os );
     //std::cout << "failed status: " << STATUS::FAILURE << std::endl;
     return STATUS::FAILURE;
   }
 
   long int nstp;
   _cv_flag = CVodeGetNumSteps( _cv_mem, &nstp );
-  stats_state.numSteps += nstp;
+  stats_solve.numSteps += nstp - _nstpPrev; _nstpPrev = nstp;   // delta, not cumulative
 #ifdef CRONOS__ODESLV_CVODES_DEBUG
   std::cout << "number of steps: " << nstp << std::endl;
 #endif
 
   _END_STA( store );
-  if( options.DISPLAY >= 1 ) _print_stats( stats_state, os );
+  if( options.DISPLAY >= 1 ) _print_stats( stats_solve, os );
   //std::cout << "normal status: " << STATUS::NORMAL << std::endl;
   return STATUS::NORMAL;
 }
 
-//! @fn inline typename ODESLV_CVODES::STATUS ODESLV_CVODES::solve_state(
+//! @fn inline typename ODESLV_CVODES::STATUS ODESLV_CVODES::solve(
 //! std::vector<double> const& p, std::vector<double> const& c=std::vector<double>(), std::ostream& os=std::cout )
 //!
 //! This function computes a solution to the parametric ODEs:
@@ -899,7 +986,7 @@ ODESLV_CVODES::_states
 //! The return value is the status.
 inline
 typename ODESLV_CVODES::STATUS
-ODESLV_CVODES::solve_state
+ODESLV_CVODES::solve
 ( std::vector<double> const& p, std::vector<double> const& c, std::ostream& os )
 {
   registration();
@@ -908,7 +995,7 @@ ODESLV_CVODES::solve_state
   return flag;
 }
 
-//! @fn inline typename ODESLV_CVODES::STATUS ODESLV_CVODES::solve_state(
+//! @fn inline typename ODESLV_CVODES::STATUS ODESLV_CVODES::solve(
 //! double const* p, double const* c=nullptr, std::ostream& os=std::cout )
 //!
 //! This function computes a solution to the parametric ODEs:
@@ -919,7 +1006,7 @@ ODESLV_CVODES::solve_state
 //! The return value is the status.
 inline
 typename ODESLV_CVODES::STATUS
-ODESLV_CVODES::solve_state
+ODESLV_CVODES::solve
 ( double const* p, double const* c, std::ostream& os )
 {
   registration();
@@ -927,6 +1014,9 @@ ODESLV_CVODES::solve_state
   unregistration();
   return flag;
 }
+
+// 2026-09-28: over-alignment guard (GCC wrong-code with over-aligned virtual bases)
+static_assert( alignof( ODESLV_CVODES ) <= alignof( void* ), "ODESLV_CVODES is a VIRTUAL base of the CRONOS solvers and must not be over-aligned (alignof > 8): GCC (6 to at least 16) emits aligned vector stores in base-object constructors assuming the full alignment, but a virtual-base subobject is only placed at its non-virtual alignment -> SIGSEGV at -O2/-O3 (see gccvb/pr_vbase_align.cpp). Keep over-aligned members (Armadillo/Eigen fixed-size types, alignas) behind a pointer, as FFModel::_pClassification does." );
 
 } // end namescape mc
 

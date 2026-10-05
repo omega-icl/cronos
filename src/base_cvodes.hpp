@@ -534,6 +534,10 @@ BASE_CVODES::_print_stats_cvode
   }
 }
 
+// 2026-09-28: over-alignment guard (GCC wrong-code with over-aligned virtual bases)
+static_assert( alignof( BASE_SUNDIALS ) <= alignof( void* ), "BASE_SUNDIALS is a VIRTUAL base of the CRONOS solvers and must not be over-aligned (alignof > 8): GCC (6 to at least 16) emits aligned vector stores in base-object constructors assuming the full alignment, but a virtual-base subobject is only placed at its non-virtual alignment -> SIGSEGV at -O2/-O3 (see gccvb/pr_vbase_align.cpp). Keep over-aligned members (Armadillo/Eigen fixed-size types, alignas) behind a pointer, as FFModel::_pClassification does." );
+static_assert( alignof( BASE_CVODES ) <= alignof( void* ), "BASE_CVODES is a VIRTUAL base of the CRONOS solvers and must not be over-aligned (alignof > 8): GCC (6 to at least 16) emits aligned vector stores in base-object constructors assuming the full alignment, but a virtual-base subobject is only placed at its non-virtual alignment -> SIGSEGV at -O2/-O3 (see gccvb/pr_vbase_align.cpp). Keep over-aligned members (Armadillo/Eigen fixed-size types, alignas) behind a pointer, as FFModel::_pClassification does." );
+
 } // end namescape mc
 
 #endif

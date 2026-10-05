@@ -5,7 +5,7 @@ include $(srcpath)/makeoptions.mk
 
 #####
 
-libobjs = odeslvs.o ffode.o cronos.o
+libobjs = ffdom.o ffmodel.o odeslv.o ffode.o ocfeslv.o ffocfe.o cronos.o
 libname = cronos.so
 libdep  = pymc.so
 

@@ -7,7 +7,7 @@ include $(PATH_CRONOS)/src/makeoptions.mk
 
 all: OCFE_revision OCFE_options OCFE_nonuniform OCFE_refinit OCFE_fadbad OCFE_deepcopy OCFE_ffocfe \
      OCFE_parallel OCFE_marching OCFE_scalar OCFE_autoelim OCFE_partialfold OCFE_nlpartial \
-     OCFE_strongcorner OCFE_hypclosure OCFE_homotopy OCFE_homotopy_reset OCFE_homotopy_copy \
+     OCFE_strongcorner OCFE_hypclosure OCFE_homotopy OCFE_homotopy_reset OCFE_homotopy_copy OCFE_weakadj \
      OCFE_bisect OCFE_distout OCFE_scalar_Tlo OCFE_scalar_point OCFE_scalar_opeval OCFE_scalar_mixed \
      OCFE_scalar_fctopeval OCFE_scalar_nest OCFE_scalar_nest2 OCFE_scalar_nest3 OCFE_scalar_nest4 \
      OCFE_march_capture OCFE_march_capture2 OCFE_march_capture3 OCFE_march_nested OCFE_march_bolza \
@@ -17,7 +17,7 @@ all: OCFE_revision OCFE_options OCFE_nonuniform OCFE_refinit OCFE_fadbad OCFE_de
      OCFE_inpcolloc OCFE_claim OCFE_closure OCFE_receiver OCFE_ffmodel OCFE_setmodel OCFE_zindex \
      OCFE_faces OCFE_pencil OCFE_fixinput OCFE_symdiff1 OCFE_symdiff2 OCFE_evalsum OCFE_ffocfe2 \
      OCFE_TRANSoc OCFE_TRANSpde OCFE_TRANSpsa OCFE_TRANSdae OCFE_TRANSode OCFE_TRANSgrad \
-     OCFE_TRANSeval OCFE_MIXEDred OCFE_AUTOrole OCFE_causal OCFE_marchflux \
+     OCFE_TRANSeval OCFE_MIXEDred OCFE_AUTOrole OCFE_causal OCFE_marchflux OCFE_zchain \
      OCFE_AE0 OCFE_AE1 OCFE_AE2 \
      OCFE_ODE0 OCFE_ODE1 OCFE_ODE2 \
      OCFE_DAE0 OCFE_DAE1 OCFE_DAE2 OCFE_DAE3 OCFE_DAE4 OCFE_DAE5 OCFE_DAE5sd \
@@ -95,6 +95,9 @@ OCFE_bisect : OCFE_bisect.o
 	$(LINK) $(FLAG_LINK) -o $@ $< $(LIB_CRONOS) $(LIB_DEP)
 
 OCFE_distout : OCFE_distout.o
+	$(LINK) $(FLAG_LINK) -o $@ $< $(LIB_CRONOS) $(LIB_DEP)
+
+OCFE_weakadj : OCFE_weakadj.o
 	$(LINK) $(FLAG_LINK) -o $@ $< $(LIB_CRONOS) $(LIB_DEP)
 
 
@@ -254,6 +257,9 @@ OCFE_causal : OCFE_causal.o
 	$(LINK) $(FLAG_LINK) -o $@ $< $(LIB_CRONOS) $(LIB_DEP)
 
 OCFE_marchflux : OCFE_marchflux.o
+	$(LINK) $(FLAG_LINK) -o $@ $< $(LIB_CRONOS) $(LIB_DEP)
+
+OCFE_zchain : OCFE_zchain.o
 	$(LINK) $(FLAG_LINK) -o $@ $< $(LIB_CRONOS) $(LIB_DEP)
 
 
@@ -590,7 +596,7 @@ OCFE_MESHONLY1 : OCFE_MESHONLY1.o
 clean :
 	rm -f  OCFE_revision OCFE_options OCFE_nonuniform OCFE_refinit OCFE_fadbad OCFE_deepcopy \
 	OCFE_ffocfe OCFE_parallel OCFE_marching OCFE_scalar OCFE_autoelim OCFE_partialfold OCFE_nlpartial \
-	OCFE_strongcorner OCFE_hypclosure OCFE_homotopy OCFE_homotopy_reset OCFE_homotopy_copy \
+	OCFE_strongcorner OCFE_hypclosure OCFE_homotopy OCFE_homotopy_reset OCFE_homotopy_copy OCFE_weakadj \
 	OCFE_bisect OCFE_distout OCFE_scalar_Tlo OCFE_scalar_point OCFE_scalar_opeval OCFE_scalar_mixed \
 	OCFE_scalar_fctopeval OCFE_scalar_nest OCFE_scalar_nest2 OCFE_scalar_nest3 OCFE_scalar_nest4 \
 	OCFE_march_capture OCFE_march_capture2 OCFE_march_capture3 OCFE_march_nested OCFE_march_bolza \
@@ -600,7 +606,7 @@ clean :
 	OCFE_inpcolloc OCFE_claim OCFE_closure OCFE_receiver OCFE_ffmodel OCFE_setmodel OCFE_zindex \
 	OCFE_faces OCFE_pencil OCFE_fixinput OCFE_symdiff1 OCFE_symdiff2 OCFE_evalsum OCFE_ffocfe2 \
 	OCFE_TRANSoc OCFE_TRANSpde OCFE_TRANSpsa OCFE_TRANSdae OCFE_TRANSode OCFE_TRANSgrad \
-	OCFE_TRANSeval OCFE_MIXEDred OCFE_AUTOrole OCFE_causal OCFE_marchflux \
+	OCFE_TRANSeval OCFE_MIXEDred OCFE_AUTOrole OCFE_causal OCFE_marchflux OCFE_zchain \
 	OCFE_AE0 OCFE_AE1 OCFE_AE2 \
 	OCFE_ODE0 OCFE_ODE1 OCFE_ODE2 \
 	OCFE_DAE0 OCFE_DAE1 OCFE_DAE2 OCFE_DAE3 OCFE_DAE4 OCFE_DAE5 OCFE_DAE5sd \

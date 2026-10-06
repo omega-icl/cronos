@@ -498,7 +498,8 @@ public:
     //! @brief How continuity between elements is expressed and imposed: the condition type, the imposition (penalty, trace multiplier, strong), SAT penalties and trace-multiplier scaling.
     struct t_Interface
     {
-      //! @brief Imposition strategy for interface conditions
+      //! @brief Imposition strategy for interface conditions: IC_STRONG (default since 2026-10-06; exact continuity rows),
+      //! IC_WEAK (penalty terms of strength SAT_SIGMA0) or IC_TRACE (trace multipliers)
       ImpositionType IMPOSITION;
       //! @brief Interface condition type for multi-element continuity
       InterfaceType TYPE;
@@ -831,7 +832,7 @@ public:
         FFModel::Options::reset();
 
         INTERFACE.TYPE      = IC_AUTO;
-        INTERFACE.IMPOSITION     = IC_WEAK;
+        INTERFACE.IMPOSITION     = IC_STRONG;  // since 2026-10-06 (formerly IC_WEAK): exact continuity rows
         INTERFACE.DROP_POLICY = DROP_VERIFY;
         INTERFACE.SAT_SIGMA0          = 10.0;
         INTERFACE.TRACE_TAU_SCALE     = 1.0;
@@ -1985,6 +1986,12 @@ protected:
   //! @brief Set when pass 1 identifies droppable redundant claims; signals
   //! _build_interface_plan_draft to re-run the pipeline excluding them.
   mutable bool                       _strong_redundancy_pending = false;
+  //! @brief A RESTORE rebuild is pending (2026-10-06, WORKPLAN 1.5): EXACT_NATURAL returned silenced claims to their
+  //! natural receivers and the plan must be re-derived with them -- no claim dropped.  Booked on its own retry, so
+  //! that a DROP (a genuinely redundant claim excluded) can still follow it: a model whose pass 0 restores and whose
+  //! pass 1 flags redundant claims (OCFE_zindex's chain, high-index in z, under IC_STRONG) used to exhaust the single
+  //! DROP retry on the restore and fail at the exclusion it needed.
+  mutable bool                       _strong_restore_pending    = false;
 
 
 
@@ -4503,6 +4510,7 @@ protected:
 
   //! @brief Reentrancy guard: true while _solve_marching() drives per-element solve()s.
   bool                                      _inMarch = false;
+  mutable bool                              _sampleOwnElement = false;   //!< sample_input: element-boundary nodes from their own element (transfer_terminal)
   size_t                                    _marchWindow = 0;      //!< resident window index during a marching solve; a distributed input matched to the evolution direction remaps its evolution element to this window (see the INPUT cases in the assembly)
   bool                                      _lastSolveMarched = false; //!< last solve() marched with a stored trajectory -> route eval_colloc reads through it
 
@@ -4562,10 +4570,8 @@ protected:
     std::map<size_t,size_t> visits_by_dir;
     bool   computed      = false; //!< the fields below were MEASURED, not skipped
     bool   grid_ok       = false; //!< evolution grid well-formed
-    int    causal_level  = 0;   //!< CRONOS_CAUSAL_EVOFACE as parsed (0/1/2)
-    size_t n_acted       = 0;   //!< visits where the causal block ACTUALLY ran
-    size_t n_acted_aux   = 0;   //!< ... and dropped via the reduction-auxiliary branch
-    size_t n_acted_upstr = 0;   //!< ... and dropped the upstream differential receiver
+    // (2026-10-06, WORKPLAN 1.4: causal_level -- CRONOS_CAUSAL_EVOFACE as parsed -- and the n_acted* counters of the
+    // claims-based causal block are gone with that block, retired at rev349; the switch had controlled nothing since)
   };
   mutable t_EvoCausalProbe _evoProbe;
 
@@ -4980,7 +4986,7 @@ public:
     // rev110 -- so a solve log carried a revision three steps stale.  Nothing else in
     // the build chain would have caught it: the makefile names the file, the build
     // oracle checks the instrument's format marker, and neither reads this.
-    = "ocfeslv  rev355  2026-10-06";
+    = "ocfeslv  rev360  2026-10-06";
 
   //! @brief The revision of this ocfeslv.hpp (HEADER_ID); FFModel::revision() gives the model layer's, which a
   //! binary may mix with another solver revision.
@@ -6359,7 +6365,7 @@ public:
             if( silenced.count( kk ) && !_strong_dropped_claims.count( kk ) && _exact_natural_restored.insert( kk ).second ) ++n_new;
           }
           if( n_new ){
-            _strong_redundancy_pending = true;
+            _strong_restore_pending = true;      // a RESTORE (projector support), not a drop: its own retry
             _disp( 2 ) << "OCFESLV::setup ** trace projection: EXACT_NATURAL -- projector support (k=" << _traceProjK
                       << ") reaches " << n_new << " claim(s) whose rescued receivers were silenced; RESTORING them and rebuilding"
                       << std::endl;
@@ -16993,11 +16999,13 @@ OCFESLV::_build_interface_plan_draft
   _exact_natural_restored.clear();
   _keepExplicitReason.clear();
   _strong_redundancy_pending = false;
+  _strong_restore_pending    = false;
   _promotionRequested = false;
   _strong_promotion_pending  = false;
   _strong_promoted_claims.clear();
-  bool drop_retry_used  = false;
-  bool promo_retry_used = false;
+  bool drop_retry_used    = false;
+  bool promo_retry_used   = false;
+  bool restore_retry_used = false;   // the RESTORE rebuild (see _strong_restore_pending): one, independent of DROP
   int const pass_budget = 3;
   for( int _pass = 0; _pass < pass_budget; ++_pass ){
   // rev154g: the protected set is shared with protect_interface_claims() (driver-owned,
@@ -17090,7 +17098,7 @@ OCFESLV::_build_interface_plan_draft
       for( auto const& term : draft.weak_sat_terms )
         if( term.multiplier_silenced && _exact_natural_restored.insert( _trace_slot_key( term.claim_key ) ).second ) ++n_new;
       if( n_new ){
-        _strong_redundancy_pending = true;
+        _strong_restore_pending = true;    // a RESTORE, not a drop: its own retry
         std::cerr << "OCFESLV::setup ** tau elimination: EXACT_NATURAL_STRONG -- elimination failed with " << n_new
                   << " silenced claim(s); RESTORING all of them and rebuilding" << std::endl;
       }
@@ -17110,21 +17118,24 @@ OCFESLV::_build_interface_plan_draft
     // rev60: the retry decision is now per-reason.  `can_drop` is the same predicate rev59
     // spelled `_strong_redundancy_pending && _pass == 0` -- only pass 0 can consume the DROP
     // retry, so `!drop_retry_used` on pass 1 is false exactly where `_pass == 0` was false.
-    bool const can_drop  = _strong_redundancy_pending && !drop_retry_used;
-    bool const can_promo = _strong_promotion_pending && !promo_retry_used;   // rev281: revived for STRONG_PROJECT
+    bool const can_drop    = _strong_redundancy_pending && !drop_retry_used;
+    bool const can_promo   = _strong_promotion_pending && !promo_retry_used;   // rev281: revived for STRONG_PROJECT
+    bool const can_restore = _strong_restore_pending && !restore_retry_used;
 
     if( _failed_phase ){
-      bool const wants_retry = can_drop || can_promo;
+      bool const wants_retry = can_drop || can_promo || can_restore;
       std::cerr << "OCFESLV::setup ** interface plan: pass " << _pass
                 << ( wants_retry ? " REQUESTED A REBUILD at phase '"
                                  : " FAILED at phase '" )
                 << _failed_phase << "'"
                 << "  (redundancy_pending=" << ( _strong_redundancy_pending ? 1 : 0 )
+                << " restore_pending=" << ( _strong_restore_pending ? 1 : 0 )
                                 << " pass_budget=" << pass_budget
                 << " retries_used=" << ( drop_retry_used ? "drop" : "-" )
-                << "/" << ( promo_retry_used ? "promote" : "-" ) << ")"
+                << "/" << ( promo_retry_used ? "promote" : "-" )
+                << "/" << ( restore_retry_used ? "restore" : "-" ) << ")"
                 << ( wants_retry ? "  [normal: the retry is available]"
-                   : ( _strong_redundancy_pending )
+                   : ( _strong_redundancy_pending || _strong_restore_pending )
                        ? "  [a retry is wanted but that reason's budget is SPENT]"
                        : "  [no retry requested -- a real failure]" )
                 << std::endl;
@@ -17147,7 +17158,11 @@ OCFESLV::_build_interface_plan_draft
     // where it bound to the diagnostic `if( can_drop && _planIsGlobal )` above and silently changed the retry
     // logic -- four PDE20f RED_MAIN cells failed setup.  It is now a plain `if`, which is what it must be once
     // the branch before it is gone.
-    if( can_drop || can_promo ){
+    if( can_drop || can_promo || can_restore ){
+      if( can_restore ){
+        _strong_restore_pending = false;
+        restore_retry_used = true;
+      }
       if( can_drop ){
         _strong_redundancy_pending = false;
         drop_retry_used = true;
@@ -18107,7 +18122,7 @@ OCFESLV::_detect_redundant_continuity_claims
     for( auto const& ck : to_restore )
       if( !_strong_dropped_claims.count( ck ) && _exact_natural_restored.insert( ck ).second ) ++n_restored;
     if( n_restored ){
-      _strong_redundancy_pending = true;
+      _strong_restore_pending = true;      // a RESTORE, not a drop: its own retry
       _disp( 2 ) << "OCFESLV::setup ** continuity redundancy: EXACT_NATURAL -- " << n_restored
                 << " claim(s) restored to their rescued receivers (" << n_group << " as dependency-group partners; re-deriving plan; no drop)" << std::endl;
       return false;   // pass-2 re-run with the restored set
@@ -22831,21 +22846,9 @@ OCFESLV::_prepare_interface_plan_tables
     _evoProbe.ran           = true;
     _evoProbe.gate_current  = evolution_input_may_jump;
     _evoProbe.visits_by_dir.clear();
-    _evoProbe.n_acted = _evoProbe.n_acted_aux = _evoProbe.n_acted_upstr = 0;
-    { char const* v = std::getenv( "CRONOS_CAUSAL_EVOFACE" );
-      int const n = ( v && *v ) ? std::atoi( v ) : 1;   // rev96: DEFAULT 1 -- delta (A) PROMOTED
-      _evoProbe.causal_level = ( n < 1 ? 0 : 1 ); }   // rev103: levels {0,1}
 
     static bool const kEvoFace = Options::_env_flag( "CRONOS_AUDIT_EVOFACE", false );
     if( kEvoFace ){
-      _disp( 3 ) << "  [evoface] rev88 causal switch: CRONOS_CAUSAL_EVOFACE="
-                << _evoProbe.causal_level
-                << ( _evoProbe.causal_level == 0
-                       ? "  -> block DEAD (rev86-identical; the corpus baseline)"
-                   : _evoProbe.causal_level == 1
-                       ? "  -> DELTA (A): live under the ORIGINAL gate"
-                       : "  -> DELTA (A)+(B): live under predicate (ii)" )
-                << "\n";
       if( !_evoProbe.computed )
         _disp( 3 ) << "  [evoface]   differential_states / with_own_IC_closure /"
                      " lumped_evo_coupling / n_elem@plan: NOT COMPUTED -- no evolution"
@@ -25305,11 +25308,6 @@ OCFESLV::_prepare_interface_plan_tables
             _disp( 3 ) << "  " << nm_dom( kv.first )
                       << ( kv.first == evo_id ? "[EVOLUTION]" : "" ) << "=" << kv.second;
           _disp( 3 ) << "\n";
-          _disp( 3 ) << "  [evoface] causal block ENTERED: " << _evoProbe.n_acted
-                    << " visit(s), DROPPED: aux_flux=" << _evoProbe.n_acted_aux
-                    << " upstream=" << _evoProbe.n_acted_upstr
-                    << ( _evoProbe.causal_level == 0
-                           ? "   <- expected 0 at CRONOS_CAUSAL_EVOFACE=0" : "" ) << "\n";
           // rev89: RECEIVER EDGES per direction.  THE metric for the differential branch.
           // MEASURED rev88 (DAE5 at L2): acted=24, drop_upstream=6, and the claim census
           // did NOT move -- still 6.  Both receivers of a seam canonicalise to ONE physical
@@ -28270,41 +28268,49 @@ const
     for( auto const& v : var_dom ) if( v.id() == evo_id ){ on_evo = true; break; }
     if( !on_evo ) continue;
 
-    // Spatial domains in var_dom order (matches pos_state); flatten each domain's
-    // physical node positions element-major, node-inner via _mDom -- the same
-    // per-element lgnodes the DOF layout and _setup_node_cache use (so the profile
-    // aligns with the LB-face DOF ordering).
-    std::vector<FFVar> sdom;
-    std::vector<std::vector<double>> spos;
-    for( auto const& v : var_dom ){
-      if( v.id() == evo_id ) continue;
-      sdom.push_back( v );
-      std::vector<double> pos;
-      auto itd = _mDom.find( v );
-      if( itd != _mDom.end() ){
-        auto const& d = itd->second;
-        for( size_t ie = 0; ie < d.n_elem; ++ie ){
-          auto xe = d.lgnodes( d.elem_lo( ie ), d.elem_up( ie ) );
-          pos.insert( pos.end(), xe.begin(), xe.end() );
-        }
-      }
-      spos.push_back( std::move( pos ) );
-    }
-
+    // Each spatial NODE of each spatial ELEMENT reads ITS OWN element's terminal (2026-10-06, WORKPLAN 1.2/1.3): the
+    // Lagrange extrapolation to the window's UB of that element's DOFs, exactly the map terminal_profile_adjoint()
+    // transposes.  Formerly each node was evaluated at its COORDINATE, so at a spatial element boundary both copies
+    // read one element's value: harmless under IC_STRONG/IC_TRACE (the copies are equal), but under IC_WEAK the
+    // other element's own terminal was ignored -- marching then differed from monolithic's causal continuity
+    // (each copy pinned to its own element) and its adjoint, the transpose of a per-element map, was wrong.
+    std::vector<double> w_evo;
+    auto ievo = _mDom.find( _evolution_dom_var );
+    if( ievo == _mDom.end() || !ievo->second.w_eval_lagrange( w_evo, 1.0, 0 ) ) continue;
+    size_t const D = var_dom.size();
+    std::vector<size_t> nnode( D, 0 ), nStride( D, 0 );
+    size_t evoDim = D;
+    { size_t st = 1, d = 0;
+      for( auto const& v : var_dom ){
+        size_t const nn = _mDom.at( v ).n_node;  nnode[d] = nn;  nStride[d] = st;  st *= nn;
+        if( v.id() == evo_id ) evoDim = d;
+        ++d; } }
+    if( evoDim == D ) continue;
+    std::vector<FFVar> sVar; std::vector<size_t> sPos, sElem, sNode;
+    { size_t d = 0;
+      for( auto const& v : var_dom ){
+        if( v.id() != evo_id ){ FFDom const& dd = _mDom.at( v ); sVar.push_back( v ); sPos.push_back( d ); sElem.push_back( dd.n_elem ); sNode.push_back( dd.n_node ); }
+        ++d; } }
     size_t total = 1;
-    for( auto const& p : spos ) total *= ( p.empty() ? 1 : p.size() );
-    std::vector<double> vals;
-    vals.reserve( total );
+    for( size_t k = 0; k < sVar.size(); ++k ) total *= sElem[k] * sNode[k];
+    std::vector<double> vals;  vals.reserve( total );
+    size_t const nme = std::min( w_evo.size(), nnode[evoDim] );
     for( size_t lin = 0; lin < total; ++lin ){
-      t_Coord pt;
-      size_t rem = lin;
-      for( size_t d = 0; d < sdom.size(); ++d ){
-        size_t const nd = spos[d].size();
-        if( !nd ) continue;
-        pt[ sdom[d] ] = spos[d][ rem % nd ];
-        rem /= nd;
+      std::map<FFVar,size_t,lt_FFVar> ndx_el;
+      // the LAST evolution element: the resident window when marching (collapsed: element 0), the final element on
+      // the full domain (a monolithic caller, e.g. OCFE_marching's read of the terminal)
+      ndx_el[ _evolution_dom_var ] = ievo->second.n_elem? ievo->second.n_elem - 1: 0;
+      size_t rem = lin, node_base = 0;
+      for( size_t k = 0; k < sVar.size(); ++k ){
+        size_t const ng = sElem[k] * sNode[k];
+        size_t const g  = rem % ng;  rem /= ng;
+        ndx_el[ sVar[k] ] = g / sNode[k];
+        node_base += ( g % sNode[k] ) * nStride[ sPos[k] ];
       }
-      vals.push_back( terminal_value( state, pt, var, inp, cst ) );
+      size_t const inc = pos_state( state, ndx_el );
+      double v = 0.;
+      for( size_t m = 0; m < nme; ++m ) v += w_evo[m] * var[ inc + node_base + m * nStride[evoDim] ];
+      vals.push_back( v );
     }
     out[ state ] = std::move( vals );
   }
@@ -28436,6 +28442,21 @@ const
         pt[ doms[j] ] = np[j][ eidx[j] ][ ni ];
         if( nnode[j] ) r /= nnode[j];
       }
+      // A marching transfer (transfer_terminal, 2026-10-06, WORKPLAN 1.2/1.3): a node on an INTERIOR element boundary of
+      // a spatial direction is sampled from just inside ITS OWN element, so each copy of the node reads its own
+      // element's terminal -- the per-element map terminal_profile() and the sensitivities use.  Sampled at the
+      // coordinate itself, both copies read one element: invisible under IC_STRONG/IC_TRACE (equal copies), but under
+      // IC_WEAK marching differed from monolithic and its gradient from its own finite differences.
+      if( _sampleOwnElement ){
+        for( size_t j = 0; j < doms.size(); ++j ){
+          if( _evolution_dom_var.dag() && doms[j].id() == _evolution_dom_var.id() ) continue;
+          if( nnode[j] < 2 || nel[j] < 2 ) continue;
+          FFDom const& d = _input_dom( input, doms[j] );
+          double const eps = 1e-12 * std::fabs( d.elem_up( eidx[j] ) - d.elem_lo( eidx[j] ) );
+          if( nidx[j] == 0 && eidx[j] > 0 )                       pt[ doms[j] ] += eps;
+          if( nidx[j] + 1 == nnode[j] && eidx[j] + 1 < nel[j] )   pt[ doms[j] ] -= eps;
+        }
+      }
       double v = fun( pt );
       // Interior-side re-sampling so a DISCONTINUOUS input gets each element's own one-sided value
       // (see _input_ref_interior_side).  No-op for continuous inputs.
@@ -28455,9 +28476,12 @@ const
   // Exact marching transfer: seed `input` with `state` at the evolution UB, sampled
   // at the input's own nodes.  terminal_value() pins the evolution coordinate to the
   // UB, so the sampled `pt` need only carry spatial coordinates.
-  return sample_input( input,
+  _sampleOwnElement = true;     // each element-boundary copy reads its own element (see sample_input)
+  bool const ok = sample_input( input,
     [&]( t_Coord const& pt ){ return terminal_value( state, pt, var, inp, cst ); },
     inp );
+  _sampleOwnElement = false;
+  return ok;
 }
 
 inline bool

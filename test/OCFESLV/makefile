@@ -585,7 +585,7 @@ OCFE_MESHONLY1 : OCFE_MESHONLY1.o
 #####
 
 clean :
-	rm -f  OCFE_revision OCFE_options OCFE_nonuniform OCFE_refinit OCFE_fadbad OCFE_deepcopy 
+	rm -f  OCFE_revision OCFE_options OCFE_nonuniform OCFE_refinit OCFE_fadbad OCFE_deepcopy \
 	OCFE_ffocfe OCFE_parallel OCFE_marching OCFE_scalar OCFE_autoelim OCFE_partialfold OCFE_nlpartial \
 	OCFE_strongcorner OCFE_hypclosure OCFE_homotopy OCFE_homotopy_reset OCFE_homotopy_copy \
 	OCFE_bisect OCFE_scalar_Tlo OCFE_scalar_point OCFE_scalar_opeval OCFE_scalar_mixed \

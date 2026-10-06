@@ -573,6 +573,8 @@ else()
               -Wno-unknown-pragmas
               -Wno-parentheses
               -Wno-unused-result
+              -Wno-unused-function
+              -Wno-comment
               ${INTERVAL_COMPILE_OPTIONS})
 endif()
 

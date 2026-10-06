@@ -68,7 +68,7 @@ public:
   //! @brief Identifies this ffmodel.hpp.  The solver header carries its own OCFESLV::HEADER_ID, and a binary can
   //! mix the two (a sweep has run one revision's model layer under another's solver), so both are printed.
   static constexpr char const* HEADER_ID
-    = "ffmodel  rev353  2026-10-05";
+    = "ffmodel  rev354  2026-10-05";
 
   //! @brief The revision of this ffmodel.hpp (HEADER_ID), e.g. for a bug report; the model report does not print it.
   static char const* revision() { return HEADER_ID; }
@@ -5037,14 +5037,36 @@ const
   // ALGEBRAIC_LUMPED accordingly.  Returning empty rather than nDom zero matrices is
   // deliberate: a zero matrix is indistinguishable from a genuinely zero coefficient.
   if( A0 && sym.vCoeff0.size() == nEqn * nState ){          // the zeroth-order block, on request
-    try{
-      std::vector<double> c0( nEqn * nState, 0. );
-      _dag->eval( sym.vCoeff0, c0, eval_vars, eval_vals );
-      *A0 = arma::mat( (arma::uword)nEqn, (arma::uword)nState, arma::fill::zeros );
-      for( size_t k = 0; k < nEqn; ++k )
-        for( size_t j = 0; j < nState; ++j ) (*A0)( (arma::uword)k, (arma::uword)j ) = c0[ k * nState + j ];
+    // sym.vCoeff0 is the state Jacobian of the PROXIED equations, so it may contain the derivative proxies
+    // (v_Cg_z for dCg/dz under an advective term): at the reference point -- a constant field -- the derivatives
+    // vanish, so the proxies are supplied at 0 (2026-10-05)
+    std::vector<FFVar>  v0 = eval_vars;  std::vector<double> x0 = eval_vals;
+    for( auto const& pr : sym.vDerivProxy ){
+      bool have = false;
+      for( auto const& w : v0 ) if( w.id() == pr.id() ){ have = true; break; }
+      if( !have ){ v0.push_back( pr ); x0.push_back( 0. ); }
     }
-    catch( ... ){ A0->reset(); }     // a coefficient this context cannot evaluate: no zeroth-order block
+    // evaluate only if every variable is supplied; otherwise no zeroth-order block, QUIETLY (FFGraph::eval would
+    // print "Subgraph evaluation failed -- missing variable ..." before throwing)
+    bool complete = true;
+    { FFSubgraph sg = _dag->subgraph( sym.vCoeff0.size(), sym.vCoeff0.data() );
+      for( auto const* op : sg.l_op ){
+        if( op->type != FFOp::VAR || !op->varout[0] ) continue;
+        bool have = false;
+        for( auto const& w : v0 ) if( w.id() == op->varout[0]->id() ){ have = true; break; }
+        if( !have ){ complete = false; break; }
+      } }
+    if( complete ){
+      try{
+        std::vector<double> c0( nEqn * nState, 0. );
+        _dag->eval( sym.vCoeff0, c0, v0, x0 );
+        *A0 = arma::mat( (arma::uword)nEqn, (arma::uword)nState, arma::fill::zeros );
+        for( size_t k = 0; k < nEqn; ++k )
+          for( size_t j = 0; j < nState; ++j ) (*A0)( (arma::uword)k, (arma::uword)j ) = c0[ k * nState + j ];
+      }
+      catch( ... ){ A0->reset(); }   // a coefficient this context cannot evaluate: no zeroth-order block
+    }
+    else A0->reset();
   }
   if( sym.vCoeff.size() < nDom ) return std::vector<arma::mat>();
 

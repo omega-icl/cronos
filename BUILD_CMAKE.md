@@ -24,7 +24,7 @@ cmake -S <cronosroot> -B build \
       -DMCPP_ROOT=<MC++ source tree, holding src/mc> \
       -DSUNDIALS_DIR=<sundials prefix>/lib/cmake/sundials \
       -DSUPERLU_ROOT=<SuperLU prefix>            # if not on the default search path
-cmake --build build -j
+cmake --build build -j $(nproc)
 cmake --install build --prefix <prefix>
 ```
 
@@ -75,7 +75,7 @@ path).  Both modules must have been built from the same MC++ headers and pybind1
 
 ```
 cmake -S <cronosroot> -B build -DENABLE_EXAMPLES=ON ...
-cmake --build build -j
+cmake --build build -j $(nproc)
 ctest --test-dir build -LE slow --output-on-failure          # the quick set
 ctest --test-dir build -L OCFESLV -j4 --output-on-failure    # one directory (labels: ODESLV, OCFESLV)
 ctest --test-dir build -L slow --output-on-failure           # the long drivers only

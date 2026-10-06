@@ -93,7 +93,7 @@ Main options (all listed in `BUILD_CMAKE.md`):
 ## 3. Build and check
 
 ```
-cmake --build build -j
+cmake --build build -j $(nproc)
 cmake --build build --target check        # the five Python check scripts
 ```
 
@@ -105,7 +105,7 @@ a final `... passed, 0 failed -- ALL PASS`.
 
 ```
 cmake -S <cronos> -B build -DENABLE_EXAMPLES=ON ...
-cmake --build build -j
+cmake --build build -j $(nproc)
 ctest --test-dir build -LE slow --output-on-failure       # the quick set
 ctest --test-dir build -L slow --output-on-failure        # the long drivers (minutes each)
 ```

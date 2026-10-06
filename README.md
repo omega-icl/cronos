@@ -42,7 +42,7 @@ guide and to [BUILD_CMAKE.md](BUILD_CMAKE.md) for the complete list of build opt
 
 ```
 cmake -S . -B build -DMCPP_ROOT=<MC++ source tree> -DPYMCPP_DIR=<directory holding pymcpp>
-cmake --build build -j
+cmake --build build -j $(nproc)
 cmake --build build --target check        # the Python check scripts
 cmake --install build --prefix <prefix>
 ```

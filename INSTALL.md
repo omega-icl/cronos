@@ -35,7 +35,7 @@ A Python module, `cronos`, exposes all of this on top of PyMC++, MC++'s Python l
 | SuperLU | 5.2.x | OCFESLV's default sparse factorisation, through Armadillo |
 | Eigen | >= 3.3 | optional sparse QR |
 | SUNDIALS | **>= 7**, built with KLU (`-DENABLE_KLU=ON`) | CVODES for ODESLV |
-| Python | 3.8+ (development headers) | for the `cronos` module |
+| Python | 3.10+ (development headers) | for the `cronos` module |
 | pybind11 | **>= 3.0.3, not 3.1.0** (3.0.4 recommended) | Python bindings |
 | pybind11-stubgen | optional | generates the `cronos.pyi` type stub |
 | HSL MC13/MC21/MC33 | optional | as for MC++ |

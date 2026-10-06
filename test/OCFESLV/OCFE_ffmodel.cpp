@@ -462,15 +462,26 @@ int main()
     check( "the capture model sets up", M.setup() );
     std::ostringstream rep; M.report( rep );
     auto has = [&]( char const* w ){ return rep.str().find( w ) != std::string::npos; };
-    std::cout << "  (its deferred section)" << std::endl;
+    // 2026-10-04: the report shows the inputs and outputs the USER declared; the deferred-value plumbing (the
+    // inputs that hold the values, their sources and LINK rows) is an implementation detail, published to a
+    // consumer through var_deferred() and no longer printed
+    std::cout << "  (its OUTPUTS section)" << std::endl;
     { std::istringstream is( rep.str() ); std::string l; bool in = false;
       while( std::getline( is, l ) ){
-        if( l.rfind("DEFERRED VALUES",0) == 0 ) in = true;
+        if( l.rfind("OUTPUTS",0) == 0 ) in = true;
         else if( in && l.empty() ) break;
         if( in ) std::cout << "  " << l << std::endl; } }
-    check( "the report lists the deferred values",     has("DEFERRED VALUES") );
-    check( "it marks the inputs that hold them",       has("(holds a deferred value)") );
-    check( "it gives each one's contract",             has("INTEGRAL over t") && has("VALUE at 0.25") ); }
+    bool plumbing_hidden = !has("DEFERRED VALUES") && !has("holds a deferred value");
+    for( auto const& C : M.var_deferred() ) plumbing_hidden = plumbing_hidden && !has( C.input.name().c_str() );
+    check( "the report lists the two outputs as declared",   has("OUTPUTS (2)") );
+    check( "it hides the deferred-value plumbing",           plumbing_hidden );
+    check( "the contract stays available (var_deferred)",    M.var_deferred().size() == 2 );
+    // 2026-10-05: every state is listed -- also one a deferred value is taken of (a point output of a state at the
+    // end of the evolution direction once hid that state from the report)
+    bool all_states = true;
+    for( auto const& [var,dom] : M.var_state() )
+      all_states = all_states && has( ( "\n  " + var.name() + " " ).c_str() );
+    check( "it lists every state of the model",              all_states ); }
 
   // 11 -- the model preflight: each malformed model is rejected, with OCFESLV's own message
   std::cout << "11: the model preflight -- malformed models are rejected" << std::endl;

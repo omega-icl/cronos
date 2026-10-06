@@ -222,8 +222,9 @@ M.setup()
 M.report()
 
 # %% [markdown]
-# The opposite mistake -- prescribing **all four** initial values, as one would for an ODE -- is caught too: two of
-# them must agree with constraints the model does not enforce at $t = 0$, and nothing guarantees that they do.
+# The opposite mistake -- prescribing **all four** initial values, as one would for an ODE -- is caught too: with
+# the hidden constraints among the rows, two of the four are redundant with them, and the initial point is
+# over-determined -- a surplus of 2 rows, which a solver would satisfy only in the least-squares sense.
 
 # %%
 M.add_equation(y, [t], [FFDom.LB], role(Role.INITIAL))

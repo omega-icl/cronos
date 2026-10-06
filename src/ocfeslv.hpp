@@ -4279,6 +4279,100 @@ protected:
   //! initial-time output (t=0) is captured at window 0 and a final-time output at the last window --
   //! or the output has no evolution-t coordinate (spatial-only -> keep the last window's value).
   //! Evolution-direction integrals are summed and do not consult this.
+  //! @brief Is output f DISTRIBUTED over the evolution direction?  (2026-10-06, WORKPLAN 1.1)  Such an output spans
+  //! the whole horizon: under marching every window emits the rows of ITS time element (the emission applies the
+  //! evolution mask with the global element index), and _march_field_rows places them in the monolithic layout.
+  bool _march_field_over_evo( t_Fct const& f ) const
+  {
+    if( f.kind != FctKind::DISTRIBUTED || !_evolution_dom_var.dag() ) return false;
+    for( auto const& [dv, lim] : f.grid ){ (void)lim; if( dv.id() == _evolution_dom_var.id() ) return true; }
+    return false;
+  }
+  //! @brief Nodes of one element kept by a grid mask (the emission's rule: the domain's ends by mask, the unique-node
+  //! policy for the left trace of every non-first LGL/CGL element; LB/UB are one interpolated row per block).
+  size_t _grid_sel_count( FFDom const& dom, int lim, size_t iel, size_t nel ) const
+  {
+    if( lim == FFDom::LB || lim == FFDom::UB ) return 1;
+    size_t n = 0;
+    for( size_t k = 0; k < dom.n_node; ++k ){
+      if( ( lim == FFDom::ALL-FFDom::LB || lim == FFDom::ALL-FFDom::LB-FFDom::UB ) && iel == 0 && k == 0 ) continue;
+      if( ( lim == FFDom::ALL-FFDom::UB || lim == FFDom::ALL-FFDom::LB-FFDom::UB ) && iel + 1 == nel && k + 1 == dom.n_node ) continue;
+      if( options.OUTPUT.GRID_POLICY == Options::OUT_UNIQUE_PHYSICAL && ( dom.type == FFDom::LGL || dom.type == FFDom::CGL )
+       && iel > 0 && k == 0 ) continue;
+      ++n;
+    }
+    return n;
+  }
+  //! @brief For output f distributed over the evolution direction and marching window k: for each row the WINDOW's
+  //! emission writes (in its order: the full grid's blocks restricted to time element k, in _next_block order --
+  //! first grid variable fastest, LB/UB pinned -- each block laid out dimension by dimension, first dimension
+  //! fastest, with ALL the window's evolution nodes), the GLOBAL row it occupies in the monolithic layout (relative
+  //! to f.row0), or npos when the global evolution mask drops that node (t = 0 under NLB, the final node under NUB,
+  //! the left trace of a non-first LGL/CGL element under OUT_UNIQUE_PHYSICAL) or when the window does not own the
+  //! row (an LB/UB evolution mask: the first/last window does).
+  static constexpr size_t npos = static_cast<size_t>( -1 );
+  std::vector<size_t> _march_field_rows( t_Fct const& f, size_t k ) const
+  {
+    std::vector<size_t> rows;
+    size_t const nw = _marchGrid.size() > 1? _marchGrid.size() - 1: 1;
+    std::vector<FFVar> dims;  std::vector<int> lims;  std::vector<size_t> nel, cur;
+    for( auto const& [dv, lim] : f.grid ){
+      dims.push_back( dv );  lims.push_back( lim );
+      nel.push_back( dv.id() == _evolution_dom_var.id()? nw: _mDom.at( dv ).n_elem );
+      cur.push_back( lim == FFDom::UB? nel.back() - 1: 0 );
+    }
+    size_t ievo = dims.size();
+    for( size_t i = 0; i < dims.size(); ++i ) if( dims[i].id() == _evolution_dom_var.id() ) ievo = i;
+    if( ievo == dims.size() ) return rows;
+    FFDom const& tdom = _mDom.at( dims[ievo] );
+    bool const evo_pinned = ( lims[ievo] == FFDom::LB || lims[ievo] == FFDom::UB );
+    // the evolution node list of global element e: kept node -> compressed index, dropped -> npos
+    auto evo_kept = [&]( size_t e ){
+      std::vector<size_t> m( tdom.n_node, npos );  size_t c = 0;
+      for( size_t q = 0; q < tdom.n_node; ++q ){
+        int const lim = lims[ievo];
+        if( ( lim == FFDom::ALL-FFDom::LB || lim == FFDom::ALL-FFDom::LB-FFDom::UB ) && e == 0 && q == 0 ) continue;
+        if( ( lim == FFDom::ALL-FFDom::UB || lim == FFDom::ALL-FFDom::LB-FFDom::UB ) && e + 1 == nw && q + 1 == tdom.n_node ) continue;
+        if( options.OUTPUT.GRID_POLICY == Options::OUT_UNIQUE_PHYSICAL && ( tdom.type == FFDom::LGL || tdom.type == FFDom::CGL ) && e > 0 && q == 0 ) continue;
+        m[q] = c++;
+      }
+      return m; };
+    size_t off = 0;
+    while( true ){
+      // the global block's per-dimension selection counts, and the window block's (all evolution nodes)
+      std::vector<size_t> gsel( dims.size() ), wsel( dims.size() );
+      for( size_t i = 0; i < dims.size(); ++i ){
+        gsel[i] = _grid_sel_count( _mDom.at( dims[i] ), lims[i], cur[i], nel[i] );
+        wsel[i] = ( i == ievo && !evo_pinned )? tdom.n_node: gsel[i];
+      }
+      size_t gsize = 1, wsize = 1;
+      for( size_t i = 0; i < dims.size(); ++i ){ gsize *= gsel[i]; wsize *= wsel[i]; }
+      bool const owns = ( cur[ievo] == k );
+      if( owns || evo_pinned ){                       // the window visits this block
+        std::vector<size_t> const m = evo_pinned? std::vector<size_t>{ 0 }: evo_kept( cur[ievo] );
+        for( size_t w = 0; w < wsize; ++w ){
+          // decompose w (first dimension fastest) and recompose the global in-block index
+          size_t rem = w, g = 0, gstride = 1;  bool drop = !owns;
+          for( size_t i = 0; i < dims.size(); ++i ){
+            size_t const idx = rem % wsel[i];  rem /= wsel[i];
+            size_t gidx = idx;
+            if( i == ievo && !evo_pinned ){ gidx = m[idx]; if( gidx == npos ) drop = true; }
+            g += ( drop? 0: gidx ) * gstride;  gstride *= gsel[i];
+          }
+          rows.push_back( drop? npos: off + g );
+        }
+      }
+      off += gsize;
+      size_t i = 0;
+      for( ; i < dims.size(); ++i ){
+        if( lims[i] == FFDom::LB || lims[i] == FFDom::UB ) continue;
+        if( ++cur[i] < nel[i] ) break;
+        cur[i] = 0;
+      }
+      if( i == dims.size() ) break;
+    }
+    return rows;
+  }
   bool _march_point_capture( t_Fct const& f, double t0, double t1 ) const
   {
     if( !_evolution_dom_var.dag() ) return true;
@@ -4886,7 +4980,7 @@ public:
     // rev110 -- so a solve log carried a revision three steps stale.  Nothing else in
     // the build chain would have caught it: the makefile names the file, the build
     // oracle checks the instrument's format marker, and neither reads this.
-    = "ocfeslv  rev354  2026-10-04";
+    = "ocfeslv  rev355  2026-10-06";
 
   //! @brief The revision of this ocfeslv.hpp (HEADER_ID); FFModel::revision() gives the model layer's, which a
   //! binary may mix with another solver revision.
@@ -9944,7 +10038,7 @@ const
   _disp( 3 ) << "setup: output checks begin\n";
 #endif
   auto keep_output_node = [&]( FFDom const& dom, int const lim,
-                                size_t const iel, size_t const inode ) -> bool
+                                size_t const iel, size_t const inode, size_t const nel ) -> bool
   {
     switch( lim ){
       case FFDom::ALL:
@@ -9953,16 +10047,16 @@ const
         if( iel == 0 && inode == 0 ) return false;
         break;
       case FFDom::ALL-FFDom::UB:
-        if( iel + 1 == dom.n_elem && inode + 1 == dom.n_node ) return false;
+        if( iel + 1 == nel && inode + 1 == dom.n_node ) return false;
         break;
       case FFDom::ALL-FFDom::LB-FFDom::UB:
         if( iel == 0 && inode == 0 ) return false;
-        if( iel + 1 == dom.n_elem && inode + 1 == dom.n_node ) return false;
+        if( iel + 1 == nel && inode + 1 == dom.n_node ) return false;
         break;
       case FFDom::LB:
         return iel == 0 && inode == 0;
       case FFDom::UB:
-        return iel + 1 == dom.n_elem && inode + 1 == dom.n_node;
+        return iel + 1 == nel && inode + 1 == dom.n_node;
       default:
         throw Exceptions( Exceptions::DOMAIN );
     }
@@ -9985,14 +10079,19 @@ const
       auto const& dom = itdom->second;
 
       size_t nsel = 0;
+      // marching (2026-10-06): the evolution direction is collapsed to the resident window (one element), but the
+      // output's rows span the WHOLE horizon -- count them over the global windows, with the global element index,
+      // as the per-window emission applies the masks (see _march_field_rows)
+      bool const evo_march = _evolution_dom_var.dag() && var.id() == _evolution_dom_var.id() && _marchGrid.size() > 1;
+      size_t const nel_eff = evo_march? _marchGrid.size() - 1: dom.n_elem;
       switch( lim ){
         case FFDom::ALL:
         case FFDom::ALL-FFDom::LB:
         case FFDom::ALL-FFDom::UB:
         case FFDom::ALL-FFDom::LB-FFDom::UB:
-          for( size_t iel = 0; iel < dom.n_elem; ++iel )
+          for( size_t iel = 0; iel < nel_eff; ++iel )
             for( size_t inode = 0; inode < dom.n_node; ++inode )
-              if( keep_output_node( dom, lim, iel, inode ) ) ++nsel;
+              if( keep_output_node( dom, lim, iel, inode, nel_eff ) ) ++nsel;
           break;
         case FFDom::LB:
         case FFDom::UB:
@@ -18678,6 +18777,14 @@ OCFESLV::_solve_marching( double* var, double const* inp, double const* cst )
       eval( eqndum.data(), fctblk.data(), var, pinp, cst );
       for( auto const& f : _mFct ){
         bool const summed = ( f.row0 < nfct && fctsum[f.row0] );
+        // An output DISTRIBUTED over the evolution direction (2026-10-06, WORKPLAN 1.1): this window emitted the rows
+        // of ITS time element, in its emission order; place them in the monolithic layout
+        if( !summed && _march_field_over_evo( f ) ){
+          std::vector<size_t> const rows = _march_field_rows( f, k );
+          for( size_t i = 0; i < rows.size() && f.row0 + i < nfct; ++i )
+            if( rows[i] != npos && f.row0 + rows[i] < nfct ) fctacc[ f.row0 + rows[i] ] = fctblk[ f.row0 + i ];
+          continue;
+        }
         // Value capture routed through the SAME predicate as the sensitivity capture (UB-owned), so a
         // point output lands in exactly one window on both paths.  For continuous states LB and UB agree
         // by IC continuity (unchanged), so this only re-sides a DISCONTINUOUS seam output to its left-
@@ -19066,6 +19173,20 @@ OCFESLV::_march_fsens_apply
     // contract dF/dp += dF/dinp . dinp_dp + dF/dvar . s  (point outputs captured in-window)
     for( auto const& f : _mFct ){
       bool const summed = ( f.row0 < nf && fctsum[f.row0] );
+      // a field output over the evolution direction (2026-10-06, WORKPLAN 1.1): this window's rows, emitted in
+      // window order at f.row0.., go to their global rows
+      if( !summed && _march_field_over_evo( f ) ){
+        std::vector<size_t> const rows = _march_field_rows( f, k );
+        for( size_t i = 0; i < rows.size(); ++i ){
+          if( rows[i] == npos ) continue;
+          size_t const r = f.row0 + i, g = f.row0 + rows[i];
+          if( r >= nf || g >= nf || r >= B.gfct.size() ) break;
+          double contr = 0.;
+          for( size_t idx = 0; idx < B.gfct[r].size(); ++idx ){ size_t c = B.cfct[r][idx]; double v = B.gfct[r][idx]; if( c < nv ) contr += v * s( c ); else if( c - nv < ni ) contr += v * dinp_dp[c-nv]; }
+          dFdp[g] = contr;
+        }
+        continue;
+      }
       bool const cap = summed || _march_point_capture( f, B.t0, B.t1 );
       for( size_t r = f.row0; r < f.row0 + f.nrow && r < nf && r < B.gfct.size(); ++r ){
         double contr = 0.;
@@ -19235,20 +19356,33 @@ OCFESLV::_march_asens_apply
     // contains its t (so c(0) is picked up at window 0), evolution integrals every window.  This is
     // the transpose of the forward's in-window dFdp capture and of _solve_marching's value capture.
     std::vector<char> capW( nf, 0 );
+    std::vector<double> weff( nf, 0. );    // this window's weight per WINDOW row (w[global row] for a captured row)
     for( auto const& f : _mFct ){
       bool const summed = ( f.row0 < nf && fctsum[f.row0] );
+      // a field output over the evolution direction (2026-10-06, WORKPLAN 1.1): window row f.row0+i is global row
+      // f.row0+rows[i] -- it takes that row's weight; the window's other rows of f carry none
+      if( !summed && _march_field_over_evo( f ) ){
+        std::vector<size_t> const rows = _march_field_rows( f, k );
+        for( size_t i = 0; i < rows.size(); ++i ){
+          if( rows[i] == npos ) continue;
+          size_t const r = f.row0 + i, g = f.row0 + rows[i];
+          if( r < nf && g < nf ){ capW[r] = 1; weff[r] = w[g]; }
+        }
+        continue;
+      }
       bool const pt     = _march_point_capture( f, B.t0, B.t1 );
       for( size_t r = f.row0; r < f.row0 + f.nrow && r < nf; ++r ){
         if( summed )                  capW[r] = 1;                       // evolution integral: every window
         else if( pt && !capDone[r] ){ capW[r] = 1; capDone[r] = 1; }     // point: highest-k window only
         else                          capW[r] = 0;
+        weff[r] = capW[r]? w[r]: 0.;
       }
     }
 
     // state adjoint  ls = dF/dvar^T wk
     arma::vec ls( nv, arma::fill::zeros );
     for( size_t r = 0; r < B.gfct.size() && r < nf; ++r ){
-      double const wk = w[r] * ( capW[r] ? 1.0 : 0.0 );
+      double const wk = weff[r];
       if( wk == 0. ) continue;
       for( size_t idx = 0; idx < B.gfct[r].size(); ++idx ){ size_t const c = B.cfct[r][idx]; if( c < nv ) ls( c ) += B.gfct[r][idx] * wk; }
     }
@@ -19285,7 +19419,7 @@ OCFESLV::_march_asens_apply
     // input-space adjoint  ldinp = dF/dinp^T wk - dR/dinp^T lb
     std::vector<double> ldinp( ni, 0. );
     for( size_t r = 0; r < B.gfct.size() && r < nf; ++r ){
-      double const wk = w[r] * ( capW[r] ? 1.0 : 0.0 );
+      double const wk = weff[r];
       if( wk == 0. ) continue;
       for( size_t idx = 0; idx < B.gfct[r].size(); ++idx ){ size_t const c = B.cfct[r][idx]; if( c >= nv && c - nv < ni ) ldinp[c-nv] += B.gfct[r][idx] * wk; }
     }
@@ -26435,10 +26569,17 @@ const
         if( itgrid == fctgrid.end() )
           throw Exceptions( Exceptions::DOMAIN );
 
-        int const lim = itgrid->second;
+        int lim = itgrid->second;
         size_t const iel = ndx_el.count(*fd.pvar)? ndx_el.at(*fd.pvar) : size_t(0);
         size_t const n   = fd.cur_n;
         size_t const nel = fd.pdom->n_elem;
+        // marching (2026-10-06, WORKPLAN 1.1): the evolution direction is collapsed to the resident window, ONE element
+        // that would count as both the first and the last.  The window emits ALL its evolution nodes (no mask drop,
+        // no unique-node drop) -- the same rows, hence the same Jacobian pattern, in every window -- and
+        // _march_field_rows applies the GLOBAL mask when it places them in the monolithic layout.
+        bool const evo_all = _evolution_dom_var.dag() && fd.pvar->id() == _evolution_dom_var.id() && _marchGrid.size() > 1
+                          && lim != FFDom::LB && lim != FFDom::UB;
+        if( evo_all ) lim = FFDom::ALL;
 
         if( lim == FFDom::LB || lim == FFDom::UB ){
           double const t_eval = ( lim == FFDom::LB ) ? -1.0 : 1.0;
@@ -26468,7 +26609,7 @@ const
               default: throw Exceptions( Exceptions::INTERNAL );
             }
 
-            if( ok
+            if( ok && !evo_all
              && options.OUTPUT.GRID_POLICY == Options::OUT_UNIQUE_PHYSICAL
              && ( fd.pdom->type == FFDom::LGL || fd.pdom->type == FFDom::CGL )
              && iel > 0 && k == 0 )
@@ -26584,7 +26725,10 @@ const
       if( grid_once ) break;
     }
 
-    if( out_row != fctrec.row0 + fctrec.nrow )
+    if( _marchGrid.size() > 1 && _march_field_over_evo( fctrec ) ){
+      if( out_row != fctrec.row0 + _march_field_rows( fctrec, _inMarch? _marchWindow: 0 ).size() ) throw Exceptions( Exceptions::INTERNAL );
+    }
+    else if( out_row != fctrec.row0 + fctrec.nrow )
       throw Exceptions( Exceptions::INTERNAL );
 
 #ifdef CRONOS_DEBUG_OUT

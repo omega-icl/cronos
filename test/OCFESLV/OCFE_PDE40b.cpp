@@ -147,6 +147,11 @@ static Outcome build_solve( FFDom::TYPE coltype, OCFESLV::Options::ImpositionTyp
   oc.options.CLASSIFY.MODE         = OCFESLV::Options::CLASS_AUTO;
   oc.options.INTERFACE.TYPE   = OCFESLV::Options::IC_AUTO;
   oc.options.INTERFACE.IMPOSITION  = imposition;
+  // This driver validates the index-2 reduction with FULL, CONSISTENT initial data (MMS-exact c1, c2, q1, q2): the
+  // former convention.  Under REDUCE.HIDDEN_IC = true (the default since 2026-10-04) the EOS level at t = 0 -- imposed
+  // off the inlet, N_z - 1 rows -- would be materialised on top of it: an over-determined initial point.  (The free
+  // data in the new convention: c1 everywhere, c2 at the inlet node only, q1, q2.)
+  oc.options.REDUCE.HIDDEN_IC = false;
   oc.options.INTERFACE.SAT_SIGMA0       = 10.0;
   oc.options.DISPLAY_LEVEL    = 0;
   oc.options.SOLVE.VERBOSE    = false;

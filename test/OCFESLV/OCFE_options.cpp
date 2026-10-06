@@ -139,7 +139,7 @@ int main()
     configure( src, OCFESLV::Options::IC_STRONG );
     src.options.SOLVE.MAX_ITER = 37;                                 // a SOLVER option
     src.options.REDUCE.ORDER   = OCFESLV::Options::RED_FULL;         // a MODEL option
-    src.options.REDUCE.HIDDEN_IC = true;                             // rev337, a MODEL option
+    src.options.REDUCE.HIDDEN_IC = false;                            // rev337, a MODEL option (NON-default since 2026-10-04)
     src.options.TTOL             = 5.0e-7;                           // rev345, a MODEL option
     bool const ok = src.setup();
     check( "O3 source setup() succeeds (IC_STRONG)", ok );
@@ -167,7 +167,7 @@ int main()
   std::cout << "\n---- O11: REDUCE.HIDDEN_IC (rev337) and TTOL (rev345) ----\n";
   {
     FFModel::Options fresh;
-    check( "O11 REDUCE.HIDDEN_IC defaults to false", fresh.REDUCE.HIDDEN_IC == false );
+    check( "O11 REDUCE.HIDDEN_IC defaults to true",  fresh.REDUCE.HIDDEN_IC == true );    // since 2026-10-04
     check( "O11 TTOL defaults to 1e-9",              fresh.TTOL == 1.0e-9,
            [&]{ std::ostringstream os; os << std::scientific << std::setprecision(3) << "got " << fresh.TTOL;
                 return os.str(); }() );
@@ -175,11 +175,11 @@ int main()
     FFGraph DAG; OCFESLV oc( &DAG ); Vars V; build( DAG, oc, V );
     configure( oc, OCFESLV::Options::IC_WEAK );
     oc.options.TTOL             = 2.5e-6;
-    oc.options.REDUCE.HIDDEN_IC = true;
+    oc.options.REDUCE.HIDDEN_IC = false;                       // the NON-default value, so the check means something
     FFModel const& mdl = oc;
     bool const before = ( mdl.options.TTOL != 2.5e-6 );          // not applied before setup(), as O1 established
     bool const ok     = oc.setup();
-    bool const after  = ( mdl.options.TTOL == 2.5e-6 && mdl.options.REDUCE.HIDDEN_IC == true );
+    bool const after  = ( mdl.options.TTOL == 2.5e-6 && mdl.options.REDUCE.HIDDEN_IC == false );
     check( "O11 they are not applied before setup()", before );
     check( "O11 setup() succeeds",                    ok );
     check( "O11 ...and both reach FFModel::options",  after );

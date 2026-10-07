@@ -1,0 +1,12 @@
+# Generated documentation (cd docs && doxygen CRONOS.dox)
+doc/html/
+
+# CMake build trees (cmake -S . -B build ...)
+build/
+build-*/
+build_*/
+
+# Python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/

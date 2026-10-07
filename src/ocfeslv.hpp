@@ -541,7 +541,7 @@ public:
       double TRACE_PROJ_EPS;       //!< Multiplier-block regularisation for the trace projection.
                                    //!< The k continuity conditions the receiver graph cannot support
                                    //!< are enforced through a spring of stiffness 1/eps rather than
-                                   //!< dropped.  Default 1.0.  Environment: CRONOS_TRACE_PROJ_EPS.
+                                   //!< dropped.  Default 1.0.
     } INTERFACE;
 
     //! @brief The nonlinear solve: Newton/Levenberg-Marquardt control, linear backend, marching, reuse, evaluation caches, and the solver's own verbosity.
@@ -638,10 +638,10 @@ public:
                                    //!< Environment: CRONOS_AUDIT_DETERMINACY.
       double TOL;      //!< the SINGLE relative rank tolerance, applied identically to rank(M) and
                                    //!< rank([B;D]) (1e-12; the value the spectrum audit's rank_deficiency[]
-                                   //!< uses).  Environment: CRONOS_DETERMINACY_TOL.
+                                   //!< uses).
       DETERMINACY_BACKEND_T BACKEND; //!< rank backend: DET_AUTO = SPQR if built, else Eigen if
-                                   //!< built, else dense under the cap.  Environment:
-                                   //!< CRONOS_DETERMINACY_BACKEND=AUTO|SPQR|EIGEN|DENSE.
+                                   //!< built, else dense under the cap.  Values:
+                                   //!< AUTO|SPQR|EIGEN|DENSE.
     } DETERMINACY;
 
     //! @brief The linear solve inside the forward/adjoint sensitivity computation.
@@ -713,7 +713,7 @@ public:
     struct t_Fatal
     {
       bool   DETERMINACY;    //!< setup() returns false (SetupStatus::DETERMINACY_UNDETERMINED) on a
-                                   //!< STATE CONTENT verdict (false).  Environment: CRONOS_DETERMINACY_FATAL.
+                                   //!< STATE CONTENT verdict (false).
       bool   INTERFACE_RANK; //!< setup() returns false (INTERFACE_PLAN_INVALID) when the multiplier block
                                    //!< B is column rank-deficient.  Default FALSE: the resulting kernel is
                                    //!< singular but not always fatal (a model whose residual satisfies the
@@ -813,25 +813,10 @@ public:
           AUDIT.SPECTRUM   = _env_flag( "CRONOS_AUDIT_SPECTRUM", AUDIT.SPECTRUM );
           AUDIT.RANK_SYMMETRY = _env_flag( "CRONOS_AUDIT_RANK", AUDIT.RANK_SYMMETRY );
           DETERMINACY.AUDIT     = _env_flag( "CRONOS_AUDIT_DETERMINACY", DETERMINACY.AUDIT );
-          FATAL.DETERMINACY     = _env_flag( "CRONOS_DETERMINACY_FATAL", FATAL.DETERMINACY );
-        if( char const* v = std::getenv( "CRONOS_SOLVE_FACTORIZATION" ) ){
-          std::string const w( v );
-          if     ( w == "SUPERLU" || w == "0" ) SOLVE.FACTORIZATION = SOLVE_SUPERLU;
-          else if( w == "LAPACK"  || w == "1" ) SOLVE.FACTORIZATION = SOLVE_LAPACK;
-#if defined(CRONOS__WITH_SPQR)
-          else if( w == "SPQR"    || w == "2" ) SOLVE.FACTORIZATION = SOLVE_SPQR;
-#else
-          else if( w == "SPQR"    || w == "2" )
-            std::cerr << "OCFESLV ** CRONOS_SOLVE_FACTORIZATION=SPQR requested but this header"
-                         " was built WITHOUT -DCRONOS__WITH_SPQR; the SOLVE_SPQR enum value"
-                         " does not exist in this build.  Keeping SOLVE_SUPERLU -- a run that"
-                         " silently used the default would be read as evidence about SPQR."
-                      << std::endl;
-#endif
-          else
-            std::cerr << "OCFESLV ** CRONOS_SOLVE_FACTORIZATION='" << w << "' not recognised"
-                         " (SUPERLU|LAPACK|SPQR); keeping SOLVE_SUPERLU." << std::endl;
-        }
+        // 2026-10-07 (WORKPLAN 3.A): the environment no longer sets an option that changes what is computed or decided --
+        // CRONOS_DETERMINACY_FATAL, _TOL, _BACKEND, CRONOS_SOLVE_FACTORIZATION, CRONOS_TRACE_PROJ_EPS, CRONOS_SAT_SIGMA0
+        // (and FFModel's CRONOS_CLASSIFY_ROBUST) are retired: the option is the interface.  The print-only switches above
+        // (audit reports, forced verbosity) remain, as diagnostics that instrument a whole sweep without editing drivers.
         SOLVE.VERBOSE       = true;
       }
 
@@ -925,15 +910,8 @@ public:
           // CRONOS_AUDIT_DETERMINACY=1 restores the SPQR audit as the cross-check that must agree.
           DETERMINACY.AUDIT     = false;
           FATAL.DETERMINACY     = false;
-          DETERMINACY.TOL       = _env_dbl( "CRONOS_DETERMINACY_TOL", 1e-12 );
+          DETERMINACY.TOL       = 1e-12;
           DETERMINACY.BACKEND   = DET_AUTO;
-          if( char const* v = std::getenv( "CRONOS_DETERMINACY_BACKEND" ) ){
-            std::string w( v );
-            for( auto& c : w ) c = static_cast<char>( std::toupper( static_cast<unsigned char>( c ) ) );
-            if     ( w == "SPQR"  ) DETERMINACY.BACKEND = DET_SPQR;
-            else if( w == "EIGEN" ) DETERMINACY.BACKEND = DET_EIGEN;
-            else if( w == "DENSE" ) DETERMINACY.BACKEND = DET_DENSE;
-          }
         }
         // rev42: automatic per-state duplicate-node spreads after every solve().
         //
@@ -1006,7 +984,7 @@ public:
         // through a spring of stiffness 1/INTERFACE.TRACE_PROJ_EPS.  eps -> 0 recovers the singular
         // unprojected system; eps -> infinity recovers dropping them, which diverged on
         // MMPDE9.  1.0 is a starting point, not a tuned value.
-        INTERFACE.TRACE_PROJ_EPS = _env_dbl( "CRONOS_TRACE_PROJ_EPS", 1.0 );
+        INTERFACE.TRACE_PROJ_EPS = 1.0;
         // rev42: warn threshold for the automatic duplicate-node spread report.  Exact
         // imposition is round-off limited at any mesh; weak is truncation limited.  1e-10 sits
         // far above the former and far below the latter, so it separates them without firing
@@ -1065,38 +1043,38 @@ public:
     { return static_cast<bool>( FFModel::Options::_env_flag( "CRONOS_RESCUE_C2", true ) ); }
   //! @brief IC_WEAK with multipliers -- an experiment, not a production setting.  0 (default) off; 1 imposes exactly
   //! every claim with a non-principal receiver edge; 2 only the claims whose coupling the rescue refused.  An integer 0..2,
-  //! not a scale.  Environment: CRONOS_WEAK_TAU_RESCUED.
+  //! not a scale.  (The CRONOS_WEAK_TAU_RESCUED variable is retired, 2026-10-07: a measured constant.)
   static int _knob_WEAK_TAU_RESCUED
     ()
-    { return static_cast<int>( FFModel::Options::_env_int( "CRONOS_WEAK_TAU_RESCUED", 0, 0, 2 ) ); }
+    { return 0; }
   //! @brief With WEAK_TAU_RESCUED set: an exact claim with a natural receiver feeds its multiplier only there.
-  //! Default off.  Environment: CRONOS_WEAK_TAU_NATURAL.
+  //! Default off.  (The CRONOS_WEAK_TAU_NATURAL variable is retired, 2026-10-07: a measured constant.)
   static bool _knob_WEAK_TAU_NATURAL
     ()
-    { return static_cast<bool>( FFModel::Options::_env_flag( "CRONOS_WEAK_TAU_NATURAL", false ) ); }
+    { return false; }
   //! @brief Receiver policy for the multiplier under IC_TRACE (under IC_STRONG only via EXACT_NATURAL_STRONG).
   //! 0: every receiver carries the multiplier, rescued duplicates included, so the exact modes read the rescue's fabricated
   //! weight.  1: a claim with a natural (principal-symbol) tau-allowed receiver feeds its multiplier only there; a claim
   //! with none keeps its rescued receivers (silencing them would leave an empty multiplier column).  2 (default): as 1, but
   //! a natural receiver that is a LINK row does not qualify.  A silenced duplicate is restored wherever the claim's
   //! remaining column is dependent -- by the redundancy pass, or by the projector where that pass is vetoed.
-  //! Environment: CRONOS_EXACT_NATURAL (0 selects policy 0).
+  //! (The CRONOS_EXACT_NATURAL variable is retired, 2026-10-07: a measured constant.)
   static int _knob_EXACT_NATURAL
     ()
-    { return static_cast<int>( FFModel::Options::_env_int( "CRONOS_EXACT_NATURAL", 2, 0, 2 ) ); }
+    { return 2; }
   //! @brief Apply EXACT_NATURAL under IC_STRONG as well (requires STRONG_PROJECT).  A silenced duplicate that turns
   //! out to be an eliminated tau's pivot row makes the Schur elimination fail; the plan is then rebuilt with every silenced
-  //! claim restored.  Default on; CRONOS_EXACT_NATURAL_STRONG=0 switches it off.
+  //! claim restored.  Default on; (The CRONOS_EXACT_NATURAL_STRONG variable is retired, 2026-10-07.)
   static bool _knob_EXACT_NATURAL_STRONG
     ()
-    { return static_cast<bool>( FFModel::Options::_env_flag( "CRONOS_EXACT_NATURAL_STRONG", true ) ); }
+    { return true; }
   //! @brief Align IC_STRONG with IC_TRACE: when the trace projector (which IC_TRACE applies to reach a full-rank
   //! multiplier block) has support on Schur-eliminated taus, those taus are promoted to explicit on a promotion rebuild and
   //! the projector is applied to them as under IC_TRACE; the rest are eliminated as before.  Default on;
-  //! CRONOS_STRONG_PROJECT=0 switches it off.
+  //! (The CRONOS_STRONG_PROJECT variable is retired, 2026-10-07.)
   static bool _knob_STRONG_PROJECT
     ()
-    { return static_cast<bool>( FFModel::Options::_env_flag( "CRONOS_STRONG_PROJECT", true ) ); }
+    { return true; }
   //! @brief IC_WEAK receiver policy for continuity claims.  0: every receiver edge carries a penalty (the rescued
   //! edges with a fabricated weight).  1: a claim that has a natural (principal-symbol) receiver is penalised only there;
   //! its rescued receiver terms are dropped; a claim with no natural receiver keeps them.  2 (default): as 1, but a natural
@@ -1106,10 +1084,10 @@ public:
     ()
     { return static_cast<int>( FFModel::Options::_env_int( "CRONOS_WEAK_NATURAL_PENALTY", 2, 0, 2 ) ); }
   //! @brief W-test the claims dropped by the redundancy pass on the built system, and restore as explicit the subset
-  //! that is needed (one re-derive, revert-guarded).  Default on; CRONOS_DROP_WDECIDE=0 switches it off.
+  //! that is needed (one re-derive, revert-guarded).  Default on; (The CRONOS_DROP_WDECIDE variable is retired, 2026-10-07.)
   static bool _knob_DROP_WDECIDE
     ()
-    { return static_cast<bool>( FFModel::Options::_env_flag( "CRONOS_DROP_WDECIDE", true ) ); }
+    { return true; }
 
   // rev314 -- FOURTEEN more environment-only knobs (see the rev309 block for the rule).
   //! @brief Stage A -- WITHDRAWN, default off.  Reached k=0 on PDE2 and MBC but collapsed interface continuity
@@ -1117,14 +1095,14 @@ public:
   //! inapplicable to MMPDE9.  Kept as a reproducible negative result: CRONOS_LINK_PAIR_SUPPRESS=1 re-enables it.
   static bool _knob_INTERFACE_SUPPRESS_LINK_PAIR
     ()
-    { return Options::_env_flag( "CRONOS_LINK_PAIR_SUPPRESS", false ); }
+    { return false; }   // CRONOS_LINK_PAIR_SUPPRESS (retired 2026-10-07, WORKPLAN 3.C) -- the withdrawn Stage A
 
   //! @brief Stage 3: suppress a C0 claim on a state that an ALL-mask IC/BC pins at this node (fixpoint closure).
   //! Row implication by physical rows, on the same footing as FIX 1 -- not Stage A's multiplier-column argument.
   //! Default on; CRONOS_NO_PIN_CLOSURE=1 disables it.
   static bool _knob_INTERFACE_SUPPRESS_PIN_CLOSURE
     ()
-    { return !Options::_env_flag( "CRONOS_NO_PIN_CLOSURE", false ); }
+    { return true; }   // CRONOS_NO_PIN_CLOSURE (retired 2026-10-07, WORKPLAN 3.C)
 
   //! @brief Tier-0 skip policy on interface-augmented systems.  ALWAYS (default): skip plain Newton whenever the
   //! system carries trace variables under SPQR.  AUTO consults the setup audit's right-deficiency for the window and
@@ -1164,7 +1142,7 @@ public:
   //! measures (1); a sweep of this knob's delta measures (2).
   static double _knob_SENS_TAU_REG
     ()
-    { return Options::_env_dbl( "CRONOS_SENS_TAU_REG", 0.0 ); }
+    { return 0.0; }
 
   //! @brief Solve the sensitivity systems with a dense pseudo-inverse
   //! (arma::pinv) instead of LU.  DIAGNOSTIC ONLY -- O(n^3) dense SVD,
@@ -1189,15 +1167,15 @@ public:
   //! and O(n^3); use nel_xi 2-3.
   static bool _knob_SENS_MINNORM_PINV
     ()
-    { return Options::_env_flag( "CRONOS_SENS_MINNORM_PINV", false ); }
+    { return false; }
 
   //! @brief Mint continuity claims from the C0 claim classification: a claim whose (state, direction) is IMPLIED,
   //! CLOSURE or NONE is not created, so nothing has to rescue it.  Exact modes (IC_STRONG, IC_TRACE) only -- under IC_WEAK
   //! a suppressed claim changes a penalty rather than a constraint.  Default off (the plan is then unchanged).
-  //! Environment: CRONOS_CLAIM_C0.
+  //! (The CRONOS_CLAIM_C0 variable is retired, 2026-10-07: a measured constant.)
   static bool _knob_CLAIM_FROM_C0
     ()
-    { return Options::_env_flag( "CRONOS_CLAIM_C0", false ); }
+    { return false; }
 
   //! return false from setup() immediately after the audit reports,
   //! without
@@ -1250,16 +1228,16 @@ public:
   //! DETERMINED instance in the corpus (sigma_min/tol ~ 1e3-1e5 is ordinary
   //! conditioning for a discretised PDE) and doubles the audit cost at n > 1e4
   //! for nothing; the genuinely marginal cases sit at 6-20.  Environment:
-  //! CRONOS_DETERMINACY_GAP_MIN.
+  //! CRONOS_DETERMINACY_GAP_MIN (an AUDIT parameter, kept as a diagnostic).
   static double _knob_DETERMINACY_GAP_MIN
     ()
     { return Options::_env_dbl( "CRONOS_DETERMINACY_GAP_MIN", 1e2 ); }
 
   //! largest dimension the dense-SVD fallback backend accepts (3000).
-  //! Environment: CRONOS_DETERMINACY_MAX_DENSE.
+  //! (The CRONOS_DETERMINACY_MAX_DENSE variable is retired, 2026-10-07: a measured constant.)
   static size_t _knob_DETERMINACY_MAX_DENSE
     ()
-    { return (size_t)Options::_env_dbl( "CRONOS_DETERMINACY_MAX_DENSE", 3000. ); }
+    { return 3000; }
 
   //! @brief the solver's effective verbosity.  SOLVE.DISPLAY_LEVEL < 0 (the default) FOLLOWS the model's
   //! DISPLAY_LEVEL, resolved HERE, at read time -- not copied at reset(), because drivers set DISPLAY_LEVEL
@@ -1377,13 +1355,7 @@ public:
       // IC_TRACE system instead -- the instrument for the MBC-family TRACE defect
       // analysis (pre-existing upstream: MBC3/MBC5 fail under IC_TRACE while
       // legacy IC_STRONG passes).  Off by default: rev144 behaviour untouched.
-      if( options.INTERFACE.IMPOSITION == Options::IC_STRONG
-       && Options::_env_flag( "CRONOS_STRONG_VIA_TRACE", false ) ){
-        _disp( 2 ) << "OCFESLV::setup ** IC_STRONG via IC_TRACE "
-                     "(CRONOS_STRONG_VIA_TRACE=1): building the full trace system."
-                  << std::endl;
-        options.INTERFACE.IMPOSITION = Options::IC_TRACE;
-      }
+      // (CRONOS_STRONG_VIA_TRACE (retired 2026-10-07, WORKPLAN 3.B batch 2b): a driver wanting the trace system sets IC_TRACE)
 
     }
 
@@ -4995,7 +4967,7 @@ public:
     // rev110 -- so a solve log carried a revision three steps stale.  Nothing else in
     // the build chain would have caught it: the makefile names the file, the build
     // oracle checks the instrument's format marker, and neither reads this.
-    = "ocfeslv  rev361  2026-10-06";
+    = "ocfeslv  rev367  2026-10-07";
 
   //! @brief The revision of this ocfeslv.hpp (HEADER_ID); FFModel::revision() gives the model layer's, which a
   //! binary may mix with another solver revision.
@@ -7779,20 +7751,11 @@ public:
   //! small.  That is a much narrower question than the roadmap states, and it is what the
   //! calibration run is for.
   //!
-  //! Off unless the variable is set; when set, reported once so no sweep can silently differ
-  //! from what the driver thinks it configured.
+  //! Since 2026-10-07 the option alone decides: the CRONOS_SAT_SIGMA0 override, which replaced even a value the driver
+  //! set, is retired (WORKPLAN 3.A).
   double _eff_sat_sigma0() const
     {
-      static bool  const set = ( std::getenv( "CRONOS_SAT_SIGMA0" ) != nullptr );
-      static double const val = set ? std::atof( std::getenv( "CRONOS_SAT_SIGMA0" ) ) : 0.;
-      if( !set ) return options.INTERFACE.SAT_SIGMA0;
-      if( !_satSigmaOverrideReported ){
-        _satSigmaOverrideReported = true;
-        _disp( 3 ) << "OCFESLV ** [sat-override] CRONOS_SAT_SIGMA0=" << val
-                  << " OVERRIDES the driver's INTERFACE.SAT_SIGMA0=" << options.INTERFACE.SAT_SIGMA0
-                  << " (B1 audit; effective tau = sigma0 * (n_node-1)^2 / w_elem)" << std::endl;
-      }
-      return val;
+      return options.INTERFACE.SAT_SIGMA0;   // the CRONOS_SAT_SIGMA0 override (B1 audit) retired 2026-10-07
     }
 
 
@@ -7855,12 +7818,9 @@ public:
   //! establish what that convention is rather than treat one driver as anomalous.
   double _eff_sat_sigma1() const
     {
-      static bool  const set = ( std::getenv( "CRONOS_SAT_SIGMA1" ) != nullptr );
-      static double const val = set ? std::atof( std::getenv( "CRONOS_SAT_SIGMA1" ) ) : 0.;
-      return set ? val : 1.0;   // rev316: environment-only; 1.0 is reset()'s former default
+      return 1.0;   // CRONOS_SAT_SIGMA1 '+R+'; 1.0 is reset()'s former default
     }
 
-  mutable bool _satSigmaOverrideReported = false;
 
   //! @brief factorise (or store) the sensitivity Jacobian for a block.
   //!
@@ -10725,11 +10685,8 @@ OCFESLV::_on_before_reduction
         // CRONOS_HOIST_EVODETECT=0 remains the exact opt-out.  For a single driver that
         // must not be re-gridded, options.SOLVE.MARCHING=false is the finer-grained one and
         // is preferable: it needs no environment variable and travels with the source.
-        char const* v = std::getenv( "CRONOS_HOIST_EVODETECT" );
-        if( !v || !*v ) return 1;
-        int const n = std::atoi( v );
-        return ( n < 1 ? 0 : 1 );
-    }();
+        return 1;   // CRONOS_HOIST_EVODETECT (retired 2026-10-07, WORKPLAN 3.C) (SOLVE.MARCHING=false is the per-driver alternative)
+  }();
     _evoHoistLevel       = kHoist;
     _evoHoistApplied     = false;
     _evoHoistWouldChange = false;
@@ -10837,7 +10794,7 @@ OCFESLV::_on_before_reduction
 
     static bool const kEvoFaceH = Options::_env_flag( "CRONOS_AUDIT_EVOFACE", false );
     if( kEvoFaceH )
-      _disp( 3 ) << "  [evoface] rev92 hoist probe: CRONOS_HOIST_EVODETECT=" << kHoist
+      _disp( 3 ) << "  [evoface] rev92 hoist probe: hoist level=" << kHoist
                 << "  domain_already_set=" << ( already ? "y (user-supplied; probe inert)" : "n" )
                 << "  inferable_here=" << ( _evoHoistWouldChange ? _evoHoistDom : std::string("<none>") )
                 << "  core=" << _evoCoreRows << "x" << _evoCoreCols
@@ -12485,7 +12442,7 @@ OCFESLV::_residual_core
         // lines identical, PASS/FAIL unchanged, including the two LGR-evolution drivers
         // (PDE5b, PDE20d) whose override rows are multi-column.  CRONOS_MARCH_TRACE_PIN=0
         // restores the rev165 nodal pin for bisection.
-        static int const kTracePin = []{ char const* v = std::getenv( "CRONOS_MARCH_TRACE_PIN" ); return ( v && *v ) ? std::atoi( v ) : 1; }();
+        static int const kTracePin = 1;   // CRONOS_MARCH_TRACE_PIN (retired 2026-10-07, WORKPLAN 3.B batch 2b)
         size_t stride_evo = 0; std::vector<double> wtr;
         if( kTracePin && _march_ic_lb_trace( st, stride_evo, wtr ) && wtr.size() > 1 ){
           double sw = 0., vv = 0.;
@@ -12549,7 +12506,7 @@ OCFESLV::_assemble_core
       for( auto const& rr : rows ){
         if( rr.row >= n || !A.gradptr[rr.row] ) continue;
         long const col = _ic_col_for_row( A, st, rr );
-        static int const kTracePinJ = []{ char const* v = std::getenv( "CRONOS_MARCH_TRACE_PIN" ); return ( v && *v ) ? std::atoi( v ) : 1; }();   // rev169 D4: default ON, see the residual site
+        static int const kTracePinJ = 1;   // CRONOS_MARCH_TRACE_PIN (retired 2026-10-07, WORKPLAN 3.B batch 2b);   // rev169 D4: default ON, see the residual site
         size_t strideJ = 0; std::vector<double> wtrJ;
         if( kTracePinJ ){
           if( !_march_ic_lb_trace( st, strideJ, wtrJ ) || wtrJ.size() <= 1 ){ wtrJ.clear(); strideJ = 0; }
@@ -12736,7 +12693,7 @@ OCFESLV::_null_basis
   // The SOLVE path (SuiteSparseQR_min2norm) is deliberately NOT changed here: it
   // returns a solution, not a rank, so a different pivot order moves the numbers in
   // the behavioural signature and would need its own sweep.
-  static int const kSpqrOrd = (int)Options::_env_dbl( "CRONOS_SPQR_ORDERING", (double)SPQR_ORDERING_BEST );
+  static int const kSpqrOrd = SPQR_ORDERING_BEST;   // CRONOS_SPQR_ORDERING (retired 2026-10-07, WORKPLAN 3.B batch 2b)
   int64_t const rk = SuiteSparseQR<double>( kSpqrOrd, tol_abs,
                                             (int64_t)nr, &Ac, &Rc, &E, &cc );
   // rev142c: same statistics on the w-decide null-basis factorization.
@@ -12847,12 +12804,10 @@ OCFESLV::_wdecide_restore
   if( _strong_dropped_claims.empty() ) return false;
   if( options.INTERFACE.IMPOSITION != Options::IC_TRACE
    && options.INTERFACE.IMPOSITION != Options::IC_STRONG ) return false;
-  { static size_t const kMaxAuditN = (size_t)Options::_env_dbl( "CRONOS_AUDIT_MAX_N", 0. );
-    if( kMaxAuditN && std::max( n_colloc_eqn(), n_colloc_sta() ) > kMaxAuditN ){
-      _disp( 3 ) << "[w-decide] dropped=" << _strong_dropped_claims.size()
-                << "  OVER-BUDGET (CRONOS_AUDIT_MAX_N=" << kMaxAuditN << "): drop stands unverified" << std::endl;
-      return false;
-    } }
+  // (2026-10-07, WORKPLAN 3.D: CRONOS_AUDIT_MAX_N no longer skips this W-test -- over its budget the drop used to
+  // "stand unverified", a DECISION changed by an environment variable named as an audit budget.  The W-test always runs
+  // (the default all along: the variable defaults to unlimited; above the dense cap the QR basis keeps it affordable,
+  // rev140).  The variable remains the determinacy AUDIT's budget, its other use.)
 
   // rev142a: n_colloc_eqn() was read into an unused `n` here, residue of the rank pass
   // that moved out in rev140.  m stays -- the W build tests c0 < m.
@@ -12899,7 +12854,7 @@ OCFESLV::_wdecide_restore
   // ---- W over the dropped claims on the win-0 null space ---------------------
   // rev140: dense SVD stays authoritative BELOW the cap (bit-compatible with every
   // rev139 decision); ABOVE the cap the QR dead-column basis takes over.
-  static bool const kForceQR = Options::_env_flag( "CRONOS_WDECIDE_FORCE_QR", false );
+  static bool const kForceQR = false;   // CRONOS_WDECIDE_FORCE_QR (retired 2026-10-07, WORKPLAN 3.B batch 2b)
   bool const over_cap = std::max<size_t>( A0.J.n_rows, A0.J.n_cols ) > _knob_DETERMINACY_MAX_DENSE();
   arma::mat NB;              // n_cols x k null basis, original column coordinates
   if( over_cap || kForceQR ){
@@ -13397,7 +13352,7 @@ const
     cholmod_sparse* Rc = nullptr; int64_t* E = nullptr;
     // rev142: ORDERING_BEST default (corpus-validated verdict-invariant; see the same
     // note in _null_basis).  CRONOS_SPQR_ORDERING overrides.
-    static int const kSpqrOrd = (int)Options::_env_dbl( "CRONOS_SPQR_ORDERING", (double)SPQR_ORDERING_BEST );
+    static int const kSpqrOrd = SPQR_ORDERING_BEST;   // CRONOS_SPQR_ORDERING (retired 2026-10-07, WORKPLAN 3.B batch 2b)
     int64_t const rk = SuiteSparseQR<double>( kSpqrOrd, tol_abs,
                                                        (int64_t)nr, &Ac, &Rc, &E, &cc );
     R.backend = t_RankResult::SPQR;
@@ -14176,7 +14131,7 @@ OCFESLV::_classification_reference
 {
   // rev207: the model-level reference needs no mesh; the knob lets the corpus measure whether any
   // classification verdict actually moves (they agree exactly wherever references are scalar).
-  static bool const kModelRef = Options::_env_flag( "CRONOS_MODEL_REF", false );
+  static bool const kModelRef = false;   // CRONOS_MODEL_REF (retired 2026-10-07, WORKPLAN 3.B batch 2b)
   if( kModelRef ){
     FFModel::_classification_reference( state_ref, input_ref, cst_ref, dom_ref );
     return;
@@ -15615,12 +15570,9 @@ OCFESLV::_pack_plan_input
     case Options::IC_STRONG: in.options.imposition = PlanOptions::Imposition::STRONG; break;
   }
   in.options.display_level = _solve_display_level();
-  // rev153c experiment knobs (GLOBAL builder policy); phase 1b turns these into Options.
-  if( char const* r = std::getenv( "CRONOS_PLAN_REALISATION" ) )
-    in.options.realisation = ( std::string( r ) == "TAU_FIRST" ) ? PlanOptions::Realisation::TAU_FIRST : PlanOptions::Realisation::EXACT_FIRST;
-  if( std::getenv( "CRONOS_PLAN_NO_AUX_IMPLIED" ) ) in.options.aux_implied = false;
-  if( std::getenv( "CRONOS_PLAN_ROOT_HI" ) ) in.options.root_hi = true;
-  if( std::getenv( "CRONOS_PLAN_FACE_DESC" ) ) in.options.face_desc = true;
+  // The rev153c experiment knobs CRONOS_PLAN_REALISATION, _NO_AUX_IMPLIED, _ROOT_HI and _FACE_DESC are retired
+  // (2026-10-07, WORKPLAN 3.B batch 1): the builder runs with PlanOptions' defaults (EXACT_FIRST, aux_implied, no
+  // root_hi, no face_desc) -- the plan every sweep since rev156 validated.
   in.options.force_bad_keep_explicit = Options::_env_flag( "CRONOS_FORCE_BAD_KEEP_EXPLICIT", false );
   in.options.fault_inject_bad_keep_explicit
     = Options::_env_flag( "CRONOS_FORCE_BAD_KEEP_EXPLICIT", false );
@@ -15775,7 +15727,7 @@ OCFESLV::_pack_plan_input
     // failure this arc already hit once (the census run whose trigger was never set).  Printed
     // only when the knob is ON, so the default path stays byte-identical to rev159.
     {
-      static int const kRankImpliedN = []{ char const* v = std::getenv( "CRONOS_AUX_IMPLIED_RANK" ); return ( v && *v ) ? std::atoi( v ) : 0; }();
+      static int const kRankImpliedN = 0;   // CRONOS_AUX_IMPLIED_RANK (retired 2026-10-07, WORKPLAN 3.B batch 2b)
       if( kRankImpliedN )
         _disp( 3 ) << "OCFESLV::setup ** PLAN: CRONOS_AUX_IMPLIED_RANK=" << kRankImpliedN
                   << " rank-implied claims collected=" << in.rank_implied_claims.size()
@@ -15923,18 +15875,17 @@ OCFESLV::_store_frozen_interface_plan
   // rev156: the GLOBAL spanning-forest plan with trace DOFs is the DEFAULT (corpus-accepted
   // 2026-09-06, sweep 173913: 59 field-wise improvements vs rev150d, no regressions).  The
   // knobs remain as opt-outs (=0) for attribution.
-  { static bool const kApply = Options::_env_flag( "CRONOS_PLAN_APPLY_GLOBAL", true );
-    static bool const kApplyStrong = Options::_env_flag( "CRONOS_PLAN_APPLY_GLOBAL_STRONG", true );
+  // 2026-10-07 (WORKPLAN 3.B batch 1): the opt-outs CRONOS_PLAN_APPLY_GLOBAL, _STRONG and _WEAK are retired.  Since
+  // rev264 deleted the legacy builder, an opt-out applied the EMPTY default plan -- no valid alternative was left.
+  // CRONOS_PLAN_APPLY_TRACE (which printed those knobs) goes with them.
+  { bool const kApply = true, kApplyStrong = true;
     // rev259 (Benoit, 2026-09-15): WEAK was never covered, so under IC_WEAK the plan still comes from the
     // LEGACY builder and GLOBAL runs only as a shadow.  That is why a change to the GLOBAL builder's weak
     // branch did nothing (nVar unchanged at 1250, realisation mix identical) -- and patching the legacy
     // builder instead would mean changing code the workplan intends to retire.  So: extend the apply to WEAK
     // behind its own knob, verify the two builders AGREE there (the shadow already reports "vs legacy"), and
     // only then land the weak-TAU change in the builder that survives.
-    static bool const kApplyWeak = Options::_env_flag( "CRONOS_PLAN_APPLY_GLOBAL_WEAK", true );   // rev262: GLOBAL decides in all modes
-    if( std::getenv( "CRONOS_PLAN_APPLY_TRACE" ) )
-      _disp( 3 ) << "  [apply?] kApply=" << kApply << " kApplyWeak=" << kApplyWeak
-                << " imposition=" << static_cast<int>( in.options.imposition ) << std::endl;
+    bool const kApplyWeak = true;   // rev262: GLOBAL decides in all modes
     if( kApply
      && ( in.options.imposition == PlanOptions::Imposition::TRACE
        || ( kApplyStrong && in.options.imposition == PlanOptions::Imposition::STRONG )
@@ -15942,9 +15893,8 @@ OCFESLV::_store_frozen_interface_plan
       PlanDecisions gdec; PlanReport grep;
       // rev155d EXPERIMENT: CRONOS_PLAN_TRACE_DOFS_APPLY=1 applies the trace-DOF plan (item 2,
       // first applied step).  Gated per model by the determinacy line, never on by default.
-      { static bool const kTdofApply = Options::_env_flag( "CRONOS_PLAN_TRACE_DOFS_APPLY", true );
-        if( kTdofApply ){ PlanInput in_t = in; in_t.options.trace_dofs = true; OCPlanGlobalBuilder::build( in_t, gdec, grep ); }
-        else OCPlanGlobalBuilder::build( in, gdec, grep ); }
+      // (CRONOS_PLAN_TRACE_DOFS_APPLY retired 2026-10-07: the trace-DOF plan always applies)
+      { PlanInput in_t = in; in_t.options.trace_dofs = true; OCPlanGlobalBuilder::build( in_t, gdec, grep ); }
       _structDeficit = static_cast<long>( grep.shadow.n_rank_deficit );
       _structDeficientClusters = static_cast<long>( grep.shadow.n_clusters_rank_deficient );
       grep.shadow.legacy_exact = dec.exact_replacement_rows.size();
@@ -15967,39 +15917,19 @@ OCFESLV::_store_frozen_interface_plan
     }
   }
 
-  // rev153a (phase 1a, SHADOW): run the GLOBAL builder on the same input, compare its
-  // decisions with the legacy ones, report; apply NOTHING from it.  CRONOS_PLAN_SHADOW=1.
-  { static bool const kShadow = Options::_env_flag( "CRONOS_PLAN_SHADOW", false );
-    if( kShadow && in.options.imposition != PlanOptions::Imposition::WEAK ){
-      PlanDecisions gdec; PlanReport grep;
-      OCPlanGlobalBuilder::build( in, gdec, grep );
-      grep.shadow.legacy_exact = dec.exact_replacement_rows.size();
-      grep.shadow.legacy_tau   = dec.n_trace_var;
-      for( auto const& r : gdec.exact_replacement_rows )
-        if( dec.exact_replacement_rows.count( r ) ) ++grep.shadow.exact_rows_common;
-      OCPlanReport::print_shadow( _disp( 3 ), grep );
-    }
-    else if( kShadow ){
-      PlanDecisions gdec; PlanReport grep;
-      OCPlanGlobalBuilder::build( in, gdec, grep );
-      OCPlanReport::print_shadow( _disp( 3 ), grep );
-    }
-  }
+  // (CRONOS_PLAN_SHADOW retired 2026-10-07, WORKPLAN 3.D: it compared the GLOBAL plan with the LEGACY builder's
+  // decisions, which have been the empty default since rev264 deleted that builder; the GLOBAL report it also printed
+  // is printed on the main path at the same display level.)
 
-  // rev155a (design item 2, SHADOW): CRONOS_PLAN_TRACE_DOFS=1 runs the GLOBAL builder a
-  // second time with trace_dofs on (non-nodal / C1 sides as abstract DOFs) and reports the
-  // census plus the tau/exact sets against the default GLOBAL build.  Nothing is applied.
-  { static bool const kTdof = Options::_env_flag( "CRONOS_PLAN_TRACE_DOFS", false );
-    if( kTdof && in.options.imposition != PlanOptions::Imposition::WEAK ){
-      PlanDecisions d0; PlanReport r0; OCPlanGlobalBuilder::build( in, d0, r0 );
+  // (CRONOS_PLAN_TRACE_DOFS retired 2026-10-07, WORKPLAN 3.D: it compared a build WITHOUT trace DOFs against one with
+  // them, "against the default" -- since batch 1 the trace-DOF build IS the applied plan.)  Its two censuses stay, now
+  // standalone (they used to run only when CRONOS_PLAN_TRACE_DOFS=1 was set too), on the applied plan:
+  // CRONOS_PLAN_RECV_CENSUS=1 and CRONOS_PLAN_DUMP_CLAIMS=<state>.
+  { bool const kRecvCensus = std::getenv( "CRONOS_PLAN_RECV_CENSUS" ) != nullptr;
+    bool const kDumpClaims = std::getenv( "CRONOS_PLAN_DUMP_CLAIMS" ) != nullptr;
+    if( ( kRecvCensus || kDumpClaims ) && in.options.imposition != PlanOptions::Imposition::WEAK ){
       PlanInput in2 = in; in2.options.trace_dofs = true;
       PlanDecisions d1; PlanReport r1; OCPlanGlobalBuilder::build( in2, d1, r1 );
-      size_t tc = 0, t1 = 0, t0 = 0, ec = 0, e1 = 0, e0 = 0;
-      for( auto const& kv : d1.tau_claims ) ( d0.tau_claims.count( kv.first ) ? tc : t1 )++;
-      for( auto const& kv : d0.tau_claims ) if( !d1.tau_claims.count( kv.first ) ) ++t0;
-      for( auto const& r : d1.exact_replacement_rows ) ( d0.exact_replacement_rows.count( r ) ? ec : e1 )++;
-      for( auto const& r : d0.exact_replacement_rows ) if( !d1.exact_replacement_rows.count( r ) ) ++e0;
-      OCPlanReport::print_tdof( _disp( 3 ), r1, tc, t1, t0, ec, e1, e0 );
       // rev155d: receiver census by row ROLE per (state, dom) of the kept claims, and, for
       // auxiliaries, how many receivers are the auxiliary's OWN LINK row.  Instrument for the
       // tau-free-row criterion (Sec.3.5): an implication through a LINK row is exact only if that
@@ -16037,8 +15967,7 @@ OCFESLV::_store_frozen_interface_plan
                     << " face=" << kv.first.face << " kind=" << kv.first.kind << " occ=" << kv.second
                     << ( in.dropped_claims.count( OCPlan::freeze_claim_key( kv.first ) ) ? " DROPPED" : "" )
                     << ( in.unrealised_claims.count( kv.first ) ? " UNREALISED" : "" )
-                    << ( !d1.claims_kept.count( kv.first ) ? " FOREST-REDUNDANT(tdof)" : "" )
-                    << ( !d0.claims_kept.count( kv.first ) ? " FOREST-REDUNDANT(default)" : "" ) << std::endl;
+                    << ( !d1.claims_kept.count( kv.first ) ? " FOREST-REDUNDANT" : "" ) << std::endl;
         }
         for( auto const& e : in.corner_suppressed_edges ){
           auto itn = in.state_name.find( e.key.state_id );
@@ -16046,11 +15975,9 @@ OCFESLV::_store_frozen_interface_plan
           std::set<t_InterfaceClaimKey> const fdset( r1.shadow.forest_dropped.begin(), r1.shadow.forest_dropped.end() );
           bool const fd = fdset.count( e.key ) > 0;
           _disp( 3 ) << "  [plan/claims] " << dc << " dom=" << e.key.dom_id << " iel_lo=" << e.key.iel_lo
-                    << " face=" << e.key.face << " kind=" << e.key.kind << " CORNER-SUPPRESSED" << ( fd ? " FOREST-DROPPED(tdof)" : " KEPT-BY-FOREST" ) << std::endl;
+                    << " face=" << e.key.face << " kind=" << e.key.kind << " CORNER-SUPPRESSED" << ( fd ? " FOREST-DROPPED" : " KEPT-BY-FOREST" ) << std::endl;
         }
       }
-      if( char const* ds = std::getenv( "CRONOS_PLAN_DUMP_STATE" ) )
-        for( auto const& kv : in.state_name ) if( kv.second == ds ) OCPlanReport::dump_state( std::cout, r1, in2, kv.first );
     }
   }
 
@@ -17559,11 +17486,8 @@ OCFESLV::_build_frozen_trace_constraints_and_tau_terms
   // change.  Letting weak fall through gives it one; the builder's weak branch already assigns SAT to every
   // claim, so the plan must be UNCHANGED -- that is the acceptance criterion, and the POSITIVE signal that it
   // ran is the builder-invoked count rising.
-  { static bool const kWeakDecide = Options::_env_flag( "CRONOS_WEAK_DECISION_LAYER", true );   // rev262: corpus-verified identical
-    if( !kWeakDecide
-     && options.INTERFACE.IMPOSITION != Options::IC_TRACE
-     && options.INTERFACE.IMPOSITION != Options::IC_STRONG )
-      return true; }
+  // (CRONOS_WEAK_DECISION_LAYER, the opt-out restoring that early return, is retired 2026-10-07: weak always falls
+  // through to the decision layer, as by default since rev262)
 
   // Build the retained exact trace basis directly during setup.  This is the
   // sole source of trace-row count, tau-column assignment, and executable
@@ -17641,7 +17565,7 @@ OCFESLV::_block_drop_eligible
   // >=4 in basin radius and it is not acceptable by default.
   // CRONOS_RECT_DROP=1 restores rev164 behaviour (rectangular blocks drop-eligible).
   if( cls.parabolic_structure_detected ){
-    static int const kRectDrop = []{ char const* v = std::getenv( "CRONOS_RECT_DROP" ); return ( v && *v ) ? std::atoi( v ) : 0; }();
+    static int const kRectDrop = 0;   // CRONOS_RECT_DROP (retired 2026-10-07, WORKPLAN 3.B batch 2b)
     if( cls.symbol_rectangular && !kRectDrop ) return false;   // type fixed, drop NOT unlocked
     return true;                                               // flux over-specified -> eligible
   }
@@ -20136,16 +20060,7 @@ OCFESLV::solve( double* var, double const* inp, double const* cst )
     // truncates more, which for a gauge-ish direction is what min-norm should do anyway.
     // Default unchanged (-2), so this is inert unless set.
     double spqr_tol = SPQR_DEFAULT_TOL;
-    if( char const* v = std::getenv( "CRONOS_SPQR_TOL" ) ){
-      try{
-        spqr_tol = std::stod( std::string( v ) );
-      }
-      catch( ... ){
-        spqr_tol = SPQR_DEFAULT_TOL;
-        _disp( 3 ) << "OCFESLV ** CRONOS_SPQR_TOL='" << v << "' is not a number; keeping"
-                     " SPQR_DEFAULT_TOL (-2, automatic)." << std::endl;
-      }
-    }
+    // (CRONOS_SPQR_TOL (retired 2026-10-07, WORKPLAN 3.B batch 2b): the automatic default always)
     // rev118: ONE-SHOT UNCONDITIONAL TRACE OF THE ACTUAL CALL.
     //
     // Not gated on any verbosity flag, and to std::cerr, deliberately.  rev117 made the
@@ -20161,11 +20076,9 @@ OCFESLV::solve( double* var, double const* inp, double const* cst )
     static bool spqr_call_noted = false;
     if( !spqr_call_noted ){
       spqr_call_noted = true;
-      char const* ev = std::getenv( "CRONOS_SPQR_TOL" );
       _disp( 3 ) << "OCFESLV ** [spqr-call] A=" << As.n_rows << "x" << As.n_cols
                 << "  tol_passed=" << std::scientific << std::setprecision(6) << spqr_tol
-                << "  (CRONOS_SPQR_TOL=" << ( ev ? ev : "<unset>" )
-                << ", SPQR_DEFAULT_TOL=" << (double)SPQR_DEFAULT_TOL << ")" << std::endl;
+                << "  (SPQR_DEFAULT_TOL=" << (double)SPQR_DEFAULT_TOL << ")" << std::endl;
     }
 
     cholmod_dense* X = SuiteSparseQR_min2norm<double>(
@@ -20939,16 +20852,7 @@ OCFESLV::solve( double* var, double const* inp, double const* cst )
   // and the accidental no-SPQR build showed plain Newton succeeding there (15.0 s vs
   // 20.2 s QR, cross-binary and suggestive only -- this switch exists to measure it
   // pinned, single-binary).  Policy per _knob_SKIP_NT_ON_TRACE() / env override.
-  static int const kSkipNTEnv = [](){
-    char const* v = std::getenv( "CRONOS_SKIP_NT_ON_TRACE" );
-    if( !v ) return -1;
-    std::string w( v ); for( auto& c : w ) c = (char)std::toupper( (unsigned char)c );
-    if( w == "ALWAYS" || w == "0" ) return (int)Options::NT_SKIP_ALWAYS;
-    if( w == "AUTO"   || w == "1" ) return (int)Options::NT_SKIP_AUTO;
-    if( w == "NEVER"  || w == "2" ) return (int)Options::NT_SKIP_NEVER;
-    std::cerr << "OCFESLV ** CRONOS_SKIP_NT_ON_TRACE='" << v
-              << "' unrecognized; using ALWAYS" << std::endl;
-    return -1; }();
+  static int const kSkipNTEnv = -1;   // CRONOS_SKIP_NT_ON_TRACE retired 2026-10-07: _knob_SKIP_NT_ON_TRACE() decides
   int const skipnt_mode = ( kSkipNTEnv >= 0 ? kSkipNTEnv : _knob_SKIP_NT_ON_TRACE() );
   bool spqr_skip_nt =
         ( options.SOLVE.FACTORIZATION == Options::SOLVE_SPQR && _nTraceVar > 0 );
@@ -22945,7 +22849,7 @@ OCFESLV::_prepare_interface_plan_tables
     // LINK collocated on both sides), so refusing it is a pure redundancy removal there.  The
     // v2 rationale above (PDE2 soft modes) concerns SPATIAL transverse directions only.
     {
-      static int const kAuxEvo = []{ char const* v = std::getenv( "CRONOS_AUX_EVO_CLAIMS" ); return ( v && *v ) ? std::atoi( v ) : 1; }();
+      static int const kAuxEvo = 1;   // CRONOS_AUX_EVO_CLAIMS (retired 2026-10-07, WORKPLAN 3.B batch 2b)
       if( !kAuxEvo && _evolution_dom_set && _evolution_dom_var.dag()
        && face_dom.id() == _evolution_dom_var.id() && _is_auxiliary_state( *pst ) ){
         bool diff_in_evo = false;
@@ -22963,7 +22867,7 @@ OCFESLV::_prepare_interface_plan_tables
     // defR=4 that makes Sec.3.5 load-bearing on PDE3.  A's own-direction claim keeps its principal
     // receivers (rows where d(A)/d(e) appears).  The alias route (declared q) is NOT touched.
     {
-      static int const kOwn = []{ char const* v = std::getenv( "CRONOS_AUX_OWNDIR_LINK_RECV" ); return ( v && *v ) ? std::atoi( v ) : 1; }();
+      static int const kOwn = 1;   // CRONOS_AUX_OWNDIR_LINK_RECV (retired 2026-10-07, WORKPLAN 3.B batch 2b)
       if( !kOwn && eqnopt.role == EqnRole::LINK && _is_auxiliary_state( *pst ) ){
         for( auto const& a : _auxDef )
           if( a.aux.id() == pst->id() ){ if( a.diff_dom.count( face_dom ) ) return false; break; }
@@ -24233,11 +24137,9 @@ OCFESLV::_prepare_interface_plan_tables
                   // system, dpivotL on a singular Jacobian, root-caused 2026-09-07) is
                   // reachable only through that instrument combined with
                   // CRONOS_PLAN_TRACE_DOFS_APPLY=0.
-                  static bool const kCornerRule   = Options::_env_flag( "CRONOS_PLAN_CORNER_RULE", false );
-                  static bool const kNoCornerRule = Options::_env_flag( "CRONOS_PLAN_NO_CORNER_RULE", false );
-                  bool const retire = !kCornerRule
-                    && ( kNoCornerRule
-                      || options.INTERFACE.IMPOSITION == Options::IC_WEAK );
+                  // (2026-10-07: the knobs CRONOS_PLAN_CORNER_RULE and _NO_CORNER_RULE are retired -- the rule is
+                  // retired under IC_WEAK and stays under the exact modes, as by default)
+                  bool const retire = ( options.INTERFACE.IMPOSITION == Options::IC_WEAK );
                   if( !retire ) continue;          // exact modes: rule stays (see above)
                 }
 

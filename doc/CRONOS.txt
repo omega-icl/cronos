@@ -1,0 +1,82 @@
+/*!
+
+@mainpage CRONOS (version 5.0): Simulation and Sensitivity Analysis of Mathematical Models on Factorable-Function DAGs
+
+@author Benoit C. Chachuat <tt>(b.chachuat@imperial.ac.uk)</tt> and the OMEGA Research Group, Imperial College London
+@date 2026
+
+
+<CENTER><TABLE BORDER=0>
+<TR>
+<TD>CRONOS is a header-only C++ library for the simulation and sensitivity analysis of mathematical models described
+by systems of algebraic, differential and/or partial-differential equations, and for embedding those simulations
+in optimisation and optimal control.  Its Python binders form the module <tt>cronos</tt>.</TD>
+</TR>
+</TABLE></CENTER>
+
+CRONOS extends <A href="https://github.com/omega-icl/mcpp">MC++</A>: models are declared on MC++'s directed acyclic graphs (DAGs) of factorable functions, which provide the symbolic representation and the automatic differentiation; and a CRONOS simulation can itself become an <i>external operation</i> of an MC++ DAG, so that the solution of a dynamic system is a factorable function that MC++ -- and the libraries built on it, such as <A href="https://github.com/omega-icl/canon">CANON</A> for numerical optimisation and <A href="https://github.com/omega-icl/magnus">MAGNUS</A> for model development and analysis -- can compose, evaluate and differentiate.
+
+
+\section sec_CRONOS_capabilities What does CRONOS do?
+
+- <b>Model declaration</b> (mc::FFModel, header <tt>ffmodel.hpp</tt>): states, inputs and constants on an MC++ DAG; one or several domains -- time and space -- each discretised into finite elements with a collocation node family; equations with their role (interior, initial, boundary, interface, link, ...) and the region they hold on; point, distributed and integral outputs; state transitions (jumps) at given times; automatic index reduction of DAEs and order reduction of PDEs.
+- <b>ODE/DAE integration</b> (mc::ODESLV_CVODES, mc::ODESLVS_CVODES, headers <tt>odeslv_cvodes.hpp</tt>, <tt>odeslvs_cvodes.hpp</tt>): with SUNDIALS CVODES, with forward and adjoint sensitivities of the outputs with respect to the model's parameters and controls.
+- <b>Orthogonal collocation on finite elements</b> (mc::OCFESLV, header <tt>ocfeslv.hpp</tt>): PDE/DAE models on tensor domains, solved either as one monolithic system or by marching through the time elements -- both solve the same discretisation, since the monolithic time discretisation is causal -- with strong, weak (penalty) or trace imposition of the interface conditions, forward and adjoint sensitivities, and state transitions.
+- <b>Embedding in DAGs</b> (mc::FFODESLV, mc::FFOCFESLV, mc::FFOCFERES, headers <tt>ffode.hpp</tt>, <tt>ffocfe.hpp</tt>): a solver, or the collocation residuals, as an external operation of an MC++ DAG: the simulation becomes a function that can be composed with other DAG operations, evaluated and sampled in parallel, and differentiated -- forward and reverse -- through the solver's own sensitivities.
+- <b>Python</b> (module <tt>cronos</tt>): all of the above from Python, on top of PyMC++ (MC++'s Python library, module <tt>pymcpp</tt>), with NumPy arrays for results and a <tt>.pyi</tt> type stub for editors.
+.
+
+
+\section sec_CRONOS_install What do I need to run CRONOS?
+
+CRONOS is released as open source code under the <A href="https://www.eclipse.org/legal/epl-v10.html">Eclipse Public License (EPL)</A>.  The optional SPQR backend (SuiteSparse) is GPL-2 licensed: binaries that link it are subject to the GPL; it is off by default.
+
+CRONOS depends on:
+- <A href="https://github.com/omega-icl/mcpp">MC++</A> (version 5) for the DAGs of factorable functions and their differentiation;
+- <A href="https://computing.llnl.gov/projects/sundials">SUNDIALS</A> (version 7 or later) for the ODE/DAE integration (CVODES);
+- Boost, BLAS/LAPACK, <A href="https://arma.sourceforge.net/">Armadillo</A>, <A href="https://github.com/DrTimothyAldenDavis/SuiteSparse">SuiteSparse</A>, <A href="https://portal.nersc.gov/project/sparse/superlu/">SuperLU</A> and <A href="https://eigen.tuxfamily.org/">Eigen</A> for the linear algebra;
+- Python with <A href="https://pybind11.readthedocs.io/">pybind11</A> for the module <tt>cronos</tt>.
+.
+
+The library consists of header files only.  CRONOS is built with CMake, which also builds the Python module, the test drivers and runs the checks:
+
+<tt>
+$ cmake -S . -B build -DMCPP_ROOT=<MC++ source tree> -DPYMCPP_DIR=<directory holding pymcpp><br>
+$ cmake --build build -j $(nproc)<br>
+$ cmake --build build --target check<br>
+$ cmake --install build --prefix <prefix>
+</tt>
+
+The files <tt>INSTALL.md</tt> and <tt>BUILD_CMAKE.md</tt> in the main directory give the installation guide and the complete list of build options.  The main directory holds:
+- <tt>src</tt>: the CRONOS headers;
+- <tt>src/interface</tt>: the Python binders, the generated option headers and the check scripts;
+- <tt>test/ODESLV</tt> and <tt>test/OCFESLV</tt>: the test drivers -- the corpus the solvers are validated against;
+- <tt>notebook</tt>: the tutorials, as Jupyter notebooks and Python scripts;
+- <tt>docs</tt>: this documentation -- generated with <tt>cd docs && doxygen CRONOS.dox</tt>, then opened at <tt>docs/html/index.html</tt>.
+.
+
+
+\section sec_CRONOS_doc Where can I learn more about CRONOS?
+
+The tutorials in <tt>notebook</tt> walk through the main features:
+- <tt>FFModel_tutorial</tt>: analysing a model before solving it -- classification of the equations, index and order reduction, initial data for high-index DAEs, and the model report;
+- <tt>ODESLV_tutorial</tt>: a serial batch-reactor network -- ODE simulation, and forward and adjoint sensitivities;
+- <tt>OCFESLV_tutorial</tt>: nonlinear heat conduction in a rod with a heater schedule -- both solve modes, sensitivities, and the embedding in a DAG.
+.
+
+CRONOS is configured through its options -- mc::FFModel::Options for the model, mc::OCFESLV::Options and the ODESLV options for the solvers -- which are also available in Python as <tt>options</tt> on each object.  A few <tt>CRONOS_*</tt> environment variables remain -- diagnostics, a thread cap and test switches; none is needed to run a model.  They are listed in \ref md_ENVIRONMENT "Environment variables".
+
+<CENTER><TABLE border="1">
+<TR>
+<TD><CENTER><TABLE BORDER=0>
+  <TR>
+  <TD>We hope you will enjoy using CRONOS and find it useful!</TD>
+  </TR>
+  <TR>
+  <TD>For more information or to provide us feedback, please email <a href="mailto:b.chachuat@imperial.ac.uk">Benoit Chachuat</a></TD>
+  </TR>
+  </TABLE></CENTER></TD>
+</TR>
+</TABLE></CENTER>
+
+*/

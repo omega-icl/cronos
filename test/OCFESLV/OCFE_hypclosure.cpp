@@ -89,7 +89,7 @@ static Run run( int kind, bool auto_on, int manual )
   oc.options.INTERFACE.TYPE        = OCFESLV::Options::IC_AUTO;
   oc.options.INTERFACE.IMPOSITION  = OCFESLV::Options::IC_WEAK;
   oc.options.INTERFACE.SAT_SIGMA0  = 10.0;
-  setenv( "CRONOS_AUTO_HYP_CLOSURE", auto_on ? "1" : "0", 1 );   // rev318: environment-only
+  oc.options.AUTO.HYP_CLOSURE     = auto_on;   // an option again since 2026-10-07 (was CRONOS_AUTO_HYP_CLOSURE)
   oc.options.SOLVE.MARCHING        = false;
   oc.options.SOLVE.MAX_ITER        = 10;
   oc.options.SOLVE.RES_TOL         = 1e-11;
@@ -134,7 +134,6 @@ int main()
       check( "PARTIAL == manual only (the missing direction appended)", maxdiff( P, M ) <= 1e-10, "max|d|=" + sci( maxdiff( P, M ) ) );
     }
   }
-  unsetenv( "CRONOS_AUTO_HYP_CLOSURE" );
   std::cout << "\n  " << g_pass << " passed, " << g_fail << " failed\n"
             << "OCFE_hypclosure: " << ( g_fail ? "FAIL" : "PASS" ) << "\n";
   return g_fail ? 1 : 0;

@@ -293,6 +293,30 @@ except Exception as e:
     check(True, "FFDom refuses inverted bounds -> %s" % type(e).__name__)
 
 # %% [markdown]
+# ## add_output returns the output's index
+
+# %%
+from pymcpp import FFGraph as _G, FFEval as _E
+_G5 = _G(); _t5, _z5, _u5 = _G5.add_var("t"), _G5.add_var("z"), _G5.add_var("u")
+_M5 = FFModel(_G5)
+_M5.add_domain(_t5, FFDom(0., 1., 2)); _M5.add_domain(_z5, FFDom(0., 1., 2, FFDom.LGL, 4))
+_M5.add_state(_u5, [_t5, _z5])
+_i0 = _M5.add_output(_E()(_u5, {_t5: 1, _z5: 1}, {_t5: 1., _z5: .5}))      # a scalar output
+_i1 = _M5.add_output(_u5, [_t5, _z5], masks=[FFDom.ALL, FFDom.UB])         # a distributed output
+_i2 = _M5.add_output(_u5, [_t5, _z5], point=[1., .5])                      # a point output
+check((_i0, _i1, _i2) == (0, 1, 2), "add_output returns the output's index: declaration order from 0 (%s)" % str((_i0, _i1, _i2)))
+check(len(_M5.var_output) == 3 and all(isinstance(i, int) for i in (_i0, _i1, _i2)), "the indices are ints, one per output")
+
+# %% [markdown]
+# ## AUTO.HYP_CLOSURE: an option again (2026-10-07)
+
+# %%
+_M9 = FFModel(FFGraph())
+check(_M9.options.AUTO.HYP_CLOSURE is True, "AUTO.HYP_CLOSURE exists and defaults on")
+check(hasattr(FFModel.SetupStatus, "HYP_CLOSURE_MISSING"),
+      "setup status HYP_CLOSURE_MISSING exists (off with an outflow face left open is refused)")
+
+# %% [markdown]
 # ## Summary
 
 # %%

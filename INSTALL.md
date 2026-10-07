@@ -31,7 +31,7 @@ A Python module, `cronos`, exposes all of this on top of PyMC++, MC++'s Python l
 | Boost | | intervals (with MC++'s default interval backend) |
 | BLAS / LAPACK | | |
 | Armadillo | | dense and sparse linear algebra |
-| SuiteSparse | 7.x recommended (older found by library search) | KLU, UMFPACK; SPQR optional (GPL-2, see below) |
+| SuiteSparse | 7.x recommended (older found by library search) | KLU (LGPL-2.1+); UMFPACK and SPQR optional (GPL-2.0-or-later, see below) |
 | SuperLU | 5.2.x | OCFESLV's default sparse factorisation, through Armadillo |
 | Eigen | >= 3.3 | optional sparse QR |
 | SUNDIALS | **>= 7**, built with KLU (`-DENABLE_KLU=ON`) | CVODES for ODESLV |
@@ -83,8 +83,9 @@ Main options (all listed in `BUILD_CMAKE.md`):
 
 | option | default | |
 |---|---|---|
-| `CRONOS_WITH_KLU`, `CRONOS_WITH_UMFPACK`, `CRONOS_WITH_EIGEN`, `CRONOS_WITH_SUPERLU` | ON | linear-solver backends |
-| `CRONOS_WITH_SPQR` | **OFF** | SPQR factorisation -- **GPL-2**: a binary linking it is subject to the GPL |
+| `CRONOS_WITH_KLU`, `CRONOS_WITH_EIGEN`, `CRONOS_WITH_SUPERLU` | ON | linear-solver backends |
+| `CRONOS_WITH_UMFPACK` | **OFF** | sparse LU for the setup's trace elimination (else dense) -- **GPL-2.0-or-later**: a binary linking it is subject to the GPL |
+| `CRONOS_WITH_SPQR` | **OFF** | SPQR factorisation, and the W-test's null bases above the dense cap -- **GPL-2.0-or-later**: a binary linking it is subject to the GPL |
 | `MC_INTERVAL_LIBRARY` | BOOST | as MC++ (BOOST, PROFIL, FILIB, NONVERIFIED) |
 | `ENABLE_HSL`, `MC__USE_FADBAD` | OFF | as MC++ |
 | `ENABLE_PYTHON` | ON | the `cronos` module and its stub |
@@ -139,10 +140,52 @@ The tutorials (`ODESLV_tutorial`, `OCFESLV_tutorial`) are the best starting poin
 | `extern/pybind11 is pybind11 3.1.0` | check out v3.0.4 there, or remove `extern/pybind11` |
 | `pybind11 changed from X to Y since this build directory was configured` | CMake cannot see a pybind11 change under the same path and would mix objects of two releases: start from a clean build directory, and rebuild `pymcpp` with the same release |
 | the `cronos.pyi` stub is not generated | `pybind11-stubgen` or `pymcpp` not importable by the build's Python: `pip install pybind11-stubgen`, set `PYMCPP_DIR` |
-| a stale option or docstring in Python | the `gen_*_options.hpp` headers are generated from the C++ headers (`gen_options.py`); regenerate, never edit, and keep a single copy, next to the binders |
+| a stale option or docstring in Python | the `gen_*_options.hpp` headers are generated from the C++ headers (`gen_options.py`); regenerate with `cmake --build <dir> --target gen-options` (never edit; keep a single copy, next to the binders); `make check` verifies they are up to date |
 | oversubscribed cores in a parallel `FFGraph::veval` over an embedded solver | set the solver's `options.MAXTHREAD = 1`: `veval` already runs the solves in parallel |
+
+## Installing from PyPI
+
+`pip install cronos-mcpp` installs the **EPL build**: wheels for Linux (x86_64) and macOS (arm64), CPython 3.10 and
+later; the module imports as `cronos`, and its dependencies (`pymcpp`, NumPy) come from PyPI.  It links no GPL
+component: OCFESLV eliminates the trace multipliers at setup with a dense inverse (fine up to a few thousand; cubic
+beyond), and the SPQR-based options (`SOLVE_SPQR`, the W-test's null basis above its dense cap) are not available.
+
+### The GPL build
+
+With UMFPACK (sparse elimination at setup) and SPQR, under GPL-2.0-or-later.  Its wheels are attached to each GitHub
+release under the same name, with a build tag; giving pip (or uv) the release page makes it prefer them:
+
+```
+pip install cronos-mcpp -f https://github.com/omega-icl/cronos/releases/expanded_assets/v5.0.0
+uv pip install cronos-mcpp --find-links https://github.com/omega-icl/cronos/releases/expanded_assets/v5.0.0
+```
+
+The page must be given at EVERY install or upgrade: without it, pip finds only the PyPI wheels and installs the EPL
+build.  To make that permanent, use one of: a line `-f https://github.com/omega-icl/cronos/releases/expanded_assets/v5.0.0`
+in `requirements.txt`; `find-links` in pip's configuration (`pip config set global.find-links <page>`); or
+`find-links = ["<page>"]` under `[tool.uv]` in a uv project.  A package that depends on `cronos-mcpp` is satisfied by
+either build, so installing it keeps the GPL build.
+
+To build it from source instead (the native dependencies above installed, and `MCPP_ROOT` pointing to MC++'s sources):
+
+```
+pip install cronos-mcpp --no-binary cronos-mcpp \
+    -C cmake.define.CRONOS_WITH_UMFPACK=ON -C cmake.define.CRONOS_WITH_SPQR=ON
+```
+
+Check which build is installed:
+
+```
+python -c "import cronos; print(cronos.build_info())"     # 'license': 'EPL-2.0' or 'GPL-2.0-or-later'
+```
 
 ## Licence
 
-CRONOS is published under the Eclipse Public License.  The optional SPQR backend is GPL-2 licensed: enabling it
-(`CRONOS_WITH_SPQR=ON`) makes binaries that link it subject to the GPL.
+CRONOS is published under the Eclipse Public License 2.0, with the GNU General Public License, version 2 or later, as
+a Secondary License (see [LICENSE](LICENSE)).  Two optional SuiteSparse backends are GPL-2.0-or-later: UMFPACK
+(`CRONOS_WITH_UMFPACK`: sparse elimination of the trace multipliers at setup; without it a dense inverse is used,
+slower on large interface systems) and SPQR (`CRONOS_WITH_SPQR`: a sparse QR factorisation, and the null bases of
+the interface plan's W-test above its dense size cap).  Both are OFF by default, so a default build links no GPL
+component; a binary that links either is subject to the GPL.  The `cronos-mcpp` wheels on PyPI are the EPL build;
+the GPL build, with both backends, is published with each GitHub release (see [INSTALL.md](INSTALL.md));
+`cronos.build_info()` reports which build is installed.

@@ -1,0 +1,122 @@
+# Wheels of cronos-mcpp (2026-10-07).
+#
+# Two builds, one PyPI project (as pymcpp does for its Torch variant):
+#   * EPL build -- pyproject.toml as committed: no GPL component.  Wheels and the sdist are published on PyPI.
+#   * GPL build -- tools/wheel_variant.py gpl: UMFPACK and SPQR (GPL-2.0-or-later), licence metadata GPL-2.0-or-later.
+#     Its wheels get build tag 1 and are attached to the GitHub release, never uploaded to PyPI; pip and uv prefer them
+#     when given the release page:  pip install cronos-mcpp -f https://github.com/omega-icl/cronos/releases/expanded_assets/<tag>
+# Every wheel is tested by the five check scripts, run against the installed wheel.  A release requires both builds.
+name: wheels
+
+on:
+  push:
+    branches: ["5.0"]
+    tags: ["v*"]
+  pull_request:
+    branches: ["5.0"]
+  workflow_dispatch:
+
+env:
+  # The MC++ sources the module is compiled against.  They must be those of the pymcpp release pinned in
+  # pyproject.toml (objects cross between the two modules): set the release tag once pymcpp 5.0.3 is published.
+  MCPP_REF: version-5.0
+
+jobs:
+  build_wheels:
+    name: ${{ matrix.variant }} wheels (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14]     # Windows to follow (SUNDIALS with KLU and SuiteSparse through vcpkg)
+        variant: [epl, gpl]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: omega-icl/mcpp
+          ref: ${{ env.MCPP_REF }}
+          path: mcpp
+      - name: GPL build -- licence, licence files and backends
+        if: matrix.variant == 'gpl'
+        run: python3 tools/wheel_variant.py gpl
+      - uses: pypa/cibuildwheel@v4.1
+        env:
+          CIBW_BUILD: "cp310-* cp311-* cp312-* cp313-* cp314-*"
+          CIBW_SKIP: "*-musllinux*"
+          CIBW_ARCHS: auto64
+          CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_28
+          CIBW_BUILD_VERBOSITY: 1
+          CIBW_BEFORE_ALL_LINUX: bash tools/ci/build_deps.sh linux ${{ matrix.variant }} /usr/local
+          CIBW_ENVIRONMENT_LINUX: >
+            MCPP_ROOT=/project/mcpp SUNDIALS_ROOT=/usr/local SUITESPARSE_ROOT=/usr/local SUPERLU_ROOT=/usr/local
+          CIBW_BEFORE_ALL_MACOS: bash tools/ci/build_deps.sh macos ${{ matrix.variant }} $HOME/deps
+          CIBW_ENVIRONMENT_MACOS: >
+            MACOSX_DEPLOYMENT_TARGET=14.0 MCPP_ROOT=$PWD/mcpp
+            SUNDIALS_ROOT=$HOME/deps SUITESPARSE_ROOT=$HOME/deps SUPERLU_ROOT=$HOME/deps
+          CIBW_REPAIR_WHEEL_COMMAND_MACOS: >
+            DYLD_LIBRARY_PATH=$HOME/deps/lib delocate-wheel --require-archs {delocate_archs} -w {dest_dir} -v {wheel}
+          # The check scripts, against the INSTALLED wheel (they import cronos and pymcpp from site-packages).
+          CIBW_TEST_COMMAND: >
+            python {project}/src/interface/check_ffmodel.py &&
+            python {project}/src/interface/check_odeslv.py &&
+            python {project}/src/interface/check_ffodeslv.py &&
+            python {project}/src/interface/check_ocfeslv.py &&
+            python {project}/src/interface/check_ffocfe.py &&
+            python -c "import cronos; i = cronos.build_info(); print(i); assert i['license'] == ('GPL-2.0-or-later' if '${{ matrix.variant }}' == 'gpl' else 'EPL-2.0')"
+      - name: Every bundled library has a third-party notice
+        run: python3 tools/ci/check_notices.py THIRD_PARTY_NOTICES.txt wheelhouse/*.whl
+      - name: GPL wheels -- build tag 1 (pip and uv prefer them when given the release page)
+        if: matrix.variant == 'gpl'
+        run: |
+          python3 -m pip install --upgrade wheel
+          for w in wheelhouse/*.whl; do python3 -m wheel tags --build 1 --remove "$w"; done
+          ls wheelhouse
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.variant }}-wheels-${{ matrix.os }}
+          path: wheelhouse/*.whl
+
+  build_sdist:
+    name: sdist (EPL)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: pipx run build --sdist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: epl-sdist
+          path: dist/*.tar.gz
+
+  publish_pypi:
+    name: Publish the EPL build to PyPI
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build_wheels, build_sdist]          # the GPL build must succeed too
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write                           # trusted publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: epl-*
+          path: dist
+          merge-multiple: true
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  release_gpl:
+    name: Attach the GPL build to the GitHub release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build_wheels]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: gpl-wheels-*
+          path: gpl
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: gpl/*.whl

@@ -1634,7 +1634,7 @@ OCPlanGlobalBuilder::build( PlanInput const& in, PlanDecisions& dec, PlanReport&
       // all spatial.  Row-receiver and cluster-deficit criteria were both refuted (see notes).
       // DEFAULT 0 (corpus-accepted): Sec.3.5 never applies to evolution-direction aux
       // claims; CRONOS_AUX_IMPLIED_EVO=1 restores the pre-156 behaviour for attribution.
-      { static int const kEvo = []{ char const* v = std::getenv( "CRONOS_AUX_IMPLIED_EVO" ); return ( v && *v ) ? std::atoi( v ) : 0; }();
+      { static int const kEvo = 0;   // CRONOS_AUX_IMPLIED_EVO (retired 2026-10-07, WORKPLAN 3.B batch 2b)
         if( !kEvo && e.causal ) implied = false; }
       if( implied ){
         // transverse element line: 2D only (one differentiated direction); higher
@@ -1658,7 +1658,7 @@ OCPlanGlobalBuilder::build( PlanInput const& in, PlanDecisions& dec, PlanReport&
             // MEASURED (PDE3, with the corner dedup retired): 68 claims move AUX-IMPLIED -> TAU
             // and n grows 6,038 -> 6,100 when the rejection IS read as missing.
             if( !ok ){
-              static int const kRankImplied = []{ char const* v = std::getenv( "CRONOS_AUX_IMPLIED_RANK" ); return ( v && *v ) ? std::atoi( v ) : 0; }();
+              static int const kRankImplied = 0;   // CRONOS_AUX_IMPLIED_RANK (retired 2026-10-07, WORKPLAN 3.B batch 2b)
               if( kRankImplied && !in.rank_implied_claims.empty() ){
                 ClaimKey pk = e.key;
                 pk.state_id = ita->second.parent;

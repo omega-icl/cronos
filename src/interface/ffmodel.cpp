@@ -307,6 +307,8 @@ Return a string describing the error.
       .value(
           "HYP_BC_MISDIRECTED", M::SetupStatus::HYP_BC_MISDIRECTED,
           "hyperbolic block: boundary condition on an outgoing characteristic")
+      .value("HYP_CLOSURE_MISSING", M::SetupStatus::HYP_CLOSURE_MISSING,
+             "hyperbolic block: AUTO.HYP_CLOSURE off and outflow rows missing")
       .value("INTERFACE_PLAN_INVALID", M::SetupStatus::INTERFACE_PLAN_INVALID,
              "the interface plan is invalid")
       .value("AUDIT_NONSQUARE", M::SetupStatus::AUDIT_NONSQUARE,
@@ -569,7 +571,7 @@ at : dict of FFVar to float, optional
 Returns
 -------
 int
-    The index of the new output: outputs are numbered in declaration order,
+    The INDEX of the new output: outputs are numbered in declaration order,
     from 0, and the index is the output's position in ``blk_fct()`` of a
     solver (``OCFESLV``, ``ODESLV``) once the model is set up.
 )doc")

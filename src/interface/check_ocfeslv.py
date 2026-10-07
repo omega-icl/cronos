@@ -181,6 +181,65 @@ check(isinstance(eo, FFModel.EqnOptions) and not eo.participate_in_classificatio
       "OCFESLV.EqnOptions extends FFModel.EqnOptions; an INTERFACE row never enters classification")
 
 # %% [markdown]
+# ## add_output index and blk_fct
+
+# %%
+_FA = FFGraph(); _t7, _z7, _u7 = _FA.add_var("t"), _FA.add_var("z"), _FA.add_var("u")
+_S7 = OCFESLV(_FA)
+_S7.add_domain(_t7, FFDom(0., 1., 2, FFDom.LGR, 3)); _S7.add_domain(_z7, FFDom(0., 1., 2, FFDom.LGL, 4)); _S7.set_evolution_domain(_t7)
+_S7.add_state(_u7, [_t7, _z7], ref=0.)
+_NLB = FFDom.ALL - FFDom.LB; _INN = FFDom.ALL - FFDom.LB - FFDom.UB; _P = FFPartial(); _R = OCFESLV.EqnRole
+_S7.add_equation(_P(_u7, _t7) - 0.1 * _P(_u7, {_z7: 2}), [_t7, _z7], [_NLB, _INN], OCFESLV.EqnOptions(_R.INTERIOR))
+_S7.add_equation(_u7, [_t7, _z7], [_NLB, FFDom.LB], OCFESLV.EqnOptions(_R.BOUNDARY))
+_S7.add_equation(_u7 - 1., [_t7, _z7], [_NLB, FFDom.UB], OCFESLV.EqnOptions(_R.BOUNDARY))
+_S7.add_equation(_u7, [_t7, _z7], [FFDom.LB, FFDom.ALL], OCFESLV.EqnOptions(_R.INITIAL))
+_j0 = _S7.add_output(_u7, [_t7, _z7], point=[1., .5])
+_j1 = _S7.add_output(_u7, [_z7], masks=[FFDom.ALL], at={_t7: 1.})
+_j2 = _S7.add_output(_u7, [_t7, _z7], point=[.5, .5])
+_S7.options.DISPLAY_LEVEL = 0
+check((_j0, _j1, _j2) == (0, 1, 2), "add_output returns the index: 0, 1, 2 (%s)" % str((_j0, _j1, _j2)))
+check(_S7.setup(), "the model with two point outputs and a profile sets up")
+_bb = [_S7.blk_fct(k) for k in (_j0, _j1, _j2)]
+check(_bb[0] == (0, 1) and _bb[1][0] == 1 and _bb[1][1] > 1 and _bb[2] == (1 + _bb[1][1], 1),
+      "blk_fct(index): the point outputs take one value, the profile its nodes, consecutively (%s)" % str(_bb))
+
+# %% [markdown]
+# ## AUTO.HYP_CLOSURE off: an open outflow face is refused (2026-10-07)
+#
+# Scalar advection u_t + a u_z = 0 (a = 1), exact u = (z - a t)^2: inflow condition at z = 0, outflow at z = 1.  With the
+# automatic closure on, the outflow face is closed and the solution exact; with it off and the face left open, the
+# system would be under-determined -- setup() refuses (status HYP_CLOSURE_MISSING) instead of solving it silently wrong.
+
+# %%
+def advection(hyp_closure):
+    G = FFGraph(); t, z, u, a = G.add_var("t"), G.add_var("z"), G.add_var("u"), G.add_var("a")
+    P, E, R = FFPartial(), FFEval(), OCFESLV.EqnRole
+    NLB, INN = FFDom.ALL - FFDom.LB, FFDom.ALL - FFDom.LB - FFDom.UB
+    S = OCFESLV(G)
+    S.add_domain(t, FFDom(0., .25, 2, FFDom.LGR, 3)); S.add_domain(z, FFDom(0., 1., 4, FFDom.LGL, 4))
+    S.set_evolution_domain(t)
+    S.add_state(u, [t, z], ref=0.); S.add_input(a, ref=1.)
+    S.add_equation(P(u, t) + a * P(u, z), [t, z], [NLB, INN], OCFESLV.EqnOptions(R.INTERIOR))
+    S.add_equation(u - z * z, [t, z], [FFDom.LB, FFDom.ALL], OCFESLV.EqnOptions(R.INITIAL))
+    S.add_equation(u - a * a * t * t, [t, z], [NLB, FFDom.LB], OCFESLV.EqnOptions(R.BOUNDARY))   # inflow at z = 0
+    S.add_output(E(u, {t: 1, z: 1}, {t: .25, z: .5}))
+    S.options.AUTO.HYP_CLOSURE = hyp_closure
+    S.options.SOLVE.MARCHING = False; S.options.DISPLAY_LEVEL = 0
+    return S
+
+_H1 = advection(True)
+_ok1 = _H1.setup()
+_v1 = float("nan")
+if _ok1:
+    _var, _inp = _H1.init(); _rep = _H1.solve(_var, _inp); _v1 = _H1.val_functions()[0]
+check(_ok1 and abs(_v1 - .25 ** 2) < 1e-8,
+      "AUTO.HYP_CLOSURE on: the outflow face is closed, u(.25,.5) exact (|err| = %.1e)" % abs(_v1 - .25 ** 2))
+_H0 = advection(False)
+_ok0 = _H0.setup()
+check(not _ok0 and _H0.setup_status.name == "HYP_CLOSURE_MISSING",
+      "AUTO.HYP_CLOSURE off, outflow face open: setup() refuses (%s)" % _H0.setup_status)
+
+# %% [markdown]
 # ## Summary
 
 # %%

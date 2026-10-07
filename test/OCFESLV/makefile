@@ -6,7 +6,7 @@ include $(PATH_CRONOS)/src/makeoptions.mk
 #####
 
 all: OCFE_revision OCFE_options OCFE_nonuniform OCFE_refinit OCFE_fadbad OCFE_deepcopy OCFE_ffocfe \
-     OCFE_parallel OCFE_marching OCFE_scalar OCFE_autoelim OCFE_partialfold OCFE_nlpartial \
+     OCFE_parallel OCFE_marching OCFE_scalar OCFE_autoelim OCFE_partialfold OCFE_nlpartial OCFE_hypoff \
      OCFE_strongcorner OCFE_hypclosure OCFE_homotopy OCFE_homotopy_reset OCFE_homotopy_copy OCFE_weakadj \
      OCFE_bisect OCFE_distout OCFE_scalar_Tlo OCFE_scalar_point OCFE_scalar_opeval OCFE_scalar_mixed \
      OCFE_scalar_fctopeval OCFE_scalar_nest OCFE_scalar_nest2 OCFE_scalar_nest3 OCFE_scalar_nest4 \
@@ -74,6 +74,9 @@ OCFE_partialfold : OCFE_partialfold.o
 	$(LINK) $(FLAG_LINK) -o $@ $< $(LIB_CRONOS) $(LIB_DEP)
 
 OCFE_nlpartial : OCFE_nlpartial.o
+	$(LINK) $(FLAG_LINK) -o $@ $< $(LIB_CRONOS) $(LIB_DEP)
+
+OCFE_hypoff : OCFE_hypoff.o
 	$(LINK) $(FLAG_LINK) -o $@ $< $(LIB_CRONOS) $(LIB_DEP)
 
 OCFE_strongcorner : OCFE_strongcorner.o
@@ -597,8 +600,8 @@ OCFE_MESHONLY1 : OCFE_MESHONLY1.o
 #####
 
 clean :
-	rm -f  OCFE_revision OCFE_options OCFE_nonuniform OCFE_refinit OCFE_fadbad OCFE_deepcopy \
-	OCFE_ffocfe OCFE_parallel OCFE_marching OCFE_scalar OCFE_autoelim OCFE_partialfold OCFE_nlpartial \
+	rm -f  OCFE_revision OCFE_options OCFE_nonuniform OCFE_refinit OCFE_fadbad OCFE_deepcopy OCFE_ffocfe \
+	OCFE_parallel OCFE_marching OCFE_scalar OCFE_autoelim OCFE_partialfold OCFE_nlpartial OCFE_hypoff \
 	OCFE_strongcorner OCFE_hypclosure OCFE_homotopy OCFE_homotopy_reset OCFE_homotopy_copy OCFE_weakadj \
 	OCFE_bisect OCFE_distout OCFE_scalar_Tlo OCFE_scalar_point OCFE_scalar_opeval OCFE_scalar_mixed \
 	OCFE_scalar_fctopeval OCFE_scalar_nest OCFE_scalar_nest2 OCFE_scalar_nest3 OCFE_scalar_nest4 \

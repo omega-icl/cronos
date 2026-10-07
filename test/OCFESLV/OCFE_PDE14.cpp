@@ -354,10 +354,11 @@ static ModeResult run_mode( OCFESLV::Options::ImpositionType imp,
   oc.options.DISPLAY_LEVEL   = 1;
 #if TEST_HYP_MANUAL_CLOSURE
   // rev317/rev318: the MANUAL ORACLE compares a hand-written closure against the automatic one, so the automatic
-  // closure must be OFF here.  Environment-only since rev318, hence setenv.  (It used to be disabled through
+  // closure must be OFF here.  (It used to be disabled through
   // MC__OCFESLV_NO_AUTO_HYP_CLOSURE, which no header has honoured for some time: this variant had been
   // double-closed and failing until rev317.)
-  setenv( "CRONOS_AUTO_HYP_CLOSURE", "0", 1 );
+  // An OPTION again since 2026-10-07 (AUTO.HYP_CLOSURE, WORKPLAN 3.C); the environment variable is retired.
+  oc.options.AUTO.HYP_CLOSURE = false;
 #endif
 
   if( !oc.setup() ){

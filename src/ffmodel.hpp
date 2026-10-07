@@ -68,7 +68,7 @@ public:
   //! @brief Identifies this ffmodel.hpp.  The solver header carries its own OCFESLV::HEADER_ID, and a binary can
   //! mix the two (a sweep has run one revision's model layer under another's solver), so both are printed.
   static constexpr char const* HEADER_ID
-    = "ffmodel  rev356  2026-10-06";
+    = "ffmodel  rev360  2026-10-07";
 
   //! @brief The revision of this ffmodel.hpp (HEADER_ID), e.g. for a bug report; the model report does not print it.
   static char const* revision() { return HEADER_ID; }
@@ -462,8 +462,7 @@ public:
   //! perturbed-start matrix, not a sweep alone.
   static int _reuse_aware()
   {
-    static int const v = [](){ char const* e = std::getenv( "CRONOS_REUSE_AWARE" );
-                               return ( e && *e ) ? std::atoi( e ) : 1; }();   // rev183: default ON
+    static int const v = 1;   // CRONOS_REUSE_AWARE (retired 2026-10-07, WORKPLAN 3.C); rev183: default ON   // rev183: default ON
     return v;
   }
 
@@ -524,8 +523,7 @@ public:
         // rev142b: 0 = no cap imposed (the runtime keeps whatever the environment set).  rev321: back HERE -- rev308
         // had moved this line into OCFESLV::Options, leaving FFModel::options.MAXTHREAD uninitialised until setup().
         MAXTHREAD = (size_t)_env_dbl( "CRONOS_MAXTHREAD", 0. );
-        CLASSIFY.ROBUST     = static_cast<RobustnessMode>(
-                                _env_int( "CRONOS_CLASSIFY_ROBUST", ROBUST_OFF, ROBUST_OFF, ROBUST_STRICT ) );
+        CLASSIFY.ROBUST     = ROBUST_OFF;   // CRONOS_CLASSIFY_ROBUST retired 2026-10-07 (WORKPLAN 3.A): the option decides
       }
 
     void reset
@@ -540,6 +538,7 @@ public:
         CLASSIFY.NSAMPLE    = 32;    // rev284: default on (sweep H)
         CLASSIFY.ROBUST     = ROBUST_OFF;
         CLASSIFY.IMAG_TOL   = 1e-8;
+        AUTO.HYP_CLOSURE    = true;    //!< auto outflow closure of hyperbolic blocks (was CRONOS_AUTO_HYP_CLOSURE)
         AUTO.DIFF_ELIM      = false;   //!< auto differential-elimination of algebraically-determined derivatives (off by default)
         apply_environment_defaults();   // rev307 (D4a): the boundary, in one place
       }
@@ -564,6 +563,7 @@ public:
         CLASSIFY.ROBUST     = opt.CLASSIFY.ROBUST;
         CLASSIFY.IMAG_TOL   = opt.CLASSIFY.IMAG_TOL;
         MAXTHREAD           = opt.MAXTHREAD;
+        AUTO.HYP_CLOSURE    = opt.AUTO.HYP_CLOSURE;
         AUTO.DIFF_ELIM      = opt.AUTO.DIFF_ELIM;
         return *this;
       }
@@ -661,7 +661,7 @@ public:
     struct t_Classify
     {
       ClassifyType MODE;          //!< PDE classification during setup(): CLASS_AUTO (default), CLASS_NONE or CLASS_STRICT
-      //! @brief Reference-robustness sampling (see RobustnessMode).  Environment: CRONOS_CLASSIFY_ROBUST
+      //! @brief Reference-robustness sampling (see RobustnessMode).
       //! (0 = off, 1 = report, 2 = strict).
       RobustnessMode ROBUST;
       //! @brief Number of angular samples for no-evolution-domain classification.
@@ -673,6 +673,10 @@ public:
     //! @brief Automatic model transformations applied at setup(): boundary closures and differential elimination.
     struct t_Auto
     {
+      bool   HYP_CLOSURE;     //!< auto closure of the OUTFLOW faces of hyperbolic blocks: appends the missing
+                              //!< outgoing-characteristic rows (default on).  Off: the model must close every outflow
+                              //!< face itself (e.g. its PDE extended to the face) -- setup REFUSES (HYP_CLOSURE_MISSING)
+                              //!< when rows are missing, as an under-determined system would be solved silently wrong
       bool   DIFF_ELIM;       //!< auto differential-elimination of algebraically-determined derivatives (substitute + relocate consumer onto source face); OFF by default
     } AUTO;
 
@@ -748,25 +752,15 @@ public:
       { return std::make_shared<EqnOptions>( *this ); }
   };
 
-  // rev314 -- environment-only model knob (the rev309 rule).
-  //! @brief automatic outgoing-characteristic boundary closure for hyperbolic blocks (default ON).  It
-  //! appends only the per-face DEFICIT: rows the model already supplies at an outflow face (its own PDE
-  //! extended to that face, as OCFE_PDE6/7/8/10 do) are recognised by projecting them onto the outgoing
-  //! characteristic space, and not duplicated.  So a model never needs to switch it off to close a face itself; the
-  //! one remaining use is an ORACLE comparing a hand-written closure against the automatic one (the
-  //! TEST_HYP_MANUAL_CLOSURE variants of OCFE_PDE14/15).  Environment: CRONOS_AUTO_HYP_CLOSURE.
-  static bool _knob_AUTO_HYP_CLOSURE
-    ()
-    { return Options::_env_flag( "CRONOS_AUTO_HYP_CLOSURE", true ); }
 
   //! @brief automatic algebraic-constraint boundary closure for parabolic/DAE blocks (default ON).  The
   //! closure is COVERAGE-AWARE -- it adds a closure at a face only where no existing equation already pins the
   //! target state -- so leaving it on is harmless when the user writes the closure too, and switching it off
   //! only exposes the model's UNclosed system (a diagnostic, e.g. when chasing a determinacy failure).  No
-  //! driver ever set it false.  Environment: CRONOS_AUTO_ALG_CLOSURE.
+  //! driver ever set it false.  (The CRONOS_AUTO_ALG_CLOSURE variable is retired, 2026-10-07.)
   static bool _knob_AUTO_ALG_CLOSURE
     ()
-    { return Options::_env_flag( "CRONOS_AUTO_ALG_CLOSURE", true ); }
+    { return true; }   // CRONOS_AUTO_ALG_CLOSURE (retired 2026-10-07, WORKPLAN 3.B batch 2b)
 
   //! @brief Chain-aware principal symbol.  A participating INTERIOR row with no differentiated state but a bare
   //! reduction auxiliary whose definition is a derivative (RED_FULL's fully reduced balance row) is read, for the symbol
@@ -774,7 +768,7 @@ public:
   //! parent's continuity claim (as under RED_MAIN).  Default on; CRONOS_CHAIN_SYMBOL=0 switches it off.
   static bool _knob_CHAIN_SYMBOL
     ()
-    { return Options::_env_flag( "CRONOS_CHAIN_SYMBOL", true ); }
+    { return true; }   // CRONOS_CHAIN_SYMBOL (retired 2026-10-07, WORKPLAN 3.C)
 
   //! @brief Map from state or input to the domain variables it depends on (empty set: lumped).
   typedef std::map< FFVar, std::set< FFVar, lt_FFVar >, lt_FFVar >                                    t_Var;
@@ -2876,10 +2870,12 @@ public:
     DETERMINACY_UNDETERMINED,//!< numerical determinacy audit found state content in the null
                              //!< space of the assembled Jacobian (fatal only under FATAL.DETERMINACY)
     MODEL_COPY_FAILED,       //!< _copy_usr_to_local failed (could not build working DAG)
-    CAPTURE_NESTED_REFUSED   //!< an evolution-direction reduction is nested inside another evolution
+    CAPTURE_NESTED_REFUSED,  //!< an evolution-direction reduction is nested inside another evolution
                              //!< reduction: the inner value is a post-solve captured input, so the
                              //!< outer's in-solve materialised operand would read a stale (window-
                              //!< lagged) value.  Refused rather than returned silently wrong.
+      HYP_CLOSURE_MISSING      //!< AUTO.HYP_CLOSURE off and the model leaves outgoing-characteristic rows missing at
+                             //!< an outflow face of a hyperbolic block (2026-10-07; appended last: values unchanged)
   };
 
   //! @brief Process-wide lock for every operation that reads or modifies a USER DAG: setup() and fdiff() here, and
@@ -2916,6 +2912,8 @@ public:
     case SetupStatus::DETERMINACY_UNDETERMINED: return "determinacy audit: the assembled Jacobian has "
         "a null space with state content (primal undetermined)";
     case SetupStatus::MODEL_COPY_FAILED:      return "could not copy user model into working DAG";
+    case SetupStatus::HYP_CLOSURE_MISSING:    return "hyperbolic block: AUTO.HYP_CLOSURE is off and outgoing-characteristic "
+        "rows are missing at an outflow face (close it in the model, or turn the option on)";
     case SetupStatus::CAPTURE_NESTED_REFUSED: return "nested evolution-direction reduction: an inner "
       "reduction's captured (post-solve) value feeds an outer reduction's in-solve operand, which "
       "would read a window-lagged value -- refused (consume the inner reduction in an output/objective, "
@@ -3106,7 +3104,7 @@ protected:
   //! _mEqn and returns the count.  Must run after _classify_pde() (consumes
   //! _blockFaceData) and before the interface-plan build.  Gated at the call site
   //! by CRONOS_AUTO_HYP_CLOSURE (environment-only).  See OCEnv_interface_refactor_plan.md.
-  size_t _generate_hyperbolic_boundary_closure();
+  size_t _generate_hyperbolic_boundary_closure( bool append = true );   //!< append=false: count the missing rows only
   //! outgoing rows the model already supplied, and at how many faces, in the last generator call
   size_t _hypClosureSkipped = 0, _hypClosureFaces = 0;
 
@@ -6473,7 +6471,7 @@ FFModel::_classify_pde
     // parabolic-character block, including classes no measurement has covered, which is why
     // it ships dormant and why the corpus read must list every model whose plan moves.
     {
-      static int const kParabChar = []{ char const* v = std::getenv( "CRONOS_PARAB_STRUCT_CHAR" ); return ( v && *v ) ? std::atoi( v ) : 0; }();
+      static int const kParabChar = 0;   // CRONOS_PARAB_STRUCT_CHAR (retired 2026-10-07, WORKPLAN 3.B batch 2b)
       // rev161a: MEASURED (OCFE_nlpartial, 2026-09-08) that the unguarded form fires on an
       // ELLIPTIC block (parab_char=y, no evolution direction).  Eligibility means "a flux
       // continuity is implied by value continuity + the LINK relation", which presupposes an
@@ -8884,7 +8882,7 @@ FFModel::_reduce_high_index()
 // (P,u) block; no left-vs-right correction is needed.
 //-----------------------------------------------------------------------------
 inline size_t
-FFModel::_generate_hyperbolic_boundary_closure()
+FFModel::_generate_hyperbolic_boundary_closure( bool const append )
 {
   _faceConditions.clear();
   size_t added = 0;
@@ -8992,7 +8990,7 @@ FFModel::_generate_hyperbolic_boundary_closure()
             if( it != e.dom.end() && it->second == end.face ) ++fc.rows_at_face;
           }
           _faceConditions.push_back( fc );
-          if( fc.rows_at_face > fc.incoming && options.DISPLAY_LEVEL >= 1 )
+          if( append && fc.rows_at_face > fc.incoming && options.DISPLAY_LEVEL >= 1 )   // not in the counting mode
             std::cerr << "FFModel::setup ** face " << ( end.face == FFDom::LB? "LB": "UB" ) << " in " << fc.direction
                       << " (block " << bid << "): " << fc.rows_at_face << " condition row(s) where only "
                       << fc.incoming << " characteristic(s) enter the domain -- data at the wrong end" << std::endl;
@@ -9020,7 +9018,7 @@ FFModel::_generate_hyperbolic_boundary_closure()
           }
 
           EqnOptions opt( EqnRole::INTERIOR, bid ); opt.participate_in_classification = false;   // rev312: sat/IC_AUTO are the solver defaults
-          _mEqn.push_back( { comb, md, _normalised_options( opt, md ) } );
+          if( append ) _mEqn.push_back( { comb, md, _normalised_options( opt, md ) } );
           ++added;
         }
       }
@@ -10817,7 +10815,44 @@ FFModel::setup
   // guard and this generator all run BEFORE the consistency/count pass, the
   // dependency map and the eval-plans, so the rows appended here flow through all
   // three caches in a SINGLE pass -- no append-then-reprep is needed.
-  if( _knob_AUTO_HYP_CLOSURE() && _classified ){   // rev318: environment-only
+  // 2026-10-07 (WORKPLAN 3.C): an option again, AUTO.HYP_CLOSURE.  Off, the model must close every outflow face
+  // itself: if rows are missing the system would be UNDER-determined and solved silently wrong (measured: 10% on
+  // scalar advection), so setup refuses -- the same rule as consistent initial data for a high-index DAE.
+  if( !options.AUTO.HYP_CLOSURE && _classified ){
+    // The generator's coverage test recognises a face closed by the block's own PDE EXTENDED to it (rev317); a model
+    // may also close it with rows written for the purpose (OCFE_PDE14/15's manual oracle).  So a face is short only
+    // if BOTH say so: directions uncovered by the PDE (fc.appended), and fewer boundary/closure rows reaching the face
+    // than the block has states (initial and diagnostic rows excluded).
+    _generate_hyperbolic_boundary_closure( false );
+    auto reaches = []( int mask, int face ){
+      return mask == FFDom::ALL || mask == face
+          || ( face == FFDom::UB && mask == FFDom::ALL - FFDom::LB )
+          || ( face == FFDom::LB && mask == FFDom::ALL - FFDom::UB ); };
+    size_t n_missing = 0;  std::ostringstream where;
+    for( auto const& fc : _faceConditions ){
+      if( !fc.appended ) continue;
+      size_t rows = 0;
+      for( auto const& e : _mEqn ){
+        if( !e.opt || e.opt->block_id != fc.block_id ) continue;
+        if( e.opt->role == EqnRole::INITIAL || e.opt->role == EqnRole::DIAGNOSTIC ) continue;
+        for( auto const& [dv, mask] : e.dom )
+          if( dv.name() == fc.direction && reaches( mask, fc.face ) ){ ++rows; break; }
+      }
+      size_t const need = fc.incoming + fc.outgoing;
+      size_t const short_by = std::min( fc.appended, need > rows? need - rows: size_t(0) );
+      if( !short_by ) continue;
+      n_missing += short_by;
+      where << " [block " << fc.block_id << ", " << fc.direction << " " << ( fc.face == FFDom::LB? "LB": "UB" ) << ": " << short_by << "]";
+    }
+    if( n_missing ){
+      std::cerr << "FFModel::setup ** AUTO.HYP_CLOSURE is off and " << n_missing << " outgoing-characteristic row(s) are"
+                   " MISSING at outflow face(s):" << where.str();
+      std::cerr << " -- close them in the model (e.g. the PDE extended to the face) or turn AUTO.HYP_CLOSURE on"
+                << std::endl;
+      _issetup = false;  _setupStatus = SetupStatus::HYP_CLOSURE_MISSING;  return false;
+    }
+  }
+  if( options.AUTO.HYP_CLOSURE && _classified ){
     size_t const n_clo = _generate_hyperbolic_boundary_closure();
   if( _hypClosureSkipped )
     if( options.DISPLAY_LEVEL >= 2 ) std::cerr << "FFModel::setup ** auto_hyp_closure: " << _hypClosureSkipped << " outgoing-characteristic row(s) at "

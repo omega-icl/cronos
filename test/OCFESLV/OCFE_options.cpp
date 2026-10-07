@@ -19,9 +19,9 @@
 //   O6  the frozen-plan guard trips when IMPOSITION_TYPE changes after setup();
 //   O8  rev314's fourteen environment-only knobs keep their rev313 defaults (verified field-for-accessor
 //       against rev313 separately; asserted here so the driver guards it from now on);
-//   O9  rev316: SAT_SIGMA1 and ALG_CLOSURE environment-only -- sigma1 defaults to 1.0 through the rev51 path
-//       (read once per process), ALG_CLOSURE defaults on and follows CRONOS_AUTO_ALG_CLOSURE;
-//   O10 rev318: HYP_CLOSURE environment-only -- default on, CRONOS_AUTO_HYP_CLOSURE=0 turns it off;
+//   O9  rev316: SAT_SIGMA1 and ALG_CLOSURE environment-only; since 2026-10-07 constants (sigma1 1.0, ALG_CLOSURE
+//       on) -- the environment no longer changes them;
+//   O10 rev318: HYP_CLOSURE environment-only; since 2026-10-07 the option AUTO.HYP_CLOSURE again (default on);
 //   O7  rev313's enum move: SKIP_NT_ON_TRACE keeps its in-class default after leaving FFModel::Options (it had
 //       NO reset() line, so a lost initializer would have left it indeterminate), and the collapsed
 //       InterfaceType is ONE type -- OCFESLV's and OCPlan's enumerators are the same values;
@@ -186,7 +186,7 @@ int main()
   }
 
   // ---- O4 retired knobs -------------------------------------------------------------------------------------
-  std::cout << "\n---- O4: the eight retired knobs are environment-only, measured defaults ----\n";
+  std::cout << "\n---- O4: the eight retired knobs: measured defaults (RESCUE_C2 and WEAK_NATURAL_PENALTY still read the environment) ----\n";
   {
     char const* keys[] = { "CRONOS_RESCUE_C2", "CRONOS_WEAK_TAU_RESCUED", "CRONOS_WEAK_TAU_NATURAL",
                            "CRONOS_EXACT_NATURAL", "CRONOS_EXACT_NATURAL_STRONG", "CRONOS_STRONG_PROJECT",
@@ -200,8 +200,9 @@ int main()
     check( "O4 STRONG_PROJECT defaults to true",       OCFESLV::_knob_STRONG_PROJECT() == true );
     check( "O4 WEAK_NATURAL_PENALTY defaults to 2",    OCFESLV::_knob_WEAK_NATURAL_PENALTY() == 2 );
     check( "O4 DROP_WDECIDE defaults to true",         OCFESLV::_knob_DROP_WDECIDE() == true );
+    // 2026-10-07 (WORKPLAN 3.B batch 2a): the environment no longer sets them -- the knobs are measured constants
     setenv( "CRONOS_EXACT_NATURAL", "0", 1 );
-    check( "O4 ...and follow the environment when set (EXACT_NATURAL=0)", OCFESLV::_knob_EXACT_NATURAL() == 0 );
+    check( "O4 ...and the environment no longer changes them (EXACT_NATURAL=0)", OCFESLV::_knob_EXACT_NATURAL() == 2 );
     unsetenv( "CRONOS_EXACT_NATURAL" );
   }
 
@@ -268,32 +269,35 @@ int main()
     check( "O8 DUP_SPREAD_WARN 1e-10",            OCFESLV::_knob_DUP_SPREAD_WARN() == 1e-10 );
     check( "O8 DETERMINACY GAP_MIN 1e2, MAX_DENSE 3000", OCFESLV::_knob_DETERMINACY_GAP_MIN() == 1e2
                                                 && OCFESLV::_knob_DETERMINACY_MAX_DENSE() == 3000 );
-    setenv( "CRONOS_NO_PIN_CLOSURE", "1", 1 );
-    check( "O8 ...and the inverted CRONOS_NO_PIN_CLOSURE still inverts", !OCFESLV::_knob_INTERFACE_SUPPRESS_PIN_CLOSURE() );
+    setenv( "CRONOS_NO_PIN_CLOSURE", "1", 1 );   // retired 2026-10-07 (WORKPLAN 3.C)
+    check( "O8 ...and CRONOS_NO_PIN_CLOSURE=1 changes nothing", OCFESLV::_knob_INTERFACE_SUPPRESS_PIN_CLOSURE() );
     unsetenv( "CRONOS_NO_PIN_CLOSURE" );
   }
 
   // ---- O9 rev316 ---------------------------------------------------------------------------------------------
-  std::cout << "\n---- O9: SAT_SIGMA1 and ALG_CLOSURE are environment-only (rev316) ----\n";
+  std::cout << "\n---- O9: SAT_SIGMA1 and ALG_CLOSURE are constants (environment retired 2026-10-07) ----\n";
   {
     FFGraph DAG; OCFESLV oc( &DAG ); Vars V; build( DAG, oc, V );
-    // CRONOS_SAT_SIGMA1 is read ONCE per process (rev51), so only its default can be asserted in-process
-    check( "O9 sigma1 defaults to 1.0 (CRONOS_SAT_SIGMA1 unset at start)",
-           std::getenv( "CRONOS_SAT_SIGMA1" ) != nullptr || oc._eff_sat_sigma1() == 1.0 );
+    // 2026-10-07 (WORKPLAN 3.B batch 2b): CRONOS_SAT_SIGMA1 and CRONOS_AUTO_ALG_CLOSURE are retired -- constants now
+    check( "O9 sigma1 is 1.0",                             oc._eff_sat_sigma1() == 1.0 );
     unsetenv( "CRONOS_AUTO_ALG_CLOSURE" );
-    check( "O9 ALG_CLOSURE defaults on",                   FFModel::_knob_AUTO_ALG_CLOSURE() );
+    check( "O9 ALG_CLOSURE on",                            FFModel::_knob_AUTO_ALG_CLOSURE() );
     setenv( "CRONOS_AUTO_ALG_CLOSURE", "0", 1 );
-    check( "O9 ...and CRONOS_AUTO_ALG_CLOSURE=0 turns it off", !FFModel::_knob_AUTO_ALG_CLOSURE() );
+    check( "O9 ...and CRONOS_AUTO_ALG_CLOSURE=0 changes nothing", FFModel::_knob_AUTO_ALG_CLOSURE() );
     unsetenv( "CRONOS_AUTO_ALG_CLOSURE" );
   }
 
   // ---- O10 rev318 --------------------------------------------------------------------------------------------
-  std::cout << "\n---- O10: HYP_CLOSURE is environment-only (rev318) ----\n";
+  std::cout << "\n---- O10: AUTO.HYP_CLOSURE is an option again (2026-10-07) ----\n";
   {
-    unsetenv( "CRONOS_AUTO_HYP_CLOSURE" );
-    check( "O10 HYP_CLOSURE defaults on",                        FFModel::_knob_AUTO_HYP_CLOSURE() );
+    FFGraph DAG; OCFESLV oc( &DAG );
+    check( "O10 AUTO.HYP_CLOSURE defaults on",                    oc.options.AUTO.HYP_CLOSURE );
+    OCFESLV::Options o2 = oc.options;  o2.AUTO.HYP_CLOSURE = false;
+    OCFESLV::Options o3;  o3 = o2;
+    check( "O10 ...copied by the Options copy and assignment",    !o2.AUTO.HYP_CLOSURE && !o3.AUTO.HYP_CLOSURE );
     setenv( "CRONOS_AUTO_HYP_CLOSURE", "0", 1 );
-    check( "O10 ...and CRONOS_AUTO_HYP_CLOSURE=0 turns it off",  !FFModel::_knob_AUTO_HYP_CLOSURE() );
+    FFGraph D2; OCFESLV oc2( &D2 );
+    check( "O10 ...and CRONOS_AUTO_HYP_CLOSURE=0 changes nothing", oc2.options.AUTO.HYP_CLOSURE );
     unsetenv( "CRONOS_AUTO_HYP_CLOSURE" );
   }
 

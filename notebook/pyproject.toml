@@ -1,10 +1,11 @@
 [project]
-name = "cronos"
+name = "cronos-tutorials"
 version = "5.0.0"
-description = "Add your description here"
+description = "Tutorials of CRONOS (Jupyter notebooks and Python scripts): FFModel, ODESLV, OCFESLV"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "cronos-mcpp>=5.0.0",   # imports as `cronos`; brings pymcpp and numpy
     "graphviz>=0.21",
     "matplotlib>=3.11.0",
     "scipy>=1.17.1",

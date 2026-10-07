@@ -165,15 +165,24 @@ public:
     const
     { static std::ostream null( nullptr ); return options.DISPLAY_LEVEL >= n? std::cout: null; }
   bool _transitions_lifted() const override { return !options.SOLVE.MARCHING; }   // marching: a transfer map (_apply_march_jumps)
-  //! @brief v1: tau on an element boundary of the evolution direction, monolithic solves only
+  //! @brief v1: tau on an element boundary of the evolution direction -- in monolithic AND marching solves (marching
+  //! validates against the user's DECLARED grid, as its working domain is collapsed to one window: a tau between two
+  //! seams was silently ignored before 2026-10-06, WORKPLAN 1.6)
+  bool _validate_transition_tau_unlifted() const override { return true; }
   bool _accept_transition_tau
     ( double const tau, std::string& why )
     const override
     {
-      auto const it = _mDom.find( _evolution_dom_var );
-      if( it == _mDom.end() ){ why = "no evolution domain"; return false; }
-      for( size_t k = 1; k < it->second.n_elem; ++k )
-        if( std::fabs( it->second.elem_bnd[k] - tau ) <= 64.*DBL_EPSILON*std::max( 1., std::fabs( tau ) ) ) return true;
+      FFDom const* pd = nullptr;
+      if( _transitions_lifted() ){
+        auto const it = _mDom.find( _evolution_dom_var );  if( it != _mDom.end() ) pd = &it->second;
+      }
+      else{
+        auto const it = _usr._mDomUsr.find( _usr._evolution_dom_varUsr );  if( it != _usr._mDomUsr.end() ) pd = &it->second;
+      }
+      if( !pd ){ why = "no evolution domain"; return false; }
+      for( size_t k = 1; k < pd->n_elem; ++k )
+        if( std::fabs( pd->elem_bnd[k] - tau ) <= 64.*DBL_EPSILON*std::max( 1., std::fabs( tau ) ) ) return true;
       why = "tau must be an ELEMENT BOUNDARY of the evolution direction (add one there)";  return false;
     }
   //! @brief Column of the lifted auxiliary's value at the SAME spatial node as a claim's face (v1.5 profiles): the
@@ -4986,7 +4995,7 @@ public:
     // rev110 -- so a solve log carried a revision three steps stale.  Nothing else in
     // the build chain would have caught it: the makefile names the file, the build
     // oracle checks the instrument's format marker, and neither reads this.
-    = "ocfeslv  rev360  2026-10-06";
+    = "ocfeslv  rev361  2026-10-06";
 
   //! @brief The revision of this ocfeslv.hpp (HEADER_ID); FFModel::revision() gives the model layer's, which a
   //! binary may mix with another solver revision.

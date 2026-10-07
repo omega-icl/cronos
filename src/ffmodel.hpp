@@ -68,7 +68,7 @@ public:
   //! @brief Identifies this ffmodel.hpp.  The solver header carries its own OCFESLV::HEADER_ID, and a binary can
   //! mix the two (a sweep has run one revision's model layer under another's solver), so both are printed.
   static constexpr char const* HEADER_ID
-    = "ffmodel  rev354  2026-10-05";
+    = "ffmodel  rev356  2026-10-06";
 
   //! @brief The revision of this ffmodel.hpp (HEADER_ID), e.g. for a bug report; the model report does not print it.
   static char const* revision() { return HEADER_ID; }
@@ -1357,10 +1357,12 @@ public:
   //! @brief Declare a scalar output evaluated at one point.
   //! @param Fct   output expression
   //! @param vDom  domain variables fixed by the point
+  //! @return the INDEX of the new output (the first one added, for the list form): outputs are numbered in declaration
+  //!         order from 0, and the index is the output's position in the solvers' blk_fct(); it stays valid after setup()
   //! @param vVal  coordinates, one per domain variable, or empty: each coordinate then defaults
   //!              to the domain's reference coordinate (ref(): the midpoint unless set)
   //! @throw Exceptions::INDEX if vVal is neither empty nor of the size of vDom
-  void add_output
+  size_t add_output
     ( FFVar const& Fct, std::vector<FFVar> const& vDom={},
       std::vector<double> const& vVal=std::vector<double>() )
     {
@@ -1372,12 +1374,12 @@ public:
       t_FctDom md;
       for( size_t i=0; i<vDom.size(); ++i )
         md.insert( { vDom[i], i < vVal.size()? vVal[i]: ref( vDom[i] ) } );
-      _append_output_point( Fct, md );
+      return _append_output_point( Fct, md );
     }
 
   //! @brief Point output with an explicit SIDE per direction (FFDom::MINUS / FFDom::PLUS), for a coordinate where
   //! the value may differ on either side (an element boundary, a transition): e.g. add_output(f,{t},{T1},{FFDom::PLUS})
-  void add_output
+  size_t add_output
     ( FFVar const& Fct, std::vector<FFVar> const& vDom, std::vector<double> const& vVal,
       std::vector<int> const& vSide )
     {
@@ -1388,23 +1390,23 @@ public:
         if( vSide[i] == FFDom::PLUS ) sd[ vDom[i] ] = FFDom::PLUS;
         else if( vSide[i] != FFDom::MINUS ) throw Exceptions( Exceptions::INDEX );
       }
-      _append_output_point( Fct, md, sd );
+      return _append_output_point( Fct, md, sd );
     }
 
   //! @brief Point output with brace-list coordinates, e.g. add_output(f,{t},{1.0}); disambiguates
   //! from the distributed overload taking masks.
-  void add_output
+  size_t add_output
     ( FFVar const& Fct, std::vector<FFVar> const& vDom,
       std::initializer_list<double> vVal )
     {
-      add_output( Fct, vDom, std::vector<double>( vVal ) );
+      return add_output( Fct, vDom, std::vector<double>( vVal ) );
     }
 
   //! @brief Declare a distributed output, evaluated at the discretisation nodes selected by masks.
   //! vDom and vLim are as in add_equation() (missing masks default to ALL).  The rows appear in
   //! the output array after evaluation; they are not equations.
   //! @throw Exceptions::INDEX if vLim is neither empty nor of the size of vDom
-  void add_output
+  size_t add_output
     ( FFVar const& Fct, std::vector<FFVar> const& vDom,
       std::vector<int> const& vLim )
     {
@@ -1416,30 +1418,32 @@ public:
       t_EqnDom grid;
       for( size_t i=0; i<vDom.size(); ++i )
         grid.insert( { vDom[i], i < vLim.size()? vLim[i]: FFDom::ALL } );
-      _append_output_distributed( Fct, grid, t_FctDom() );
+      return _append_output_distributed( Fct, grid, t_FctDom() );
     }
 
   //! @brief Distributed output with brace-list masks, e.g. add_output(g,{t},{FFDom::ALL-FFDom::LB});
   //! disambiguates from the point overload.
-  void add_output
+  size_t add_output
     ( FFVar const& Fct, std::vector<FFVar> const& vDom,
       std::initializer_list<int> vLim )
     {
-      add_output( Fct, vDom, std::vector<int>( vLim ) );
+      return add_output( Fct, vDom, std::vector<int>( vLim ) );
     }
 
   //! @brief Declare several distributed outputs over the same domains and masks.
-  void add_output
+  size_t add_output
     ( std::vector<FFVar> const& vFct, std::vector<FFVar> const& vDom,
       std::vector<int> const& vLim )
     {
+      size_t const first = _usr._mFctUsr.size();     // the index of the first output added
       for( auto const& f : vFct ) add_output( f, vDom, vLim );
+      return first;
     }
 
   //! @brief Declare a distributed output over @p vGridDom (masks @p vLim) at the fixed coordinates
   //! @p vPointVal of the domains @p vPointDom.
   //! @throw Exceptions::INDEX on inconsistent sizes
-  void add_output
+  size_t add_output
     ( FFVar const& Fct, std::vector<FFVar> const& vGridDom,
       std::vector<int> const& vLim, std::vector<FFVar> const& vPointDom,
       std::vector<double> const& vPointVal )
@@ -1458,7 +1462,7 @@ public:
       t_FctDom point;
       for( size_t i=0; i<vPointDom.size(); ++i )
         point.insert( { vPointDom[i], vPointVal[i] } );
-      _append_output_distributed( Fct, grid, point );
+      return _append_output_distributed( Fct, grid, point );
     }
 
   //! @brief Remove all outputs (classification is not invalidated: outputs do not enter it).
@@ -1758,6 +1762,13 @@ public:
     ( double const tau, std::string& why )
     const
     { (void)tau; (void)why; return true; }
+  //! @brief Does the consumer validate the transition times even when it does NOT lift the transitions (marching: a
+  //! transfer map applies them at the window seams, so a tau between two seams is never met and was silently
+  //! ignored -- WORKPLAN 1.6, 2026-10-06)?  Default: no (ODESLV, a bare FFModel).
+  virtual bool _validate_transition_tau_unlifted
+    ()
+    const
+    { return false; }
 
   //! @brief One lifted post-jump state: x_i(tau^+) is the auxiliary aux (see _transitions_lifted)
   struct t_TransitionLift
@@ -1778,7 +1789,19 @@ public:
     ()
     {
       _trnLift.clear();
-      if( _mTrn.empty() || !_transitions_lifted() ) return true;
+      if( _mTrn.empty() ) return true;
+      if( !_transitions_lifted() ){
+        // not lifted (marching): the transfer map applies the jumps at the window seams -- still validate the times
+        if( !_validate_transition_tau_unlifted() ) return true;
+        t_TransitionJumps Ju;  std::string whyu;
+        auto is_state_u = [&]( FFVar const& v ){ return _mVar.count( v ) > 0; };
+        if( !_transition_jumps( _mTrn, is_state_u, Ju, whyu ) ){
+          std::cerr << "FFModel::setup ** TRANSITION REFUSED: " << whyu << std::endl;  return false; }
+        for( auto const& G : Ju ){ std::string w2;
+          if( !_accept_transition_tau( G.tau, w2 ) ){
+            std::cerr << "FFModel::setup ** TRANSITION REFUSED at tau = " << G.tau << ": " << w2 << std::endl;  return false; } }
+        return true;
+      }
       t_TransitionJumps J;  std::string why;
       auto is_state = [&]( FFVar const& v ){ return _mVar.count( v ) > 0; };
       if( !_transition_jumps( _mTrn, is_state, J, why ) ){
@@ -1986,7 +2009,7 @@ public:
 protected:
 
   //! @brief Append a point-output record to the declared outputs (sizes checked by the caller).
-  void _append_output_point
+  size_t _append_output_point
     ( FFVar const& Fct, t_FctDom const& point,
       std::map<FFVar,int,lt_FFVar> const& side = std::map<FFVar,int,lt_FFVar>() )
     {
@@ -1998,13 +2021,15 @@ protected:
       rec.grid.clear();
       rec.row0 = 0;
       rec.nrow = 1;
+      size_t const ndx = _usr._mFctUsr.size();       // outputs are numbered in declaration order, from 0
       _usr._mFctUsr.push_back( std::move( rec ) );
       _issetup  = false;
       _on_model_changed( ModelChange::DERIVATIVES );
+      return ndx;
     }
 
   //! @brief Append a distributed-output record to the declared outputs (sizes checked by the caller).
-  void _append_output_distributed
+  size_t _append_output_distributed
     ( FFVar const& Fct, t_EqnDom const& grid, t_FctDom const& point=t_FctDom() )
     {
       t_Fct rec;
@@ -2014,9 +2039,11 @@ protected:
       rec.grid  = grid;
       rec.row0 = 0;
       rec.nrow = 0;
+      size_t const ndx = _usr._mFctUsr.size();       // outputs are numbered in declaration order, from 0
       _usr._mFctUsr.push_back( std::move( rec ) );
       _issetup  = false;
       _on_model_changed( ModelChange::DERIVATIVES );
+      return ndx;
     }
 
   //! @brief True once classify_pde() has succeeded on the current model; cleared by model mutations

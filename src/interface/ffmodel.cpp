@@ -157,7 +157,7 @@ add_input(M& self, mc::FFVar const& var, std::vector<mc::FFVar> const& doms,
   return self.add_input(var, doms, val);
 }
 
-void
+size_t
 add_output(M& self, mc::FFVar const& fct, std::vector<mc::FFVar> const& doms,
            std::optional<std::vector<double>> const& point,
            std::optional<std::vector<int>> const& side,
@@ -565,6 +565,13 @@ masks : list of int, optional
     Region per domain (distributed output).
 at : dict of FFVar to float, optional
     Fixed coordinates of further domains (distributed output).
+
+Returns
+-------
+int
+    The index of the new output: outputs are numbered in declaration order,
+    from 0, and the index is the output's position in ``blk_fct()`` of a
+    solver (``OCFESLV``, ``ODESLV``) once the model is set up.
 )doc")
       .def(
           "add_transition",

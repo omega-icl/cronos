@@ -461,11 +461,21 @@ ODESLVS_BASE::_IC_SET_ASA
 #else
   delete[] _pSACFCT; _pSACFCT = _dag->BAD( 1, &pHAM, _nx+_np, _pVAR+_ny );
 #endif
+  bool df0dx_nonzero = false;
+  for( unsigned ix=0; ix<_nx && !df0dx_nonzero; ix++ )
+    if( !( _pSACFCT[ix].cst() && _pSACFCT[ix].num().val() == 0. ) ) df0dx_nonzero = true;
   for( unsigned is=0; is<_nsen; is++ ){
-    _pSAFCT[is] = _pSACFCT[_nx+_ndxSEN[is]];
-      for( unsigned ix=0; ix<_nx; ix++ )
-        _pSAFCT[is] += _pSACFCT[ix] * pIC[ix];
-  }    
+    _pSAFCT[is] = _pSACFCT[_nx+_ndxSEN[is]];          // d( f0 + y.IC )/dp at a fixed initial state
+    // + the chain through the initial state, (df0/dx) . d(x0)/dp: d(x0)/dp is the derivative of the INITIAL-CONDITION
+    // expression w.r.t. the parameter.  It used to multiply by the initial VALUE x0 instead, so an output at the
+    // initial time had a wrong adjoint gradient (1.0 for x0 = 1, whatever the parameter) -- WORKPLAN 1.8, 2026-10-06.
+    // Only a function at stage 0 makes df0/dx non-zero: skip the derivative of the initial condition otherwise.
+    if( df0dx_nonzero ){
+      FFVar* dIC = _dag->FAD( _nx, pIC, 1, _pP + _ndxSEN[is] );
+      for( unsigned ix=0; ix<_nx; ix++ ) _pSAFCT[is] += _pSACFCT[ix] * dIC[ix];
+      delete[] dIC;
+    }
+  }
 
   return true;
 }

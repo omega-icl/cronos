@@ -703,6 +703,23 @@ if(ENABLE_PYTHON)
   if(_check_missing)
     message(WARNING "make check: not found in CRONOS_PYCHECK_DIR (${CRONOS_PYCHECK_DIR}): ${_check_missing}")
   endif()
+  # The generated option headers (src/interface/gen_*_options.hpp, the Python docstrings and defaults of the option
+  # structs) are produced from the C++ headers by gen_options.py -- never edited.  `gen-options` regenerates them
+  # (needs clang-format and MC++'s .clang-format, found through MCPP_ROOT); the first step of `make check` verifies
+  # that they are up to date (skipped, with a notice, when clang-format is not available).
+  set(CRONOS_GEN_OPTIONS "${CMAKE_CURRENT_SOURCE_DIR}/src/interface/gen_options.py")
+  if(EXISTS "${CRONOS_GEN_OPTIONS}")
+    add_custom_target(
+      gen-options
+      COMMAND ${CMAKE_COMMAND} -E env "MCPP_ROOT=${MCPP_ROOT}" ${Python3_EXECUTABLE} "${CRONOS_GEN_OPTIONS}" --all
+      WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+      COMMENT "Regenerating src/interface/gen_*_options.hpp from the C++ headers"
+      VERBATIM)
+    set(_check_cmds
+        COMMAND ${CMAKE_COMMAND} -E echo "== gen_options.py --check"
+        COMMAND ${CMAKE_COMMAND} -E env "MCPP_ROOT=${MCPP_ROOT}" ${Python3_EXECUTABLE} "${CRONOS_GEN_OPTIONS}" --check
+        ${_check_cmds})
+  endif()
   if(_check_cmds)
     add_custom_target(
       check

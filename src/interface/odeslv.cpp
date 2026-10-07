@@ -235,6 +235,9 @@ Statistics of an integration.
                     "Number of Jacobian evaluations.");
 
   // --- ODESLV Main Class ---
+  pyODESLV.def_static("revision", []() { return std::string(S::revision()); },
+                      "The revision of the ODESLV headers (odeslv_base.hpp and the three that change with it), e.g.\n"
+                      "for a bug report; FFModel.revision() gives the model layer's.");
   pyODESLV
       .def(py::init<mc::FFGraph*>(), py::arg("dag"), py::keep_alive<1, 2>(),
            "Empty solver and model on the DAG ``dag`` (kept alive by it).")
@@ -320,6 +323,24 @@ the outputs with respect to the sensitivity directions. Arguments as
       .def(
           "val_function", [](S const& self) { return self.val_function(); },
           "Output values after the last solve.")
+      .def(
+          "blk_fct",
+          [](S const& self, size_t ndx)
+          {
+            auto const b = self.blk_fct(ndx);
+            if (b.first == std::numeric_limits<size_t>::max())
+              throw py::index_error("ODESLV.blk_fct: no output " +
+                                    std::to_string(ndx) +
+                                    " (outputs are numbered in add_output() "
+                                    "order, after setup())");
+            return py::make_tuple(b.first, b.second);
+          },
+          py::arg("ndx"), R"doc(
+The block of output ``ndx`` (in add_output() order) in ``val_function()``:
+``(first, count)``.  An ODESLV integrates a lumped system and returns one value
+per output, so the block is ``(ndx, 1)``.  The same call exists on ``OCFESLV``,
+where a distributed output spans several values.
+)doc")
       .def(
           "val_function_gradient",
           [](S const& self) { return self.val_function_gradient(); },

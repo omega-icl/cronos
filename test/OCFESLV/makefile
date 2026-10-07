@@ -16,7 +16,7 @@ all: OCFE_revision OCFE_options OCFE_nonuniform OCFE_refinit OCFE_fadbad OCFE_de
      OCFE_capture_marching OCFE_hybrid_adequacy OCFE_dagcopy_dump OCFE_exceptions_api OCFE_resetup \
      OCFE_inpcolloc OCFE_claim OCFE_closure OCFE_receiver OCFE_ffmodel OCFE_setmodel OCFE_zindex \
      OCFE_faces OCFE_pencil OCFE_fixinput OCFE_symdiff1 OCFE_symdiff2 OCFE_evalsum OCFE_ffocfe2 \
-     OCFE_TRANSoc OCFE_TRANSpde OCFE_TRANSpsa OCFE_TRANSdae OCFE_TRANSode OCFE_TRANSgrad \
+     OCFE_TRANSoc OCFE_TRANSpde OCFE_TRANSpsa OCFE_TRANSdae OCFE_TRANSode OCFE_TRANSgrad OCFE_TRANSgrid \
      OCFE_TRANSeval OCFE_MIXEDred OCFE_AUTOrole OCFE_causal OCFE_marchflux OCFE_zchain \
      OCFE_AE0 OCFE_AE1 OCFE_AE2 \
      OCFE_ODE0 OCFE_ODE1 OCFE_ODE2 \
@@ -242,6 +242,9 @@ OCFE_TRANSode : OCFE_TRANSode.o
 	$(LINK) $(FLAG_LINK) -o $@ $< $(LIB_CRONOS) $(LIB_DEP)
 
 OCFE_TRANSgrad : OCFE_TRANSgrad.o
+	$(LINK) $(FLAG_LINK) -o $@ $< $(LIB_CRONOS) $(LIB_DEP)
+
+OCFE_TRANSgrid : OCFE_TRANSgrid.o
 	$(LINK) $(FLAG_LINK) -o $@ $< $(LIB_CRONOS) $(LIB_DEP)
 
 OCFE_TRANSeval : OCFE_TRANSeval.o
@@ -605,7 +608,7 @@ clean :
 	OCFE_capture_marching OCFE_hybrid_adequacy OCFE_dagcopy_dump OCFE_exceptions_api OCFE_resetup \
 	OCFE_inpcolloc OCFE_claim OCFE_closure OCFE_receiver OCFE_ffmodel OCFE_setmodel OCFE_zindex \
 	OCFE_faces OCFE_pencil OCFE_fixinput OCFE_symdiff1 OCFE_symdiff2 OCFE_evalsum OCFE_ffocfe2 \
-	OCFE_TRANSoc OCFE_TRANSpde OCFE_TRANSpsa OCFE_TRANSdae OCFE_TRANSode OCFE_TRANSgrad \
+	OCFE_TRANSoc OCFE_TRANSpde OCFE_TRANSpsa OCFE_TRANSdae OCFE_TRANSode OCFE_TRANSgrad OCFE_TRANSgrid \
 	OCFE_TRANSeval OCFE_MIXEDred OCFE_AUTOrole OCFE_causal OCFE_marchflux OCFE_zchain \
 	OCFE_AE0 OCFE_AE1 OCFE_AE2 \
 	OCFE_ODE0 OCFE_ODE1 OCFE_ODE2 \

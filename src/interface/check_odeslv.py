@@ -225,6 +225,47 @@ check(isinstance(o, FFModel.Options), "ODESLV.Options extends FFModel.Options")
 print("  doc of RTOL:", ODESLV.Options.RTOL.__doc__)
 
 # %% [markdown]
+# ## blk_fct and the output index
+
+# %%
+_b = [A.blk_fct(k) for k in range(2)]
+check(_b == [(0, 1), (1, 1)], "blk_fct(k) = (k, 1): an ODESLV output is ONE value (%s)" % str(_b))
+try:
+    A.blk_fct(2); check(False, "blk_fct beyond the last output raises IndexError")
+except IndexError:
+    check(True, "blk_fct beyond the last output raises IndexError")
+_G6 = FFGraph(); _t6, _x6, _k6 = _G6.add_var("t"), _G6.add_var("x"), _G6.add_var("k")
+_S6 = ODESLV(_G6)
+_i0 = _S6.add_output(OpE(_x6, _t6, 1.)); _i1 = _S6.add_output(OpI(_x6, _t6))
+check((_i0, _i1) == (0, 1), "add_output returns the output's index on an ODESLV too (%s)" % str((_i0, _i1)))
+
+# %% [markdown]
+# ## An output distributed over the evolution direction: one value per stage time
+
+# %%
+_G8 = FFGraph(); _t8, _x8, _k8 = _G8.add_var("t"), _G8.add_var("x"), _G8.add_var("k")
+_S8 = ODESLV(_G8)
+_S8.add_domain(_t8, FFDom(0., 1., 4, FFDom.LGR, 3)); _S8.set_evolution_domain(_t8)
+_S8.add_state(_x8, [_t8], ref=1.); _S8.add_input(_k8, ref=0.8)
+_S8.add_equation(OpP(_x8, _t8) + _k8 * _x8, [_t8], [FFDom.ALL - FFDom.LB], ODESLV.EqnOptions(ODESLV.EqnRole.INTERIOR))
+_S8.add_equation(_x8 - 2. * _k8, [_t8], [FFDom.LB], ODESLV.EqnOptions(ODESLV.EqnRole.INITIAL))   # x(t) = 2 k exp(-k t)
+_j0 = _S8.add_output(_x8, [_t8], masks=[FFDom.ALL])
+_j1 = _S8.add_output(OpE(_x8, _t8, 1.))
+_S8.options.DISPLAY = 0
+check(_S8.setup(), "a model with an output distributed over t sets up (%s)" % (_S8.extract_error() or "ok"))
+check((_j0, _j1) == (0, 1) and _S8.blk_fct(0) == (0, 5) and _S8.blk_fct(1) == (5, 1),
+      "blk_fct: the distributed output takes one value per stage time (5), the point output the next (%s, %s)" % (_S8.blk_fct(0), _S8.blk_fct(1)))
+_TS = np.array([0., .25, .5, .75, 1.])
+_ex = 2 * .8 * np.exp(-.8 * _TS); _dex = 2 * np.exp(-.8 * _TS) * (1 - .8 * _TS)
+_S8.solve_fsens([0.8]); _f = np.array(_S8.val_function()); _g = np.array(_S8.val_function_gradient()).ravel()
+check(len(_f) == 6 and np.abs(_f[:5] - _ex).max() < 1e-6 and abs(_f[5] - _ex[-1]) < 1e-6,
+      "the values at the 5 stage times = 2 k exp(-k t), and the point output after them")
+check(len(_g) == 6 and np.abs(_g[:5] - _dex).max() < 1e-5, "forward gradient at the stage times = the closed form")
+_S8.solve_asens([0.8]); _ga = np.array(_S8.val_function_gradient()).ravel()
+check(len(_ga) == 6 and np.abs(_ga[:5] - _dex).max() < 1e-5,
+      "adjoint gradient at the stage times = the closed form -- including the initial time (d x0 / dk = 2)")
+
+# %% [markdown]
 # ## Summary
 
 # %%

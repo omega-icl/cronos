@@ -7,6 +7,8 @@
 
 #undef  CRONOS__ODESLV_BASE_DEBUG
 
+#include <limits>
+#include <utility>
 #include <cstdint>
 #include <new>
 #include <sstream>
@@ -287,11 +289,32 @@ class ODESLV_BASE
     const
     { return _np; }
 
+  //! @brief Revision of the ODESLV headers (odeslv_base.hpp, odeslvs_base.hpp, odeslv_cvodes.hpp, odeslvs_cvodes.hpp,
+  //! which change together): bump it with any change to one of them.  Since 2026-10-07, so that a sweep log can show
+  //! which ODESLV headers it ran (ODESLV_revision prints it).
+  static constexpr char const* HEADER_ID
+    = "odeslv  rev1  2026-10-07";
+
+  //! @brief The revision of the ODESLV headers (HEADER_ID), e.g. for a bug report
+  static char const* revision() { return HEADER_ID; }
+
   //! @brief Number of state functions (was BASE_DE::nf)
   size_t nf
     ()
     const
     { return _nf; }
+
+  //! @brief The block of output @p ndx (in add_output() order) in val_function(): (first, count).  A scalar output
+  //! takes ONE value; an output DISTRIBUTED over the evolution direction takes one value per kept STAGE TIME
+  //! (ODESLV has no collocation nodes), in time order.  (max, 0) if setup() has not run or @p ndx is out of range --
+  //! the convention of OCFESLV::blk_fct, so a script reads the outputs of either solver alike (WORKPLAN 2.2, 1.7).
+  std::pair<size_t,size_t> blk_fct
+    ( size_t const ndx )
+    const
+    {
+      return this->is_setup() && ndx < _blkFct.size()? _blkFct[ndx]
+                                                     : std::make_pair( std::numeric_limits<size_t>::max(), size_t(0) );
+    }
 
   //! @brief Number of states (was BASE_DE::nx)
   size_t nx
@@ -333,7 +356,9 @@ protected:
     { if( _dag ) _resolve_sensitivity_index(); }
 
   size_t _nq = 0;        //!< number of quadratures
-  size_t _nf = 0;        //!< number of state functions
+  size_t _nf = 0;        //!< number of state functions (ROWS of val_function(): a distributed output has one per stage time)
+  //! the block [first, count] of each user output (in add_output() order) among the functions / val_function()
+  std::vector< std::pair<size_t,size_t> > _blkFct;
   double _t = 0.;        //!< current time
   size_t _istg = 0;      //!< current stage
   size_t _nnzjac = 0;    //!< nonzeros in the Jacobian
@@ -1444,7 +1469,42 @@ ODESLV_BASE::_extract_from_model
       if( in ) r.push_back( k );
     }
     return r; };
+  // An output DISTRIBUTED over the evolution direction (2026-10-06, WORKPLAN 1.7) is carried at the STAGE TIMES: one
+  // function per kept stage time tau_k -- the output expression's value at the END of stage k (tau_k^-; the initial
+  // state at k = 0) -- in time order, the mask selecting the times: ALL all of them, LB the initial time, UB the final
+  // one, ALL-LB the stage ends (not the initial time), and so on.  Each row is an ordinary per-stage function, so the
+  // values and the forward and adjoint sensitivities come from the machinery that already serves the point outputs.
+  auto keep_stage = [&]( int const lim, size_t const k ){
+    bool const lb = ( k == 0 ), ub = ( k == _ns );
+    if( lim == FFDom::ALL )                         return true;
+    if( lim == FFDom::ALL - FFDom::LB )             return !lb;
+    if( lim == FFDom::ALL - FFDom::UB )             return !ub;
+    if( lim == FFDom::ALL - FFDom::LB - FFDom::UB ) return !lb && !ub;
+    if( lim == FFDom::LB )                          return lb;
+    if( lim == FFDom::UB )                          return ub;
+    return false; };
+  std::vector<size_t> blk_first;
   for( auto const& fct : var_output() ){
+    blk_first.push_back( _nf );
+    if( fct.kind == FFModel::FctKind::DISTRIBUTED ){
+      if( !fct.point.empty() || fct.grid.size() != 1 || fct.grid.begin()->first.id() != _evolution_dom_var.id() ){
+        _extractError = "an output of an ODESLV can be distributed over the evolution direction only (" + fct.var.name() + ")";
+        return false;
+      }
+      if( !records_in( fct.var ).empty() ){
+        _extractError = "an output distributed over the evolution direction cannot involve an evaluation or an integral ("
+                      + fct.var.name() + ")";
+        return false;
+      }
+      int const lim = fct.grid.begin()->second;  size_t nrow = 0;
+      for( size_t k = 0; k <= _ns; ++k ){
+        if( !keep_stage( lim, k ) ) continue;
+        add_to( k, _nf++, subst_inputs( { subst1( _in_model_dag( fct.var ) ) }, elem_of_point( _dT[k], FFDom::MINUS ) )[0] );
+        ++nrow;
+      }
+      if( !nrow ){ _extractError = "the mask of a distributed output selects no stage time (" + fct.var.name() + ")";  return false; }
+      continue;
+    }
     int direct = -1;
     for( size_t k = 0; k < vDef.size(); ++k )
       if( vDef[k].input.dag() && fct.var.dag() && vDef[k].input.id() == fct.var.id() ){ direct = (int)k; break; }
@@ -1474,6 +1534,9 @@ ODESLV_BASE::_extract_from_model
     if( !( B[0].cst() && B[0].num().val() == 0. ) )
       add_to( _ns, idx, B[0].cst()? FFVar( B[0].num().val() ): subst1( _in_model_dag( B[0] ) ) );
   }
+  blk_first.push_back( _nf );                             // the block of every output among the functions
+  _blkFct.clear();
+  for( size_t k = 0; k + 1 < blk_first.size(); ++k ) _blkFct.push_back( { blk_first[k], blk_first[k+1] - blk_first[k] } );
   if( tv_inputs.empty() || quad.empty() )                 // after the outputs: they may have added quadratures
     _mQUAD.assign( 1, quad );
   else{                                                    // integrands with time-varying inputs: per stage

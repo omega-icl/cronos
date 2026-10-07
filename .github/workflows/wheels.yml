@@ -65,7 +65,10 @@ jobs:
             python {project}/src/interface/check_ffocfe.py &&
             python -c "import cronos; i = cronos.build_info(); print(i); assert i['license'] == ('GPL-2.0-or-later' if '${{ matrix.variant }}' == 'gpl' else 'EPL-2.0')"
       - name: Every bundled library has a third-party notice
-        run: python3 tools/ci/check_notices.py THIRD_PARTY_NOTICES.txt wheelhouse/*.whl
+        shell: bash                     # also on Windows, whose default shell (PowerShell) does not expand globs
+        run: |
+          PY=$(command -v python3 || command -v python)
+          "$PY" tools/ci/check_notices.py THIRD_PARTY_NOTICES.txt wheelhouse
       - name: GPL wheels -- build tag 1 (pip and uv prefer them when given the release page)
         if: matrix.variant == 'gpl'
         run: |

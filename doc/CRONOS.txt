@@ -52,7 +52,7 @@ The files <tt>INSTALL.md</tt> and <tt>BUILD_CMAKE.md</tt> in the main directory 
 - <tt>src/interface</tt>: the Python binders, the generated option headers and the check scripts;
 - <tt>test/ODESLV</tt> and <tt>test/OCFESLV</tt>: the test drivers -- the corpus the solvers are validated against;
 - <tt>notebook</tt>: the tutorials, as Jupyter notebooks and Python scripts;
-- <tt>docs</tt>: this documentation -- generated with <tt>cd docs && doxygen CRONOS.dox</tt>, then opened at <tt>docs/html/index.html</tt>.
+- <tt>doc</tt>: this documentation -- generated with <tt>cd doc && doxygen CRONOS.dox</tt>, then opened at <tt>doc/html/index.html</tt>.
 .
 
 

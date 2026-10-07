@@ -3,14 +3,14 @@
 # All Rights Reserved.
 # This code is published under the Eclipse Public License.
 #
-# gen_environment.py -- docs/ENVIRONMENT.md, GENERATED from the code and a curated registry (2026-10-07, WORKPLAN 3.D).
+# gen_environment.py -- doc/ENVIRONMENT.md, GENERATED from the code and a curated registry (2026-10-07, WORKPLAN 3.D).
 #
 #   gen_environment.py --write [SRC_DIR [DOC]]    write the document
 #   gen_environment.py --check [SRC_DIR [DOC]]    exit 1 if a header reads a CRONOS_* variable the registry does not
 #                                                  document, if the registry documents one no header reads, or if the
 #                                                  document is not what --write would produce
 #
-# SRC_DIR defaults to the script's parent (src/), DOC to ../../docs/ENVIRONMENT.md relative to the script.  A new
+# SRC_DIR defaults to the script's parent (src/), DOC to ../../doc/ENVIRONMENT.md relative to the script.  A new
 # environment variable therefore cannot be added silently: `make check` fails until it is described here.  Read sites are
 # recorded by HEADER, not by line, so that ordinary edits of a header do not make the document stale.
 import os, re, sys
@@ -126,7 +126,7 @@ def main():
         sys.stderr.write( 'usage: gen_environment.py --write|--check [SRC_DIR [DOC]]\n' ); return 2
     here = os.path.dirname( os.path.abspath( __file__ ) )
     src = a[ 1 ] if len( a ) > 1 else os.path.join( here, '..' )
-    doc = a[ 2 ] if len( a ) > 2 else os.path.join( here, '..', '..', 'docs', 'ENVIRONMENT.md' )
+    doc = a[ 2 ] if len( a ) > 2 else os.path.join( here, '..', '..', 'doc', 'ENVIRONMENT.md' )
     found = scan( src )
     undocumented = sorted( set( found ) - set( REGISTRY ) - set( MCPP ) )   # an MC++ header in SRC_DIR is documented below
     stale = sorted( set( REGISTRY ) - set( found ) )
@@ -138,11 +138,13 @@ def main():
     bad = []
     if undocumented: bad.append( 'read by a header but NOT documented: ' + ', '.join( undocumented ) )
     if stale: bad.append( 'documented but read by no header: ' + ', '.join( stale ) )
-    if not bad and ( not os.path.exists( doc ) or open( doc ).read() != text ):
-        bad.append( 'docs/ENVIRONMENT.md is out of date (regenerate with the gen-environment target)' )
+    if not bad and not os.path.exists( doc ):
+        bad.append( '%s does not exist (generate it with the gen-environment target)' % os.path.relpath( doc ) )
+    elif not bad and open( doc ).read() != text:
+        bad.append( '%s is out of date (regenerate with the gen-environment target)' % os.path.relpath( doc ) )
     if bad:
         print( 'gen_environment.py --check: ' + '; '.join( bad ) ); return 1
-    print( 'gen_environment.py --check: the %d environment variables are documented and docs/ENVIRONMENT.md is up to date' % len( REGISTRY ) )
+    print( 'gen_environment.py --check: the %d environment variables are documented and doc/ENVIRONMENT.md is up to date' % len( REGISTRY ) )
     return 0
 
 sys.exit( main() )

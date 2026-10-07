@@ -38,10 +38,11 @@ cmake --install build --prefix <prefix>
 | `ENABLE_HSL` | OFF | MC13/MC21/MC33 (`MC__USE_HSL`), as MC++ |
 | `MC__USE_FADBAD` | OFF | FADBAD++ forward AD (reads `MCPP_ROOT/src/3rdparty/fadbad++`) |
 | `CRONOS_WITH_KLU` | ON | sparse KLU in CVODES (`CRONOS__WITH_KLU`): SuiteSparse KLU + SUNDIALS built with KLU |
-| `CRONOS_WITH_UMFPACK` | ON | UMFPACK factorization in OCFESLV (`CRONOS__WITH_UMFPACK`) |
+| `CRONOS_WITH_UMFPACK` | **OFF** | UMFPACK sparse LU in OCFESLV's setup (`CRONOS__WITH_UMFPACK`) -- **GPL-2.0-or-later**: a binary linking it is subject to the GPL; without it the setup uses a dense inverse |
 | `CRONOS_WITH_EIGEN` | ON | Eigen sparse QR in OCFESLV (`CRONOS__WITH_EIGEN`) |
 | `CRONOS_WITH_SUPERLU` | ON | SuperLU through `arma::spsolve` (`ARMA_USE_SUPERLU`), OCFESLV's default factorization |
-| `CRONOS_WITH_SPQR` | **OFF** | SPQR factorization in OCFESLV (`CRONOS__WITH_SPQR`) -- **GPL-2 licensed**: a binary linking it is subject to the GPL |
+| `CRONOS_WITH_SPQR` | **OFF** | SPQR factorization in OCFESLV (`CRONOS__WITH_SPQR`) -- **GPL-2.0-or-later**: a binary linking it is subject to the GPL |
+| `CRONOS_ARMA_WRAPPER` | OFF | link Armadillo's runtime wrapper library instead of using Armadillo header-only with BLAS/LAPACK (and SuperLU) linked directly; the wrapper also pulls in whatever Armadillo was built with, e.g. ARPACK and MPI |
 | `ENABLE_PYTHON` | ON | the `cronos` module |
 | `CRONOS_STUBS` | ON | generate and install `cronos.pyi` (needs `pybind11-stubgen` and `pymcpp` importable; `PYMCPP_DIR` points at the directory holding `pymcpp` if it is not on the Python path) |
 | `ENABLE_EXAMPLES` | OFF | build every driver in `test/ODESLVS` and `test/OCFESLV`, register each with CTest (labels `ODESLVS`, `OCFESLV`) |

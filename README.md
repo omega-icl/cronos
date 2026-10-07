@@ -45,7 +45,7 @@ CRONOS is configured through its options -- `FFModel::Options` for the model, `O
 options for the solvers -- available in Python as `options` on each object, with their documentation.  A few
 `CRONOS_*` environment variables remain: diagnostics that instrument a whole test sweep without editing any driver,
 a thread cap, and three test switches.  None is needed to run a model; they are listed in
-[docs/ENVIRONMENT.md](docs/ENVIRONMENT.md).
+[doc/ENVIRONMENT.md](doc/ENVIRONMENT.md).
 
 ## Installing from PyPI
 
@@ -69,8 +69,8 @@ cmake --build build --target check        # the generated-file checks and the Py
 cmake --install build --prefix <prefix>
 ```
 
-The API documentation is generated with [Doxygen](https://www.doxygen.nl): `cd docs && doxygen CRONOS.dox`, then
-open `docs/html/index.html`.
+The API documentation is generated with [Doxygen](https://www.doxygen.nl): `cd doc && doxygen CRONOS.dox`, then
+open `doc/html/index.html`.
 
 ## Layout
 
@@ -80,7 +80,7 @@ src/interface/       the Python binders, the generated option headers, the check
 test/ODESLV/         ODESLV test drivers
 test/OCFESLV/        OCFESLV test drivers (the corpus the solver is validated against)
 notebook/            tutorials (Python scripts and Jupyter notebooks)
-docs/                the Doxygen configuration (CRONOS.dox) and main page (CRONOS.txt); ENVIRONMENT.md
+doc/                 the Doxygen configuration (CRONOS.dox) and main page (CRONOS.txt); ENVIRONMENT.md
 ```
 
 ## Contacts

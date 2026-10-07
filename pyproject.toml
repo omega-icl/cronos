@@ -46,7 +46,7 @@ cmake.version = ">=3.18"
 build.verbose = true
 install.components = ["python_modules"]   # the module and its stub only (not the headers)
 wheel.packages = []
-sdist.exclude = [".github", "build", "build-*", "build_*", "dist", ".cache", "docs/html", "test"]
+sdist.exclude = [".github", "build", "build-*", "build_*", "dist", ".cache", "doc/html", "test"]
 
 [tool.scikit-build.cmake.define]
 ENABLE_EXAMPLES = "OFF"

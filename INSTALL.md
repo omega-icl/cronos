@@ -86,6 +86,7 @@ Main options (all listed in `BUILD_CMAKE.md`):
 | `CRONOS_WITH_KLU`, `CRONOS_WITH_EIGEN`, `CRONOS_WITH_SUPERLU` | ON | linear-solver backends |
 | `CRONOS_WITH_UMFPACK` | **OFF** | sparse LU for the setup's trace elimination (else dense) -- **GPL-2.0-or-later**: a binary linking it is subject to the GPL |
 | `CRONOS_WITH_SPQR` | **OFF** | SPQR factorisation, and the W-test's null bases above the dense cap -- **GPL-2.0-or-later**: a binary linking it is subject to the GPL |
+| `CRONOS_ARMA_WRAPPER` | OFF | link Armadillo's runtime wrapper library instead of using Armadillo header-only with BLAS/LAPACK (and SuperLU) linked directly; the wrapper also pulls in whatever Armadillo was built with, e.g. ARPACK and MPI |
 | `MC_INTERVAL_LIBRARY` | BOOST | as MC++ (BOOST, PROFIL, FILIB, NONVERIFIED) |
 | `ENABLE_HSL`, `MC__USE_FADBAD` | OFF | as MC++ |
 | `ENABLE_PYTHON` | ON | the `cronos` module and its stub |

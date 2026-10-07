@@ -317,6 +317,18 @@ check(hasattr(FFModel.SetupStatus, "HYP_CLOSURE_MISSING"),
       "setup status HYP_CLOSURE_MISSING exists (off with an outflow face left open is refused)")
 
 # %% [markdown]
+# ## build_info: which build this is (2026-10-07)
+
+# %%
+import cronos as _cr
+_bi = _cr.build_info()
+check(_bi["version"] == _cr.__version__, "build_info()['version'] == cronos.__version__ (%s)" % _bi["version"])
+_gpl = _bi["backends"]["UMFPACK"] or _bi["backends"]["SPQR"]
+check(_bi["license"] == ("GPL-2.0-or-later" if _gpl else "EPL-2.0"),
+      "build_info()['license'] follows the compiled-in backends (%s; UMFPACK=%s, SPQR=%s)"
+      % (_bi["license"], _bi["backends"]["UMFPACK"], _bi["backends"]["SPQR"]))
+
+# %% [markdown]
 # ## Summary
 
 # %%

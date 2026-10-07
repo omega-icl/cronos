@@ -1,4 +1,4 @@
-# Generated documentation (cd docs && doxygen CRONOS.dox)
+# Generated documentation (cd doc && doxygen CRONOS.dox)
 doc/html/
 
 # CMake build trees (cmake -S . -B build ...)

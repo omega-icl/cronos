@@ -63,11 +63,11 @@ jobs:
             SUNDIALS_ROOT=$HOME/deps SUITESPARSE_ROOT=$HOME/deps SUPERLU_ROOT=$HOME/deps
           CIBW_REPAIR_WHEEL_COMMAND_MACOS: >
             DYLD_LIBRARY_PATH=$HOME/deps/lib delocate-wheel --require-archs {delocate_archs} -w {dest_dir} -v {wheel}
-          # Windows -- as pymcpp's wheels: ClangCL (the C++ ABI pymcpp is built with), vcpkg, prebuilt OpenBLAS,
-          # Armadillo's headers; SuperLU and SUNDIALS (with vcpkg's KLU) from source into C:/deps.
+          # Windows -- as pymcpp's wheels: ClangCL (the C++ ABI pymcpp is built with), vcpkg (Boost, Eigen), prebuilt
+          # OpenBLAS, Armadillo's headers; SuiteSparse, SuperLU and SUNDIALS (with KLU) from source into C:/deps.
           CIBW_BEFORE_ALL_WINDOWS: bash tools/ci/build_deps.sh windows ${{ matrix.variant }} C:/deps
           CIBW_ENVIRONMENT_WINDOWS: >
-            MCPP_ROOT="$GITHUB_WORKSPACE/mcpp" SUNDIALS_ROOT=C:/deps SUPERLU_ROOT=C:/deps
+            MCPP_ROOT="$GITHUB_WORKSPACE/mcpp" SUNDIALS_ROOT=C:/deps SUITESPARSE_ROOT=C:/deps SUPERLU_ROOT=C:/deps
             CMAKE_ARGS="-T ClangCL -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake -DVCPKG_TARGET_TRIPLET=x64-windows -DARMADILLO_INCLUDE_DIR=C:/armadillo/include -DBLAS_LIBRARIES=C:/openblas/libopenblas.lib -DLAPACK_LIBRARIES=C:/openblas/libopenblas.lib"
           CIBW_BEFORE_BUILD_WINDOWS: pip install delvewheel
           CIBW_REPAIR_WHEEL_COMMAND_WINDOWS: >

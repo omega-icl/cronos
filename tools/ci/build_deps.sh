@@ -24,13 +24,11 @@ case "$OS" in
   macos) brew install boost armadillo eigen openblas ;;
   windows)
     # As pymcpp's Windows wheels: vcpkg (x64-windows), prebuilt OpenBLAS, Armadillo's headers; ClangCL builds the module.
-    # SuiteSparse comes from vcpkg -- for the EPL build suitesparse-klu only (its CHOLMOD feature is off by default).
+    # vcpkg for the header-only Boost.Interval and Eigen only.  SuiteSparse is built from source below, as elsewhere:
+    # vcpkg's SuiteSparse requires a BLAS and would build OpenBLAS from source (twice: Debug and Release) beside the
+    # prebuilt one -- SuiteSparse's own build accepts the prebuilt OpenBLAS (BLAS_LIBRARIES, used as given).
     VCPKG=${VCPKG_INSTALLATION_ROOT:-C:/vcpkg}; VCPKG=${VCPKG//\\//}     # forward slashes (the runner sets C:\vcpkg)
-    case "$VARIANT" in
-      epl) VCPKG_SS="suitesparse-klu" ;;
-      gpl) VCPKG_SS="suitesparse-klu suitesparse-umfpack suitesparse-spqr" ;;
-    esac
-    "$VCPKG/vcpkg" install --triplet x64-windows boost-interval eigen3 $VCPKG_SS
+    "$VCPKG/vcpkg" install --triplet x64-windows boost-interval eigen3
     WTAR=/c/Windows/System32/tar.exe                                   # bsdtar: reads .zip and .tar.xz
     curl -sSfL -o "$PREFIX.openblas.zip" "https://github.com/OpenMathLib/OpenBLAS/releases/download/v${OPENBLAS_WIN_VERSION}/OpenBLAS-${OPENBLAS_WIN_VERSION}-x64.zip"
     mkdir -p C:/openblas && "$WTAR" -xf "$PREFIX.openblas.zip" -C C:/openblas
@@ -54,15 +52,17 @@ step(){ local name=$1; shift; echo "== build_deps.sh: $name"
 # CMake 4 (current runners and manylinux images) refuses projects declaring compatibility with CMake < 3.5, as
 # SuperLU 5.2.2 does; this accepts them (older CMake ignores it).
 POLICY=-DCMAKE_POLICY_VERSION_MINIMUM=3.5
-if [ "$OS" != windows ]; then
+# SuiteSparse, from source on every platform.  Windows: the prebuilt OpenBLAS given (SuiteSparse uses BLAS_LIBRARIES as
+# is; SuiteSparse_config only records it -- KLU, AMD, COLAMD, BTF do not link a BLAS), and no OpenMP (KLU does not use it).
+SS_WIN=""
+[ "$OS" = windows ] && SS_WIN="-DBLAS_LIBRARIES=C:/openblas/libopenblas.lib -DLAPACK_LIBRARIES=C:/openblas/libopenblas.lib -DSUITESPARSE_USE_OPENMP=OFF"
 fetch "https://github.com/DrTimothyAldenDavis/SuiteSparse/archive/refs/tags/v${SUITESPARSE_VERSION}.tar.gz"
 step suitesparse-configure cmake -S "SuiteSparse-${SUITESPARSE_VERSION}" -B ss $POLICY -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$PREFIX" \
       -DSUITESPARSE_ENABLE_PROJECTS="$SS_PROJECTS" -DSUITESPARSE_USE_FORTRAN=OFF -DSUITESPARSE_USE_CUDA=OFF \
       -DSUITESPARSE_DEMOS=OFF -DBUILD_TESTING=OFF -DBUILD_STATIC_LIBS=OFF \
-      -DKLU_USE_CHOLMOD=$SS_KLU_CHOLMOD   # OFF: else KLU pulls in CHOLMOD (GPL modules) for its optional ordering
+      -DKLU_USE_CHOLMOD=$SS_KLU_CHOLMOD $SS_WIN   # KLU_USE_CHOLMOD=OFF: else KLU pulls in CHOLMOD (GPL modules)
 step suitesparse-build cmake --build ss --config Release -j"$JOBS"
 step suitesparse-install cmake --install ss --config Release
-fi
 fetch "https://github.com/xiaoyeli/superlu/archive/refs/tags/v${SUPERLU_VERSION}.tar.gz"
 # SuperLU: its Fortran interface is not used; on Windows static (it exports no DLL symbols) and against OpenBLAS.
 SLU_WIN=""
@@ -72,11 +72,19 @@ step superlu-configure cmake -S "superlu-${SUPERLU_VERSION}" -B slu $POLICY -DCM
       -DXSDK_ENABLE_Fortran=OFF $SLU_WIN
 step superlu-build cmake --build slu --config Release -j"$JOBS"
 step superlu-install cmake --install slu --config Release
-KLU_PREFIX=$( [ "$OS" = windows ] && echo "$VCPKG/installed/x64-windows" || echo "$PREFIX" )   # KLU: vcpkg on Windows
+# SUNDIALS gets the KLU libraries by FILE: its FindKLU otherwise guesses names, which missed them on Windows.
+sslib(){ local f; for f in "$PREFIX/lib/$1.lib" "$PREFIX/lib/lib$1.lib" "$PREFIX/lib/lib$1.dylib" "$PREFIX/lib/lib$1.so" \
+                           "$PREFIX/lib64/lib$1.so"; do [ -f "$f" ] && { echo "$f"; return 0; }; done; return 1; }
+KLU_LIBS=""
+for n in klu amd colamd btf suitesparseconfig; do
+  f=$( sslib $n ) || { echo "build_deps.sh: no $n library in $PREFIX/lib -- it holds:"; ls "$PREFIX/lib"; exit 1; }
+  KLU_LIBS="$KLU_LIBS -D$( echo $n | tr '[:lower:]' '[:upper:]' )_LIBRARY=$f"
+done
+echo "== build_deps.sh: KLU for SUNDIALS:$KLU_LIBS"
 fetch "https://github.com/LLNL/sundials/releases/download/v${SUNDIALS_VERSION}/sundials-${SUNDIALS_VERSION}.tar.gz"
 step sundials-configure cmake -S "sundials-${SUNDIALS_VERSION}" -B sun $POLICY -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-      -DENABLE_KLU=ON -DKLU_INCLUDE_DIR="$KLU_PREFIX/include/suitesparse" -DKLU_LIBRARY_DIR="$KLU_PREFIX/lib" \
+      -DENABLE_KLU=ON -DKLU_INCLUDE_DIR="$PREFIX/include/suitesparse" -DKLU_LIBRARY_DIR="$PREFIX/lib" $KLU_LIBS \
       -DBUILD_STATIC_LIBS=OFF -DEXAMPLES_ENABLE_C=OFF -DEXAMPLES_INSTALL=OFF
 step sundials-build cmake --build sun --config Release -j"$JOBS"
 step sundials-install cmake --install sun --config Release
-echo "build_deps.sh ($OS): SuiteSparse $( [ "$OS" = windows ] && echo "from vcpkg (${VCPKG_SS})" || echo "${SUITESPARSE_VERSION} (${SS_PROJECTS})" ), SuperLU ${SUPERLU_VERSION}, SUNDIALS ${SUNDIALS_VERSION} (KLU) -> ${PREFIX}"
+echo "build_deps.sh ($OS): SuiteSparse ${SUITESPARSE_VERSION} (${SS_PROJECTS}), SuperLU ${SUPERLU_VERSION}, SUNDIALS ${SUNDIALS_VERSION} (KLU) -> ${PREFIX}"

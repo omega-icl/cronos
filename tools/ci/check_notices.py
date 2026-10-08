@@ -20,6 +20,11 @@ COVER = {
   "libamd": "SuiteSparse AMD", "libcamd": "SuiteSparse CAMD", "libcolamd": "SuiteSparse COLAMD",
   "libccolamd": "SuiteSparse CCOLAMD", "libbtf": "SuiteSparse BTF", "libklu": "SuiteSparse KLU",
   "libcholmod": "SuiteSparse CHOLMOD", "libumfpack": "SuiteSparse UMFPACK", "libspqr": "SuiteSparse SPQR",
+  # Windows: SuiteSparse and SUNDIALS name their DLLs without the "lib" prefix (klu.dll, sundials_cvodes.dll)
+  "suitesparseconfig": "SuiteSparse SuiteSparse_config", "amd": "SuiteSparse AMD", "camd": "SuiteSparse CAMD",
+  "colamd": "SuiteSparse COLAMD", "ccolamd": "SuiteSparse CCOLAMD", "btf": "SuiteSparse BTF", "klu": "SuiteSparse KLU",
+  "cholmod": "SuiteSparse CHOLMOD", "umfpack": "SuiteSparse UMFPACK", "spqr": "SuiteSparse SPQR",
+  "sundials_": "SUNDIALS", "superlu": "SuperLU",
 }
 LIB = re.compile( r"\.(dll|dylib)$|\.so(\.\d+)*$", re.I )
 

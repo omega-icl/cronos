@@ -4967,7 +4967,7 @@ public:
     // rev110 -- so a solve log carried a revision three steps stale.  Nothing else in
     // the build chain would have caught it: the makefile names the file, the build
     // oracle checks the instrument's format marker, and neither reads this.
-    = "ocfeslv  rev367  2026-10-07";
+    = "ocfeslv  rev368  2026-10-08";
 
   //! @brief The revision of this ocfeslv.hpp (HEADER_ID); FFModel::revision() gives the model layer's, which a
   //! binary may mix with another solver revision.
@@ -12663,61 +12663,111 @@ OCFESLV::_null_basis
 ( arma::sp_mat const& M, double tol_abs, size_t& rank_out, arma::mat& N )
 {
   rank_out = 0; N.reset();
-#if !defined(CRONOS__WITH_SPQR)
-  return false;
-#else
   size_t const nr = M.n_rows, nc = M.n_cols;
   if( !nr || !nc ) return false;
-  M.sync();
-  std::vector<int64_t> cp( nc + 1 ), ri( M.n_nonzero ? M.n_nonzero : 1 );
-  for( size_t j = 0; j <= nc; ++j ) cp[j] = (int64_t)M.col_ptrs[j];
-  for( size_t k = 0; k < M.n_nonzero; ++k ) ri[k] = (int64_t)M.row_indices[k];
-  cholmod_common cc;  cholmod_l_start( &cc );
-  // rev142b: CHOLMOD's own OpenMP regions honour this; guarded on the CHOLMOD major
-  // version because nthreads_max does not exist before CHOLMOD 4 (SuiteSparse 6).
-#if defined(CHOLMOD_MAIN_VERSION) && (CHOLMOD_MAIN_VERSION >= 4)
-  if( int const _cap = t_ThreadCap::active() ) cc.nthreads_max = _cap;
+  // The factorization M P = Q R by SPQR or, without it, by Eigen's sparse QR (2026-10-08, WORKPLAN 4R.1: the EPL build
+  // has no SPQR, so above the dense cap the W-test had no null basis and a needed dropped claim stayed dropped).  Either
+  // way R (CSC) and the column permutation go into the arrays below, and ONE construction builds the basis from them.
+  std::vector<int64_t> Rp, Ri, Ep;  std::vector<double> Rx;  size_t ncolR = 0;  bool sortedR = false;  int64_t rk = -1;
+#if defined(CRONOS__WITH_SPQR)
+  { // ---- SPQR ----
+    M.sync();
+    std::vector<int64_t> cp( nc + 1 ), ri( M.n_nonzero ? M.n_nonzero : 1 );
+    for( size_t j = 0; j <= nc; ++j ) cp[j] = (int64_t)M.col_ptrs[j];
+    for( size_t k = 0; k < M.n_nonzero; ++k ) ri[k] = (int64_t)M.row_indices[k];
+    cholmod_common cc;  cholmod_l_start( &cc );
+    // rev142b: CHOLMOD's own OpenMP regions honour this; guarded on the CHOLMOD major
+    // version because nthreads_max does not exist before CHOLMOD 4 (SuiteSparse 6).
+  #if defined(CHOLMOD_MAIN_VERSION) && (CHOLMOD_MAIN_VERSION >= 4)
+    if( int const _cap = t_ThreadCap::active() ) cc.nthreads_max = _cap;
+  #endif
+    cholmod_sparse Ac;  std::memset( &Ac, 0, sizeof(Ac) );
+    Ac.nrow = nr; Ac.ncol = nc; Ac.nzmax = M.n_nonzero;
+    Ac.p = cp.data(); Ac.i = ri.data(); Ac.x = const_cast<double*>( M.values );
+    Ac.stype = 0; Ac.itype = CHOLMOD_LONG; Ac.xtype = CHOLMOD_REAL; Ac.dtype = CHOLMOD_DOUBLE;
+    Ac.sorted = 1; Ac.packed = 1;
+    cholmod_sparse* Rc = nullptr; int64_t* E = nullptr;
+    // rev142: ORDERING_BEST is the default for the AUDIT factorizations (this call and
+    // numeric_rank's).  It lets SPQR try both its orderings and keep the sparser R.
+    // MEASURED 11-12.5% off the factorization at n ~ 3k with the margin growing in n;
+    // VERDICT-INVARIANT over the corpus -- 1159 instances, det_check 0 deviations and an
+    // empty defR/defL/k' diff, which is also datum (3) for the refinement (see
+    // _refine_rank_from_R).  CRONOS_SPQR_ORDERING restores any SPQR_ORDERING_* value.
+    // The SOLVE path (SuiteSparseQR_min2norm) is deliberately NOT changed here: it
+    // returns a solution, not a rank, so a different pivot order moves the numbers in
+    // the behavioural signature and would need its own sweep.
+    static int const kSpqrOrd = SPQR_ORDERING_BEST;   // CRONOS_SPQR_ORDERING (retired 2026-10-07, WORKPLAN 3.B batch 2b)
+    rk = SuiteSparseQR<double>( kSpqrOrd, tol_abs,
+                                              (int64_t)nr, &Ac, &Rc, &E, &cc );
+    // rev142c: same statistics on the w-decide null-basis factorization.
+    { t_SpqrStat S;
+      S.nrow = nr; S.ncol = nc; S.nnzA = M.n_nonzero; S.rank = ( rk >= 0 ? (size_t)rk : 0 );
+      S.nnzR = cc.SPQR_istat[0]; S.ncolsing = cc.SPQR_istat[5]; S.nrowsing = cc.SPQR_istat[6];
+      S.ordering = (int)cc.SPQR_istat[7]; S.flops = cc.SPQR_flopcount;
+      S.t_analyze = cc.SPQR_analyze_time; S.t_factorize = cc.SPQR_factorize_time;
+      _spqr_stat_report( S, "null" ); }
+    if( rk >= 0 && Rc && Rc->x && Rc->p && Rc->i ){
+      ncolR = (size_t)Rc->ncol;  sortedR = ( Rc->sorted != 0 );
+      int64_t const* p = static_cast<int64_t const*>( Rc->p );
+      Rp.assign( p, p + ncolR + 1 );
+      Ri.assign( static_cast<int64_t const*>( Rc->i ), static_cast<int64_t const*>( Rc->i ) + p[ncolR] );
+      Rx.assign( static_cast<double const*>( Rc->x ), static_cast<double const*>( Rc->x ) + p[ncolR] );
+      if( E ) Ep.assign( E, E + nc );
+    }
+    if( Rc ) cholmod_l_free_sparse( &Rc, &cc );
+    if( E )  cholmod_l_free( nc, sizeof(int64_t), E, &cc );
+    cholmod_l_finish( &cc );
+  }
+#elif defined(CRONOS__WITH_EIGEN)
+  { // ---- Eigen's sparse QR (no SPQR: the EPL build) ----
+    typedef Eigen::SparseMatrix<double, Eigen::ColMajor, int> t_Sp;
+    std::vector<Eigen::Triplet<double>> trip;  trip.reserve( M.n_nonzero );
+    for( auto it = M.begin(); it != M.end(); ++it ) trip.emplace_back( (int)it.row(), (int)it.col(), *it );
+    t_Sp A( (int)nr, (int)nc );  A.setFromTriplets( trip.begin(), trip.end() );  A.makeCompressed();
+    Eigen::SparseQR<t_Sp, Eigen::COLAMDOrdering<int>> qr;
+    qr.setPivotThreshold( tol_abs );     // absolute, as SPQR's tol
+    qr.compute( A );
+    if( qr.info() == Eigen::Success ){
+      rk = (int64_t)qr.rank();
+      t_Sp R = qr.matrixR();  R.makeCompressed();
+      ncolR = (size_t)R.cols();
+      Rp.assign( R.outerIndexPtr(), R.outerIndexPtr() + ncolR + 1 );
+      Ri.assign( R.innerIndexPtr(), R.innerIndexPtr() + R.nonZeros() );
+      Rx.assign( R.valuePtr(), R.valuePtr() + R.nonZeros() );
+      // Eigen does not sort a column's entries by row: sort them here (linear overall), so that the staircase uses its
+      // row-sorted walk -- an unsorted R took the old column scan and printed a diagnostic on every EPL run.
+      { std::vector<std::pair<int64_t,double>> col;
+        for( size_t j = 0; j < ncolR; ++j ){
+          col.clear();
+          for( int64_t k = Rp[j]; k < Rp[j+1]; ++k ) col.emplace_back( Ri[k], Rx[k] );
+          std::sort( col.begin(), col.end(), []( auto const& x, auto const& y ){ return x.first < y.first; } );
+          for( int64_t k = Rp[j], q = 0; k < Rp[j+1]; ++k, ++q ){ Ri[k] = col[q].first; Rx[k] = col[q].second; }
+        }
+        sortedR = true; }
+      // E[k] = the original column of R's k-th column: the permutation applied to 0..nc-1 (convention-proof)
+      Eigen::RowVectorXd v( (Eigen::Index)nc );  for( size_t j = 0; j < nc; ++j ) v( (Eigen::Index)j ) = (double)j;
+      Eigen::RowVectorXd const vp = v * qr.colsPermutation();
+      Ep.resize( nc );  for( size_t j = 0; j < nc; ++j ) Ep[j] = (int64_t)std::llround( vp( (Eigen::Index)j ) );
+    }
+  }
+#else
+  return false;
 #endif
-  cholmod_sparse Ac;  std::memset( &Ac, 0, sizeof(Ac) );
-  Ac.nrow = nr; Ac.ncol = nc; Ac.nzmax = M.n_nonzero;
-  Ac.p = cp.data(); Ac.i = ri.data(); Ac.x = const_cast<double*>( M.values );
-  Ac.stype = 0; Ac.itype = CHOLMOD_LONG; Ac.xtype = CHOLMOD_REAL; Ac.dtype = CHOLMOD_DOUBLE;
-  Ac.sorted = 1; Ac.packed = 1;
-  cholmod_sparse* Rc = nullptr; int64_t* E = nullptr;
-  // rev142: ORDERING_BEST is the default for the AUDIT factorizations (this call and
-  // numeric_rank's).  It lets SPQR try both its orderings and keep the sparser R.
-  // MEASURED 11-12.5% off the factorization at n ~ 3k with the margin growing in n;
-  // VERDICT-INVARIANT over the corpus -- 1159 instances, det_check 0 deviations and an
-  // empty defR/defL/k' diff, which is also datum (3) for the refinement (see
-  // _refine_rank_from_R).  CRONOS_SPQR_ORDERING restores any SPQR_ORDERING_* value.
-  // The SOLVE path (SuiteSparseQR_min2norm) is deliberately NOT changed here: it
-  // returns a solution, not a rank, so a different pivot order moves the numbers in
-  // the behavioural signature and would need its own sweep.
-  static int const kSpqrOrd = SPQR_ORDERING_BEST;   // CRONOS_SPQR_ORDERING (retired 2026-10-07, WORKPLAN 3.B batch 2b)
-  int64_t const rk = SuiteSparseQR<double>( kSpqrOrd, tol_abs,
-                                            (int64_t)nr, &Ac, &Rc, &E, &cc );
-  // rev142c: same statistics on the w-decide null-basis factorization.
-  { t_SpqrStat S;
-    S.nrow = nr; S.ncol = nc; S.nnzA = M.n_nonzero; S.rank = ( rk >= 0 ? (size_t)rk : 0 );
-    S.nnzR = cc.SPQR_istat[0]; S.ncolsing = cc.SPQR_istat[5]; S.nrowsing = cc.SPQR_istat[6];
-    S.ordering = (int)cc.SPQR_istat[7]; S.flops = cc.SPQR_flopcount;
-    S.t_analyze = cc.SPQR_analyze_time; S.t_factorize = cc.SPQR_factorize_time;
-    _spqr_stat_report( S, "null" ); }
-
+  int64_t const* E = Ep.empty()? nullptr: Ep.data();
   bool ok = false;
   do{
-    if( rk < 0 || !Rc || !Rc->x || !Rc->p || !Rc->i ) break;
+    if( rk < 0 || Rp.empty() ) break;
     size_t const r = (size_t)rk;
-    int64_t const* rp = static_cast<int64_t const*>( Rc->p );
-    int64_t const* rI = static_cast<int64_t const*>( Rc->i );
-    double  const* rx = static_cast<double const*>( Rc->x );
+    int64_t const* rp = Rp.data();
+    int64_t const* rI = Ri.data();
+    double  const* rx = Rx.data();
     // staircase: live columns of the squeezed R (rev142: one shared walk, O(1)/column
     // when Rc is row-sorted; identical set by construction -- see the routine).
     std::vector<size_t> live;
-    _staircase_live_columns( rp, rI, rx, (size_t)Rc->ncol, r, Rc->sorted != 0, live );
+    _staircase_live_columns( rp, rI, rx, ncolR, r, sortedR, live );
     if( live.size() != r ) break;
-    std::vector<char> is_live( Rc->ncol, 0 ); for( size_t j : live ) is_live[j] = 1;
-    std::vector<size_t> dead; for( size_t j = 0; j < (size_t)Rc->ncol; ++j ) if( !is_live[j] ) dead.push_back( j );
+    std::vector<char> is_live( ncolR, 0 ); for( size_t j : live ) is_live[j] = 1;
+    std::vector<size_t> dead; for( size_t j = 0; j < ncolR; ++j ) if( !is_live[j] ) dead.push_back( j );
     // R11 (r x r, CSC, upper triangular by staircase) and per-dead-column rhs
     std::vector<std::vector<std::pair<size_t,double>>> colR( r );
     for( size_t jj = 0; jj < r; ++jj ){ size_t const j = live[jj];
@@ -12787,11 +12837,7 @@ OCFESLV::_null_basis
     }
     rank_out = rank_ref; ok = true;
   } while( false );
-  if( Rc ) cholmod_l_free_sparse( &Rc, &cc );
-  if( E )  cholmod_l_free( nc, sizeof(int64_t), E, &cc );
-  cholmod_l_finish( &cc );
   return ok;
-#endif
 }
 
 inline bool
@@ -12860,7 +12906,12 @@ OCFESLV::_wdecide_restore
   if( over_cap || kForceQR ){
     size_t rk2 = 0;
     if( !have0 || !_null_basis( A0.J, RR0.tol_abs, rk2, NB ) ){
-      rep << "  QR-NULL-FAILED (no decision)"; _disp( 3 ) << rep.str() << std::endl; return false;
+      rep << "  QR-NULL-FAILED (no decision)"; _disp( 3 ) << rep.str() << std::endl;
+      // 4R.1: never silent -- a dropped claim may be needed and cannot be verified
+      _disp( 1 ) << "OCFESLV::setup ** WARNING: the W-test of dropped interface claims found no null basis above its dense"
+                 << " cap (" << A0.J.n_rows << "x" << A0.J.n_cols << "): dropped claims stand UNVERIFIED -- a build with"
+                 << " SPQR or Eigen decides them" << std::endl;
+      return false;
     }
     rep << ( kForceQR && !over_cap ? " [qr-null forced]" : " [qr-null]" );
   }

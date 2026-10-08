@@ -691,6 +691,50 @@ if(ENABLE_PYTHON)
     endif()
   endif()
 
+  # Windows (2026-10-08): Python (>= 3.8) loads an extension module's DLLs only from the module's own directory, the
+  # system directories and directories registered explicitly -- not from PATH.  So that the stub generator (which
+  # imports the freshly built module) and `make check` can load it, the dependencies' DLLs are copied next to the
+  # module in the BUILD directory.  They are not installed: in a wheel, delvewheel bundles them.  The directories come
+  # from SUNDIALS_ROOT, SUITESPARSE_ROOT, SUPERLU_ROOT and the BLAS/LAPACK libraries, plus CRONOS_RUNTIME_DLL_DIRS.
+  if(WIN32)
+    set(CRONOS_RUNTIME_DLL_DIRS "" CACHE STRING "Windows: more directories holding DLLs the cronos module needs (;-list)")
+    set(_dll_dirs ${CRONOS_RUNTIME_DLL_DIRS})
+    foreach(_root SUNDIALS_ROOT SUITESPARSE_ROOT SUPERLU_ROOT)
+      set(_r "${${_root}}")
+      if(NOT _r)
+        set(_r "$ENV{${_root}}")
+      endif()
+      if(_r)
+        file(TO_CMAKE_PATH "${_r}" _r)
+        list(APPEND _dll_dirs "${_r}/bin" "${_r}/lib")
+      endif()
+    endforeach()
+    foreach(_lib ${BLAS_LIBRARIES} ${LAPACK_LIBRARIES})
+      if(EXISTS "${_lib}")
+        get_filename_component(_d "${_lib}" DIRECTORY)
+        list(APPEND _dll_dirs "${_d}" "${_d}/bin" "${_d}/../bin")
+      endif()
+    endforeach()
+    set(_cronos_dlls "")
+    foreach(_d ${_dll_dirs})
+      if(IS_DIRECTORY "${_d}")
+        file(GLOB _found "${_d}/*.dll")
+        list(APPEND _cronos_dlls ${_found})
+      endif()
+    endforeach()
+    if(_cronos_dlls)
+      list(REMOVE_DUPLICATES _cronos_dlls)
+      list(LENGTH _cronos_dlls _n)
+      message(STATUS "Windows: ${_n} dependency DLL(s) to copy next to the module in the build directory")
+      add_custom_command(
+        TARGET cronos
+        POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${_cronos_dlls} $<TARGET_FILE_DIR:cronos>
+        COMMENT "Copying dependency DLLs next to the cronos module (Windows)"
+        VERBATIM)
+    endif()
+  endif()
+
   if(_cronos_stubs_ok)
     set(_stub_out ${CMAKE_CURRENT_BINARY_DIR}/stubs)
     add_custom_command(

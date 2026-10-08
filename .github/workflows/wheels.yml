@@ -30,9 +30,6 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-14, windows-latest]
         variant: [epl, gpl]
-    # Windows is new (2026-10-08), EPL and GPL: until their first runs succeed, a Windows failure does not stop the
-    # release of the Linux and macOS wheels.  Remove this line once Windows is green.
-    continue-on-error: ${{ matrix.os == 'windows-latest' }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/checkout@v5

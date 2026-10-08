@@ -516,7 +516,12 @@ endif()
 
 # Eigen (header-only)
 if(CRONOS_WITH_EIGEN)
-  find_package(Eigen3 3.3 CONFIG REQUIRED)
+  # No version in the request: Eigen's package files accept only the SAME major version, so "3.3" rejected Eigen 5
+  # (Homebrew's, on the macOS runners).  The minimum is checked here instead; CRONOS builds with Eigen 3.4 and 5.0.
+  find_package(Eigen3 CONFIG REQUIRED)
+  if(Eigen3_VERSION VERSION_LESS 3.3)
+    message(FATAL_ERROR "Eigen ${Eigen3_VERSION} found; CRONOS needs Eigen 3.3 or later (or CRONOS_WITH_EIGEN=OFF)")
+  endif()
   message(STATUS "Eigen: ${Eigen3_VERSION}")
 endif()
 

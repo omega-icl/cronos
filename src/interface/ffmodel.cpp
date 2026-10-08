@@ -309,6 +309,16 @@ Return a string describing the error.
           "hyperbolic block: boundary condition on an outgoing characteristic")
       .value("HYP_CLOSURE_MISSING", M::SetupStatus::HYP_CLOSURE_MISSING,
              "hyperbolic block: AUTO.HYP_CLOSURE off and outflow rows missing")
+      .value("REDUCED_DOF_INCONSISTENT", M::SetupStatus::REDUCED_DOF_INCONSISTENT,
+             "post-index-reduction DOF audit: IC/BC count inconsistent with the reduced degrees of freedom")
+      .value("EVOLUTION_DOMAIN_UNSUITABLE", M::SetupStatus::EVOLUTION_DOMAIN_UNSUITABLE,
+             "evolution-domain validation: unsuitable evolution domain, or initial condition not settable")
+      .value("DETERMINACY_UNDETERMINED", M::SetupStatus::DETERMINACY_UNDETERMINED,
+             "determinacy audit: the Jacobian has a null space with state content")
+      .value("MODEL_COPY_FAILED", M::SetupStatus::MODEL_COPY_FAILED,
+             "could not copy the user model into the working DAG")
+      .value("CAPTURE_NESTED_REFUSED", M::SetupStatus::CAPTURE_NESTED_REFUSED,
+             "nested evolution-direction reduction refused (captured value feeds an outer in-solve operand)")
       .value("INTERFACE_PLAN_INVALID", M::SetupStatus::INTERFACE_PLAN_INVALID,
              "the interface plan is invalid")
       .value("AUDIT_NONSQUARE", M::SetupStatus::AUDIT_NONSQUARE,

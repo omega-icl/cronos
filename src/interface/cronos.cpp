@@ -55,6 +55,21 @@ from ``pymcpp``, which this module imports.
 )doc";
   py::module_::import("pymcpp");  // registers FFBase/FFGraph/FFVar/FFOp: cronos
                                   // must share, not re-register them
+#if defined(CRONOS_MCPP_VERSION)
+  // cronos shares C++ objects with pymcpp (FFVar, FFGraph, the operations), compiled from the MC++ headers above: a
+  // pymcpp of another major.minor may give them another layout.  Patch releases keep it (2026-10-08).
+  {
+    py::object pm = py::module_::import( "pymcpp" );
+    std::string const have = py::hasattr( pm, "__version__" )? py::str( pm.attr( "__version__" ) ).cast<std::string>(): "";
+    std::string const want = CRONOS_MCPP_VERSION;
+    auto major_minor = []( std::string const& v ){
+      auto const p = v.find( '.' );  if( p == std::string::npos ) return v;
+      auto const q = v.find( '.', p+1 );  return v.substr( 0, q ); };
+    if( have.empty() || major_minor( have ) != major_minor( want ) )
+      throw py::import_error( "cronos was compiled against MC++ " + want + ", but pymcpp " + ( have.empty()? "(version unknown)": have )
+        + " is installed: install pymcpp~=" + want + " (same major.minor), or rebuild cronos against your MC++" );
+  }
+#endif
   mc_ffdom(m);
   mc_ffmodel(m);
   mc_odeslv(m);    // after mc_ffmodel: ODESLV derives from FFModel
@@ -63,6 +78,7 @@ from ``pymcpp``, which this module imports.
   mc_ffocfe(m);    // after mc_ocfeslv: FFOCFESLV / FFOCFERES take an OCFESLV
   
   m.attr("__version__") = kVersion;
+
 
   // build_info (2026-10-07): which build this binary is.  The licence follows from what is COMPILED IN, read from the
   // same macros the headers use, so it cannot disagree with the binary: UMFPACK and SPQR are GPL-2.0-or-later.
@@ -85,6 +101,9 @@ from ``pymcpp``, which this module imports.
     py::object pv = py::none();                   // not a ?: -- that would convert the version string to None
     if( py::hasattr( pm, "__version__" ) ) pv = pm.attr( "__version__" );
     d["pymcpp"] = pv;
+#if defined(CRONOS_MCPP_VERSION)
+    d["mcpp_compiled"] = CRONOS_MCPP_VERSION;   // the MC++ headers this module was compiled against
+#endif
     return d;
   }, R"doc(
 Describe this build of CRONOS: ``version``, ``license`` (``"EPL-2.0"``, or ``"GPL-2.0-or-later"`` when the GPL

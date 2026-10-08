@@ -9,7 +9,7 @@
 #include <iomanip>
 #include <cassert>
 #include <thread>
-#include <sys/time.h>
+#include <chrono>     // elapsed time of an integration (portable; was gettimeofday)
 
 #include <cvodes/cvodes.h>              /* prototypes for CVODE fcts., consts.  */
 #include <nvector/nvector_serial.h>     /* access to serial N_Vector            */
@@ -415,9 +415,7 @@ BASE_CVODES::_init_stats
 {
   // Initialize statistics
   stats.reset();
-  timeval time;
-  gettimeofday(&time, 0) ;
-  stats.cputime = - time.tv_sec - time.tv_usec*1e-6;
+  stats.cputime = - std::chrono::duration<double>( std::chrono::steady_clock::now().time_since_epoch() ).count();
 }
 
 inline
@@ -426,9 +424,7 @@ BASE_CVODES::_final_stats
 ( Stats& stats )
 {
   // Get final CPU time
-  timeval time;
-  gettimeofday(&time, 0);
-  stats.cputime += time.tv_sec + time.tv_usec*1e-6;
+  stats.cputime += std::chrono::duration<double>( std::chrono::steady_clock::now().time_since_epoch() ).count();
 }
 
 inline

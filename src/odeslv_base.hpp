@@ -20,7 +20,6 @@
 #include <algorithm>
 #include <vector>
 #include <list>
-#include <sys/time.h>
 
 #include "ffmodel.hpp"
 
@@ -1512,7 +1511,7 @@ ODESLV_BASE::_extract_from_model
     std::vector<size_t> const rec = records_in( fct.var );
     if( rec.empty() ){ _mFCT[_ns][ _nf++ ] = subst1( _in_model_dag( fct.var ) ); continue; }
     // a combination of records: split g = sum_j a_j c_j + b, and require every a_j (and b) free of the records
-    FFGraph* const dag = dynamic_cast<FFGraph*>( fct.var.dag() );
+    FFGraph* const dag = mc::type_cast<FFGraph>( fct.var.dag() );
     if( !dag ){ _extractError = "an output's DAG is not an FFGraph (" + fct.var.name() + ")"; return false; }
     std::vector<FFVar> cin;  for( size_t k : rec ) cin.push_back( vDef[k].input );
     std::vector<FFVar> A, B;

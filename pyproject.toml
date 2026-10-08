@@ -25,7 +25,7 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Mathematics",
 ]
 # pymcpp: the SAME release the wheels are built against (shared types cross between the modules)
-dependencies = ["pymcpp==5.0.3", "numpy>=1.23"]
+dependencies = ["pymcpp~=5.0.4", "numpy>=1.23"]   # >=5.0.4,<5.1: patch releases keep the layout of shared objects
 
 [project.urls]
 Homepage = "https://github.com/omega-icl/cronos"
@@ -55,11 +55,11 @@ if.state = "wheel"
 build.requires = [
   "pybind11==3.0.4",            # the SAME release as the pymcpp wheels: objects cross between the modules (not 3.1.0)
   "pybind11-stubgen>=2.5",
-  "pymcpp==5.0.3",              # the next MC++ release (5.0.2 lacks FFDom and the FF* bindings)
+  "pymcpp==5.0.4",              # 5.0.4: type comparisons that hold across modules (macOS); 5.0.2 lacked FFDom
   "numpy>=1.23",
 ]
 
 [[tool.scikit-build.overrides]]
 if.state = "editable"
-build.requires = ["pybind11==3.0.4", "pybind11-stubgen>=2.5", "pymcpp==5.0.3", "numpy>=1.23"]
+build.requires = ["pybind11==3.0.4", "pybind11-stubgen>=2.5", "pymcpp==5.0.4", "numpy>=1.23"]
 

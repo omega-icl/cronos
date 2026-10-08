@@ -146,7 +146,7 @@ The tutorials (`ODESLV_tutorial`, `OCFESLV_tutorial`) are the best starting poin
 
 ## Installing from PyPI
 
-`pip install cronos-mcpp` installs the **EPL build**: wheels for Linux (x86_64) and macOS (arm64), CPython 3.10 and
+`pip install cronos-mcpp` installs the **EPL build**: wheels for Linux (x86_64), macOS (arm64) and Windows (x86_64), CPython 3.10 and
 later; the module imports as `cronos`, and its dependencies (`pymcpp`, NumPy) come from PyPI.  It links no GPL
 component: OCFESLV eliminates the trace multipliers at setup with a dense inverse (fine up to a few thousand; cubic
 beyond), and the SPQR-based options (`SOLVE_SPQR`, the W-test's null basis above its dense cap) are not available.

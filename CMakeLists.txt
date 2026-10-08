@@ -74,7 +74,18 @@ if(NOT MCPP_ROOT OR NOT EXISTS "${MCPP_ROOT}/src/mc/mcfunc.hpp")
       "MC++ not found: set MCPP_ROOT (cache or environment variable) to the MC++ source tree, the directory "
       "holding src/mc/mcfunc.hpp (MCPP_ROOT='${MCPP_ROOT}')")
 endif()
+file(TO_CMAKE_PATH "${MCPP_ROOT}" MCPP_ROOT)   # forward slashes (a Windows path from the environment has backslashes)
 set(MCPP_INCLUDE_DIRS "${MCPP_ROOT}/src/mc")
+# The MC++ version the module is compiled against (2026-10-08): read from MC++'s pyproject.toml -- the version of the
+# matching pymcpp.  The module refuses to import next to a pymcpp of another major.minor, whose shared objects (FFVar,
+# FFGraph, the operations) may have another layout.  Override with -DCRONOS_MCPP_VERSION=x.y.z; empty: no check.
+set(CRONOS_MCPP_VERSION "" CACHE STRING "MC++ version the cronos module is compiled against (default: from MCPP_ROOT)")
+set(_cronos_mcpp_version "${CRONOS_MCPP_VERSION}")
+if(NOT _cronos_mcpp_version AND EXISTS "${MCPP_ROOT}/pyproject.toml")
+  file(STRINGS "${MCPP_ROOT}/pyproject.toml" _v REGEX "^version *= *\"[0-9]+\\.[0-9]+")
+  string(REGEX MATCH "[0-9]+\\.[0-9]+(\\.[0-9]+)?" _cronos_mcpp_version "${_v}")
+endif()
+message(STATUS "MC++ version compiled against: ${_cronos_mcpp_version}")
 if(MC__USE_FADBAD)
   if(NOT EXISTS "${MCPP_ROOT}/src/3rdparty/fadbad++")
     message(FATAL_ERROR "MC__USE_FADBAD=ON but ${MCPP_ROOT}/src/3rdparty/fadbad++ does not exist")
@@ -580,7 +591,8 @@ endif()
 # Match the classical Make warning flags and add backend-specific compile options such as -frounding-math only
 # when required, e.g. with FILIB.
 if(MSVC)
-  target_compile_options(cronos_headers INTERFACE ${INTERVAL_COMPILE_OPTIONS})
+  # /bigobj: the template-heavy translation units exceed the default COFF section limit (MSVC and ClangCL accept it)
+  target_compile_options(cronos_headers INTERFACE ${INTERVAL_COMPILE_OPTIONS} /bigobj)
 else()
   target_compile_options(
     cronos_headers
@@ -629,6 +641,9 @@ if(ENABLE_PYTHON)
       src/interface/cronos.cpp)
 
   pybind11_add_module(cronos ${CRONOS_PY_SOURCES})
+  if(_cronos_mcpp_version)
+    target_compile_definitions(cronos PRIVATE CRONOS_MCPP_VERSION="${_cronos_mcpp_version}")
+  endif()
 
   if(CRONOS_VENDORED_PYBIND11)
     target_include_directories(

@@ -19,7 +19,7 @@ on:
 env:
   # The MC++ sources the module is compiled against.  They must be those of the pymcpp release pinned in
   # pyproject.toml (objects cross between the two modules): set the release tag once pymcpp 5.0.3 is published.
-  MCPP_REF: version-5.0
+  MCPP_REF: v5.0.4
 
 jobs:
   build_wheels:
@@ -28,8 +28,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-14]     # Windows to follow (SUNDIALS with KLU and SuiteSparse through vcpkg)
+        os: [ubuntu-latest, macos-14, windows-latest]
         variant: [epl, gpl]
+        exclude:
+          # The GPL build on Windows needs vcpkg's SPQR, hence its LAPACK (built with a Fortran compiler): to follow.
+          - os: windows-latest
+            variant: gpl
+    # Windows is new (2026-10-08): until its first runs succeed, a Windows failure does not stop the release of the
+    # Linux and macOS wheels.  Remove this line once Windows is green.
+    continue-on-error: ${{ matrix.os == 'windows-latest' }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/checkout@v5
@@ -56,6 +63,15 @@ jobs:
             SUNDIALS_ROOT=$HOME/deps SUITESPARSE_ROOT=$HOME/deps SUPERLU_ROOT=$HOME/deps
           CIBW_REPAIR_WHEEL_COMMAND_MACOS: >
             DYLD_LIBRARY_PATH=$HOME/deps/lib delocate-wheel --require-archs {delocate_archs} -w {dest_dir} -v {wheel}
+          # Windows -- as pymcpp's wheels: ClangCL (the C++ ABI pymcpp is built with), vcpkg, prebuilt OpenBLAS,
+          # Armadillo's headers; SuperLU and SUNDIALS (with vcpkg's KLU) from source into C:/deps.
+          CIBW_BEFORE_ALL_WINDOWS: bash tools/ci/build_deps.sh windows ${{ matrix.variant }} C:/deps
+          CIBW_ENVIRONMENT_WINDOWS: >
+            MCPP_ROOT="$GITHUB_WORKSPACE/mcpp" SUNDIALS_ROOT=C:/deps SUPERLU_ROOT=C:/deps
+            CMAKE_ARGS="-T ClangCL -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake -DVCPKG_TARGET_TRIPLET=x64-windows -DARMADILLO_INCLUDE_DIR=C:/armadillo/include -DBLAS_LIBRARIES=C:/openblas/libopenblas.lib -DLAPACK_LIBRARIES=C:/openblas/libopenblas.lib"
+          CIBW_BEFORE_BUILD_WINDOWS: pip install delvewheel
+          CIBW_REPAIR_WHEEL_COMMAND_WINDOWS: >
+            delvewheel repair --add-path "C:/openblas/bin;C:/deps/bin;C:/vcpkg/installed/x64-windows/bin" -w {dest_dir} {wheel}
           # The check scripts, against the INSTALLED wheel (they import cronos and pymcpp from site-packages).
           CIBW_TEST_COMMAND: >
             python {project}/src/interface/check_ffmodel.py &&

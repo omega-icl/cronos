@@ -11,7 +11,9 @@
 // discretisation state -- no mesh, no basis, no FFDom member, no collocation call.
 #include <mutex>
 #include "ocbase.hpp"
-#include <dlfcn.h>
+#if defined(__unix__) || defined(__APPLE__)
+# include <dlfcn.h>     // dlsym: the run-time thread setters (_thread_hooks); none on Windows (the cap then reports it)
+#endif
 #include <typeinfo>   // rev205: t_ThreadCap resolves the OpenMP/BLAS thread setters at run time
 #include <cassert>
 #include <sstream>
@@ -1529,11 +1531,11 @@ public:
         for( auto const* op : sg.l_op ){
           if( !op ) continue;
           bool evo = false;  char const* kind = nullptr;
-          if( auto const* pe = dynamic_cast<FFEval const*>( op ) ){
+          if( auto const* pe = mc::type_cast<FFEval const>( op ) ){
             for( auto const& [dv, z0] : pe->Coord() ){ (void)z0; if( dv.id() == t.id() ) evo = true; }
             kind = "an evaluation at a point of";
           }
-          else if( auto const* pi = dynamic_cast<FFIntegral const*>( op ) ){
+          else if( auto const* pi = mc::type_cast<FFIntegral const>( op ) ){
             for( auto const& [dv, ord] : pi->Indep().expr ){ (void)ord; if( dv.id() == t.id() ) evo = true; }
             kind = "an integral over";
           }
@@ -1581,9 +1583,9 @@ public:
                                                 " without a time point every state is evaluated, at tau^- (left) or tau^+ (right)"; return false; }
               return true;
             }
-            if( dynamic_cast<FFPartial const*>( op ) || dynamic_cast<FFIntegral const*>( op ) ){
+            if( mc::type_cast<FFPartial const>( op ) || mc::type_cast<FFIntegral const>( op ) ){
               why = "a transition expression must be POINTWISE -- no derivative or integral operator";  return false; }
-            if( auto const* e = dynamic_cast<FFEval const*>( op ) ){
+            if( auto const* e = mc::type_cast<FFEval const>( op ) ){
               auto const& C = e->Coord();
               if( C.size() != 1 || C.begin()->first.id() != evo.id() ){ why = "an evaluation must consume the evolution direction only"; return false; }
               double const c = C.begin()->second;
@@ -1597,7 +1599,7 @@ public:
                 if( !vi || !vi->dag() ) continue;
                 FFSubgraph sg = vi->dag()->subgraph( 1, vi );
                 for( auto const* o2 : sg.l_op )
-                  if( o2 && ( dynamic_cast<FFPartial const*>( o2 ) || dynamic_cast<FFIntegral const*>( o2 ) || dynamic_cast<FFEval const*>( o2 ) ) ){
+                  if( o2 && ( mc::type_cast<FFPartial const>( o2 ) || mc::type_cast<FFIntegral const>( o2 ) || mc::type_cast<FFEval const>( o2 ) ) ){
                     why = "inside an evaluation a transition expression must be POINTWISE -- no derivative, integral or nested evaluation";  return false; }
               }
               return true;
@@ -1625,7 +1627,7 @@ public:
             FFSubgraph sg = ex.dag()->subgraph( 1, &ex );
             for( auto const* op : sg.l_op ){
               if( !op ) continue;
-              if( !tr.evaluated && ( dynamic_cast<FFPartial const*>( op ) || dynamic_cast<FFIntegral const*>( op ) || dynamic_cast<FFEval const*>( op ) ) )
+              if( !tr.evaluated && ( mc::type_cast<FFPartial const>( op ) || mc::type_cast<FFIntegral const>( op ) || mc::type_cast<FFEval const>( op ) ) )
                 return fail( "a transition expression must be POINTWISE -- no derivative, integral or evaluation operator" );
               if( op->type != FFOp::VAR || !op->varout[0] ) continue;
               FFVar const& v = *op->varout[0];
@@ -1650,7 +1652,7 @@ public:
           if( !e.var.dag() ) continue;
           FFSubgraph sg = e.var.dag()->subgraph( 1, &e.var );
           for( auto const* op : sg.l_op ){
-            auto const* pp = op? dynamic_cast<FFPartial const*>( op ): nullptr;
+            auto const* pp = op? mc::type_cast<FFPartial const>( op ): nullptr;
             if( !pp ) continue;
             bool along = false;  for( auto const& [dv, ord] : pp->Indep().expr ){ (void)ord; if( dv.id() == _usr._evolution_dom_varUsr.id() ) along = true; }
             if( !along ) continue;
@@ -1873,11 +1875,11 @@ public:
               // a derivative, integral or evaluation ACROSS the jump (along spatial directions only) carries over to the
               // post-jump profile -- the substitution x -> w rebuilds d x/dz as d w/dz, OpE(x,z,z0) as OpE(w,z,z0) -- but
               // one ALONG the evolution direction does not (the x-dot(tau+) family)
-              if( auto const* pp = dynamic_cast<FFPartial const*>( op ) )
+              if( auto const* pp = mc::type_cast<FFPartial const>( op ) )
                 for( auto const& [dv, ord] : pp->Indep().expr ){ (void)ord; if( dv.id() == t.id() ) pointwise = false; }
-              if( auto const* pi = dynamic_cast<FFIntegral const*>( op ) )
+              if( auto const* pi = mc::type_cast<FFIntegral const>( op ) )
                 for( auto const& [dv, ord] : pi->Indep().expr ){ (void)ord; if( dv.id() == t.id() ) pointwise = false; }
-              if( auto const* pe = dynamic_cast<FFEval const*>( op ) )
+              if( auto const* pe = mc::type_cast<FFEval const>( op ) )
                 for( auto const& [dv, z0] : pe->Coord() ){ (void)z0; if( dv.id() == t.id() ) pointwise = false; }
               if( op->type == FFOp::VAR && op->varout[0] && w_of.count( op->varout[0]->id().second ) ) reads_jump = true;
             }
@@ -4479,7 +4481,7 @@ const
           && _mVar.find( *op->varout[0] ) != _mVar.end() )
         all_block_states.insert( *op->varout[0] );
       if( !op->sameid( typeid(FFPartial) ) ) continue;
-      auto const* pop = dynamic_cast<FFPartial const*>( op );
+      auto const* pop = mc::type_cast<FFPartial const>( op );
       for( size_t jj = 0; jj < op->varin.size(); ++jj ){
         FFVar const* operand = op->varin[jj];
         if( _mVar.find( *operand ) == _mVar.end() ) continue;
@@ -4516,7 +4518,7 @@ const
           auto sgi = _dag->subgraph( 1, &inl );
           for( auto const& op : sgi.l_op ){
             if( !op->sameid( typeid(FFPartial) ) ) continue;
-            auto const* pop = dynamic_cast<FFPartial const*>( op );
+            auto const* pop = mc::type_cast<FFPartial const>( op );
             for( size_t jj = 0; jj < op->varin.size(); ++jj ){
               FFVar const* operand = op->varin[jj];
               if( _mVar.find( *operand ) == _mVar.end() ) continue;
@@ -4651,7 +4653,7 @@ const
         auto sg = _dag->subgraph( 1, it_inl2 != inlined_eqn.end() ? &it_inl2->second : &eqnvar );
         for( auto const& op : sg.l_op ){
           if( !op->sameid( typeid(FFPartial) ) ) continue;
-          auto const* pop = dynamic_cast<FFPartial const*>( op );
+          auto const* pop = mc::type_cast<FFPartial const>( op );
           for( size_t jj = 0; jj < op->varin.size(); ++jj ){
             FFVar const* operand = op->varin[jj];
             if( _mVar.find( *operand ) == _mVar.end() ) continue;
@@ -4726,7 +4728,7 @@ const
     auto sg = _dag->subgraph( 1, &eqnvar );
     for( auto const& op : sg.l_op ){
       if( !op->sameid( typeid(FFPartial) ) ) continue;
-      auto const* pop = dynamic_cast<FFPartial const*>( op );
+      auto const* pop = mc::type_cast<FFPartial const>( op );
       for( size_t jj = 0; jj < op->varin.size(); ++jj ){
         FFVar const* operand = op->varin[jj];
         FFVar const* dag_out = op->varout[jj];
@@ -5171,7 +5173,7 @@ FFModel::_time_derivative_state
 const
 {
   if( !op || !op->sameid( typeid( FFPartial ) ) || !_evolution_dom_set || !_evolution_dom_var.dag() ) return FFVar();
-  auto const* pop = dynamic_cast<FFPartial const*>( op );
+  auto const* pop = mc::type_cast<FFPartial const>( op );
   if( !pop ) return FFVar();
   auto const evo_id2 = _evolution_dom_var.id().second;   // match id().second's type (signed) exactly
   for( size_t jj = 0; jj < op->varin.size(); ++jj ){
@@ -5235,7 +5237,7 @@ const
       // operand-subgraph walk is needed.  Time-derivative detection uses the shared
       // _time_derivative_state rule (same definition as marching auto-detection).
       if( !op->sameid( typeid(FFPartial) ) ) continue;
-      auto const* pop = dynamic_cast<FFPartial const*>( op );
+      auto const* pop = mc::type_cast<FFPartial const>( op );
       { bool const dir_is_evol = ( dir && dir->dag() && _evolution_dom_set && _evolution_dom_var.dag()
                                    && dir->id().second == _evolution_dom_var.id().second );
         FFVar st_dt;
@@ -5427,7 +5429,7 @@ const
       auto sg = _dag->subgraph( 1, &eqn.var );
       for( auto const& op : sg.l_op ){
         if( !op->sameid( typeid(FFPartial) ) ) continue;
-        auto const* pop = dynamic_cast<FFPartial const*>( op );
+        auto const* pop = mc::type_cast<FFPartial const>( op );
         for( auto const* operand : op->varin ){
           if( !operand || _mVar.find( *operand ) == _mVar.end() ) continue;
           for( auto const& [iv, ord] : pop->Indep().expr )
@@ -5697,7 +5699,7 @@ const
     }
     else if( dim == 2 ){
       for( unsigned s = 0; s < n_sample; ++s ){
-        double theta = s * M_PI / static_cast<double>( n_sample );
+        double theta = s * 3.14159265358979323846 / static_cast<double>( n_sample );   // pi (M_PI is not standard C++)
         dirs.push_back( { std::cos(theta), std::sin(theta) } );
       }
     }
@@ -6347,7 +6349,7 @@ FFModel::_eqn_differentiates_in() const
         bool found = false;
         for( auto const& op : sg.l_op ){
           if( !op || !op->sameid( typeid(FFPartial) ) ) continue;
-          auto const* pop = dynamic_cast<FFPartial const*>( op );
+          auto const* pop = mc::type_cast<FFPartial const>( op );
           if( !pop ) continue;
           for( auto const& [dv,ord] : pop->Indep().expr )
             if( ord && dv.id() == kd.first.id() ){ found = true; break; }
@@ -6704,7 +6706,7 @@ FFModel::_classify_pde
               bool carries = false;
               for( auto const& op : sg.l_op ){
                 if( !op->sameid( typeid(FFPartial) ) ) continue;
-                auto const* pop = dynamic_cast<FFPartial const*>( op );
+                auto const* pop = mc::type_cast<FFPartial const>( op );
                 for( size_t jj = 0; jj < op->varin.size() && !carries; ++jj ){
                   FFVar const* operand = op->varin[jj];
                   if( !operand || operand->id() != st.id() ) continue;
@@ -6967,7 +6969,7 @@ FFModel::_reduce_order
     std::vector<FFVar> dnode;
     for( auto const* op : sg.l_op ){
       if( !op || !op->sameid( typeid(FFPartial) ) ) continue;
-      auto const* pop2 = dynamic_cast<FFPartial const*>( op );
+      auto const* pop2 = mc::type_cast<FFPartial const>( op );
       if( !pop2 || pop2->Indep().tord != 1 ) continue;                 // high order: peel path
       if( op->varin.empty() || op->varout.empty() ) continue;
       if( !op->varin[0] || !op->varout[0] ) continue;
@@ -7063,7 +7065,7 @@ FFModel::_reduce_order
         auto sg = _dag->subgraph( 1, var );
         for( auto const& sop : sg.l_op ){
           if( !sop->sameid( typeid(FFPartial) ) ) continue;
-          auto const* spop = dynamic_cast<FFPartial const*>( sop );
+          auto const* spop = mc::type_cast<FFPartial const>( sop );
           for( size_t j = 0; j < sop->varout.size(); ++j )
             if( sop->varout[j]->id() == var->id() ){
               mon = spop->Indep();
@@ -7207,7 +7209,7 @@ FFModel::_reduce_order
         auto op_sg = _dag->subgraph( 1, operand );
         for( auto const& sop : op_sg.l_op ){
           if( !sop || !sop->sameid( typeid(FFPartial) ) ) continue;
-          auto const* spop = dynamic_cast<FFPartial const*>( sop );
+          auto const* spop = mc::type_cast<FFPartial const>( sop );
           if( !spop ) continue;
           for( auto const& [dv,ord] : spop->Indep().expr )
             if( ord ) diff_dom.insert( dv );
@@ -7240,7 +7242,7 @@ FFModel::_reduce_order
         auto osg = _dag->subgraph( 1, operand );
         for( auto const* sop : osg.l_op ){
           if( !sop || !sop->sameid( typeid(FFPartial) ) ) continue;
-          auto const* spop = dynamic_cast<FFPartial const*>( sop );
+          auto const* spop = mc::type_cast<FFPartial const>( sop );
           if( !spop || spop->Indep().tord != 1 ) continue;            // higher-order: peeled from inside out
           if( sop->varin.empty() || sop->varout.empty() ) continue;
           FFVar const* pin  = sop->varin[0];
@@ -7317,11 +7319,11 @@ FFModel::_reduce_order
           bool const is_eval = op->sameid( typeid(FFEval) );
           std::set<FFVar,lt_FFVar> consumed;
           if( is_eval ){
-            auto const* eop = dynamic_cast<FFEval const*>( op );
+            auto const* eop = mc::type_cast<FFEval const>( op );
             for( auto const& [dv,z0] : eop->Coord() ){ (void)z0; consumed.insert( dv ); }
           }
           else{
-            auto const* iop = dynamic_cast<FFIntegral const*>( op );
+            auto const* iop = mc::type_cast<FFIntegral const>( op );
             for( auto const& [dv,ord] : iop->Indep().expr ){ (void)ord; consumed.insert( dv ); }
           }
 
@@ -7353,11 +7355,11 @@ FFModel::_reduce_order
               if( materialize_operand_partials( operand, wEqn[ieqn].opt->block_id, true, ftarg, frepl ) ){
                 red_operand = _dag->substitute( std::vector<FFVar>{ *operand }, ftarg, frepl )[0];
                 if( is_eval ){
-                  auto const* eop = dynamic_cast<FFEval const*>( op );
+                  auto const* eop = mc::type_cast<FFEval const>( op );
                   red_out = OpEvalLoc( red_operand, eop->Indep(), eop->Coord(), eop->Side() );   // keep the SIDE
                 }
                 else{
-                  auto const* iop = dynamic_cast<FFIntegral const*>( op );
+                  auto const* iop = mc::type_cast<FFIntegral const>( op );
                   red_out = OpILoc( red_operand, iop->Indep() );
                 }
               }
@@ -7404,10 +7406,10 @@ FFModel::_reduce_order
               C.source     = red_operand;                                  // the expression itself: see t_DeferredValue
               C.source_dom.insert( aux_dom_vec.begin(), aux_dom_vec.end() );
               if( is_eval )
-                for( auto const& [dv,z0] : dynamic_cast<FFEval const*>( op )->Coord() )
+                for( auto const& [dv,z0] : mc::type_cast<FFEval const>( op )->Coord() )
                   if( dv.id().second == _evolution_dom_var.id().second ){
                     C.tau  = z0;
-                    C.side = dynamic_cast<FFEval const*>( op )->side( dv );
+                    C.side = mc::type_cast<FFEval const>( op )->side( dv );
                   }
               _deferredValue.push_back( C );
               subst_map[ dag_out->id().second ] = { *dag_out, cap };
@@ -7441,7 +7443,7 @@ FFModel::_reduce_order
         }
 
         if( !op->sameid( typeid(FFPartial) ) ) continue;
-        auto const* pop = dynamic_cast<FFPartial const*>( op );
+        auto const* pop = mc::type_cast<FFPartial const>( op );
         t_SMon const full_indep = pop->Indep();
 
         for( size_t j = 0; j < op->varin.size(); ++j ){
@@ -7691,7 +7693,7 @@ FFModel::_reduce_order
           }
 
           if( op->sameid( typeid(FFIntegral) ) ){
-            auto const* iop = dynamic_cast<FFIntegral const*>( op );
+            auto const* iop = mc::type_cast<FFIntegral const>( op );
             std::set<FFVar,lt_FFVar> consumed;
             for( auto const& [dv,ord] : iop->Indep().expr ){ (void)ord; consumed.insert( dv ); }
             bool const evo = _is_deferred_reduction( consumed );
@@ -7749,7 +7751,7 @@ FFModel::_reduce_order
           // is the output analogue of the equation OpEval extraction; fctrec.point
           // / fctrec.grid (output-node PRESENTATION) are untouched.
           if( op->sameid( typeid(FFEval) ) ){
-            auto const* eop = dynamic_cast<FFEval const*>( op );
+            auto const* eop = mc::type_cast<FFEval const>( op );
             std::set<FFVar,lt_FFVar> consumed;
             for( auto const& [dv,z0] : eop->Coord() ){ (void)z0; consumed.insert( dv ); }
 
@@ -7871,7 +7873,7 @@ FFModel::_reduce_order
           }
 
           if( !op->sameid( typeid(FFPartial) ) ) continue;
-          auto const* pop = dynamic_cast<FFPartial const*>( op );
+          auto const* pop = mc::type_cast<FFPartial const>( op );
           t_SMon const full_indep = pop->Indep();
 
           for( size_t j = 0; j < op->varin.size(); ++j ){
@@ -8175,7 +8177,7 @@ const
     FFSubgraph sg = _dag->subgraph( 1, &eqnvar );
     for( auto const& sop : sg.l_op ){
       if( !sop || !sop->sameid( typeid(FFPartial) ) ) continue;
-      auto const* pop = dynamic_cast<FFPartial const*>( sop );
+      auto const* pop = mc::type_cast<FFPartial const>( sop );
       if( !pop ) continue;
       t_SMon const idx = pop->Indep();
       for( size_t j = 0; j < sop->varin.size(); ++j ){
@@ -8409,7 +8411,7 @@ FFModel::_auto_diff_eliminate()
           auto sg = _dag->subgraph( 1, &G );
           for( auto const& op : sg.l_op ){
             if( !op->sameid( typeid(FFPartial) ) ) continue;
-            auto const* pop = dynamic_cast<FFPartial const*>( op );
+            auto const* pop = mc::type_cast<FFPartial const>( op );
             for( size_t jj = 0; jj < op->varin.size() && !p_out; ++jj ){
               FFVar const* operand = op->varin[jj];
               if( !operand || operand->id() != st.id() ) continue;
@@ -8542,7 +8544,7 @@ FFModel::_build_reduction_plan()
       auto sg = _dag->subgraph( 1, &var );
       for( auto const& op : sg.l_op ){
         if( !op->sameid( typeid(FFPartial) ) ) continue;
-        auto const* pop = dynamic_cast<FFPartial const*>( op );
+        auto const* pop = mc::type_cast<FFPartial const>( op );
         for( auto const* operand : op->varin ){
           if( !operand || _mVar.find( *operand ) == _mVar.end() ) continue;
           for( auto const& [iv, ord] : pop->Indep().expr )
@@ -8565,7 +8567,7 @@ FFModel::_build_reduction_plan()
       auto sg = _dag->subgraph( 1, &eqn.var );
       for( auto const& op : sg.l_op ){
         if( !op->sameid( typeid(FFPartial) ) ) continue;
-        auto const* pop = dynamic_cast<FFPartial const*>( op );
+        auto const* pop = mc::type_cast<FFPartial const>( op );
         for( auto const* operand : op->varin ){
           if( !operand || _mVar.find( *operand ) == _mVar.end() ) continue;
           for( auto const& [iv, ord] : pop->Indep().expr )
@@ -8705,7 +8707,7 @@ FFModel::_reduce_high_index()
       auto sg = _dag->subgraph( 1, &eqn.var );
       for( auto const& op : sg.l_op ){
         if( !op->sameid( typeid(FFPartial) ) ) continue;
-        auto const* pop = dynamic_cast<FFPartial const*>( op );
+        auto const* pop = mc::type_cast<FFPartial const>( op );
         for( auto const* operand : op->varin ){
           if( !operand || _mVar.find( *operand ) == _mVar.end() ) continue;
           for( auto const& [iv, ord] : pop->Indep().expr )
@@ -9083,7 +9085,7 @@ FFModel::_generate_algebraic_boundary_closure()
     auto sg = _dag->subgraph( 1, &eqn );
     for( auto const& op : sg.l_op ){
       if( !op->sameid(typeid(FFPartial)) ) continue;
-      auto const* pop = dynamic_cast<FFPartial const*>(op);
+      auto const* pop = mc::type_cast<FFPartial const>(op);
       for( auto const* operand : op->varin ){
         if( !operand || _mVar.find(*operand) == _mVar.end() ) continue;
         for( auto const& [iv,ord] : pop->Indep().expr )
@@ -9277,7 +9279,7 @@ FFModel::_value_slaved_algebraic_state_ids
     auto sg = _dag->subgraph( 1, &eqn );
     for( auto const& op : sg.l_op ){
       if( !op->sameid(typeid(FFPartial)) ) continue;
-      auto const* pop = dynamic_cast<FFPartial const*>(op);
+      auto const* pop = mc::type_cast<FFPartial const>(op);
       for( auto const* operand : op->varin ){
         if( !operand || _mVar.find(*operand) == _mVar.end() ) continue;
         for( auto const& [iv,ord] : pop->Indep().expr )
@@ -9965,14 +9967,14 @@ const
       auto jtop = itop;
       for( ++jtop; jtop != sg.l_op.cend(); ++jtop ){
         if( (*jtop)->sameid( typeid( FFIntegral ) ) ){
-          for( auto const& [v,e] : dynamic_cast<FFIntegral const*>(*jtop)->Indep().expr ){
+          for( auto const& [v,e] : mc::type_cast<FFIntegral const>(*jtop)->Indep().expr ){
             (void)e;
             domfree.erase( v );
           }
         }
         else if( (*jtop)->sameid( typeid( FFEval ) ) ){
           // OpEval consumes its direction at a fixed coordinate, exactly like integration.
-          for( auto const& [dv,z0] : dynamic_cast<FFEval const*>(*jtop)->Coord() ){
+          for( auto const& [dv,z0] : mc::type_cast<FFEval const>(*jtop)->Coord() ){
             (void)z0;
             domfree.erase( dv );
           }
@@ -10119,14 +10121,14 @@ const
       auto jtop = itop;
       for( ++jtop; jtop != sg.l_op.cend(); ++jtop ){
         if( (*jtop)->sameid( typeid( FFIntegral ) ) ){
-          for( auto const& [v,e] : dynamic_cast<FFIntegral const*>(*jtop)->Indep().expr ){
+          for( auto const& [v,e] : mc::type_cast<FFIntegral const>(*jtop)->Indep().expr ){
             (void)e;
             domfree.erase( v );
           }
         }
         else if( (*jtop)->sameid( typeid( FFEval ) ) ){
           // OpEval consumes its direction at a fixed coordinate, like integration.
-          for( auto const& [dv,z0] : dynamic_cast<FFEval const*>(*jtop)->Coord() ){
+          for( auto const& [dv,z0] : mc::type_cast<FFEval const>(*jtop)->Coord() ){
             (void)z0;
             domfree.erase( dv );
           }
@@ -10513,7 +10515,7 @@ FFModel::_build_dynamic_form
       auto sg = _dag->subgraph( 1, &eqn.var );
       for( auto const& op : sg.l_op ){
         if( !op->sameid( typeid(FFPartial) ) ) continue;
-        auto const* pop = dynamic_cast<FFPartial const*>( op );
+        auto const* pop = mc::type_cast<FFPartial const>( op );
         if( !pop ) continue;
         for( size_t jj = 0; jj < op->varin.size(); ++jj ){
           FFVar const* operand = op->varin[jj];
@@ -10614,7 +10616,7 @@ FFModel::_audit_dof_balance
       auto sg = _dag->subgraph( 1, &eqn.var );
       for( auto const& op : sg.l_op ){
         if( !op->sameid( typeid(FFPartial) ) ) continue;
-        auto const* pop = dynamic_cast<FFPartial const*>( op );
+        auto const* pop = mc::type_cast<FFPartial const>( op );
         if( !pop ) continue;
         for( size_t jj = 0; jj < op->varin.size(); ++jj ){
           FFVar const* operand = op->varin[jj];
@@ -11268,7 +11270,7 @@ const
       if( op->type == FFOp::VAR && op->varout[0] && _mVar.find( *op->varout[0] ) != _mVar.end() )
         r.states.insert( *op->varout[0] );
       if( !op->sameid( typeid(FFPartial) ) ) continue;
-      auto const* pop = dynamic_cast<FFPartial const*>( op );
+      auto const* pop = mc::type_cast<FFPartial const>( op );
       if( !pop ) continue;
       for( auto const* operand : op->varin ){
         if( !operand || _mVar.find( *operand ) == _mVar.end() ) continue;

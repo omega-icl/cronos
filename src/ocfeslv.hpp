@@ -5129,7 +5129,7 @@ public:
             bool const is_par = op->sameid( typeid(FFPartial) );
             bool const is_int = op->sameid( typeid(FFIntegral) );
             if( is_par ){
-              auto const* pop = dynamic_cast<FFPartial const*>( op );
+              auto const* pop = mc::type_cast<FFPartial const>( op );
               for( auto const* od : op->varin ){
                 if( !od || _mVar.find( *od ) == _mVar.end() ) continue;
                 if( !pop ) continue;
@@ -9966,7 +9966,7 @@ const
       FFSubgraph const sgq = dag->subgraph( 1, &eqn.var );
       for( auto const& op : sgq.l_op ){
         if( !op || !op->sameid( typeid( FFPartial ) ) ) continue;
-        auto const* pop = dynamic_cast<FFPartial const*>( op );
+        auto const* pop = mc::type_cast<FFPartial const>( op );
         if( !pop ) continue;
         for( auto const& [dv, o_] : pop->Indep().expr ){ (void)o_; if( dv.id() == _evolution_dom_var.id() ){ _evoDerivRows.insert( ie ); break; } }
       }
@@ -11746,7 +11746,7 @@ OCFESLV::_setup_eval_plans
   for( size_t ne = 0; ne < _sgEqn.size(); ++ne ){
     for( auto const& op : _sgEqn[ne].l_op ){
       if( !op || !op->sameid( typeid( FFEval ) ) ) continue;
-      auto const* fe = dynamic_cast<FFEval const*>( op );
+      auto const* fe = mc::type_cast<FFEval const>( op );
       if( !fe ) continue;
       for( auto const& [dv, z0] : fe->Coord() ){
         _eqnEvalPoint[ne][dv] = z0;
@@ -14387,7 +14387,7 @@ OCFESLV::_validate_hyperbolic_incoming_bcs()
             std::vector<FFVar> sub_targ, sub_repl;
             for( auto const& op : sg.l_op ){
               if( !op->sameid( typeid(FFPartial) ) ) continue;
-              auto const* pop = dynamic_cast<FFPartial const*>( op );
+              auto const* pop = mc::type_cast<FFPartial const>( op );
               for( size_t jj = 0; jj < op->varin.size(); ++jj ){
                 FFVar const* operand = op->varin[jj];
                 FFVar const* dag_out = op->varout[jj];
@@ -14595,7 +14595,7 @@ const
     FFSubgraph sg = _dag->subgraph( 1, &eqn );
     for( auto const& op : sg.l_op ){
       if( !op->sameid( typeid(FFPartial) ) ) continue;
-      auto const* pop = dynamic_cast<FFPartial const*>( op );
+      auto const* pop = mc::type_cast<FFPartial const>( op );
       if( !pop ) continue;
 
       bool dom_match = false;
@@ -15771,7 +15771,7 @@ OCFESLV::_pack_plan_input
         std::map<size_t,int> order_in;
         for( auto const& op : sg.l_op ){
           if( !op || !op->sameid( typeid(FFPartial) ) ) continue;
-          auto const* pop = dynamic_cast<FFPartial const*>( op );
+          auto const* pop = mc::type_cast<FFPartial const>( op );
           if( !pop ) continue;
           for( auto const& [dv,ord] : pop->Indep().expr ){
             if( !ord ) continue;
@@ -16604,7 +16604,7 @@ OCFESLV::_build_interface_plan_draft
             for( auto const* op : sg.l_op ){
               if( !op ) continue;
               if( op->sameid( typeid(FFPartial) ) ){
-                auto const* pop = dynamic_cast<FFPartial const*>( op );
+                auto const* pop = mc::type_cast<FFPartial const>( op );
                 bool const is_self = [&]{ for( auto const* od : op->varin )
                                             if( od && od->id() == sv.id() ) return true;
                                           return false; }();
@@ -16726,7 +16726,7 @@ OCFESLV::_build_interface_plan_draft
                 for( auto const* op : sg3.l_op ){
                   if( !op ) continue;
                   if( op->sameid( typeid(FFPartial) ) ){
-                    auto const* pop = dynamic_cast<FFPartial const*>( op );
+                    auto const* pop = mc::type_cast<FFPartial const>( op );
                     if( pop )
                       for( auto const& [iv,ord] : pop->Indep().expr ){
                         (void)ord; if( iv.id() == dv.id() ) part_dir = true; }
@@ -22589,7 +22589,7 @@ OCFESLV::_prepare_interface_plan_tables
       for( auto const& op : sgq.l_op ){
         if( !op || !op->sameid( typeid( FFPartial ) ) || op->varin.empty() || !op->varin[0] ) continue;
         if( op->varin[0]->id() != sid ) continue;
-        auto const* pop = dynamic_cast<FFPartial const*>( op );
+        auto const* pop = mc::type_cast<FFPartial const>( op );
         if( pop ) for( auto const& [dv, ordr] : pop->Indep().expr ){ (void)ordr; if( dv.id() == dom.id() ) return true; }
       }
     }
@@ -22651,7 +22651,7 @@ OCFESLV::_prepare_interface_plan_tables
             if( vin->id() == ps->id() && isPart && k == 0 ) s_under_deriv = true;
             if( vin->id() == only_other->id() ){
               if( isPart && k == 0 ){
-                auto const* pop = dynamic_cast<FFPartial const*>( op );
+                auto const* pop = mc::type_cast<FFPartial const>( op );
                 if( pop ) for( auto const& [dv, ordr] : pop->Indep().expr ){
                   (void)ordr; if( dv.id() == face_dom.id() ) P_under_face = true; }
               }
@@ -23085,7 +23085,7 @@ OCFESLV::_prepare_interface_plan_tables
     // collocation system square because the would-be-dropped row is retained.
     for( auto const& op : sg.l_op ){
       if( !op || !op->sameid( typeid(FFPartial) ) ) continue;
-      auto const* pop = dynamic_cast<FFPartial const*>( op );
+      auto const* pop = mc::type_cast<FFPartial const>( op );
       if( !pop ) continue;
       for( auto const& [dv,ord] : pop->Indep().expr )
         if( ord && dv.id() == face_dom.id() ) return false;
@@ -23762,7 +23762,7 @@ OCFESLV::_prepare_interface_plan_tables
                     if( !op || !shape_ok ) continue;
                     if( op->sameid( typeid(FFIntegral) ) ){ shape_ok = false; continue; }
                     if( op->sameid( typeid(FFPartial) ) ){
-                      auto const* pop = dynamic_cast<FFPartial const*>( op );
+                      auto const* pop = mc::type_cast<FFPartial const>( op );
                       if( !pop ){ shape_ok = false; continue; }
                       size_t nind = 0; bool dir_ok = false;
                       for( auto const& iv_ord : pop->Indep().expr ){
@@ -24271,7 +24271,7 @@ OCFESLV::_prepare_interface_plan_tables
                             FFSubgraph sgr = _dag->subgraph( 1, &eqnvar );
                             for( auto const& opr : sgr.l_op ){
                               if( !opr->sameid( typeid(FFPartial) ) ) continue;
-                              auto const* popr = dynamic_cast<FFPartial const*>( opr );
+                              auto const* popr = mc::type_cast<FFPartial const>( opr );
                               if( !popr ) continue;
                               bool dom_match = false;
                               for( auto const& kv : popr->Indep().expr )
@@ -24297,7 +24297,7 @@ OCFESLV::_prepare_interface_plan_tables
                                 for( auto const* vin : opr->varin ) if( vin && vin->id() == pst->id() ) occurs = true;
                                 for( auto const* vout : opr->varout ) if( vout && vout->id() == pst->id() ) occurs = true;
                                 if( !opr->sameid( typeid(FFPartial) ) ) continue;
-                                auto const* popr = dynamic_cast<FFPartial const*>( opr );
+                                auto const* popr = mc::type_cast<FFPartial const>( opr );
                                 if( !popr ) continue;
                                 bool hits2 = false;
                                 for( auto const& operand : popr->Var() ){
@@ -26426,7 +26426,7 @@ const
     if( fctrec.var.dag() ){
       FFSubgraph sgf = _dag->subgraph( 1, &fctrec.var );
       for( auto const* op : sgf.l_op ){
-        auto const* fe = op? dynamic_cast<FFEval const*>( op ): nullptr;
+        auto const* fe = op? mc::type_cast<FFEval const>( op ): nullptr;
         if( !fe ) continue;
         for( auto const& [dv, z0] : fe->Coord() ){
           if( fixed_el.count( dv ) || !_mDom.count( dv ) ) continue;
@@ -27867,7 +27867,7 @@ const
   long const evoid = _evolution_dom_var.id().second;
   for( auto const* op : sg.l_op ){
     if( !op || !op->sameid( typeid( FFIntegral ) ) ) continue;
-    for( auto const& [v,e] : dynamic_cast<FFIntegral const*>( op )->Indep().expr ){
+    for( auto const& [v,e] : mc::type_cast<FFIntegral const>( op )->Indep().expr ){
       (void)e;
       if( v.id().second == evoid ) return true;   // integrates over the evolution variable
     }

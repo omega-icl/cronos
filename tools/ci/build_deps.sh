@@ -25,21 +25,30 @@ case "$OS" in
   *) echo "os must be linux, macos or none" >&2; exit 2 ;;
 esac
 W=$( mktemp -d ); cd "$W"
-fetch(){ curl -sfL "$1" | tar xz; }
+fetch(){ echo "== build_deps.sh: fetching ${1##*/}"; curl -sfL "$1" | tar xz; }
+# Each step's output goes to a log, printed in full on failure (so CI shows the cause, not only "exit 1").
+step(){ local name=$1; shift; echo "== build_deps.sh: $name"
+  if ! "$@" > "$W/$name.log" 2>&1; then echo "build_deps.sh: $name FAILED -- its log:"; tail -n 80 "$W/$name.log"; exit 1; fi; }
+# CMake 4 (current runners and manylinux images) refuses projects declaring compatibility with CMake < 3.5, as
+# SuperLU 5.2.2 does; this accepts them (older CMake ignores it).
+POLICY=-DCMAKE_POLICY_VERSION_MINIMUM=3.5
 fetch "https://github.com/DrTimothyAldenDavis/SuiteSparse/archive/refs/tags/v${SUITESPARSE_VERSION}.tar.gz"
-cmake -S "SuiteSparse-${SUITESPARSE_VERSION}" -B ss -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+step suitesparse-configure cmake -S "SuiteSparse-${SUITESPARSE_VERSION}" -B ss $POLICY -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$PREFIX" \
       -DSUITESPARSE_ENABLE_PROJECTS="$SS_PROJECTS" -DSUITESPARSE_USE_FORTRAN=OFF -DSUITESPARSE_USE_CUDA=OFF \
       -DSUITESPARSE_DEMOS=OFF -DBUILD_TESTING=OFF -DBUILD_STATIC_LIBS=OFF \
-      -DKLU_USE_CHOLMOD=$SS_KLU_CHOLMOD > ss.log   # OFF: else KLU pulls in CHOLMOD (GPL modules) for its optional ordering
-cmake --build ss -j"$JOBS" > /dev/null && cmake --install ss > /dev/null
+      -DKLU_USE_CHOLMOD=$SS_KLU_CHOLMOD   # OFF: else KLU pulls in CHOLMOD (GPL modules) for its optional ordering
+step suitesparse-build cmake --build ss -j"$JOBS"
+step suitesparse-install cmake --install ss
 fetch "https://github.com/xiaoyeli/superlu/archive/refs/tags/v${SUPERLU_VERSION}.tar.gz"
-cmake -S "superlu-${SUPERLU_VERSION}" -B slu -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+step superlu-configure cmake -S "superlu-${SUPERLU_VERSION}" -B slu $POLICY -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$PREFIX" \
       -DBUILD_SHARED_LIBS=ON -DCMAKE_POSITION_INDEPENDENT_CODE=ON -Denable_internal_blaslib=OFF -Denable_tests=OFF \
-      -DXSDK_ENABLE_Fortran=OFF > slu.log   # its Fortran interface is not used
-cmake --build slu -j"$JOBS" > /dev/null && cmake --install slu > /dev/null
+      -DXSDK_ENABLE_Fortran=OFF   # its Fortran interface is not used
+step superlu-build cmake --build slu -j"$JOBS"
+step superlu-install cmake --install slu
 fetch "https://github.com/LLNL/sundials/releases/download/v${SUNDIALS_VERSION}/sundials-${SUNDIALS_VERSION}.tar.gz"
-cmake -S "sundials-${SUNDIALS_VERSION}" -B sun -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+step sundials-configure cmake -S "sundials-${SUNDIALS_VERSION}" -B sun $POLICY -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$PREFIX" \
       -DENABLE_KLU=ON -DKLU_INCLUDE_DIR="$PREFIX/include/suitesparse" -DKLU_LIBRARY_DIR="$PREFIX/lib" \
-      -DBUILD_STATIC_LIBS=OFF -DEXAMPLES_ENABLE_C=OFF -DEXAMPLES_INSTALL=OFF > sun.log
-cmake --build sun -j"$JOBS" > /dev/null && cmake --install sun > /dev/null
+      -DBUILD_STATIC_LIBS=OFF -DEXAMPLES_ENABLE_C=OFF -DEXAMPLES_INSTALL=OFF
+step sundials-build cmake --build sun -j"$JOBS"
+step sundials-install cmake --install sun
 echo "build_deps.sh: SuiteSparse ${SUITESPARSE_VERSION} (${SS_PROJECTS}), SuperLU ${SUPERLU_VERSION}, SUNDIALS ${SUNDIALS_VERSION} (KLU) -> ${PREFIX}"

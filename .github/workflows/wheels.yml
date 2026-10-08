@@ -71,7 +71,7 @@ jobs:
             CMAKE_ARGS="-T ClangCL -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake -DVCPKG_TARGET_TRIPLET=x64-windows -DARMADILLO_INCLUDE_DIR=C:/armadillo/include -DBLAS_LIBRARIES=C:/openblas/libopenblas.lib -DLAPACK_LIBRARIES=C:/openblas/libopenblas.lib"
           CIBW_BEFORE_BUILD_WINDOWS: pip install delvewheel
           CIBW_REPAIR_WHEEL_COMMAND_WINDOWS: >
-            delvewheel repair --add-path "C:/openblas/bin;C:/deps/bin;C:/vcpkg/installed/x64-windows/bin" -w {dest_dir} {wheel}
+            delvewheel repair --add-path "C:/openblas/bin;C:/deps/bin;C:/deps/lib;C:/vcpkg/installed/x64-windows/bin" -w {dest_dir} {wheel}
           # The check scripts, against the INSTALLED wheel (they import cronos and pymcpp from site-packages).
           CIBW_TEST_COMMAND: >
             python {project}/src/interface/check_ffmodel.py &&
@@ -87,9 +87,11 @@ jobs:
           "$PY" tools/ci/check_notices.py THIRD_PARTY_NOTICES.txt wheelhouse
       - name: GPL wheels -- build tag 1 (pip and uv prefer them when given the release page)
         if: matrix.variant == 'gpl'
+        shell: bash
         run: |
-          python3 -m pip install --upgrade wheel
-          for w in wheelhouse/*.whl; do python3 -m wheel tags --build 1 --remove "$w"; done
+          # pipx: preinstalled on every runner, and runs `wheel` in its own environment -- the system Python of the
+          # macOS runners (Homebrew's) refuses `pip install` (PEP 668, externally managed).
+          for w in wheelhouse/*.whl; do pipx run wheel tags --build 1 --remove "$w"; done
           ls wheelhouse
       - uses: actions/upload-artifact@v6
         with:

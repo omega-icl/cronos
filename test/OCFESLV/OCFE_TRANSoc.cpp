@@ -77,7 +77,11 @@ int main(){
     check( N.ok, tag + "baseline WITHOUT a transition solves" + ( N.ok? std::string(): " -- " + reason( N.msg ) ) );
     if( !Id.ok ) check( false, tag + "I  identity transition -- " + reason( Id.msg ) );
     else{ double w = 0.; for( size_t j = 0; j < 3; ++j ) w = std::max( w, std::fabs( Id.F[j]-N.F[j] ) );
-          check( N.ok && w < 1e-10, tag + "I  identity transition == no transition (values)", w ); }
+          // EXACT in every mode, marching AND monolithic (measured 2026-10-09: 4.4e-16 / 0): an ODE whose transitions
+          // sit on element boundaries carries no spatial interface claim, so the identity transition imposes the same
+          // discrete condition as no transition.  Contrast TRANS_pde / TRANS_psa, where the monolithic identity holds
+          // only to discretisation level (its lifted interface claim is imposed differently).  Round-off tolerance.
+          check( N.ok && w < 1e-13, tag + "I  identity transition == no transition (values, exact)", w ); }
     for( int kind : { 1, 2 } ){
       Out const R = run( kind, imp, march, P0 ); std::string const k = kind == 1? "E  explicit": "M  implicit";
       if( !R.ok ){ check( false, tag + k + " -- " + reason( R.msg ) ); continue; }

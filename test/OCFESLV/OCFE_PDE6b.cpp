@@ -489,48 +489,61 @@ int main( int argc, char* argv[] )
     << "  disagreement is PROOF the primal is not unique: same equations, same\n"
     << "  residual, different answer.  agreement is evidence, not proof.\n"
     << "  imposition  solve  form        SuperLU          SPQR       ratio  verdict\n";
-  int det_ok=0, det_bad=0, det_na=0;
+  // 2026-10-09: in a build WITHOUT SPQR (the EPL build) the SPQR cells cannot run BY CONSTRUCTION.  They are counted
+  // as SKIPPED -- printed as such and excluded from the verdict, never folded into a pass -- while a cell that should
+  // have run and did not (a failed setup) stays n/a, which still fails.  DETERMINACY compares SuperLU with SPQR, so
+  // without SPQR it is NOT TESTED at all; the verdict then rests on EQUIVALENCE over the SuperLU cells.
+#if defined(CRONOS__WITH_SPQR)
+  bool const kSPQR = true;
+#else
+  bool const kSPQR = false;
+#endif
+  int det_ok=0, det_bad=0, det_na=0, det_skip=0;
   for( int i = 0; i < 3; ++i ){
     if( g_only >= 0 && i != g_only ) continue;
     for( int r = 0; r < 2; ++r )
       for( int m = 0; m < 2; ++m ){
         Run const& A = R[m][r][i][0]; Run const& B = R[m][r][i][1];
         int const c = cmp( A, B );
-        c < 0 ? ++det_na : ( c ? ++det_bad : ++det_ok );
+        bool const skip = !kSPQR;                          // SuperLU vs SPQR: needs SPQR built
+        skip ? ++det_skip : ( c < 0 ? ++det_na : ( c ? ++det_bad : ++det_ok ) );
         std::cout << "  " << std::left << std::setw(12) << IMPNAME[i]
                   << std::setw(7) << ( r ? "march" : "mono" )
                   << std::setw(9) << ( m ? "AUTO" : "MANUAL" )
                   << num( A.eT, ok(A) ) << "  " << num( B.eT, ok(B) )
                   << "  " << std::left << std::setw(7) << ratio_of( A, B, c )
-                  << verd( c, "DETERM", "** UNDETERMINED **" ) << "\n";
+                  << ( skip ? "skipped (no SPQR)" : verd( c, "DETERM", "** UNDETERMINED **" ) ) << "\n";
       }
   }
 
   std::cout
     << "\n  ---- EQUIVALENCE  (MANUAL vs AUTO, SAME cell) --------------------------------\n"
     << "  imposition  solve  backend      MANUAL           AUTO       ratio  verdict\n";
-  int eq_ok=0, eq_bad=0, eq_na=0;
+  int eq_ok=0, eq_bad=0, eq_na=0, eq_skip=0;
   for( int i = 0; i < 3; ++i ){
     if( g_only >= 0 && i != g_only ) continue;
     for( int r = 0; r < 2; ++r )
       for( int b = 0; b < 2; ++b ){
         Run const& A = R[0][r][i][b]; Run const& B = R[1][r][i][b];
         int const c = cmp( A, B );
-        c < 0 ? ++eq_na : ( c ? ++eq_bad : ++eq_ok );
+        bool const skip = ( b == 1 && !kSPQR );            // an SPQR cell in a build without SPQR
+        skip ? ++eq_skip : ( c < 0 ? ++eq_na : ( c ? ++eq_bad : ++eq_ok ) );
         std::cout << "  " << std::left << std::setw(12) << IMPNAME[i]
                   << std::setw(7) << ( r ? "march" : "mono" )
                   << std::setw(10) << ( b ? "SPQR" : "SuperLU" )
                   << num( A.eT, ok(A) ) << "  " << num( B.eT, ok(B) )
                   << "  " << std::left << std::setw(7) << ratio_of( A, B, c )
-                  << verd( c, "EQUIV", "** DIFFER **" ) << "\n";
+                  << ( skip ? "skipped (no SPQR)" : verd( c, "EQUIV", "** DIFFER **" ) ) << "\n";
       }
   }
 
-  bool const clean = ( det_bad==0 && eq_bad==0 && det_na==0 && eq_na==0 );
+  bool const clean = ( det_bad==0 && eq_bad==0 && det_na==0 && eq_na==0 && det_ok + eq_ok > 0 );
   std::cout
     << "\n================================================================================\n"
-    << "  DETERMINACY : " << det_ok << " DETERM, " << det_bad << " UNDETERMINED, " << det_na << " n/a\n"
-    << "  EQUIVALENCE : " << eq_ok  << " EQUIV, "  << eq_bad  << " DIFFER, "       << eq_na  << " n/a\n"
+    << "  DETERMINACY : " << det_ok << " DETERM, " << det_bad << " UNDETERMINED, " << det_na << " n/a"
+    << ( det_skip ? ", " + std::to_string( det_skip ) + " skipped -- NOT TESTED in this build (no SPQR)" : std::string() ) << "\n"
+    << "  EQUIVALENCE : " << eq_ok  << " EQUIV, "  << eq_bad  << " DIFFER, "       << eq_na  << " n/a"
+    << ( eq_skip ? ", " + std::to_string( eq_skip ) + " skipped (SPQR cells; no SPQR build)" : std::string() ) << "\n"
     << "  PDE6_blk0: " << ( clean ? "PASS" : "FAIL" ) << "\n"
     << "================================================================================\n"
     << "  READ IN THIS ORDER:\n"
@@ -542,8 +555,9 @@ int main( int argc, char* argv[] )
     << "      formulations really are different discretisations.  With one side\n"
     << "      undetermined it only means you are comparing against a coin flip --\n"
     << "      fix determinacy FIRST, then re-read equivalence.\n"
-    << "  'n/a' counts as FAIL.  A skipped SPQR build (no -DCRONOS__WITH_SPQR) or a\n"
-    << "  failed setup must never look like agreement.\n"
+    << "  'n/a' counts as FAIL: a failed setup must never look like agreement.  In a\n"
+    << "  build without SPQR its cells are SKIPPED (counted apart, not passed), and\n"
+    << "  DETERMINACY is not tested.\n"
     << "\n"
     << "  A PASS does NOT mean the plan is right -- only that these cells agree at one\n"
     << "  mesh.  The deficiency measured NEL_X-1 and was CONSTANT in NEL_T, so widen\n"

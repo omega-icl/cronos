@@ -1,6 +1,7 @@
 // Copyright (C) Benoit Chachuat, Imperial College London.
 // All Rights Reserved.
-// This code is published under the Eclipse Public License.
+// This code is published under the EPL-2.0 with GPL-2.0-or-later as a Secondary License; see the LICENSE file.
+// SPDX-License-Identifier: EPL-2.0 OR GPL-2.0-or-later
 
 #ifndef CRONOS__ODESLV_BASE_HPP
 #define CRONOS__ODESLV_BASE_HPP
@@ -45,6 +46,33 @@ odeslv_new_vars
 class ODESLV_BASE
 : public virtual FFModel
 {
+ protected:
+  //! @brief 4.10 (2026-10-09): a POINT-FORM output, add_output( f, {t}, {tau}, {side} ), becomes the evaluation
+  //! FFEval( f, t, tau, side ) before the evolution-direction reduction, so it is served like the expression form
+  //! add_output( OpE( f, t, tau, side ) ).  Until now ODESLV ignored an output's point: it read f at the FINAL time
+  //! (a state: silently the wrong value) or failed on a time-varying input ("missing variable").
+  bool _on_before_reduction
+    ()
+    override
+    {
+      if( !_evolution_dom_var.dag() ) return true;
+      FFEval OpE;
+      for( auto& fct : _mFct ){
+        auto const it = fct.point.find( _evolution_dom_var );
+        if( it == fct.point.end() ) continue;
+        if( fct.point.size() != 1 ){
+          _extractError = "a point output fixes a coordinate other than the evolution direction (" + fct.var.name()
+                        + "): ODESLV has no other direction";
+          return false;
+        }
+        auto const is = fct.side.find( _evolution_dom_var );
+        int const side = ( is != fct.side.end() && is->second == FFDom::PLUS )? (int)FFDom::PLUS: (int)FFDom::MINUS;
+        fct.var = OpE( fct.var, _evolution_dom_var, it->second, side );
+        fct.point.clear();  fct.side.clear();
+      }
+      return true;
+    }
+
  public:
   /** @defgroup ODESLV Continuous-time real-valued integration of parametric ODEs
    *  @{

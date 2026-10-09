@@ -813,6 +813,15 @@ if(ENABLE_PYTHON)
         COMMAND ${Python3_EXECUTABLE} "${CRONOS_GEN_ENVIRONMENT}" --check
         ${_check_cmds})
   endif()
+  # Every file carrying the project's copyright line states the licence as LICENSE does (EPL-2.0 with GPL-2.0-or-later
+  # as a Secondary License, plus the SPDX line); tools/update_licence_header.py updates them, `make check` verifies.
+  set(CRONOS_LICENCE_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/tools/update_licence_header.py")
+  if(EXISTS "${CRONOS_LICENCE_HEADER}")
+    set(_check_cmds
+        COMMAND ${CMAKE_COMMAND} -E echo "== update_licence_header.py --check"
+        COMMAND ${Python3_EXECUTABLE} "${CRONOS_LICENCE_HEADER}" "${CMAKE_CURRENT_SOURCE_DIR}" --check
+        ${_check_cmds})
+  endif()
   if(_check_cmds)
     add_custom_target(
       check

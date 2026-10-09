@@ -3,6 +3,8 @@
 //   outputs: u(0.5-) = 2, u(0.5+) = 5, x(0.5-) = x(0.5+) = 1, u(0.3-) = u(0.3+) = 2 (not a boundary),
 //            u(1+) = u(1-) = 5 (the upper bound: the one limit that exists), int u dt = 3.5
 //   gradients w.r.t. (u0, u1), forward and adjoint: exact.
+// Each one-sided output twice: as an FFEval expression, OpE( u, t, 0.5, FFDom::MINUS ), and in POINT FORM,
+// add_output( u, {t}, {0.5}, {FFDom::MINUS} ) (4.10, 2026-10-09) -- the same exact values and gradients.
 #include <cmath>
 #include <cstdio>
 #include <vector>
@@ -13,23 +15,31 @@ static int npass = 0, nfail = 0;
 static void check( bool c, char const* w, double v ){ std::printf( "  %s  %-70s (%.2e)\n", c? "PASS": "FAIL", w, v ); c? ++npass: ++nfail; }
 double const U0 = 2., U1 = 5.;
 // value and d/d(u0,u1) of each output, exactly
-std::vector<double> const VAL{ 2., 5., 1., 1., 2., 2., 5., 5., 3.5 };
-std::vector<std::vector<double>> const GRD{ {1,0}, {0,1}, {.5,0}, {.5,0}, {1,0}, {1,0}, {0,1}, {0,1}, {.5,.5} };
-char const* const NAME[9] = { "u(0.5-)", "u(0.5+)", "x(0.5-)", "x(0.5+)", "u(0.3-)", "u(0.3+)", "u(1-)", "u(1+)", "int u" };
+size_t const NOUT = 17;   // 8 sided outputs as FFEval expressions, the integral, the same 8 in point form
+std::vector<double> const VAL{ 2., 5., 1., 1., 2., 2., 5., 5., 3.5,   2., 5., 1., 1., 2., 2., 5., 5. };
+std::vector<std::vector<double>> const GRD{ {1,0}, {0,1}, {.5,0}, {.5,0}, {1,0}, {1,0}, {0,1}, {0,1}, {.5,.5},
+                                            {1,0}, {0,1}, {.5,0}, {.5,0}, {1,0}, {1,0}, {0,1}, {0,1} };
+char const* const NAME[NOUT] = { "u(0.5-)", "u(0.5+)", "x(0.5-)", "x(0.5+)", "u(0.3-)", "u(0.3+)", "u(1-)", "u(1+)", "int u",
+  "u(0.5-) pt", "u(0.5+) pt", "x(0.5-) pt", "x(0.5+) pt", "u(0.3-) pt", "u(0.3+) pt", "u(1-) pt", "u(1+) pt" };
 template <class M> static void outputs( M& I, FFVar const& t, FFVar const& x, FFVar const& u ){
   FFEval OpE; FFIntegral OpI;
   I.add_output( OpE( u, t, 0.5, FFDom::MINUS ) ); I.add_output( OpE( u, t, 0.5, FFDom::PLUS ) );
   I.add_output( OpE( x, t, 0.5, FFDom::MINUS ) ); I.add_output( OpE( x, t, 0.5, FFDom::PLUS ) );
   I.add_output( OpE( u, t, 0.3, FFDom::MINUS ) ); I.add_output( OpE( u, t, 0.3, FFDom::PLUS ) );
   I.add_output( OpE( u, t, 1.0, FFDom::MINUS ) ); I.add_output( OpE( u, t, 1.0, FFDom::PLUS ) );
-  I.add_output( OpI( std::vector<FFVar>{ u }, { t } )[0] ); }
+  I.add_output( OpI( std::vector<FFVar>{ u }, { t } )[0] );
+  // point form: add_output( Fct, {direction}, {point}, {side} )
+  I.add_output( u, {t}, {0.5}, {FFDom::MINUS} ); I.add_output( u, {t}, {0.5}, {FFDom::PLUS} );
+  I.add_output( x, {t}, {0.5}, {FFDom::MINUS} ); I.add_output( x, {t}, {0.5}, {FFDom::PLUS} );
+  I.add_output( u, {t}, {0.3}, {FFDom::MINUS} ); I.add_output( u, {t}, {0.3}, {FFDom::PLUS} );
+  I.add_output( u, {t}, {1.0}, {FFDom::MINUS} ); I.add_output( u, {t}, {1.0}, {FFDom::PLUS} ); }
 static void report( char const* who, bool ok, std::vector<double> const& F, std::vector<std::vector<double>> const& Gf, std::vector<std::vector<double>> const& Ga ){
   char w[140];
-  if( !ok || F.size() != 9 ){ std::snprintf( w, sizeof w, "%s: solves and 9 outputs", who ); check( false, w, 0. ); return; }
-  for( size_t k = 0; k < 9; ++k ){
+  if( !ok || F.size() != NOUT ){ std::snprintf( w, sizeof w, "%s: solves and %zu outputs", who, NOUT ); check( false, w, 0. ); return; }
+  for( size_t k = 0; k < NOUT; ++k ){
     double e = std::fabs( F[k] - VAL[k] );
     for( size_t d = 0; d < 2; ++d ){ if( !Gf.empty() ) e = std::max( e, std::fabs( Gf[k][d] - GRD[k][d] ) ); if( !Ga.empty() ) e = std::max( e, std::fabs( Ga[k][d] - GRD[k][d] ) ); }
-    std::snprintf( w, sizeof w, "%s: %-8s value %g, forward and adjoint gradients exact", who, NAME[k], VAL[k] );
+    std::snprintf( w, sizeof w, "%s: %-11s value %g, forward and adjoint gradients exact", who, NAME[k], VAL[k] );
     check( e < 1e-6, w, e );
   }
 }
@@ -45,8 +55,8 @@ int main(){
     bool ok = I.setup(); std::vector<double> P( I.np() ); auto iu = I.parameter_index( u ); P[iu[0]] = U0; P[iu[1]] = U1;
     ok = ok && I.solve_fsens( P ) == ODESLVS_CVODES::STATUS::NORMAL; auto const F = I.val_function(); auto Gf0 = I.val_function_gradient();
     ok = ok && I.solve_asens( P ) == ODESLVS_CVODES::STATUS::NORMAL; auto Ga0 = I.val_function_gradient();
-    std::vector<std::vector<double>> Gf( 9, std::vector<double>( 2 ) ), Ga( Gf );          // [output][u0,u1]
-    for( size_t k = 0; ok && k < 9; ++k ) for( size_t d = 0; d < 2; ++d ){ Gf[k][d] = Gf0[iu[d]][k]; Ga[k][d] = Ga0[iu[d]][k]; }
+    std::vector<std::vector<double>> Gf( NOUT, std::vector<double>( 2 ) ), Ga( Gf );       // [output][u0,u1]
+    for( size_t k = 0; ok && k < NOUT; ++k ) for( size_t d = 0; d < 2; ++d ){ Gf[k][d] = Gf0[iu[d]][k]; Ga[k][d] = Ga0[iu[d]][k]; }
     report( "ODESLV          ", ok, F, Gf, Ga );
   }
   for( bool march : { false, true } ){ // ---- OCFESLV
@@ -63,9 +73,9 @@ int main(){
     ok = ok && I.solve( x1.data(), inp.data(), nullptr ).converged; auto const F = I.val_functions();
     ok = ok && I.solve_fsens( x2.data(), inp.data(), nullptr ); auto const Jf = I.sens_jacobian();
     ok = ok && I.solve_asens( x3.data(), inp.data(), nullptr ); auto const Ja = I.sens_jacobian();
-    std::vector<std::vector<double>> Gf( 9, std::vector<double>( 2 ) ), Ga( Gf );          // sens_jacobian: nf x ncd, row-major
-    for( size_t k = 0; ok && k < 9 && Jf.size() >= 18; ++k ) for( size_t d = 0; d < 2; ++d ){ Gf[k][d] = Jf[k*2+d]; Ga[k][d] = Ja[k*2+d]; }
-    report( march? "OCFESLV marching": "OCFESLV monolith", ok && Jf.size() == 18, F, Gf, Ga );
+    std::vector<std::vector<double>> Gf( NOUT, std::vector<double>( 2 ) ), Ga( Gf );       // sens_jacobian: nf x ncd, row-major
+    for( size_t k = 0; ok && k < NOUT && Jf.size() >= 2*NOUT; ++k ) for( size_t d = 0; d < 2; ++d ){ Gf[k][d] = Jf[k*2+d]; Ga[k][d] = Ja[k*2+d]; }
+    report( march? "OCFESLV marching": "OCFESLV monolith", ok && Jf.size() == 2*NOUT, F, Gf, Ga );
   }
   std::printf( "\n  SIDES_gate: %d passed, %d failed -- %s\n", npass, nfail, nfail? "FAILURES": "ALL PASS" );
   return nfail? 1: 0;

@@ -1,6 +1,7 @@
 // Copyright (C) Benoit Chachuat, Imperial College London.
 // All Rights Reserved.
-// This code is published under the Eclipse Public License.
+// This code is published under the EPL-2.0 with GPL-2.0-or-later as a Secondary License; see the LICENSE file.
+// SPDX-License-Identifier: EPL-2.0 OR GPL-2.0-or-later
 
 #ifndef CRONOS__OCENV_HPP
 #define CRONOS__OCENV_HPP
@@ -4383,6 +4384,14 @@ protected:
     // would clobber the correct value -- the interior-seam reduced-Jacobian-row zeroing.  The FIRST window
     // keeps its LB so a point at the global start (t == _marchGrid.front()) still lands.
     bool const first = _marchGrid.empty() || std::fabs( t0 - _marchGrid.front() ) <= eps;
+    // 4.10 (2026-10-09): a PLUS-sided point output (add_output(f,{t},{tau},{FFDom::PLUS})) is the RIGHT limit at tau:
+    // at an interior seam only the window STARTING there holds it -- owned with the LB inclusive and the UB exclusive
+    // (the last window keeps a point at the global end).  The rule above gave it the LEFT window: u(tau+) read u(tau-).
+    auto const isd = f.side.find( _evolution_dom_var );
+    if( isd != f.side.end() && isd->second == FFDom::PLUS ){
+      bool const last = _marchGrid.empty() || std::fabs( t1 - _marchGrid.back() ) <= eps;
+      return ( it->second >= t0 - eps ) && ( last ? ( it->second <= t1 + eps ) : ( it->second < t1 - eps ) );
+    }
     bool const lo_ok = first ? ( it->second >= t0 - eps ) : ( it->second > t0 + eps );
     return lo_ok && ( it->second <= t1 + eps );
   }

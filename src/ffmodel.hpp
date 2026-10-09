@@ -1,6 +1,7 @@
 // Copyright (C) Benoit Chachuat, Imperial College London.
 // All Rights Reserved.
-// This code is published under the Eclipse Public License.
+// This code is published under the EPL-2.0 with GPL-2.0-or-later as a Secondary License; see the LICENSE file.
+// SPDX-License-Identifier: EPL-2.0 OR GPL-2.0-or-later
 
 #ifndef MC__FFMODEL_HPP
 #define MC__FFMODEL_HPP
@@ -12,7 +13,16 @@
 #include <mutex>
 #include "ocbase.hpp"
 #if defined(__unix__) || defined(__APPLE__)
-# include <dlfcn.h>     // dlsym: the run-time thread setters (_thread_hooks); none on Windows (the cap then reports it)
+# include <dlfcn.h>     // dlsym: the run-time thread setters (_thread_hooks)
+#elif defined(_WIN32)
+# ifndef NOMINMAX
+#  define NOMINMAX      // no min/max macros (they would break std::min, Armadillo, ...)
+# endif
+# ifndef WIN32_LEAN_AND_MEAN
+#  define WIN32_LEAN_AND_MEAN
+# endif
+# include <windows.h>   // the run-time thread setters on Windows (_thread_hooks): GetProcAddress over the loaded modules
+# include <psapi.h>     // K32EnumProcessModules (kernel32 since Windows 7: no psapi.lib needed)
 #endif
 #include <typeinfo>   // rev205: t_ThreadCap resolves the OpenMP/BLAS thread setters at run time
 #include <cassert>
@@ -10982,6 +10992,27 @@ FFModel::_thread_hooks()
     h.mkl_get  = reinterpret_cast<int(*)()>        ( dlsym( RTLD_DEFAULT, "mkl_get_max_threads" ) );
     h.blis_set = reinterpret_cast<void(*)(int64_t)>( dlsym( RTLD_DEFAULT, "bli_thread_set_num_threads" ) );
     h.blis_get = reinterpret_cast<int64_t(*)()>    ( dlsym( RTLD_DEFAULT, "bli_thread_get_num_threads" ) );
+#elif defined(_WIN32)
+    // 4R.4 (2026-10-09).  Windows has no RTLD_DEFAULT: walk the modules loaded in the process and take, for each setter,
+    // the first module that exports it -- the libopenblas DLL delvewheel bundles, the OpenMP runtime (vcomp140.dll for
+    // MSVC, libomp for ClangCL/LLVM), MKL or BLIS if loaded.  Same names, same first-found rule as dlsym.
+    HMODULE mods[1024];  DWORD need = 0;
+    if( K32EnumProcessModules( GetCurrentProcess(), mods, (DWORD)sizeof( mods ), &need ) ){
+      size_t const nmod = std::min<size_t>( need / sizeof( HMODULE ), sizeof( mods ) / sizeof( HMODULE ) );
+      auto find = [&]( char const* name )->FARPROC {
+        for( size_t i = 0; i < nmod; ++i ) if( FARPROC p = GetProcAddress( mods[i], name ) ) return p;
+        return nullptr;
+      };
+      h.omp_set  = reinterpret_cast<void(*)(int)>    ( find( "omp_set_num_threads" ) );
+      h.omp_get  = reinterpret_cast<int(*)()>        ( find( "omp_get_max_threads" ) );
+      h.blas_set = reinterpret_cast<void(*)(int)>    ( find( "openblas_set_num_threads" ) );
+      h.blas_get = reinterpret_cast<int(*)()>        ( find( "openblas_get_num_threads" ) );
+      FARPROC const ms = find( "mkl_set_num_threads" ), mg = find( "mkl_get_max_threads" );   // MKL: both spellings
+      h.mkl_set  = reinterpret_cast<void(*)(int)>    ( ms ? ms : find( "MKL_Set_Num_Threads" ) );
+      h.mkl_get  = reinterpret_cast<int(*)()>        ( mg ? mg : find( "MKL_Get_Max_Threads" ) );
+      h.blis_set = reinterpret_cast<void(*)(int64_t)>( find( "bli_thread_set_num_threads" ) );
+      h.blis_get = reinterpret_cast<int64_t(*)()>    ( find( "bli_thread_get_num_threads" ) );
+    }
 #endif
     return h;
   }();

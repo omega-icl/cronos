@@ -93,7 +93,9 @@ static Run run( int kind, bool auto_on, int manual )
   oc.options.SOLVE.MARCHING        = false;
   oc.options.SOLVE.MAX_ITER        = 10;
   oc.options.SOLVE.RES_TOL         = 1e-11;
-  oc.options.SOLVE.FACTORIZATION   = OCFESLV::Options::SOLVE_SPQR;
+#if defined(CRONOS__WITH_SPQR)
+  oc.options.SOLVE.FACTORIZATION   = OCFESLV::Options::SOLVE_SPQR;   // available only with SuiteSparseQR (GPL build)
+#endif
   R.setup = oc.setup();
   if( !R.setup ) return R;
   R.nVar = oc.n_colloc_sta(); R.nEqn = oc.n_colloc_eqn(); R.square = ( R.nVar == R.nEqn );

@@ -38,9 +38,7 @@ class BASE_CVODES
 : public virtual BASE_SUNDIALS
 {
 public:
-  /** @ingroup ODESLV_CVODES
-   *  @ingroup ODEBND_CVODES
-   *  @{
+  /** @{
    */
   //! @brief Default class constructor
   BASE_CVODES()

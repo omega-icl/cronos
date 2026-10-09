@@ -985,15 +985,11 @@ ODESLV_CVODES::_states
   return STATUS::NORMAL;
 }
 
-//! @fn inline typename ODESLV_CVODES::STATUS ODESLV_CVODES::solve(
-//! std::vector<double> const& p, std::vector<double> const& c=std::vector<double>(), std::ostream& os=std::cout )
-//!
 //! This function computes a solution to the parametric ODEs:
-//!   - <a>p</a>  [input]  parameter values
-//!   - <a>c</a>  [input]  constant values
-//!   - <a>os</a> [input/ouptut]  output stream [default: std::cout]
-//! .
-//! The return value is the status.
+//! @param[in] p  parameter values
+//! @param[in] c  constant values
+//! @param[in,out] os  output stream [default: std::cout]
+//! @return the status
 inline
 typename ODESLV_CVODES::STATUS
 ODESLV_CVODES::solve
@@ -1005,15 +1001,11 @@ ODESLV_CVODES::solve
   return flag;
 }
 
-//! @fn inline typename ODESLV_CVODES::STATUS ODESLV_CVODES::solve(
-//! double const* p, double const* c=nullptr, std::ostream& os=std::cout )
-//!
 //! This function computes a solution to the parametric ODEs:
-//!   - <a>p</a>  [input]  parameter values
-//!   - <a>c</a>  [input]  constant values
-//!   - <a>os</a> [input/output]  output stream [default: std::cout]
-//! .
-//! The return value is the status.
+//! @param[in] p  parameter values
+//! @param[in] c  constant values
+//! @param[in,out] os  output stream [default: std::cout]
+//! @return the status
 inline
 typename ODESLV_CVODES::STATUS
 ODESLV_CVODES::solve

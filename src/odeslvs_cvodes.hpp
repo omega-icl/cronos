@@ -1080,11 +1080,10 @@ ODESLVS_CVODES::CVQUADB__
 
 //! This function computes a solution to the parametric ODEs with adjoint
 //! sensitivity analysis:
-//!  - <a>p</a>  [input]  parameter values
-//!  - <a>c</a>  [input]  constant values
-//!  - <a>os</a> [input/output]  output stream [default: std::cout]
-//! .
-//! The return value is the status.
+//! @param[in] p  parameter values
+//! @param[in] c  constant values
+//! @param[in,out] os  output stream [default: std::cout]
+//! @return the status
 inline
 typename ODESLVS_CVODES::STATUS
 ODESLVS_CVODES::solve_asens
@@ -1098,11 +1097,10 @@ ODESLVS_CVODES::solve_asens
 
 //! This function computes a solution to the parametric ODEs with adjoint
 //! sensitivity analysis:
-//!  - <a>p</a>  [input]  parameter values
-//!  - <a>c</a>  [input]  constant values
-//!  - <a>os</a> [input/output]  output stream [default: std::cout]
-//! .
-//! The return value is the status.
+//! @param[in] p  parameter values
+//! @param[in] c  constant values
+//! @param[in,out] os  output stream [default: std::cout]
+//! @return the status
 inline
 typename ODESLVS_CVODES::STATUS
 ODESLVS_CVODES::solve_asens
@@ -1498,16 +1496,12 @@ ODESLVS_CVODES::CVQUADF__
   return( flag? 0: -1 );
 }
 
-//! @fn inline typename ODESLVS_CVODES::STATUS ODESLVS_CVODES::solve_fsens(
-//! std::vector<double> const& p, std::vector<double> const& c=std::vector<double>(), std::ostream& os=std::cout )
-//!
 //! This function computes a solution to the parametric ODEs with forward
 //! sensitivity analysis:
-//!  - <a>p</a>   [input]  parameter values
-//!  - <a>c</a>   [input]  constant values
-//!  - <a>os</a>  [input/output]  output stream [default: std::cout]
-//! .
-//! The return value is the status.
+//! @param[in] p  parameter values
+//! @param[in] c  constant values
+//! @param[in,out] os  output stream [default: std::cout]
+//! @return the status
 inline
 typename ODESLVS_CVODES::STATUS
 ODESLVS_CVODES::solve_fsens
@@ -1519,16 +1513,12 @@ ODESLVS_CVODES::solve_fsens
   return flag;
 }
 
-//! @fn inline typename ODESLVS_CVODES::STATUS ODESLVS_CVODES::solve_fsens(
-//! double const* p, double const* c=nullptr, std::ostream& os=std::cout )
-//!
 //! This function computes a solution to the parametric ODEs with forward
 //! sensitivity analysis:
-//!  - <a>p</a>   [input]  parameter values
-//!  - <a>c</a>   [input]  constant values
-//!  - <a>os</a>  [input/output]  output stream [default: std::cout]
-//! .
-//! The return value is the status.
+//! @param[in] p  parameter values
+//! @param[in] c  constant values
+//! @param[in,out] os  output stream [default: std::cout]
+//! @return the status
 inline
 typename ODESLVS_CVODES::STATUS
 ODESLVS_CVODES::solve_fsens

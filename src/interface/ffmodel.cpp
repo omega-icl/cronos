@@ -307,6 +307,8 @@ Return a string describing the error.
       .value(
           "HYP_BC_MISDIRECTED", M::SetupStatus::HYP_BC_MISDIRECTED,
           "hyperbolic block: boundary condition on an outgoing characteristic")
+      .value("BACKEND_UNAVAILABLE", M::SetupStatus::BACKEND_UNAVAILABLE,
+             "an option requests a linear-algebra backend this build does not include")
       .value("HYP_CLOSURE_MISSING", M::SetupStatus::HYP_CLOSURE_MISSING,
              "hyperbolic block: AUTO.HYP_CLOSURE off and outflow rows missing")
       .value("REDUCED_DOF_INCONSISTENT", M::SetupStatus::REDUCED_DOF_INCONSISTENT,

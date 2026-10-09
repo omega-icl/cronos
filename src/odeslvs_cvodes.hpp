@@ -652,6 +652,15 @@ ODESLVS_CVODES::_INI_CVODES_ASA
 
    // Newton nonlinear solver
    case Options::NEWTON:
+#if !defined( CRONOS__WITH_KLU )
+    // 2026-10-09: SPARSE is always defined; without KLU it is REFUSED here (adjoint) -- the switch's DIAG/default
+    // case would otherwise run a different (diagonal) solver silently.
+    if( options.LINSOL == Options::SPARSE ){
+      std::cerr << "ODESLVS_CVODES ** LINSOL = SPARSE requires KLU, which this build does not include"
+                << " (build_info()['backends']); choose DIAG, DENSE or DENSEDQ, or use a build with KLU" << std::endl;
+      return false;
+    }
+#endif
     // Specify the linear solver and Jacobian approximation
     switch( options.LINSOL ){
      case Options::DIAG: default:

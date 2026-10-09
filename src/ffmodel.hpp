@@ -70,7 +70,7 @@ public:
   //! @brief Identifies this ffmodel.hpp.  The solver header carries its own OCFESLV::HEADER_ID, and a binary can
   //! mix the two (a sweep has run one revision's model layer under another's solver), so both are printed.
   static constexpr char const* HEADER_ID
-    = "ffmodel  rev361  2026-10-08";
+    = "ffmodel  rev362  2026-10-09";
 
   //! @brief The revision of this ffmodel.hpp (HEADER_ID), e.g. for a bug report; the model report does not print it.
   static char const* revision() { return HEADER_ID; }
@@ -2876,8 +2876,11 @@ public:
                              //!< reduction: the inner value is a post-solve captured input, so the
                              //!< outer's in-solve materialised operand would read a stale (window-
                              //!< lagged) value.  Refused rather than returned silently wrong.
-      HYP_CLOSURE_MISSING      //!< AUTO.HYP_CLOSURE off and the model leaves outgoing-characteristic rows missing at
+      HYP_CLOSURE_MISSING,     //!< AUTO.HYP_CLOSURE off and the model leaves outgoing-characteristic rows missing at
                              //!< an outflow face of a hyperbolic block (2026-10-07; appended last: values unchanged)
+      BACKEND_UNAVAILABLE      //!< an option explicitly requests a linear-algebra backend this build does not include
+                             //!< (SOLVE_SPQR, DET_SPQR without SuiteSparseQR; DET_EIGEN without Eigen).  Default and
+                             //!< AUTO choices fall back instead (2026-10-09; appended last: values unchanged)
   };
 
   //! @brief Process-wide lock for every operation that reads or modifies a USER DAG: setup() and fdiff() here, and
@@ -2916,6 +2919,8 @@ public:
     case SetupStatus::MODEL_COPY_FAILED:      return "could not copy user model into working DAG";
     case SetupStatus::HYP_CLOSURE_MISSING:    return "hyperbolic block: AUTO.HYP_CLOSURE is off and outgoing-characteristic "
         "rows are missing at an outflow face (close it in the model, or turn the option on)";
+    case SetupStatus::BACKEND_UNAVAILABLE:    return "an option requests a linear-algebra backend this build does not "
+        "include (see build_info()['backends']; the default or AUTO choice falls back instead)";
     case SetupStatus::CAPTURE_NESTED_REFUSED: return "nested evolution-direction reduction: an inner "
       "reduction's captured (post-solve) value feeds an outer reduction's in-solve operand, which "
       "would read a window-lagged value -- refused (consume the inner reduction in an output/objective, "

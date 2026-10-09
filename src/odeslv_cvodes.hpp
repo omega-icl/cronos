@@ -470,6 +470,15 @@ ODESLV_CVODES::_INI_CVODE
     _cv_flag = CVodeSetNonlinearSolver( _cv_mem, _sun_nls );
     if( _check_cv_flag( &_cv_flag, "CVodeSetNonlinearSolver", 1 ) ) return false;
 
+#if !defined( CRONOS__WITH_KLU )
+    // 2026-10-09: SPARSE is always defined; without KLU it is REFUSED here -- the switch's DIAG/default case would
+    // otherwise run a different (diagonal) solver silently.
+    if( options.LINSOL == Options::SPARSE ){
+      std::cerr << "ODESLV_CVODES ** LINSOL = SPARSE requires KLU, which this build does not include"
+                << " (build_info()['backends']); choose DIAG, DENSE or DENSEDQ, or use a build with KLU" << std::endl;
+      return false;
+    }
+#endif
     // Specify the linear solver and Jacobian approximation
     switch( options.LINSOL ){
      case Options::DIAG: default:

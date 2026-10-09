@@ -80,11 +80,9 @@ bind_ocfeslv_options(PyOpt& c)
       .value("SOLVE_LAPACK", mc::OCFESLV::Options::SOLVE_LAPACK,
              "densify the damped operator and use dense LU (debug / small "
              "systems)")
-#if defined(CRONOS__WITH_SPQR)
       .value("SOLVE_SPQR", mc::OCFESLV::Options::SOLVE_SPQR,
              "sparse rank-revealing QR (SuiteSparseQR) min-2-norm least "
              "squares on")
-#endif
       .export_values();
   py::enum_<mc::OCFESLV::Options::SolveWarmstart>(
       c, "SolveWarmstart",
@@ -103,7 +101,21 @@ bind_ocfeslv_options(PyOpt& c)
                                                 "undocumented")
       .export_values();
   py::enum_<mc::OCFESLV::Options::DETERMINACY_BACKEND_T>(
-      c, "DETERMINACY_BACKEND_T", "undocumented")
+      c, "DETERMINACY_BACKEND_T",
+      "Rank backend of the determinacy audit (2026-10-09: one value per line, "
+      "so that the Python binder registers them -- the one-line form left the "
+      "enum empty in Python).")
+      .value("DET_AUTO", mc::OCFESLV::Options::DET_AUTO,
+             "SuiteSparseQR if built, else Eigen if built, else dense under "
+             "the cap (default)")
+      .value("DET_SPQR", mc::OCFESLV::Options::DET_SPQR,
+             "SuiteSparseQR only; refused by setup() in a build without it "
+             "(BACKEND_UNAVAILABLE)")
+      .value("DET_EIGEN", mc::OCFESLV::Options::DET_EIGEN,
+             "Eigen's sparse QR only; refused by setup() in a build without "
+             "Eigen (BACKEND_UNAVAILABLE)")
+      .value("DET_DENSE", mc::OCFESLV::Options::DET_DENSE,
+             "dense SVD only, under the size cap")
       .export_values();
   py::class_<mc::OCFESLV::Options::t_Interface> c_INTERFACE(
       c, "t_Interface",
@@ -313,7 +325,9 @@ bind_ocfeslv_options(PyOpt& c)
   c_DETERMINACY.def_readwrite(
       "BACKEND", &mc::OCFESLV::Options::t_Determinacy::BACKEND,
       "rank backend: DET_AUTO = SPQR if built, else Eigen if built, else dense "
-      "under the cap. Values: AUTO|SPQR|EIGEN|DENSE.");
+      "under the cap. Values: AUTO|SPQR|EIGEN|DENSE. An explicit DET_SPQR / "
+      "DET_EIGEN in a build without that backend is REFUSED by setup() "
+      "(BACKEND_UNAVAILABLE) -- it used to skip the check silently.");
   c.def_readwrite(
       "DETERMINACY", &mc::OCFESLV::Options::DETERMINACY,
       "The numerical-rank determinacy audit run at the end of setup().");

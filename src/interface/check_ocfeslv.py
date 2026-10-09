@@ -240,6 +240,31 @@ check(not _ok0 and _H0.setup_status.name == "HYP_CLOSURE_MISSING",
       "AUTO.HYP_CLOSURE off, outflow face open: setup() refuses (%s)" % _H0.setup_status)
 
 # %% [markdown]
+# ### Backends requested explicitly
+# `SOLVE_SPQR`, `DET_SPQR` and `DET_EIGEN` exist in every build (2026-10-09).  Requested in a build without that
+# backend, setup() refuses with `BACKEND_UNAVAILABLE` -- it used to be a compile error (SOLVE_SPQR) or a silently
+# skipped check (DET_*).  In a build with it, the same model sets up as usual.
+
+# %%
+import cronos as _cr
+_be = _cr.build_info()["backends"]
+check(hasattr(OCFESLV.Options, "SOLVE_SPQR") and hasattr(OCFESLV.Options, "DET_SPQR")
+      and hasattr(OCFESLV.Options, "DET_EIGEN"), "SOLVE_SPQR, DET_SPQR, DET_EIGEN exist in every build")
+for _what, _field, _value, _have in (
+        ("SOLVE.FACTORIZATION = SOLVE_SPQR", "SOLVE", OCFESLV.Options.SOLVE_SPQR, _be["SPQR"]),
+        ("DETERMINACY.BACKEND = DET_SPQR", "DETERMINACY", OCFESLV.Options.DET_SPQR, _be["SPQR"]),
+        ("DETERMINACY.BACKEND = DET_EIGEN", "DETERMINACY", OCFESLV.Options.DET_EIGEN, _be["Eigen"])):
+    _B = advection(True)
+    if _field == "SOLVE": _B.options.SOLVE.FACTORIZATION = _value
+    else:                 _B.options.DETERMINACY.BACKEND = _value
+    _okb = _B.setup()
+    if _have:
+        check(_okb and _B.setup_status.name == "OK", "%s, backend built in: setup() succeeds (%s)" % (_what, _B.setup_status))
+    else:
+        check(not _okb and _B.setup_status.name == "BACKEND_UNAVAILABLE",
+              "%s, backend NOT built in: setup() refuses (%s)" % (_what, _B.setup_status))
+
+# %% [markdown]
 # ## Summary
 
 # %%

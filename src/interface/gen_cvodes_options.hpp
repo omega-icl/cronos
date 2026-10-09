@@ -52,7 +52,6 @@ bind_cvodes_options(PyOpt& c)
       c, "LINEAR_SOLVER",
       "Enumeration of linear solver strategies (within Newton nonlinear "
       "solver)")
-#if defined(CRONOS__WITH_KLU)
       .value("DIAG", mc::BASE_CVODES::Options::DIAG,
              "Approximate diagonal Jacobian formed by way of a difference "
              "quotient")
@@ -63,19 +62,8 @@ bind_cvodes_options(PyOpt& c)
              "Use approximate dense Jacobian by way of a difference quotient "
              "and internal direct dense linear algebra")
       .value("SPARSE", mc::BASE_CVODES::Options::SPARSE,
-             "Use analytic sparse Jacobian and use of internal direct dense "
-             "linear algebra functions")
-#else
-      .value("DIAG", mc::BASE_CVODES::Options::DIAG,
-             "Approximate diagonal Jacobian formed by way of a difference "
-             "quotient")
-      .value("DENSE", mc::BASE_CVODES::Options::DENSE,
-             "Use analytic dense Jacobian and internal direct dense linear "
-             "algebra functions")
-      .value("DENSEDQ", mc::BASE_CVODES::Options::DENSEDQ,
-             "Use approximate dense Jacobian by way of a difference quotient "
-             "and internal direct dense linear algebra")
-#endif
+             "Use analytic sparse Jacobian and the KLU sparse direct solver. "
+             "Requires a build with KLU")
       .export_values();
   c.def_readwrite("INTMETH", &mc::BASE_CVODES::Options::INTMETH,
                   "Numerical integration method [Default: MSBDF]");

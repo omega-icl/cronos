@@ -130,16 +130,11 @@ public:
     };
     //! @brief Enumeration of linear solver strategies (within Newton nonlinear solver)
     enum LINEAR_SOLVER{
-#if defined( CRONOS__WITH_KLU )
       DIAG=0,	//!< Approximate diagonal Jacobian formed by way of a difference quotient
       DENSE,	//!< Use analytic dense Jacobian and internal direct dense linear algebra functions
       DENSEDQ,	//!< Use approximate dense Jacobian by way of a difference quotient and internal direct dense linear algebra
-      SPARSE	//!< Use analytic sparse Jacobian and use of internal direct dense linear algebra functions
-#else
-      DIAG=0,	//!< Approximate diagonal Jacobian formed by way of a difference quotient
-      DENSE,	//!< Use analytic dense Jacobian and internal direct dense linear algebra functions
-      DENSEDQ	//!< Use approximate dense Jacobian by way of a difference quotient and internal direct dense linear algebra
-#endif
+      SPARSE	//!< Use analytic sparse Jacobian and the KLU sparse direct solver.  Requires a build with KLU
+		//!< (CRONOS__WITH_KLU); otherwise the integrator REFUSES it at setup.  Always defined (2026-10-09).
     };
     //! @brief Numerical integration method [Default: MSBDF]
     INTEGRATION_METHOD INTMETH;

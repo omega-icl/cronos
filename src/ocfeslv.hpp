@@ -484,15 +484,14 @@ public:
                           //!< so there are no zero-pivot issues even on rank-deficient interface
                           //!< Jacobians; sparse + fast on the large multi-block systems. Falls
                           //!< back to dense LAPACK (with a one-time notice) if not linked.
-      SOLVE_LAPACK  = 1   //!< densify the damped operator and use dense LU (debug / small systems)
-#if defined(CRONOS__WITH_SPQR)
-      ,
+      SOLVE_LAPACK  = 1,  //!< densify the damped operator and use dense LU (debug / small systems)
       SOLVE_SPQR    = 2   //!< sparse rank-revealing QR (SuiteSparseQR) min-2-norm least squares on
                           //!< Js directly -- no Js^T Js, so no fill/condition squaring, and the
                           //!< rank-revealing factor resolves the singular interface-augmented saddle
-                          //!< natively (the sparse analogue of the dense min-norm tier).  Available
-                          //!< only when the header is built with -DCRONOS__WITH_SPQR + SuiteSparse link.
-#endif
+                          //!< natively (the sparse analogue of the dense min-norm tier).  Requires a build
+                          //!< with SuiteSparseQR (-DCRONOS__WITH_SPQR, the GPL build); otherwise setup()
+                          //!< REFUSES it (BACKEND_UNAVAILABLE).  Always defined (2026-10-09), so a model
+                          //!< compiles -- and Python lists it -- in every build.
     };
     //! @brief Warm-start strategy for the per-element step of a SOLVE.MARCHING solve.
     enum SolveWarmstart
@@ -502,7 +501,15 @@ public:
       EXTRAPOLATE = 2   //!< linear/quadratic extrapolation from the last one/two elements' terminals
     };
     enum NT_SKIP_MODE { NT_SKIP_ALWAYS=0, NT_SKIP_AUTO=1, NT_SKIP_NEVER=2 };
-    enum DETERMINACY_BACKEND_T { DET_AUTO=0, DET_SPQR, DET_EIGEN, DET_DENSE };
+    //! @brief Rank backend of the determinacy audit (2026-10-09: one value per line, so that the Python binder registers
+    //! them -- the one-line form left the enum empty in Python).
+    enum DETERMINACY_BACKEND_T
+    {
+      DET_AUTO  = 0,  //!< SuiteSparseQR if built, else Eigen if built, else dense under the cap (default)
+      DET_SPQR  = 1,  //!< SuiteSparseQR only; refused by setup() in a build without it (BACKEND_UNAVAILABLE)
+      DET_EIGEN = 2,  //!< Eigen's sparse QR only; refused by setup() in a build without Eigen (BACKEND_UNAVAILABLE)
+      DET_DENSE = 3   //!< dense SVD only, under the size cap
+    };
 
     //! @brief How continuity between elements is expressed and imposed: the condition type, the imposition (penalty, trace multiplier, strong), SAT penalties and trace-multiplier scaling.
     struct t_Interface
@@ -641,7 +648,9 @@ public:
                                    //!< uses).
       DETERMINACY_BACKEND_T BACKEND; //!< rank backend: DET_AUTO = SPQR if built, else Eigen if
                                    //!< built, else dense under the cap.  Values:
-                                   //!< AUTO|SPQR|EIGEN|DENSE.
+                                   //!< AUTO|SPQR|EIGEN|DENSE.  An explicit DET_SPQR / DET_EIGEN in a
+                                   //!< build without that backend is REFUSED by setup()
+                                   //!< (BACKEND_UNAVAILABLE) -- it used to skip the check silently.
     } DETERMINACY;
 
     //! @brief The linear solve inside the forward/adjoint sensitivity computation.
@@ -4967,7 +4976,7 @@ public:
     // rev110 -- so a solve log carried a revision three steps stale.  Nothing else in
     // the build chain would have caught it: the makefile names the file, the build
     // oracle checks the instrument's format marker, and neither reads this.
-    = "ocfeslv  rev369  2026-10-09";
+    = "ocfeslv  rev370  2026-10-09";
 
   //! @brief The revision of this ocfeslv.hpp (HEADER_ID); FFModel::revision() gives the model layer's, which a
   //! binary may mix with another solver revision.
@@ -10591,6 +10600,24 @@ OCFESLV::_on_setup_begin
   _blockFaceData.clear();
   _idxCache.clear();
   _face_data.clear();
+  // 2026-10-09: an option that EXPLICITLY requests a backend this build lacks is refused here, before any work.
+  // (Default / AUTO choices fall back: SOLVE_SUPERLU to dense LAPACK, DET_AUTO to Eigen or dense.)
+  auto refuse = [&]( char const* what, char const* need ){
+    std::cerr << "OCFESLV::setup ** " << what << " requires " << need << ", which this build does not include"
+              << " (build_info()['backends']); choose another value or use a build with it" << std::endl;
+    _setupStatus = SetupStatus::BACKEND_UNAVAILABLE;
+    return false;
+  };
+#if !defined(CRONOS__WITH_SPQR)
+  if( options.SOLVE.FACTORIZATION == Options::SOLVE_SPQR )
+    return refuse( "SOLVE.FACTORIZATION = SOLVE_SPQR", "SuiteSparseQR (the GPL build)" );
+  if( options.DETERMINACY.BACKEND == Options::DET_SPQR )
+    return refuse( "DETERMINACY.BACKEND = DET_SPQR", "SuiteSparseQR (the GPL build)" );
+#endif
+#if !defined(CRONOS__WITH_EIGEN)
+  if( options.DETERMINACY.BACKEND == Options::DET_EIGEN )
+    return refuse( "DETERMINACY.BACKEND = DET_EIGEN", "Eigen" );
+#endif
   return true;
 }
 

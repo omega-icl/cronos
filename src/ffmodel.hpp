@@ -70,7 +70,7 @@ public:
   //! @brief Identifies this ffmodel.hpp.  The solver header carries its own OCFESLV::HEADER_ID, and a binary can
   //! mix the two (a sweep has run one revision's model layer under another's solver), so both are printed.
   static constexpr char const* HEADER_ID
-    = "ffmodel  rev360  2026-10-07";
+    = "ffmodel  rev361  2026-10-08";
 
   //! @brief The revision of this ffmodel.hpp (HEADER_ID), e.g. for a bug report; the model report does not print it.
   static char const* revision() { return HEADER_ID; }
@@ -4497,7 +4497,13 @@ const
     // rev283 (T-P1): a balance row that reduce_order left ALGEBRAIC in a bare auxiliary is still a balance row.
     // Inline each such auxiliary one level (aux -> its defining derivative) and re-scan; the inlined form is used
     // for the symbol only.  INTERIOR rows only: LINK rows ARE the definitions.
-    if( !eqn_has_deriv && _knob_CHAIN_SYMBOL() ){
+    // 4.0b (2026-10-08): ALSO a differential row, for an auxiliary that appears in it only BARE (never under a
+    // derivative in the row): u_t + Dz_u = 0 -- the advection PDE once a second-derivative BOUNDARY row has made
+    // RED_FULL substitute Dz_u -- is read u_t + u_z = 0.  Without this its symbol column u_z was missing and the
+    // block came out rectangular (UNDETERMINED).  An auxiliary differentiated in the row (u_t - D w_z, the reduced
+    // diffusion form) is left alone: there the first-order system in (u, w) is the intended reading.
+    bool const had_deriv = eqn_has_deriv;
+    if( _knob_CHAIN_SYMBOL() ){
       auto itr = role_of_eqn.find( eqnvar.id().second );
       if( itr != role_of_eqn.end() && itr->second == EqnRole::INTERIOR ){
         std::vector<FFVar> targ, repl;
@@ -4507,6 +4513,15 @@ const
           for( auto const& op : sg.l_op )
             if( op->type == FFOp::VAR && !op->varout.empty() && op->varout[0] && op->varout[0]->id() == aux.aux.id() ){ in_row = true; break; }
           if( !in_row ) continue;
+          if( had_deriv ){                                     // a differential row: bare occurrences only
+            bool aux_differentiated = false;
+            for( auto const& op : sg.l_op ){
+              if( !op->sameid( typeid(FFPartial) ) ) continue;
+              for( auto const* vin : op->varin ) if( vin && vin->id() == aux.aux.id() ){ aux_differentiated = true; break; }
+              if( aux_differentiated ) break;
+            }
+            if( aux_differentiated ) continue;
+          }
           bool expr_has_deriv = false;
           auto sge = _dag->subgraph( 1, &aux.expr );
           for( auto const& ope : sge.l_op ) if( ope->sameid( typeid(FFPartial) ) ){ expr_has_deriv = true; break; }
@@ -4531,7 +4546,7 @@ const
           }
           if( eqn_has_deriv ){
             inlined_eqn[ eqnvar.id().second ] = inl;
-            if( options.DISPLAY_LEVEL >= 1 )
+            if( !had_deriv && options.DISPLAY_LEVEL >= 1 )
               std::cerr << "OCFESLV::_principal_symbol ** chain-aware: row " << eqnvar << " is algebraic in "
                         << targ.size() << " reduction auxiliar" << ( targ.size() == 1 ? "y" : "ies" )
                         << " -- read with the definition(s) inlined; it is a balance row" << std::endl;
@@ -4570,11 +4585,11 @@ const
   // in a transport equation is untouched (and PDE22's flux divergence has NO value-slaved state, so
   // (a) fails and it never enters this path).
   {
-    auto covered = [&]( FFVar const& sd )->bool {
-      auto it = diff_count.find( sd.id().second );
-      return ( it != diff_count.end() && it->second > 1 )       // (b1) another diff eqn supplies it
-          || _auxVarID.find( sd.id() ) != _auxVarID.end();      // (b2) LINK-defined materialised aux
-    };
+    // 4.0b (2026-10-08): (b1) is judged per (state, DIRECTION), not per state.  A row is the provider of the
+    // derivatives it takes; "covered elsewhere" must mean the SAME derivative is supplied by another row.  Counted
+    // per state, a LINK Dz_u - u_z (a z-derivative) "covered" the PDE u_t + Dz_u (the t-derivative) once a
+    // second-derivative BOUNDARY row had made reduction substitute Dz_u into it: the PDE was routed to vAlgEqn,
+    // then u, then everything -- an EMPTY symbol, classified ALGEBRAIC_FIELD (measured, OCFE: u_zz = 0 at an outflow).
     bool routed_any = true;
     while( routed_any ){
       routed_any = false;
@@ -4591,6 +4606,32 @@ const
         }
       }
       if( value_slaved.empty() ) break;
+      std::map<size_t, std::set<std::pair<size_t,size_t>>> eqn_diff_dir;   // eqn id -> {(state id, direction id)}
+      std::map<std::pair<size_t,size_t>, int> diff_count_dir;              // (state, direction) -> # rows taking it
+      for( auto const& eqnvar : diff_eqn ){
+        auto const it_i = inlined_eqn.find( eqnvar.id().second );            // rev283: the inlined row, as below
+        auto sgd = _dag->subgraph( 1, it_i != inlined_eqn.end() ? &it_i->second : &eqnvar );
+        auto& pr = eqn_diff_dir[ eqnvar.id().second ];
+        for( auto const& op : sgd.l_op ){
+          if( !op->sameid( typeid(FFPartial) ) ) continue;
+          auto const* pop = mc::type_cast<FFPartial const>( op );
+          for( size_t jj = 0; jj < op->varin.size(); ++jj ){
+            FFVar const* operand = op->varin[jj];
+            if( _mVar.find( *operand ) == _mVar.end() ) continue;
+            for( auto const& [indep_var, ord] : pop->Indep().expr )
+              for( auto const& d : sym.vDom )
+                if( d.id() == indep_var.id() ) pr.insert( { operand->id().second, indep_var.id().second } );
+          }
+        }
+        for( auto const& pd : pr ) ++diff_count_dir[ pd ];
+      }
+      // (b1) every direction in which THIS row differentiates sd is also taken by another row; or (b2)
+      auto covered = [&]( FFVar const& sd, size_t eqn_id )->bool {
+        if( _auxVarID.find( sd.id() ) != _auxVarID.end() ) return true;        // (b2) LINK-defined materialised aux
+        for( auto const& pd : eqn_diff_dir[ eqn_id ] )
+          if( pd.first == sd.id().second && diff_count_dir[ pd ] <= 1 ) return false;
+        return true;
+      };
       std::vector<FFVar> keep_diff;
       bool any_moved = false;
       for( auto const& eqnvar : diff_eqn ){
@@ -4604,7 +4645,7 @@ const
         bool all_covered = has_vs;
         if( has_vs )
           for( auto const& sdiff : eqn_diff[ eqnvar.id().second ] )
-            if( !covered( sdiff ) ){ all_covered = false; break; }
+            if( !covered( sdiff, eqnvar.id().second ) ){ all_covered = false; break; }
         // rev69 INSTRUMENT [symrow].  This routing rule exists, by its own comment, to
         // "avoid spurious extra rows (rectangular / rank-deficient)" -- and on MMPDE27 it
         // PRODUCES a rectangular symbol: sym=3x4, hence type=UNDETERMINED with
@@ -4633,7 +4674,7 @@ const
                         << "  diff_count=" << ( it != diff_count.end() ? it->second : 0 )
                         << "  is_aux=" << ( _auxVarID.find( sdiff.id() ) != _auxVarID.end()
                                               ? "y" : "n" )
-                        << "  covered=" << ( covered( sdiff ) ? "y" : "n" ) << "\n";
+                        << "  covered=" << ( covered( sdiff, eqnvar.id().second ) ? "y" : "n" ) << "\n";
             }
         }
         if( has_vs && all_covered ){ sym.vAlgEqn.push_back( eqnvar ); any_moved = true; }

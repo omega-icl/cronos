@@ -58,26 +58,31 @@
 //           guard-ON reject here is STRUCTURAL (the BC supplies no inflow data) and
 //           conservative -- relevant to PSA's coupled blocks.
 //
-//   C  ZERO-REFERENCE COLLAPSE     BC = P * c - q              @ LB   (ALGEBRAIC)
+//   C  REFERENCE-DEPENDENT VERDICT  BC = P * c - q              @ LB   (ALGEBRAIC)
 //        a purely-algebraic bilinear (NO derivative, so NO proxy rescue):
-//        a = d(P*c)/d(P,c) = (c_ref, P_ref).
+//        a = d(P*c)/d(P,c) = (c_ref, P_ref).  (rev369, 2026-10-09: the guard tests the
+//        KREISS condition a.r_in != 0 with r_in = (1,0) -- the condition PINS P iff
+//        c_ref != 0; the former membership test "a in Vin" rejected it for P_ref != 0.)
 //        -> reference ZEROED (no update_ref): a=(0,0) -> ||a||~0 -> the guard
-//           reports "imposes nothing" and SILENTLY ACCEPTS a mis-directed BC.
-//        -> reference SET (update_ref to the operating point): a=(c0,P0) with
-//           P0 != 0 -> a NOT in Vin@LB -> REJECT.
-//        The verdict flips PURELY from the reference: the degeneracy is OBSERVED,
-//        not assumed.  Independent of the flux-guard macro (no OpP node).
+//           reports "imposes nothing" and SILENTLY ACCEPTS: the collapse, as before.
+//        -> reference SET (operating point): a=(c0,P0), c0 != 0 -> pins P -> ACCEPT
+//           (P*c = q with c known from the interior determines P: well-posed).
+//        -> P reference SET, c reference ZERO: a=(0,P0) -> a.r_in = 0 -> REJECT.
+//        The verdict flips PURELY from the reference -- from c_ref, the one that
+//        matters.  Independent of the flux-guard macro (no OpP node).
 //
 //   D  FACE-vs-MIDPOINT dom_ref    BC = P * d_z c + g(z) c - q  @ LB
 //        g(z) = z (z - zf):  g(LB)=g(0)=0 but g(midpoint)=-zf^2/4 != 0.  At the
 //        face the BC is exactly section A (well-directed, recovers).  But the
 //        guard evaluates `a` at _default_dom_ref(z) = the element MIDPOINT:
 //        a = (1, g(z_ref)).
-//        -> dom_ref = MIDPOINT (default): a=(1,-zf^2/4) NOT in Vin -> FALSE REJECT.
+//        -> dom_ref = MIDPOINT (default): a=(1,-zf^2/4): the membership test "a in Vin"
+//           FALSE-REJECTED this (rev <= 368); the Kreiss test (rev369) accepts it,
+//           a.r_in = 1, and the solve RECOVERS.
 //        -> dom_ref = FACE (add_domain(z,...,ref=LB) overrides _classDomRef): a=(1,0)
-//           in Vin -> ACCEPT, and the solve RECOVERS.
-//        So the midpoint default false-rejects a well-posed face BC: the override
-//        is load-bearing, and a face-aware classification dom_ref is warranted.
+//           -> ACCEPT, and the solve RECOVERS.
+//        Both arms accept and recover: the midpoint default no longer false-rejects a
+//        well-posed face BC (the face override is kept as a second arm).
 //        (Requires the flux guard ON; with it off the OpP BC skips and neither
 //        dom_ref discriminates.)
 //
@@ -228,7 +233,8 @@ struct Result {
 // dom_ref for z to the LB face (the D face arm).
 static Result run_section( OCFESLV::Options::ImpositionType imp, Par const& p,
                            Section section, bool set_ref, bool face_domref,
-                           char const* label, double init_perturb = 0.0 )
+                           char const* label, double init_perturb = 0.0,
+                           bool c_ref_zero = false )   // section C: P reference set, c reference left at zero
 {
   Result R; R.mode = imp_name(imp); R.label = label;
   R.section = section; R.set_ref = set_ref; R.face_domref = face_domref;
@@ -302,7 +308,8 @@ static Result run_section( OCFESLV::Options::ImpositionType imp, Par const& p,
   oc.add_state( c, {t,z} );
   if( set_ref ){
     oc.update_ref( P, [&]( OCFESLV::t_Coord const& crd ){ return P_exact(crd.at(t),crd.at(z),p); } );
-    oc.update_ref( c, [&]( OCFESLV::t_Coord const& crd ){ return C_exact(crd.at(t),crd.at(z),p); } );
+    if( !c_ref_zero )
+      oc.update_ref( c, [&]( OCFESLV::t_Coord const& crd ){ return C_exact(crd.at(t),crd.at(z),p); } );
   }
 
   OCFESLV::EqnOptions int_opt( OCFESLV::EqnRole::INTERIOR, 0 );
@@ -455,6 +462,7 @@ int main()
   // Same BC, two references; the verdict must FLIP.  Independent of the flux macro.
   Result C_zero = run_section(OCFESLV::Options::IC_WEAK, p, SEC_C_ALGEBRAIC, /*set_ref=*/false, false, "ref-zeroed");
   Result C_set  = run_section(OCFESLV::Options::IC_WEAK, p, SEC_C_ALGEBRAIC, /*set_ref=*/true,  false, "ref-set");
+  Result C_czero= run_section(OCFESLV::Options::IC_WEAK, p, SEC_C_ALGEBRAIC, /*set_ref=*/true,  false, "ref-c-zero", 0.0, /*c_ref_zero=*/true);
 
   // ---- Section D: z-dependent coupling -- midpoint-vs-face dom_ref.
   //   dom_ref = MIDPOINT (default) -> FALSE REJECT.
@@ -560,25 +568,28 @@ int main()
   }
   all_ok &= B2_ok;
 
-  // C: the verdict must FLIP with the reference -- zeroed ACCEPTs (a~0, guard
-  // imposes nothing), set REJECTs (a=(c0,P0), P0!=0 outside Vin).
+  // C: the verdict must FLIP with the reference (Kreiss, rev369) -- zeroed ACCEPTs (a~0, guard imposes
+  // nothing), set ACCEPTs (a=(c0,P0): c0 pins P), c-zero REJECTs (a=(0,P0): pins nothing incoming).
   bool const C_ok = ( C_zero.setup_ok && !C_zero.rejected_bc )
-                 && ( !C_set.setup_ok && C_set.rejected_bc );
-  std::cout << "C  zero-reference collapse OBSERVED (zeroed=accept, set=reject): "
+                 && ( C_set.setup_ok && !C_set.rejected_bc )
+                 && ( !C_czero.setup_ok && C_czero.rejected_bc );
+  std::cout << "C  reference-dependent verdict (zeroed=accept, set=accept, c-zero=reject): "
             << (C_ok?"PASS":"FAIL")
             << "   [zeroed: " << (C_zero.setup_ok?"silently accepted":"rejected")
-            << " | set: "     << (C_set.setup_ok?"accepted":"rejected") << "]\n";
+            << " | set: "     << (C_set.setup_ok?"accepted":"rejected")
+            << " | c-zero: "  << (C_czero.setup_ok?"accepted":"rejected") << "]\n";
   all_ok &= C_ok;
 
-  // D: the verdict must move with dom_ref -- midpoint FALSE-REJECTs, face ACCEPTs
-  // and recovers.  Only discriminates with the flux guard ON.
+  // D: NO false reject (Kreiss, rev369) -- midpoint AND face dom_ref ACCEPT and recover.  (Up to rev368 the
+  // membership test false-rejected the midpoint arm.)  Only discriminates with the flux guard ON.
   bool D_ok;
   if( flux_on ){
-    D_ok = ( !D_mid.setup_ok && D_mid.rejected_bc )
+    D_ok = (  D_mid.setup_ok && D_mid.solved
+              && D_mid.eP <= TEST_HYP_EXACT_TOL && D_mid.eC <= TEST_HYP_EXACT_TOL )
         && (  D_face.setup_ok && D_face.solved
               && D_face.eP <= TEST_HYP_EXACT_TOL && D_face.eC <= TEST_HYP_EXACT_TOL );
-    std::cout << "D  dom_ref face-vs-midpoint discrimination (midpoint false-reject, "
-              << "face accept+recover): " << (D_ok?"PASS":"FAIL") << "\n";
+    std::cout << "D  dom_ref face-vs-midpoint: no false reject (both accept+recover): "
+              << (D_ok?"PASS":"FAIL") << "\n";
   } else {
     // guard off: the OpP BC skips, so neither dom_ref rejects (both accept).  The
     // degeneracy is invisible without the flux guard -- documented, not scored.

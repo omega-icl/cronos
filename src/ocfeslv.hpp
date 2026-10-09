@@ -4967,7 +4967,7 @@ public:
     // rev110 -- so a solve log carried a revision three steps stale.  Nothing else in
     // the build chain would have caught it: the makefile names the file, the build
     // oracle checks the instrument's format marker, and neither reads this.
-    = "ocfeslv  rev368  2026-10-08";
+    = "ocfeslv  rev369  2026-10-09";
 
   //! @brief The revision of this ocfeslv.hpp (HEADER_ID); FFModel::revision() gives the model layer's, which a
   //! binary may mix with another solver revision.
@@ -14394,16 +14394,24 @@ OCFESLV::_validate_hyperbolic_incoming_bcs()
           continue;
         }
 
-        // Off-direction residual: relative norm of the part of a coupling
-        // vector that lies OUTSIDE the incoming characteristic space Vin.
-        // Returns <0 for a trivial (zero) coupling = "no constraint".
-        auto offdir_resid = [&]( arma::vec const& w )->double {
+        // 4.0b-i (2026-10-09): the test is the KREISS condition, not membership of Vin.  Writing the states in
+        // characteristic variables, u = R w, a condition a.u = g reads a.R_in w_in + a.R_out w_out = g: it pins the
+        // incoming w_in iff a.R_in != 0 -- a NONZERO component on the incoming RIGHT eigenvectors, the COLUMN space
+        // of A+/A- (the U columns of this SVD).  Membership of Vin (the LEFT eigenvectors: "the condition is a
+        // function of w_in only") is sufficient but stricter: it REJECTED u = g at z = 0 for u_t + v_z = 0,
+        // v_t + u_z = 0 (incoming mode u + v; a = (1,0) is outside span{(1,1)} yet pins it, u - v being known from
+        // the interior).  The two agree for scalars and decoupled systems -- all the corpus had.  PDE16's
+        // w_out + beta d_z w_out (a = (2,-1), r_in = (1,2)) stays rejected: a.r_in = 0.
+        arma::mat Qin;  if( r_in > 0 ) Qin = arma::orth( U.cols( 0, r_in - 1 ) );
+        // fraction of a coupling vector that lies in the incoming space: 1 inside Vin, 0 orthogonal to it;
+        // <0 for a trivial (zero) coupling = "no constraint"
+        auto in_frac = [&]( arma::vec const& w )->double {
           double const wn = arma::norm( w );
           if( wn < 1e-30 ) return -1.0;          // trivial: imposes nothing
-          if( r_in == 0 )  return 1.0;           // nothing incoming -> off
-          arma::vec const proj = Vin * ( Vin.t() * w );
-          return arma::norm( w - proj ) / wn;
+          if( r_in == 0 )  return 0.0;           // nothing incoming -> touches nothing
+          return arma::norm( Qin.t() * w ) / wn;
         };
+        std::vector<arma::rowvec> face_rows;     // the accepted couplings restricted to Vin (the Kreiss matrix)
 
         for( auto const& bcvar : bcs ){
           // Classify the BC's structure: FFPartial = LOCAL derivative (flux BC,
@@ -14473,8 +14481,9 @@ OCFESLV::_validate_hyperbolic_incoming_bcs()
           _dag->eval( jacA, aval, ev_vars, ev_vals );
           arma::vec a( (arma::uword)nState );
           for( size_t k = 0; k < nState; ++k ) a((arma::uword)k) = aval[k];
-          double const resid_a = offdir_resid( a );
-          double resid_b = -1.0;          // face-normal DERIVATIVE coupling residual
+          double const frac_a = in_frac( a );
+          double frac_b = -1.0;           // face-normal DERIVATIVE coupling: its fraction in Vin
+          arma::vec b_used;
                                           // (criterion #3); stays trivial (-1) unless
                                           // a flux BC's b is computed below.
 
@@ -14503,36 +14512,52 @@ OCFESLV::_validate_hyperbolic_incoming_bcs()
               auto jacB = _dag->FAD( std::vector<FFVar>{ bc_use }, face_proxies );
               std::vector<double> bval( nState, 0. );
               _dag->eval( jacB, bval, ev_vars, ev_vals );
-              arma::vec b( (arma::uword)nState );
-              for( size_t k = 0; k < nState; ++k ) b((arma::uword)k) = bval[k];
-              resid_b = offdir_resid( b );
+              b_used.set_size( (arma::uword)nState );
+              for( size_t k = 0; k < nState; ++k ) b_used((arma::uword)k) = bval[k];
+              frac_b = in_frac( b_used );
             }
           }
           if( _solve_display_level() >= 2 && has_partial )
             _disp( 2 ) << "OCFESLV::setup ** hyperbolic flux-BC guard: block " << bid
-                      << " face " << end.name << " (flux BC) value-resid="
-                      << ( resid_a < 0 ? 0.0 : resid_a ) << " deriv-resid="
-                      << ( resid_b < 0 ? 0.0 : resid_b ) << "\n";
+                      << " face " << end.name << " (flux BC) value-in="
+                      << ( frac_a < 0 ? 0.0 : frac_a ) << " deriv-in="
+                      << ( frac_b < 0 ? 0.0 : frac_b ) << "\n";
 
-          // Criterion #3: imposes nothing if BOTH couplings are trivial; accept if
-          // EITHER value or derivative coupling lies in Vin; reject only when the BC
-          // constrains something yet touches no incoming characteristic in either.
-          // With the flux guard OFF, resid_b stays -1 (trivial) and this reduces
-          // EXACTLY to the value-only test (a in Vin) for value BCs.
-          bool const a_triv = ( resid_a < 0 ), b_triv = ( resid_b < 0 );
+          // Criterion #3: imposes nothing if BOTH couplings are trivial; accept if EITHER the value or the
+          // derivative coupling TOUCHES Vin (a nonzero component on it); reject only when the BC constrains
+          // something yet touches no incoming characteristic in either.
+          bool const a_triv = ( frac_a < 0 ), b_triv = ( frac_b < 0 );
           if( a_triv && b_triv ) continue;             // trivial: imposes nothing
-          bool const a_in = ( !a_triv && resid_a <= 1e-6 );
-          bool const b_in = ( !b_triv && resid_b <= 1e-6 );
+          bool const a_in = ( !a_triv && frac_a >= 1e-6 );
+          bool const b_in = ( !b_triv && frac_b >= 1e-6 );
+          if( a_in || b_in ){
+            arma::vec const& w_used = a_in ? a : b_used;
+            face_rows.push_back( ( Qin.t() * w_used ).t() / arma::norm( w_used ) );
+          }
           if( !a_in && !b_in ){
             _disp( 2 ) << "OCFESLV::setup ** hyperbolic BC guard: block " << bid
                       << " face " << end.name
                       << " incoming BC touches no incoming characteristic in value "
-                      << "OR derivative (value-resid " << ( resid_a < 0 ? 1.0 : resid_a )
-                      << ", deriv-resid " << ( resid_b < 0 ? 1.0 : resid_b )
+                      << "OR derivative (value-in " << ( frac_a < 0 ? 0.0 : frac_a )
+                      << ", deriv-in " << ( frac_b < 0 ? 0.0 : frac_b )
                       << ") -- it prescribes an OUTGOING characteristic; check the "
                       << "flow-direction / which end this condition belongs on\n";
             ok = false;
             _setupStatus = SetupStatus::HYP_BC_MISDIRECTED;   // distinct from the count mismatch
+          }
+        }
+        // Face level: the Kreiss matrix (the accepted couplings restricted to Vin, one row each) must be
+        // nonsingular -- two conditions each touching Vin may still pin the SAME incoming characteristic.
+        if( ok && r_in > 0 && face_rows.size() == (size_t)r_in ){
+          arma::mat K( (arma::uword)r_in, (arma::uword)r_in );
+          for( size_t k = 0; k < face_rows.size(); ++k ) K.row( (arma::uword)k ) = face_rows[k];
+          arma::vec const sv = arma::svd( K );
+          if( sv.n_elem && sv.min() <= 1e-8 * sv.max() ){
+            _disp( 2 ) << "OCFESLV::setup ** hyperbolic BC guard: block " << bid << " face " << end.name
+                      << ": its " << r_in << " incoming condition(s) pin the same incoming characteristic(s)"
+                      << " (Kreiss matrix singular: sigma_min/sigma_max = " << sv.min() / sv.max() << ")\n";
+            ok = false;
+            _setupStatus = SetupStatus::HYP_BC_MISDIRECTED;
           }
         }
       }

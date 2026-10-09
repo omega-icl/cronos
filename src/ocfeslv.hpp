@@ -10611,7 +10611,7 @@ OCFESLV::_on_setup_begin
   _face_data.clear();
   // 2026-10-09: an option that EXPLICITLY requests a backend this build lacks is refused here, before any work.
   // (Default / AUTO choices fall back: SOLVE_SUPERLU to dense LAPACK, DET_AUTO to Eigen or dense.)
-  auto refuse = [&]( char const* what, char const* need ){
+  [[maybe_unused]] auto refuse = [&]( char const* what, char const* need ){   // unused when every backend is built
     std::cerr << "OCFESLV::setup ** " << what << " requires " << need << ", which this build does not include"
               << " (build_info()['backends']); choose another value or use a build with it" << std::endl;
     _setupStatus = SetupStatus::BACKEND_UNAVAILABLE;

@@ -4621,8 +4621,9 @@ const
         }
       }
       if( value_slaved.empty() ) break;
-      std::map<size_t, std::set<std::pair<size_t,size_t>>> eqn_diff_dir;   // eqn id -> {(state id, direction id)}
-      std::map<std::pair<size_t,size_t>, int> diff_count_dir;              // (state, direction) -> # rows taking it
+      using t_vid = std::decay_t<decltype( std::declval<FFVar const&>().id().second )>;   // a variable's id, as FFVar has it
+      std::map<t_vid, std::set<std::pair<t_vid,t_vid>>> eqn_diff_dir;     // eqn id -> {(state id, direction id)}
+      std::map<std::pair<t_vid,t_vid>, int> diff_count_dir;                // (state, direction) -> # rows taking it
       for( auto const& eqnvar : diff_eqn ){
         auto const it_i = inlined_eqn.find( eqnvar.id().second );            // rev283: the inlined row, as below
         auto sgd = _dag->subgraph( 1, it_i != inlined_eqn.end() ? &it_i->second : &eqnvar );
@@ -4641,7 +4642,7 @@ const
         for( auto const& pd : pr ) ++diff_count_dir[ pd ];
       }
       // (b1) every direction in which THIS row differentiates sd is also taken by another row; or (b2)
-      auto covered = [&]( FFVar const& sd, size_t eqn_id )->bool {
+      auto covered = [&]( FFVar const& sd, t_vid eqn_id )->bool {
         if( _auxVarID.find( sd.id() ) != _auxVarID.end() ) return true;        // (b2) LINK-defined materialised aux
         for( auto const& pd : eqn_diff_dir[ eqn_id ] )
           if( pd.first == sd.id().second && diff_count_dir[ pd ] <= 1 ) return false;

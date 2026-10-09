@@ -31,7 +31,7 @@ GROUPS = [
 ]
 REGISTRY = {
   # resources
-  'CRONOS_MAXTHREAD': ( 'resource', 'Default of `MAXTHREAD` (0 = no cap): lets a cluster job cap the threads without editing code.' ),
+  'CRONOS_MAXTHREAD': ( 'resource', 'Default of `MAXTHREAD` (1 = one thread, the default since 5.0.0; 0 = no cap, the runtime keeps the environment\'s setting, usually all cores; n = at most n): the threads the numerical backends (BLAS, OpenMP, SPQR, SuperLU, ...) may use inside setup() and solve().' ),
   # setup reports and audits
   'CRONOS_AUDIT': ( 'audit', 'Umbrella for the cheap setup reports: default of `AUDIT.EQN_LEGEND`, `AUDIT.COVERAGE` and `AUDIT.RANK_SYMMETRY` (not the spectrum, which runs a dense SVD).' ),
   'CRONOS_AUDIT_LEGEND': ( 'audit', 'Default of `AUDIT.EQN_LEGEND`: the equation legend.' ),

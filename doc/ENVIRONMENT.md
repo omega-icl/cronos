@@ -16,7 +16,7 @@ Sets the default of an option that does not change results.
 
 | variable | what it does | read in |
 |---|---|---|
-| `CRONOS_MAXTHREAD` | Default of `MAXTHREAD` (0 = no cap): lets a cluster job cap the threads without editing code. | `ffmodel.hpp` |
+| `CRONOS_MAXTHREAD` | Default of `MAXTHREAD` (1 = one thread, the default since 5.0.0; 0 = no cap, the runtime keeps the environment's setting, usually all cores; n = at most n): the threads the numerical backends (BLAS, OpenMP, SPQR, SuperLU, ...) may use inside setup() and solve(). | `ffmodel.hpp` |
 
 ## Setup reports and audits
 

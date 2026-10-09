@@ -534,7 +534,8 @@ public:
       {
         // rev142b: 0 = no cap imposed (the runtime keeps whatever the environment set).  rev321: back HERE -- rev308
         // had moved this line into OCFESLV::Options, leaving FFModel::options.MAXTHREAD uninitialised until setup().
-        MAXTHREAD = (size_t)_env_dbl( "CRONOS_MAXTHREAD", 0. );
+        // 2026-10-09: default 1 (was 0) -- see MAXTHREAD.
+        MAXTHREAD = (size_t)_env_dbl( "CRONOS_MAXTHREAD", 1. );
         CLASSIFY.ROBUST     = ROBUST_OFF;   // CRONOS_CLASSIFY_ROBUST retired 2026-10-07 (WORKPLAN 3.A): the option decides
       }
 
@@ -711,15 +712,21 @@ public:
                                  //!< the SAME BLAS/OpenMP layer, so ONE cap covers them all --
                                  //!< SPQR has no thread pool of its own (its TBB path was removed
                                  //!< upstream, and cc.SPQR_nthreads is now inert).
-                                 //!< 0 (default) imposes NO cap: the runtime is left exactly as
-                                 //!< the environment set it.  n>0 caps to n for the duration of
-                                 //!< the call and RESTORES the previous setting on every exit.
+                                 //!< 1 (default since 2026-10-09; was 0): one thread.  0 imposes NO
+                                 //!< cap: the runtime is left exactly as the environment set it --
+                                 //!< usually ALL cores, OpenBLAS's and OpenMP's own default.  n>0
+                                 //!< caps to n for the duration of the call and RESTORES the
+                                 //!< previous setting on every exit.
                                  //!< NOTE the deliberate difference from FFGraph::Options::
                                  //!< MAXTHREAD, which reads 0 as "hardware_concurrency": here 0
                                  //!< means "do not touch", so an outer OMP_NUM_THREADS or a
                                  //!< cluster allocation is respected rather than overridden.
                                  //!< MEASURED (PDE5, 9 audit windows): cap=1 is 18% FASTER than
                                  //!< the uncapped run -- 152.4 s against 186.0 s of rank time.
+                                 //!< MEASURED (PDE38, 16 cores): uncapped, the SPQR build ran
+                                 //!< 29.6 s on 431 s of CPU; capped at 1, 16.4 s on 15 s (and
+                                 //!< without SPQR 19.7 s -> 18.7 s): CRONOS's frontal and dense
+                                 //!< blocks are too small for threads to pay.  Results identical.
                                  //!< Environment: CRONOS_MAXTHREAD.
   } options;
 
@@ -3272,7 +3279,10 @@ protected:
   class t_ThreadCap
   {
   public:
-    explicit t_ThreadCap( size_t maxthread );
+    //! @param maxthread  the cap (0: none -- no call at all)
+    //! @param announce   report, once per distinct cap, what the cap bound (or that nothing did); callers pass true
+    //!                   for a cap other than the default 1, or at DISPLAY_LEVEL >= 1, so a default run stays quiet
+    explicit t_ThreadCap( size_t maxthread, bool announce = true );
     ~t_ThreadCap();
     t_ThreadCap( t_ThreadCap const& ) = delete;
     t_ThreadCap& operator=( t_ThreadCap const& ) = delete;
@@ -10783,7 +10793,7 @@ FFModel::setup
   if( !_check_transitions() ){ _setupStatus = SetupStatus::INCONSISTENT_MODEL;  return false; }   // see add_transition
   if( !_check_equation_reductions() ){ _setupStatus = SetupStatus::INCONSISTENT_MODEL;  return false; }   // the causality refusal
 
-  t_ThreadCap const _tcap( options.MAXTHREAD );
+  t_ThreadCap const _tcap( options.MAXTHREAD, options.MAXTHREAD != 1 || options.DISPLAY_LEVEL >= 1 );
 
   // rev150 = rev144 (revision of record) + this override ONLY.  The rev145-149
   // faithful-projection lineage is retired to the diagnostic record: it proved
@@ -11037,7 +11047,7 @@ FFModel::_thread_hooks()
 
 inline
 FFModel::t_ThreadCap::t_ThreadCap
-( size_t maxthread )
+( size_t maxthread, bool announce )
 {
   if( !maxthread ) return;                  // 0 = no cap imposed: make NO call at all
   std::lock_guard<std::mutex> lock( _mutex() );
@@ -11062,7 +11072,7 @@ FFModel::t_ThreadCap::t_ThreadCap
   // Announce once per DISTINCT cap: a run that caps setup() and solve() differently
   // must not have the second one go unreported.
   static int announced = -1;
-  if( announced != cap ){
+  if( announce && announced != cap ){
     announced = cap;
     if( H.none() )
       std::cerr << "  [maxthread] ** NO THREAD SETTER RESOLVED ** cap=" << cap

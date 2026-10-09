@@ -12,7 +12,7 @@ PATH_CRONOS = $(abspath $(PATH_CRONOS_MK)../)
 PATH_SUITESPARSE = 
 LIB_SUITESPARSE = -lspqr -lcholmod -lumfpack -lsuitesparseconfig -lamd -lcolamd -lccolamd -lcamd -lmetis
 INC_SUITESPARSE = -I/usr/include/suitesparse
-FLAG_SUITESPARSE = -DCRONOS__WITH_KLU #-DCRONOS__WITH_SPQR -DCRONOS__WITH_UMFPACK
+FLAG_SUITESPARSE = -DCRONOS__WITH_KLU -DCRONOS__WITH_SPQR -DCRONOS__WITH_UMFPACK
 
 PATH_EIGEN = 
 LIB_EIGEN = 

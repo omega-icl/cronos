@@ -142,7 +142,7 @@ The tutorials (`ODESLV_tutorial`, `OCFESLV_tutorial`) are the best starting poin
 | `pybind11 changed from X to Y since this build directory was configured` | CMake cannot see a pybind11 change under the same path and would mix objects of two releases: start from a clean build directory, and rebuild `pymcpp` with the same release |
 | the `cronos.pyi` stub is not generated | `pybind11-stubgen` or `pymcpp` not importable by the build's Python: `pip install pybind11-stubgen`, set `PYMCPP_DIR` |
 | a stale option or docstring in Python | the `gen_*_options.hpp` headers are generated from the C++ headers (`gen_options.py`); regenerate with `cmake --build <dir> --target gen-options` (never edit; keep a single copy, next to the binders); `make check` verifies they are up to date |
-| oversubscribed cores in a parallel `FFGraph::veval` over an embedded solver | set the solver's `options.MAXTHREAD = 1`: `veval` already runs the solves in parallel |
+| oversubscribed cores in a parallel `FFGraph::veval` over an embedded solver | `options.MAXTHREAD = 1` is the default since 5.0.0 (one thread for the numerical backends inside `setup()` and `solve()`); `veval` already runs the solves in parallel, so check that it has not been raised and that `CRONOS_MAXTHREAD` is not set above 1 |
 
 ## Installing from PyPI
 

@@ -19683,7 +19683,7 @@ OCFESLV::solve_fsens
 ( double* var, double const* inp, double const* cst )
 {
   FixedInputScope fixed_scope_( _fixedInputDepth );  std::vector<double> fixed_buf_;  inp = _with_fixed_inputs( inp, fixed_buf_ );   // fix_input: model-supplied values, outermost call only
-  t_ThreadCap const _tcap( options.MAXTHREAD );   // rev142b: covers the sensitivity
+  t_ThreadCap const _tcap( options.MAXTHREAD, options.MAXTHREAD != 1 || options.DISPLAY_LEVEL >= 1 );   // rev142b: covers the sensitivity
                                                   // factorizations, not just the primal
   // Primal solve + factorization (auto march/mono); leaves sens_functions() populated.
   _sensJac.clear();
@@ -19710,7 +19710,7 @@ OCFESLV::solve_asens
 ( double* var, double const* inp, double const* cst )
 {
   FixedInputScope fixed_scope_( _fixedInputDepth );  std::vector<double> fixed_buf_;  inp = _with_fixed_inputs( inp, fixed_buf_ );   // fix_input: model-supplied values, outermost call only
-  t_ThreadCap const _tcap( options.MAXTHREAD );   // rev142b: covers the sensitivity
+  t_ThreadCap const _tcap( options.MAXTHREAD, options.MAXTHREAD != 1 || options.DISPLAY_LEVEL >= 1 );   // rev142b: covers the sensitivity
                                                   // factorizations, not just the primal
   // Primal solve + factorization (auto march/mono); leaves sens_functions() populated.
   _sensJac.clear();
@@ -19987,7 +19987,7 @@ inline OCFESLV::SolveReport
 OCFESLV::solve( double* var, double const* inp, double const* cst )
 {
   FixedInputScope fixed_scope_( _fixedInputDepth );  std::vector<double> fixed_buf_;  inp = _with_fixed_inputs( inp, fixed_buf_ );   // fix_input: model-supplied values, outermost call only
-  t_ThreadCap const _tcap( options.MAXTHREAD );   // rev142b: see setup()
+  t_ThreadCap const _tcap( options.MAXTHREAD, options.MAXTHREAD != 1 || options.DISPLAY_LEVEL >= 1 );   // rev142b: see setup()
   // rev115: force solver verbosity from the environment HERE, at the entry to solve(),
   // because this is the last point before the flag is read.
   //

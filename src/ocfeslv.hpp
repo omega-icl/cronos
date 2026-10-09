@@ -6,6 +6,13 @@
 #ifndef CRONOS__OCENV_HPP
 #define CRONOS__OCENV_HPP
 
+// <windows.h>, in its FULL form (not WIN32_LEAN_AND_MEAN), leaves INTERFACE defined as a macro; this header
+// declares OCFESLV::Options::INTERFACE.  Set aside for the header and restored after it (2026-10-09).
+#if defined(_WIN32)
+# pragma push_macro("INTERFACE")
+# undef INTERFACE
+#endif
+
 // Hyperbolic boundary conditions.  The incoming-BC direction guard and its flux/derivative-BC extension are always
 // on (unconditional since rev319; validated on PDE14, PDE15, PDE16 and PDE18): an inflow condition must pin an
 // incoming characteristic through its value OR its face-normal derivative, and is rejected only when it touches none.
@@ -28755,4 +28762,7 @@ OCFESLV::_apply_interface_edge_flags_v2
 
 } // namespace mc
 
+#if defined(_WIN32)
+# pragma pop_macro("INTERFACE")
+#endif
 #endif

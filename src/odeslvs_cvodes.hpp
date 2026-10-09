@@ -316,9 +316,9 @@ class ODESLVS_CVODES
         int ic = -1;
         for( size_t c = 0; c < vCst.size(); ++c ) if( vCst[c].id().second == pPar[i].id().second ){ ic = (int)c; break; }
         if( ic < 0 ){ err = "fdiff: " + pPar[i].name() + " is neither a parameter nor a constant of the extracted model"; return nullptr; }
-        FFVar const& cdecl = _usr._vCstUsr[ic];            // constants are extracted in declared order
-        int pos = -1; for( size_t c = 0; c < vC.size(); ++c ) if( vC[c].id().second == cdecl.id().second ){ pos = (int)c; break; }
-        if( pos < 0 ){ pos = (int)vC.size(); vC.push_back( cdecl ); }
+        FFVar const& cst_decl = _usr._vCstUsr[ic];            // constants are extracted in declared order
+        int pos = -1; for( size_t c = 0; c < vC.size(); ++c ) if( vC[c].id().second == cst_decl.id().second ){ pos = (int)c; break; }
+        if( pos < 0 ){ pos = (int)vC.size(); vC.push_back( cst_decl ); }
         vCi[i] = pos;
       }
       // 2. one direction per entry, legacy output layout; constant directions by literal seed

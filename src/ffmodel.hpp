@@ -6,6 +6,13 @@
 #ifndef MC__FFMODEL_HPP
 #define MC__FFMODEL_HPP
 
+// <windows.h>, in its FULL form (not WIN32_LEAN_AND_MEAN), leaves INTERFACE defined as a macro; this header
+// declares OCFESLV::Options::INTERFACE.  Set aside for the header and restored after it (2026-10-09).
+#if defined(_WIN32)
+# pragma push_macro("INTERFACE")
+# undef INTERFACE
+#endif
+
 // The model layer of the collocation stack (rev199: the principal symbol moved in, F2a step 1): the declared model and its declaration API.
 // ocbase.hpp is included for the DAG operators the equations are written with (FFPartial,
 // FFIntegral, FFEval) and the OCVar arithmetic they dispatch on; FFModel itself holds no
@@ -15,14 +22,20 @@
 #if defined(__unix__) || defined(__APPLE__)
 # include <dlfcn.h>     // dlsym: the run-time thread setters (_thread_hooks)
 #elif defined(_WIN32)
-# ifndef NOMINMAX
-#  define NOMINMAX      // no min/max macros (they would break std::min, Armadillo, ...)
-# endif
-# ifndef WIN32_LEAN_AND_MEAN
-#  define WIN32_LEAN_AND_MEAN
-# endif
-# include <windows.h>   // the run-time thread setters on Windows (_thread_hooks): GetProcAddress over the loaded modules
-# include <psapi.h>     // K32EnumProcessModules (kernel32 since Windows 7: no psapi.lib needed)
+# include <cstdint>
+// The three kernel32 functions the run-time thread setters need on Windows (_thread_hooks), DECLARED here instead of
+// through <windows.h>: that header defines thousands of macros -- cdecl, interface, small, near, far, ERROR, ... --
+// which break ordinary identifiers in CRONOS (a variable named cdecl in odeslvs_cvodes.hpp, 2026-10-09) and in every
+// user's code that includes a CRONOS header.  The declarations are the Windows SDK's, with STRICT handles
+// (HMODULE = HINSTANCE__*), so they coexist with <windows.h> and <psapi.h> where a translation unit includes them too:
+// GetCurrentProcess and GetProcAddress are dllimport there (WINBASEAPI), K32EnumProcessModules is not (psapi.h).
+// K32EnumProcessModules is in kernel32 since Windows 7: no psapi.lib needed.
+struct HINSTANCE__;
+extern "C" {
+  __declspec(dllimport) void* __stdcall GetCurrentProcess( void );
+  __declspec(dllimport) std::intptr_t ( __stdcall* __stdcall GetProcAddress( HINSTANCE__*, char const* ) )();
+  int __stdcall K32EnumProcessModules( void*, HINSTANCE__**, unsigned long, unsigned long* );
+}
 #endif
 #include <typeinfo>   // rev205: t_ThreadCap resolves the OpenMP/BLAS thread setters at run time
 #include <cassert>
@@ -11022,18 +11035,19 @@ FFModel::_thread_hooks()
     // 4R.4 (2026-10-09).  Windows has no RTLD_DEFAULT: walk the modules loaded in the process and take, for each setter,
     // the first module that exports it -- the libopenblas DLL delvewheel bundles, the OpenMP runtime (vcomp140.dll for
     // MSVC, libomp for ClangCL/LLVM), MKL or BLIS if loaded.  Same names, same first-found rule as dlsym.
-    HMODULE mods[1024];  DWORD need = 0;
-    if( K32EnumProcessModules( GetCurrentProcess(), mods, (DWORD)sizeof( mods ), &need ) ){
-      size_t const nmod = std::min<size_t>( need / sizeof( HMODULE ), sizeof( mods ) / sizeof( HMODULE ) );
-      auto find = [&]( char const* name )->FARPROC {
-        for( size_t i = 0; i < nmod; ++i ) if( FARPROC p = GetProcAddress( mods[i], name ) ) return p;
+    typedef std::intptr_t ( __stdcall* t_proc )();      // FARPROC
+    HINSTANCE__* mods[1024];  unsigned long need = 0;   // HMODULE[], DWORD
+    if( K32EnumProcessModules( GetCurrentProcess(), mods, (unsigned long)sizeof( mods ), &need ) ){
+      size_t const nmod = std::min<size_t>( need / sizeof( HINSTANCE__* ), sizeof( mods ) / sizeof( HINSTANCE__* ) );
+      auto find = [&]( char const* name )->t_proc {
+        for( size_t i = 0; i < nmod; ++i ) if( t_proc p = GetProcAddress( mods[i], name ) ) return p;
         return nullptr;
       };
       h.omp_set  = reinterpret_cast<void(*)(int)>    ( find( "omp_set_num_threads" ) );
       h.omp_get  = reinterpret_cast<int(*)()>        ( find( "omp_get_max_threads" ) );
       h.blas_set = reinterpret_cast<void(*)(int)>    ( find( "openblas_set_num_threads" ) );
       h.blas_get = reinterpret_cast<int(*)()>        ( find( "openblas_get_num_threads" ) );
-      FARPROC const ms = find( "mkl_set_num_threads" ), mg = find( "mkl_get_max_threads" );   // MKL: both spellings
+      t_proc const ms = find( "mkl_set_num_threads" ), mg = find( "mkl_get_max_threads" );    // MKL: both spellings
       h.mkl_set  = reinterpret_cast<void(*)(int)>    ( ms ? ms : find( "MKL_Set_Num_Threads" ) );
       h.mkl_get  = reinterpret_cast<int(*)()>        ( mg ? mg : find( "MKL_Get_Max_Threads" ) );
       h.blis_set = reinterpret_cast<void(*)(int64_t)>( find( "bli_thread_set_num_threads" ) );
@@ -11597,4 +11611,7 @@ static_assert( alignof( FFModel ) <= alignof( void* ), "FFModel is a VIRTUAL bas
 
 } // namespace mc
 
+#if defined(_WIN32)
+# pragma pop_macro("INTERFACE")
+#endif
 #endif

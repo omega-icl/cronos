@@ -6,6 +6,13 @@
 #ifndef CRONOS__OCPLAN_HPP
 #define CRONOS__OCPLAN_HPP
 
+// <windows.h>, in its FULL form (not WIN32_LEAN_AND_MEAN), leaves INTERFACE defined as a macro; this header
+// declares OCFESLV::Options::INTERFACE.  Set aside for the header and restored after it (2026-10-09).
+#if defined(_WIN32)
+# pragma push_macro("INTERFACE")
+# undef INTERFACE
+#endif
+
 #include <cstddef>
 #include <cmath>
 #include <limits>
@@ -1969,4 +1976,7 @@ struct OCPlanReport
 
 } // namespace mc
 
+#if defined(_WIN32)
+# pragma pop_macro("INTERFACE")
+#endif
 #endif  // CRONOS__OCPLAN_HPP

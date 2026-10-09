@@ -813,6 +813,31 @@ if(ENABLE_PYTHON)
         COMMAND ${Python3_EXECUTABLE} "${CRONOS_GEN_ENVIRONMENT}" --check
         ${_check_cmds})
   endif()
+  # Documentation (2026-10-09, WORKPLAN 4.13).  `doc` builds the Doxygen pages into <build>/doc; when Doxygen is
+  # installed, `make check` fails on ANY Doxygen warning (the headers' comments were brought to zero), and is skipped
+  # with a note otherwise.  Both run doc/CRONOS.dox through a wrapper that only redirects the output and sets the
+  # warning handling, so the project's configuration stays the single source.
+  find_package(Doxygen QUIET)
+  if(DOXYGEN_FOUND)
+    set(_dox_doc "${CMAKE_CURRENT_BINARY_DIR}/CRONOS-doc.dox")
+    set(_dox_chk "${CMAKE_CURRENT_BINARY_DIR}/CRONOS-check.dox")
+    file(WRITE "${_dox_doc}" "@INCLUDE = ${CMAKE_CURRENT_SOURCE_DIR}/doc/CRONOS.dox\nOUTPUT_DIRECTORY = ${CMAKE_CURRENT_BINARY_DIR}/doc\n")
+    file(WRITE "${_dox_chk}" "@INCLUDE = ${CMAKE_CURRENT_SOURCE_DIR}/doc/CRONOS.dox\nOUTPUT_DIRECTORY = ${CMAKE_CURRENT_BINARY_DIR}/doc-check\nHAVE_DOT = NO\nQUIET = YES\nWARN_AS_ERROR = FAIL_ON_WARNINGS\n")
+    add_custom_target(
+      doc
+      COMMAND ${DOXYGEN_EXECUTABLE} "${_dox_doc}"
+      WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/doc
+      COMMENT "Building the Doxygen documentation into ${CMAKE_CURRENT_BINARY_DIR}/doc"
+      VERBATIM)
+    set(_check_cmds
+        COMMAND ${CMAKE_COMMAND} -E echo "== doxygen (no warning allowed)"
+        COMMAND ${CMAKE_COMMAND} -E chdir "${CMAKE_CURRENT_SOURCE_DIR}/doc" ${DOXYGEN_EXECUTABLE} "${_dox_chk}"
+        ${_check_cmds})
+  else()
+    set(_check_cmds
+        COMMAND ${CMAKE_COMMAND} -E echo "== doxygen: not found, documentation check skipped"
+        ${_check_cmds})
+  endif()
   # Every file carrying the project's copyright line states the licence as LICENSE does (EPL-2.0 with GPL-2.0-or-later
   # as a Secondary License, plus the SPDX line); tools/update_licence_header.py updates them, `make check` verifies.
   set(CRONOS_LICENCE_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/tools/update_licence_header.py")

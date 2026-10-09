@@ -363,7 +363,7 @@ public:
   //! @brief Interface-plan options captured when executable terms are frozen.
   //!
   //! Public OCFESLV::options can legally be modified by callers after setup().
-  //! Because FrozenWeakSatTerm::prefactor and ::trace_prefactor already bake
+  //! Because FrozenWeakSatTerm::prefactor and FrozenWeakSatTerm::trace_prefactor already bake
   //! in INTERFACE.SAT_SIGMA0, sigma1 and INTERFACE.TRACE_TAU_SCALE, evaluation must reject a stale
   //! (sigma1 comes from CRONOS_SAT_SIGMA1, fixed per process, so in practice only the other two can move)
   //! plan rather than silently using coefficients from an older setup().
@@ -885,23 +885,18 @@ enum class PlanRowRole : int {
 struct PlanOptions
 {
   enum class Imposition   : int { WEAK = 0, TRACE = 1, STRONG = 2 };
-  enum class Builder      : int { LEGACY = 0, GLOBAL = 1 };          // phase 1
-  enum class Realisation  : int { EXACT_FIRST = 0, TAU_FIRST = 1 };  // phase 1, Q1
-  enum class Causal       : int { KEEP_UPSTREAM = 0, SYMMETRIC = 1 };// phase 1, Q2
 
+  // 4.0 (2026-10-09): the rev153c experiments -- realisation (EXACT_FIRST / TAU_FIRST), causal (KEEP_UPSTREAM /
+  // SYMMETRIC), aux_implied, root_hi, face_desc -- and the builder selector (LEGACY / GLOBAL) are gone: nothing set
+  // them since Phase 3 retired their variables (batch 1), so the builder always ran their defaults, which it now
+  // hard-codes: exact realisation first, causal roots upstream, implied cross-direction auxiliary edges dropped,
+  // trees rooted at the low DOF, faces ascending.  display_level and fault_inject_bad_keep_explicit (set, never
+  // read: the legacy builder that printed with them was deleted in rev264) are gone too.
   Imposition  imposition  = Imposition::WEAK;
-  Builder     builder     = Builder::LEGACY;
-  Realisation realisation = Realisation::EXACT_FIRST;
-  Causal      causal      = Causal::KEEP_UPSTREAM;
-  bool        aux_implied = true;     // design §3.5 (implied cross-direction auxiliary edges dropped)
-  bool        root_hi     = false;    // experiment: root trees at the HIGH DOF (replace the low copy, as legacy did)
-  bool        face_desc   = false;
   bool        trace_dofs  = false;    // rev155a (shadow): non-nodal trace functionals become abstract DOFs (design item 2)
   bool        weak_multipliers = false;   // IC_WEAK realises PlanInput::rescued_claims as TAU (CRONOS_WEAK_TAU_RESCUED)
   bool        weak_natural_only = false;  // ... and a claim WITH a natural receiver feeds its multiplier only there (CRONOS_WEAK_TAU_NATURAL)
   bool        force_bad_keep_explicit = false;   // attribution testing (CRONOS_FORCE_BAD_KEEP_EXPLICIT): invert the first STRONG explicit choice so the adequacy check must catch it    // experiment: within a seam, add edges in DESCENDING transverse face order (drop low-side cycle edges)
-  int         display_level = 0;      // legacy builder only (it prints; phase 2 removes)
-  bool        fault_inject_bad_keep_explicit = false;   // legacy CRONOS_FORCE_BAD_KEEP_EXPLICIT
 };
 
 // ------------------------------------------------------------------------------
@@ -1226,7 +1221,6 @@ OCPlanGlobalBuilder::build( PlanInput const& in, PlanDecisions& dec, PlanReport&
   PlanReport::Shadow& sh = rep.shadow;
 
   bool const is_weak   = ( in.options.imposition == PlanOptions::Imposition::WEAK );
-  bool const causal_up = ( in.options.causal == PlanOptions::Causal::KEEP_UPSTREAM );
 
   // ---- 1. edges (claims after the DROP), DOFs ------------------------------------
   // Occurrence counts are irrelevant here: geometry is per key; every kept key is one edge.
@@ -1440,11 +1434,10 @@ OCPlanGlobalBuilder::build( PlanInput const& in, PlanDecisions& dec, PlanReport&
   auto edge_less = [&]( size_t a, size_t b ){
     auto const& ea = all_edges[a]; auto const& eb = all_edges[b];
     int ra = ea.direction_rank, rb = eb.direction_rank;
-    if( !causal_up ){ ra = std::max( ra, 1 ); rb = std::max( rb, 1 ); }   // SYMMETRIC: evolution ranks as spatial
     if( ra != rb ) return ra < rb;
     if( ea.key.dom_id != eb.key.dom_id ) return ea.key.dom_id < eb.key.dom_id;
     if( ea.key.iel_lo != eb.key.iel_lo ) return ea.key.iel_lo < eb.key.iel_lo;
-    if( ea.key.face   != eb.key.face   ) return in.options.face_desc ? ea.key.face > eb.key.face : ea.key.face < eb.key.face;
+    if( ea.key.face   != eb.key.face   ) return ea.key.face < eb.key.face;
     return ea.key < eb.key;
   };
 
@@ -1510,7 +1503,7 @@ OCPlanGlobalBuilder::build( PlanInput const& in, PlanDecisions& dec, PlanReport&
       bool has_causal = false;
       for( size_t ei : tree_edges ){ auto const& e = all_edges[ei];
         if( e.causal && memset_.count( e.dof_lo ) ){ has_causal = true; break; } }
-      if( has_causal && causal_up ){
+      if( has_causal ){
         // upstream = the lo side of a causal edge OF THIS COMPONENT that is nobody's hi
         // side within the component.  (rev154f: the search must stay inside the
         // component -- scanning the whole cluster picked a sibling component's dof and
@@ -1523,8 +1516,7 @@ OCPlanGlobalBuilder::build( PlanInput const& in, PlanDecisions& dec, PlanReport&
           if( e.causal && memset_.count( e.dof_lo ) && !his.count( e.dof_lo ) ){ root = e.dof_lo; break; } }
       }
       if( root == std::numeric_limits<size_t>::max() || !memset_.count( root ) )
-        root = in.options.root_hi ? *std::max_element( members.begin(), members.end() )
-                                  : *std::min_element( members.begin(), members.end() );
+        root = *std::min_element( members.begin(), members.end() );
       C.root = root;
       std::vector<size_t> q{ root }; visited.insert( root );
       for( size_t qi = 0; qi < q.size(); ++qi ){
@@ -1541,9 +1533,8 @@ OCPlanGlobalBuilder::build( PlanInput const& in, PlanDecisions& dec, PlanReport&
     };
     for( auto const& [ei, child] : oriented ){
       auto const& e = all_edges[ei];
-      if( !is_weak && in.options.aux_implied && is_cross_aux( e.key ) ){ C.realisation[ e.key ] = 4; continue; }  // 4 = PENDING
+      if( !is_weak && is_cross_aux( e.key ) ){ C.realisation[ e.key ] = 4; continue; }  // 4 = PENDING
       bool exact = false;
-      bool const want_exact_first = !is_weak && ( in.options.realisation == PlanOptions::Realisation::EXACT_FIRST );
       // Candidate replaceable copy (design §3.2 + 2026-09-04 refinements):
       //  (A) only PRIMITIVE claims consume rows; an auxiliary's claim never does (the PDE
       //      copies among its receivers belong to its parent).
@@ -1589,13 +1580,8 @@ OCPlanGlobalBuilder::build( PlanInput const& in, PlanDecisions& dec, PlanReport&
       else if( upwind ){
         exact = false;                                  // first-order seam: continuity ADDS a condition (TAU); replacing a row starves the element
       }
-      else if( want_exact_first ){
+      else{
         exact = ( cand != nullptr );
-      }
-      else{                                             // TAU_FIRST
-        bool has_tau = false;
-        for( size_t ri : rows_of_claim[ e.key ] ){ auto const& r = in.rows_at_dof[ri]; if( r.tau_allowed && !consumed.count( r.row ) ){ has_tau = true; break; } }
-        exact = !has_tau && ( cand != nullptr );
       }
       if( exact ){ consumed.insert( *cand ); C.consumed_rows.push_back( *cand ); dec.exact_replacement_rows.insert( *cand );
                    C.realisation[ e.key ] = 0; ++sh.n_exact; }

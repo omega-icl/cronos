@@ -293,9 +293,6 @@ protected:
   static std::string _strset
     ( std::map<FFVar,U,lt_FFVar> const& set1, std::string const& sep );
 
-  //! @brief Preflight the declared model before it is imported: _check_model() on the declared collections.  A
-  //! derived solver may add its own checks, calling this version first.
-  //! @return false to fail the setup with SetupStatus::INCONSISTENT_MODEL
   //! @brief The bounds [lo,up] an output point on domain @p var must lie in; _check_model() passes the domain's
   //! own.  A derived solver may widen them (OCFESLV: the march span, whose working domain is one element).
   virtual void _output_point_bounds
@@ -303,6 +300,9 @@ protected:
     const
     { (void)var; (void)lo; (void)up; }
 
+  //! @brief Preflight the declared model before it is imported: _check_model() on the declared collections.  A
+  //! derived solver may add its own checks, calling this version first.
+  //! @return false to fail the setup with SetupStatus::INCONSISTENT_MODEL
   virtual bool _validate_model
     ()
     { return _check_model( _usr._dagUsr, _usr._vCstUsr, &_usr._vCstValUsr, _usr._mDomUsr, _usr._mVarUsr,
@@ -326,9 +326,6 @@ protected:
     ()
     { return true; }
 
-  //! @brief The model is reduced and eliminated, and is about to be classified; does nothing in FFModel.  A
-  //! derived solver discretises it here.
-  //! @return false to fail the setup
   //! @brief apply the caller's options before setup() reads any of them.  FFModel's own options ARE
   //! the applied configuration; a derived solver overrides this to slice its own (richer) options in, which
   //! is the single, greppable moment of transfer -- and the only place a solver-side option may influence
@@ -337,6 +334,9 @@ protected:
     ()
     {}
 
+  //! @brief The model is reduced and eliminated, and is about to be classified; does nothing in FFModel.  A
+  //! derived solver discretises it here.
+  //! @return false to fail the setup
   virtual bool _on_model_discretise
     ()
     { return true; }
@@ -591,6 +591,8 @@ public:
     //!       breakdowns.
     //! Errors and warnings are NEVER gated by this level.
     int DISPLAY_LEVEL;
+    //! @brief Order reduction at setup -- the values of REDUCE.ORDER: whether derivatives above first order are
+    //! replaced by auxiliary states, and whether rows processed before an auxiliary existed are rewritten to use it.
     enum ReductionType
     {
       RED_NONE = 0,  //!< Do not perform order reduction during setup
@@ -603,6 +605,8 @@ public:
     };
 
 
+    //! @brief How setup() tests the classification's sensitivity to the reference point -- the values of
+    //! CLASSIFY.ROBUST: by sampling the reference and comparing the verdicts, or not at all.
     enum RobustnessMode
     {
       ROBUST_OFF    = 0,  //!< Do not sample: classify at the reference point only (default)
@@ -717,7 +721,6 @@ public:
                                  //!< MEASURED (PDE5, 9 audit windows): cap=1 is 18% FASTER than
                                  //!< the uncapped run -- 152.4 s against 186.0 s of rank time.
                                  //!< Environment: CRONOS_MAXTHREAD.
-    //!@}
   } options;
 
   //! @brief Per-equation options: model role and classification block, plus solver annotations.
@@ -1173,7 +1176,9 @@ public:
     }
 
   //! @brief Declare a domain with its FFDom (extent and mesh), replacing any previous declaration.
-  //! @param ref  reference coordinate for classification (default: the domain midpoint, see ref())
+  //! @param Var     the domain variable
+  //! @param optDom  its extent and finite-element mesh
+  //! @param ref     reference coordinate for classification (default: the domain midpoint, see ref())
   void add_domain
     ( FFVar const& Var, FFDom const& optDom,
       std::optional<double> ref=std::nullopt )
@@ -2361,13 +2366,14 @@ protected:
   //! @param dom_vals   Values for sym.vDom domain variables (length = vDom.size())
   //! @param input_vals Values for _vInp inputs (length = _vInp.size()).
   //!                   Distributed inputs are treated as spatially constant.
+  //! @param A0         On request: the zeroth-order block (sym.vCoeff0), evaluated; nullptr to skip it
   std::vector<arma::mat> _eval_symbol
     ( t_Symbol             const& sym,
       std::vector<double>  const& state_vals,
       std::vector<double>  const& cst_vals,
       std::vector<double>  const& dom_vals,
       std::vector<double>  const& input_vals = std::vector<double>(),
-      arma::mat*                  A0 = nullptr )   //!< on request: the zeroth-order block (sym.vCoeff0), evaluated
+      arma::mat*                  A0 = nullptr )
     const;
 
 
@@ -2456,7 +2462,7 @@ public:
     std::vector<arma::mat>  Ai;
     //! Characteristic speeds/eigenvalues for the last sampled direction
     arma::cx_vec            eigenvalues;
-    //! Per-direction eigenvalue data: {transverse/principal direction \xi, eigenvalues}
+    //! Per-direction eigenvalue data: {transverse/principal direction xi, eigenvalues}
     std::vector< std::pair< std::vector<double>, arma::cx_vec > > eigendata;
     //! True when the chosen evolution coefficient matrix is numerically singular
     bool                    At_singular = false;
@@ -2697,6 +2703,7 @@ public:
   //! belongs to whoever solves.  @a detail is a sentence a modeller can act on.
   struct t_Finding
   {
+    //! @brief What the finding is about
     enum Kind { COMPLEX_CHARACTERISTICS,   //!< speeds are not real: no continuous dependence on the data
                 SINGULAR_INDEX,            //!< a witness no differentiation exposes (structurally singular)
                 DOF_IMBALANCE,             //!< rows - unknowns is not zero
@@ -2820,6 +2827,8 @@ protected:
   //!        OCFE_DAE0's index-1 pendulum: 5 states, 5 interior equations, yet sym=4x4
   //!        with Ae_singular=n and sigma_min=sigma_max=1.  Defaulted false so every
   //!        existing caller keeps its behaviour unchanged.
+  //! @param Ai_dn     The Douglis-Nirenberg weighted first-order symbol (see t_Classify::dn_elliptic), or nullptr
+  //! @param E0_dn     Its zeroth-order part, or nullptr
   t_Classify classify
     ( std::vector<arma::mat> const& Ai,
       std::vector<FFVar>     const& vDom,
@@ -2827,17 +2836,23 @@ protected:
       unsigned const                n_sample  = 32,
       double   const                imag_tol  = 1e-8,
       bool     const                has_algebraic_rows = false,
-      std::vector<arma::mat> const* Ai_dn = nullptr,   //!< weighted first-order symbol (see t_Classify::dn_elliptic)
-      arma::mat const*              E0_dn = nullptr )  //!< its zeroth-order part
+      std::vector<arma::mat> const* Ai_dn = nullptr,
+      arma::mat const*              E0_dn = nullptr )
     const;
 
 
 protected:
 
   //! @brief Compute and cache the PDE classification with input references.
+  //! @param state_ref  Reference values for the states (as _eval_symbol's state_vals)
   //! @param input_ref  Reference values for input FFVars (length = _vInp.size()).
   //!                   Distributed inputs are evaluated as spatially constant
   //!                   at these reference values during classification.
+  //! @param cst_ref    Reference values for the constants (length = _vCst.size())
+  //! @param dom_ref    Reference coordinates of the domain variables
+  //! @param time_dom   Pointer to the time-like domain variable, or nullptr
+  //! @param n_sample   Number of spatial directions sampled on the unit sphere
+  //! @param imag_tol   Threshold for declaring an eigenvalue real
   bool _classify_pde
     ( std::vector<double> const& state_ref,
       std::vector<double> const& input_ref,

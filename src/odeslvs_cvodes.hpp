@@ -1078,9 +1078,6 @@ ODESLVS_CVODES::CVQUADB__
   return( flag? 0: -1 );
 }
 
-//! @fn inline typename ODESLVS_CVODES::STATUS ODESLVS_CVODES::solve_asens
-//!( std::vector<double> const& p, std::vector<double> const& c=std::vector<double>(), std::ostream& os=std::cout )
-//!
 //! This function computes a solution to the parametric ODEs with adjoint
 //! sensitivity analysis:
 //!  - <a>p</a>  [input]  parameter values
@@ -1099,9 +1096,6 @@ ODESLVS_CVODES::solve_asens
   return flag;
 }
 
-//! @fn inline typename ODESLVS_CVODES::STATUS ODESLVS_CVODES::solve_asens
-//!( double const* p, double const* c=nullptr, std::ostream& os=std::cout )
-//!
 //! This function computes a solution to the parametric ODEs with adjoint
 //! sensitivity analysis:
 //!  - <a>p</a>  [input]  parameter values

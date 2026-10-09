@@ -18,8 +18,12 @@ template <class PyOpt>
 void
 bind_ffmodel_options(PyOpt& c)
 {
-  py::enum_<mc::FFModel::Options::ReductionType>(c, "ReductionType",
-                                                 "undocumented")
+  py::enum_<mc::FFModel::Options::ReductionType>(
+      c, "ReductionType",
+      "Order reduction at setup -- the values of REDUCE.ORDER: whether "
+      "derivatives above first order are replaced by auxiliary states, and "
+      "whether rows processed before an auxiliary existed are rewritten to use "
+      "it.")
       .value("RED_NONE", mc::FFModel::Options::RED_NONE,
              "Do not perform order reduction during setup")
       .value("RED_MAIN", mc::FFModel::Options::RED_MAIN,
@@ -29,8 +33,11 @@ bind_ffmodel_options(PyOpt& c)
              "Reduce high-order derivatives and rewrite earlier rows to use "
              "the auxiliaries")
       .export_values();
-  py::enum_<mc::FFModel::Options::RobustnessMode>(c, "RobustnessMode",
-                                                  "undocumented")
+  py::enum_<mc::FFModel::Options::RobustnessMode>(
+      c, "RobustnessMode",
+      "How setup() tests the classification's sensitivity to the reference "
+      "point -- the values of CLASSIFY.ROBUST: by sampling the reference and "
+      "comparing the verdicts, or not at all.")
       .value("ROBUST_OFF", mc::FFModel::Options::ROBUST_OFF,
              "Do not sample: classify at the reference point only (default)")
       .value("ROBUST_REPORT", mc::FFModel::Options::ROBUST_REPORT,

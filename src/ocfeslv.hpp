@@ -450,6 +450,8 @@ public:
     static constexpr ImpositionType IC_WEAK   = OCPlan::IMPOSITION_IC_WEAK;
     static constexpr ImpositionType IC_STRONG = OCPlan::IMPOSITION_IC_STRONG;
     static constexpr ImpositionType IC_TRACE  = OCPlan::IMPOSITION_IC_TRACE;
+    //! @brief What setup() does with interface continuity claims the structural analysis finds redundant -- the
+    //! values of INTERFACE.DROP_POLICY: drop and verify after the solve, re-derive what verification flags, or keep all.
     enum InterfaceDropPolicy
     {
       DROP_VERIFY   = 0,  //!< structural drop + post-solve verify gate (default)
@@ -521,14 +523,14 @@ public:
       //! @brief Interface condition type for multi-element continuity
       InterfaceType TYPE;
       //! @brief SAT penalty coefficient for C0 (value) continuity.
-      //! Effective penalty = INTERFACE.SAT_SIGMA0 * \tau_d  per direction d.  Default 10.0 (since 2026-10-03;
+      //! Effective penalty = INTERFACE.SAT_SIGMA0 * tau_d  per direction d.  Default 10.0 (since 2026-10-03;
       //! 1.0 was below threshold at moderate refinement -- a ~10x worse answer, silently -- and 100 can stall the
       //! monolithic Newton solve).
       //! Default penalty parameter for direction d:
-      //!   \tau_d = (n_node - 1)^2 / w_elem    (spectral scaling)
+      //!   tau_d = (n_node - 1)^2 / w_elem    (spectral scaling)
       //! scaled by INTERFACE.SAT_SIGMA0 (C0 continuity) or CRONOS_SAT_SIGMA1 (C1).
       //! When classify_pde() has been called, the penalty is coupled
-      //! through the principal symbol: \sum_j A_d[k,j] * \sigma * \tau_d * \Delta u_j.
+      //! through the principal symbol: sum_j A_d[k,j] * sigma * tau_d * Delta u_j.
       double SAT_SIGMA0;
       //! @brief Policy for the IC_TRACE/IC_STRONG redundant-continuity drop
       //! (item 10).  DROP_VERIFY keeps the structural receiver-B drop and treats a
@@ -3775,7 +3777,7 @@ public:
     ( FFVar const& param, double from, double to, int stage = 0 );
 
   //! @brief Register input @p param as a homotopy parameter with a map s -> value, e.g. for a rate
-  //! constant spanning decades: [](double s){ return 2e4*std::pow(50.,s); }.  Must be called
+  //! constant spanning decades: [](double s){ return 2e4*std::%pow(50.,s); }.  Must be called
   //! after setup().
   //! @return false if @p param is not an input of the set-up model or @p map is empty
   bool add_homotopy
@@ -4784,9 +4786,9 @@ protected:
 
 
   //! @brief Default SAT spectral penalty parameter for domain d.
-  //! Returns \tau = (n_node - 1)^2 / element_width.
-  //! The effective C0 penalty coefficient is  INTERFACE.SAT_SIGMA0 * \tau,
-  //! and the effective C1 penalty coefficient is  CRONOS_SAT_SIGMA1 * \tau / element_width.
+  //! Returns tau = (n_node - 1)^2 / element_width.
+  //! The effective C0 penalty coefficient is  INTERFACE.SAT_SIGMA0 * tau,
+  //! and the effective C1 penalty coefficient is  CRONOS_SAT_SIGMA1 * tau / element_width.
   double _sat_tau
     ( FFDom const& dom, size_t const iel )
     const
@@ -4985,7 +4987,7 @@ public:
     // rev110 -- so a solve log carried a revision three steps stale.  Nothing else in
     // the build chain would have caught it: the makefile names the file, the build
     // oracle checks the instrument's format marker, and neither reads this.
-    = "ocfeslv  rev370  2026-10-09";
+    = "ocfeslv  rev371  2026-10-09";
 
   //! @brief The revision of this ocfeslv.hpp (HEADER_ID); FFModel::revision() gives the model layer's, which a
   //! binary may mix with another solver revision.
@@ -15681,13 +15683,10 @@ OCFESLV::_pack_plan_input
     case Options::IC_TRACE:  in.options.imposition = PlanOptions::Imposition::TRACE;  break;
     case Options::IC_STRONG: in.options.imposition = PlanOptions::Imposition::STRONG; break;
   }
-  in.options.display_level = _solve_display_level();
   // The rev153c experiment knobs CRONOS_PLAN_REALISATION, _NO_AUX_IMPLIED, _ROOT_HI and _FACE_DESC are retired
-  // (2026-10-07, WORKPLAN 3.B batch 1): the builder runs with PlanOptions' defaults (EXACT_FIRST, aux_implied, no
-  // root_hi, no face_desc) -- the plan every sweep since rev156 validated.
+  // (2026-10-07, WORKPLAN 3.B batch 1), and with them (4.0, 2026-10-09) the PlanOptions fields they set: the builder
+  // hard-codes those defaults -- the plan every sweep since rev156 validated.
   in.options.force_bad_keep_explicit = Options::_env_flag( "CRONOS_FORCE_BAD_KEEP_EXPLICIT", false );
-  in.options.fault_inject_bad_keep_explicit
-    = Options::_env_flag( "CRONOS_FORCE_BAD_KEEP_EXPLICIT", false );
 
   in.claims         = claims;
   in.receiver_edges = &draft.receiver_edges;

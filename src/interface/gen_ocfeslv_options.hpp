@@ -42,8 +42,12 @@ bind_ocfeslv_options(PyOpt& c)
       .value("IC_TRACE", mc::OCPlan::IMPOSITION_IC_TRACE,
              "OCPlan::IMPOSITION_IC_TRACE")
       .export_values();
-  py::enum_<mc::OCFESLV::Options::InterfaceDropPolicy>(c, "InterfaceDropPolicy",
-                                                       "undocumented")
+  py::enum_<mc::OCFESLV::Options::InterfaceDropPolicy>(
+      c, "InterfaceDropPolicy",
+      "What setup() does with interface continuity claims the structural "
+      "analysis finds redundant -- the values of INTERFACE.DROP_POLICY: drop "
+      "and verify after the solve, re-derive what verification flags, or keep "
+      "all.")
       .value("DROP_VERIFY", mc::OCFESLV::Options::DROP_VERIFY,
              "structural drop + post-solve verify gate (default)")
       .value("DROP_REDERIVE", mc::OCFESLV::Options::DROP_REDERIVE,
@@ -137,14 +141,14 @@ bind_ocfeslv_options(PyOpt& c)
   c_INTERFACE.def_readwrite(
       "SAT_SIGMA0", &mc::OCFESLV::Options::t_Interface::SAT_SIGMA0,
       "SAT penalty coefficient for C0 (value) continuity. Effective penalty = "
-      "INTERFACE.SAT_SIGMA0 * \\tau_d per direction d. Default 10.0 (since "
+      "INTERFACE.SAT_SIGMA0 * tau_d per direction d. Default 10.0 (since "
       "2026-10-03; 1.0 was below threshold at moderate refinement -- a ~10x "
       "worse answer, silently -- and 100 can stall the monolithic Newton "
-      "solve). Default penalty parameter for direction d: \\tau_d = (n_node - "
+      "solve). Default penalty parameter for direction d: tau_d = (n_node - "
       "1)^2 / w_elem (spectral scaling) scaled by INTERFACE.SAT_SIGMA0 (C0 "
       "continuity) or CRONOS_SAT_SIGMA1 (C1). When classify_pde() has been "
-      "called, the penalty is coupled through the principal symbol: \\sum_j "
-      "A_d[k,j] * \\sigma * \\tau_d * \\Delta u_j.");
+      "called, the penalty is coupled through the principal symbol: sum_j "
+      "A_d[k,j] * sigma * tau_d * Delta u_j.");
   c_INTERFACE.def_readwrite(
       "DROP_POLICY", &mc::OCFESLV::Options::t_Interface::DROP_POLICY,
       "Policy for the IC_TRACE/IC_STRONG redundant-continuity drop (item 10). "

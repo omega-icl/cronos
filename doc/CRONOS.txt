@@ -41,10 +41,10 @@ CRONOS depends on:
 The library consists of header files only.  CRONOS is built with CMake, which also builds the Python module, the test drivers and runs the checks:
 
 <tt>
-$ cmake -S . -B build -DMCPP_ROOT=<MC++ source tree> -DPYMCPP_DIR=<directory holding pymcpp><br>
+$ cmake -S . -B build -DMCPP_ROOT=&lt;MC++ source tree&gt; -DPYMCPP_DIR=&lt;directory holding pymcpp&gt;<br>
 $ cmake --build build -j $(nproc)<br>
 $ cmake --build build --target check<br>
-$ cmake --install build --prefix <prefix>
+$ cmake --install build --prefix &lt;prefix&gt;
 </tt>
 
 The files <tt>INSTALL.md</tt> and <tt>BUILD_CMAKE.md</tt> in the main directory give the installation guide and the complete list of build options.  The main directory holds:

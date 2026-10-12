@@ -35,6 +35,7 @@ all: OCFE_revision OCFE_options OCFE_nonuniform OCFE_refinit OCFE_fadbad OCFE_de
      OCFE_PSA10 \
      OCFE_MBC1 OCFE_MBC2a OCFE_MBC2b OCFE_MBC3 OCFE_MBC4 OCFE_MBC5 OCFE_MBC5b OCFE_MBC5c \
      OCFE_MBC5fig OCFE_MBC5fig_ebal OCFE_MBC6 OCFE_MBC6fig OCFE_MBC6fig_ebal \
+     OCFE_Burger_fixed \
      OCFE_MMPDE1 OCFE_MESHONLY1
 
 OCFE_revision : OCFE_revision.o
@@ -586,6 +587,10 @@ OCFE_MBC6fig_ebal : OCFE_MBC6fig_ebal.o
 	$(LINK) $(FLAG_LINK) -o $@ $< $(LIB_CRONOS) $(LIB_DEP)
 
 
+OCFE_Burger_fixed : OCFE_Burger_fixed.o
+	$(LINK) $(FLAG_LINK) -o $@ $< $(LIB_CRONOS) $(LIB_DEP)
+
+
 OCFE_MMPDE1 : OCFE_MMPDE1.o
 	$(LINK) $(FLAG_LINK) -o $@ $< $(LIB_CRONOS) $(LIB_DEP)
 
@@ -630,6 +635,7 @@ clean :
 	OCFE_PSA10 \
 	OCFE_MBC1 OCFE_MBC2a OCFE_MBC2b OCFE_MBC3 OCFE_MBC4 OCFE_MBC5 OCFE_MBC5b OCFE_MBC5c \
 	OCFE_MBC5fig OCFE_MBC5fig_ebal OCFE_MBC6 OCFE_MBC6fig OCFE_MBC6fig_ebal \
+	OCFE_Burger_fixed \
 	OCFE_MMPDE1 OCFE_MESHONLY1
 	rm -f *.o *.out *.dat *.eps *.dot *.png *.lp *.gp *.log *~
 

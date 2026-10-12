@@ -4994,7 +4994,7 @@ public:
     // rev110 -- so a solve log carried a revision three steps stale.  Nothing else in
     // the build chain would have caught it: the makefile names the file, the build
     // oracle checks the instrument's format marker, and neither reads this.
-    = "ocfeslv  rev371  2026-10-09";
+    = "ocfeslv  rev372  2026-10-10";
 
   //! @brief The revision of this ocfeslv.hpp (HEADER_ID); FFModel::revision() gives the model layer's, which a
   //! binary may mix with another solver revision.
@@ -11243,6 +11243,17 @@ OCFESLV::_on_model_ready
   _audit_reduced_dof();
   _phase( "audit_reduced_dof" );
 
+  // 2026-10-10: invalidate the PREVIOUS setup's caches HERE, before the W-test (which recurses into setup()) and
+  // the determinacy audit can read them.  They were invalidated at the END of this hook, after both: a first setup
+  // never noticed (nothing cached yet), but on a re-setup the window audit ran with the previous plan's marching IC
+  // override rows (_marchICRows, indexed into the OLD plan) and found a deficiency the new plan does not have --
+  // the W-test then REVERTED a correct restore (OCFE_MMPDE1, adaptive monitor: "worst excess 9 >= 3").
+  _primalValid = false;   // model (re)built -> any cached primal solution is stale
+  _reducedDepValid = false;   // ... and the structural dependency pattern
+  _rowProvenanceReady = false; _rowEqnNdx.clear();   // ... and the residual-row provenance
+  _eqnDiffInReady = false; _eqnDiffIn.clear();       // ... and the row x direction Partial table
+  _marchICRowsReady = false; _marchICRows.clear(); _marchICTerminal.clear(); _marchICColToNode.clear(); _marchICActive = false;
+
   // rev133: numerical determinacy audit on the assembled Jacobian at a deterministic
   // reference point.  Unconditional on imposition mode and on index reduction (the
   // structural audit above runs only on reduced IC_WEAK systems).  Report-only unless
@@ -11311,6 +11322,15 @@ OCFESLV::_on_model_ready
   // computed, which is the one case the option exists to stop.  A MISSING verdict is
   // now a failure, with the reason named on stderr.  The same rule catches "assembly
   // failed" and "no rank backend": each of those is an absent certificate, not a pass.
+  // 2026-10-10: a MEASURED state null space is said at display level 1 whatever FATAL.DETERMINACY is.  Until now a
+  // model whose audit reported "** STATE CONTENT **" (a solution family, not a solution) set up with status OK and
+  // nothing at the default display: OCFE_MMPDE1 with an adaptive monitor, where a wrongly reverted restore had
+  // left rank 957 of 960 in the states.  FATAL.DETERMINACY (below) turns this into a refusal.
+  for( auto const& D : _determinacy )
+    if( D.ran && D.verdict == t_Determinacy::STATE_CONTENT )
+      _disp( 1 ) << "OCFESLV::setup ** determinacy: window " << D.window << " has a NULL SPACE IN THE STATES"
+                 << " (rank " << ( D.n > D.def_right ? D.n - D.def_right : 0 ) << " of " << D.n << "): the discrete"
+                 << " problem has a family of solutions, not one -- setup continues (set FATAL.DETERMINACY to refuse)\n";
   // Corpus-inert -- no driver sets the option and the default is off.
   if( options.FATAL.DETERMINACY ){
     std::string why;
@@ -11357,11 +11377,7 @@ OCFESLV::_on_model_ready
   // setup() so it is idempotent under re-setup; an explicit register_control() after setup() still
   // appends (deduplicated).  Skipped implicitly on the early-return setup failures above.
   _reindex_controls();   // layout from _decisionFlag; FFModel::control_ndof reads the declaration
-  _primalValid = false;   // model (re)built -> any cached primal solution is stale
-  _reducedDepValid = false;   // ... and the structural dependency pattern
-  _rowProvenanceReady = false; _rowEqnNdx.clear();   // ... and the residual-row provenance
-  _eqnDiffInReady = false; _eqnDiffIn.clear();       // ... and the row x direction Partial table
-  _marchICRowsReady = false; _marchICRows.clear(); _marchICTerminal.clear(); _marchICColToNode.clear(); _marchICActive = false;
+  // (the previous setup's caches were invalidated ABOVE, before the W-test and the determinacy audit -- 2026-10-10)
 
   // Header identity, once per process.  A stale object file not relinked against a new
   // header produces a log indistinguishable from a correct run of the OLD header -- the
@@ -13022,14 +13038,29 @@ OCFESLV::_wdecide_restore
   bool ok = setup();                // the kept system's lines are replayed below,
   _auditQuiet   = false;            // a revert prints via the second recursion.
   _wdecideRetry = false;
+  // 2026-10-10: the RESTORED system is measured exactly as the dropped one was above -- its windows assembled at the
+  // reference and numeric_rank'ed by this W-test itself.  It used to be read from _determinacy, which the numerical
+  // audit fills only when DETERMINACY.AUDIT is on (the structural count otherwise): the verdict, hence the plan the
+  // solver got, depended on a DIAGNOSTIC flag (OCFE_MMPDE1 with an adaptive monitor, found 9 Oct).
   size_t worst_after = 0, worst_before = 0;
-  for( size_t w = 0; w < nwin && w < _determinacy.size(); ++w ){
-    auto const& D = _determinacy[w];
-    if( !D.ran ) continue;
-    size_t const excess = ( D.def_right > D.free_expected + D.k_prime )
-                        ? D.def_right - D.free_expected - D.k_prime : 0;
-    worst_after  = std::max( worst_after, excess );
-    worst_before = std::max( worst_before, def_before[w] );
+  for( size_t w = 0; w < nwin; ++w ) worst_before = std::max( worst_before, def_before[w] );
+  if( ok ){
+    std::vector<double> xa, ua; std::string reftag_a;
+    _reference_point( xa, ua, reftag_a );
+    double const* xav = xa.empty() ? nullptr : xa.data();
+    double const* uav = ua.empty() ? nullptr : ua.data();
+    double const* cav = _vCstVal.empty() ? nullptr : _vCstVal.data();
+    bool const marching_a = ( options.SOLVE.MARCHING && _marchGrid.size() >= 2 && n_march_steps() >= 1 );
+    size_t const nwin_a = marching_a ? std::min<size_t>( 2, n_march_steps() ) : 1;
+    for( size_t w = 0; w < nwin_a; ++w ){
+      t_JacAssembly A;
+      bool const oka = ( w == 0 && !marching_a ) ? assemble( xav, uav, cav, A, true )
+                                                 : assemble_window( w, xav, uav, cav, A, true );
+      if( !oka ){ ok = false; break; }
+      t_RankResult const RRa = numeric_rank( A.J, options.DETERMINACY.TOL, 0.0 );
+      size_t const def_after = ( (size_t)A.J.n_cols > RRa.rank ? (size_t)A.J.n_cols - RRa.rank : 0 );
+      worst_after = std::max( worst_after, def_after );
+    }
   }
   if( !ok || worst_after >= worst_before ){
     _disp( 3 ) << "[w-decide] restore did not strictly improve (worst excess "

@@ -3806,6 +3806,19 @@ public:
   //! @brief Register input @p param as a homotopy parameter with a map s -> value, e.g. for a rate
   //! constant spanning decades: [](double s){ return 2e4*std::%pow(50.,s); }.  Must be called
   //! after setup().
+  //! To step through a LIST OF VALUES, interpolate them in the map -- values[i] at s = i/(n-1), joined
+  //! linearly, is the waypoint idiom, and `{from, to}` reproduces the ramp overload above:
+  //! \code
+  //!   std::vector<double> const v{ 0.1, 0.4, 1.0 };          // CAPTURE BY VALUE: the map outlives the call
+  //!   oc.add_homotopy( p, [v]( double s ){
+  //!     double const x = std::min( std::max( s, 0. ), 1. ) * ( v.size() - 1 );
+  //!     size_t const i = std::min( (size_t)x, v.size() - 2 );
+  //!     return v[i] + ( x - (double)i ) * ( v[i+1] - v[i] );
+  //!   } );
+  //! \endcode
+  //! A bent path like that is useful where a straight ramp leaves the branch.  Note the stepper chooses its
+  //! own s, so the PATH passes through the values but a solve need not LAND on one: to force a stop at a
+  //! value, give it its own stage or cap that stage with set_homotopy_cap().
   //! @return false if @p param is not an input of the set-up model or @p map is empty
   bool add_homotopy
     ( FFVar const& param, std::function<double(double)> map, int stage = 0 );

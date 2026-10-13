@@ -265,6 +265,97 @@ for _what, _field, _value, _have in (
               "%s, backend NOT built in: setup() refuses (%s)" % (_what, _B.setup_status))
 
 # %% [markdown]
+# ## Homotopy / continuation
+#
+# `add_homotopy` and `continuation_report` were unreachable from Python in v5.0.0 while their
+# options were bound and documented, so the gap was invisible from the options alone.  These
+# checks cover both overloads, the documented waypoint idiom on top of the map form, the report,
+# the per-stage cap, the reset and the error paths.
+
+# %%
+def homotopy(form):
+    """A heat model whose diffusivity is scaled by a homotopy input, driven by `form`."""
+    G = FFGraph()
+    t, z, u, lam = G.add_var("t"), G.add_var("z"), G.add_var("u(t,z)"), G.add_var("lam")
+    S = OCFESLV(G)
+    S.add_domain(t, FFDom(0., 1., 2, FFDom.LGR, 6))
+    S.add_domain(z, FFDom(0., 1., 4, FFDom.LGL, 7))
+    S.set_evolution_domain(t)
+    S.add_state(u, [t, z], ref=0.5)
+    T_NO_LB, Z_INT = FFDom.ALL - FFDom.LB, FFDom.ALL - FFDom.LB - FFDom.UB
+    S.add_equation(OpP(u, t) - A * lam * OpP(u, {z: 2}), [t, z], [T_NO_LB, Z_INT], OCFESLV.EqnOptions(Role.INTERIOR))
+    S.add_equation(u, [t, z], [T_NO_LB, FFDom.LB], OCFESLV.EqnOptions(Role.BOUNDARY))
+    S.add_equation(u, [t, z], [T_NO_LB, FFDom.UB], OCFESLV.EqnOptions(Role.BOUNDARY))
+    S.add_equation(u - pymcpp.sin(math.pi * z), [t, z], [FFDom.LB, FFDom.ALL], OCFESLV.EqnOptions(Role.INITIAL))
+    S.add_output(OpE(u, {t: 1, z: 1}, {t: 1., z: .5}))
+    S.options.SOLVE.RES_TOL = 1e-12
+    S.options.DISPLAY_LEVEL = 0
+    S.add_input(lam, [], ref=1.0)
+    ok = S.setup()
+    form(S, lam)                       # the overload under test, AFTER setup()
+    S.options.HOMOTOPY.ENABLE = True
+    var, inp = S.init()
+    rep = S.solve(var, inp)
+    return S, ok, rep, S.val_functions()[0]
+
+
+S, ok, rep, f_ramp = homotopy(lambda S, lam: S.add_homotopy(lam, 0.1, 1.0))
+cr = S.continuation_report()
+check(ok and rep.converged, "homotopy: setup, solve converged under continuation")
+check(cr.converged and cr.failed_stage == -1 and cr.solves >= 1 and cr.iterations >= 1,
+      "continuation_report: converged, no failed stage, solves/iterations counted")
+check(len(cr.stage) == 1 and cr.stage[0].stage == 0 and cr.stage[0].nparam == 1
+      and cr.stage[0].converged and abs(cr.stage[0].s_reached - 1.) < 1e-12,
+      "continuation_report: one stage, one parameter, s reached 1")
+
+_, _, _, f_map = homotopy(lambda S, lam: S.add_homotopy(lam, lambda s: 0.1 + 0.9 * s))
+check(abs(f_map - f_ramp) < 1e-10, "add_homotopy(map): the same ramp as a callable  (1e-10)")
+
+
+def waypoints(v):
+    """The documented idiom: a list of values interpolated in the map, v[i] at s = i/(n-1)."""
+    return lambda s: float(np.interp(s, np.linspace(0., 1., len(v)), v))
+
+
+_, _, _, f_vec = homotopy(lambda S, lam: S.add_homotopy(lam, waypoints([0.1, 1.0])))
+check(abs(f_vec - f_ramp) < 1e-10, "waypoint idiom: [a, b] interpolated gives the ramp's solution  (1e-10)")
+
+_, _, _, f_way = homotopy(lambda S, lam: S.add_homotopy(lam, waypoints([0.1, 0.4, 1.0])))
+check(abs(f_way - f_ramp) < 1e-8, "waypoint idiom: a bent path reaches the same solution  (1e-8)")
+
+
+def staged(S, lam):
+    S.add_homotopy(lam, 0.1, 1.0, stage=0)
+    S.set_homotopy_cap(0, 0.25)
+
+
+S2, _, rep2, _ = homotopy(staged)
+cr2 = S2.continuation_report()
+check(rep2.converged and cr2.solves >= 4,
+      "set_homotopy_cap: a 0.25 cap takes at least four steps (%d)" % cr2.solves)
+S2.reset_homotopy()
+check(S2.continuation_report() is not None, "reset_homotopy: accepted after a run")
+
+G3 = FFGraph()
+t3, u3, q3 = G3.add_var("t"), G3.add_var("u(t)"), G3.add_var("q")
+S3 = OCFESLV(G3)
+S3.add_domain(t3, FFDom(0., 1., 1, FFDom.LGR, 4))
+S3.set_evolution_domain(t3)
+S3.add_state(u3, [t3], ref=1.)
+S3.add_equation(OpP(u3, t3) + u3, [t3], [FFDom.ALL - FFDom.LB], OCFESLV.EqnOptions(Role.INTERIOR))
+S3.add_equation(u3 - 1., [t3], [FFDom.LB], OCFESLV.EqnOptions(Role.INITIAL))
+S3.options.DISPLAY_LEVEL = 0
+S3.setup()
+for what, call, err in [
+        ("add_homotopy on a variable that is not an input", lambda: S3.add_homotopy(q3, 0., 1.), ValueError),
+        ("add_homotopy(map) on a state", lambda: S3.add_homotopy(u3, lambda s: s), ValueError)]:
+    try:
+        call()
+        check(False, "%s refused" % what)
+    except err:
+        check(True, "%s refused (%s)" % (what, err.__name__))
+
+# %% [markdown]
 # ## Summary
 
 # %%

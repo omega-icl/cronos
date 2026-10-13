@@ -115,6 +115,46 @@ Example -- the heat equation u_t = u_zz with an output:
 >>> rep.converged, S.val_functions()
 )doc");
 
+  // --- OCFESLV StageReport / ContinuationReport ---
+  py::class_<O::StageReport>( pyOCFESLV, "StageReport",
+      "Per-stage breakdown of a continuation; see ContinuationReport.stage." )
+      .def_readonly( "stage", &O::StageReport::stage, "stage index" )
+      .def_readonly( "nparam", &O::StageReport::nparam, "parameters driven together in this stage" )
+      .def_readonly( "converged", &O::StageReport::converged, "the stage reached s = 1" )
+      .def_readonly( "solves", &O::StageReport::solves, "solve() calls" )
+      .def_readonly( "accepts", &O::StageReport::accepts, "accepted steps" )
+      .def_readonly( "backtracks", &O::StageReport::backtracks, "rejected steps" )
+      .def_readonly( "iterations", &O::StageReport::iterations, "Newton/LM iterations" )
+      .def_readonly( "pred_used", &O::StageReport::pred_used, "steps started from a predictor" )
+      .def_readonly( "pred_rejected", &O::StageReport::pred_rejected, "predictions rejected" )
+      .def_readonly( "pred_ord1", &O::StageReport::pred_ord1, "accepted steps won by the secant" )
+      .def_readonly( "pred_ord2", &O::StageReport::pred_ord2,
+                     "accepted steps won by the quadratic: a rising ord2 with falling iterations is what shows the"
+                     " higher order actually paying" )
+      .def_readonly( "seconds", &O::StageReport::seconds, "wall time in solve()" )
+      .def_readonly( "s_reached", &O::StageReport::s_reached, "s attained (1.0 on success)" )
+      .def_readonly( "last_residual", &O::StageReport::last_residual, "max|r| at the last solve of this stage" )
+      .def_readonly( "destaged", &O::StageReport::destaged,
+                     "0 normally; else the number of sequential sub-stages the stage was split into after failing to"
+                     " move its parameters together" );
+  py::class_<O::ContinuationReport>( pyOCFESLV, "ContinuationReport",
+      "Detail of a continuation run; retrieve with continuation_report() after solve()." )
+      .def_readonly( "converged", &O::ContinuationReport::converged, "every stage reached s = 1" )
+      .def_readonly( "solves", &O::ContinuationReport::solves, "total solve() calls" )
+      .def_readonly( "accepts", &O::ContinuationReport::accepts, "accepted steps" )
+      .def_readonly( "backtracks", &O::ContinuationReport::backtracks, "rejected steps" )
+      .def_readonly( "iterations", &O::ContinuationReport::iterations, "total Newton/LM iterations" )
+      .def_readonly( "pred_used", &O::ContinuationReport::pred_used, "steps started from a predictor" )
+      .def_readonly( "pred_rejected", &O::ContinuationReport::pred_rejected, "predictions rejected" )
+      .def_readonly( "pred_ord1", &O::ContinuationReport::pred_ord1, "accepted steps won by the secant" )
+      .def_readonly( "pred_ord2", &O::ContinuationReport::pred_ord2, "accepted steps won by the quadratic" )
+      .def_readonly( "seconds", &O::ContinuationReport::seconds, "total wall time in solve()" )
+      .def_readonly( "final_residual", &O::ContinuationReport::final_residual, "max|r| at return" )
+      .def_readonly( "failed_stage", &O::ContinuationReport::failed_stage,
+                     "index of the stage that failed (-1 if none)" )
+      .def_readonly( "failed_at_s", &O::ContinuationReport::failed_at_s, "s reached when it failed" )
+      .def_readonly( "stage", &O::ContinuationReport::stage, "per-stage breakdown, a list of StageReport" );
+
   // --- OCFESLV SolveReport ---
   py::class_<O::SolveReport>(pyOCFESLV, "SolveReport", "Outcome of a solve.")
       .def_readonly("converged", &O::SolveReport::converged,
@@ -339,6 +379,87 @@ Jacobian of the outputs with respect to the control DOFs, captured by the last
 solve_fsens / solve_asens: NumPy array of shape (nf, n_control_dof), columns
 in the order of the registered controls and their ``control_dofs``.
 )doc")
+      // homotopy / continuation
+      .def(
+          "continuation_report",
+          []( O const& self ) -> O::ContinuationReport const& { return self.continuation_report(); },
+          py::return_value_policy::reference_internal, R"doc(
+Detail of the continuation run of the last ``solve()``: totals, the failing
+stage and the s it reached, and a per-stage breakdown.  Meaningful only when
+``options.HOMOTOPY.ENABLE`` was set and parameters were registered.
+)doc" )
+      .def(
+          "add_homotopy",
+          []( O& self, mc::FFVar const& param, double from, double to, int stage )
+          {
+            if( !self.add_homotopy( param, from, to, stage ) )
+              throw py::value_error( "OCFESLV.add_homotopy: " + param.name() +
+                                     " is not an input of the set-up model" );
+          },
+          py::arg( "param" ), py::arg( "from_" ), py::arg( "to" ), py::arg( "stage" ) = 0,
+          t_Redirect(), R"doc(
+Register input ``param`` as a homotopy parameter driven linearly from ``from_``
+to ``to`` by a scalar s in [0, 1].  Call AFTER ``setup()``: the parameter is
+looked up among the inputs of the set-up model.
+
+With ``options.HOMOTOPY.ENABLE`` set, ``solve()`` runs the continuation,
+stepping s adaptively.  Parameters sharing a ``stage`` move together and stages
+run in ascending order: all stage 0 is simultaneous, 0, 1, 2, ... a staircase.
+
+Continuation also SELECTS THE ROOT on a multi-rooted model: a different schedule
+or step cap can converge to a different solution with no warning, so validate
+such a change against a known-good final state.
+
+Raises
+------
+ValueError
+    If ``param`` is not an input of the set-up model.
+)doc" )
+      .def(
+          "add_homotopy",
+          []( O& self, mc::FFVar const& param, std::function<double(double)> map, int stage )
+          {
+            if( !self.add_homotopy( param, std::move( map ), stage ) )
+              throw py::value_error( "OCFESLV.add_homotopy: " + param.name() +
+                                     " is not an input of the set-up model, or the map is empty" );
+          },
+          py::arg( "param" ), py::arg( "map" ), py::arg( "stage" ) = 0,
+          t_Redirect(), R"doc(
+As above, with an arbitrary map s -> value instead of a linear ramp -- e.g. for
+a rate constant spanning decades, ``lambda s: 2e4 * 50.0**s``.
+
+To step through a LIST OF VALUES, interpolate them here: ``values[i]`` at
+s = i/(n-1), joined linearly, is the waypoint idiom, and ``[from_, to]``
+reproduces the ramp overload::
+
+    v = [0.1, 0.4, 1.0]
+    S.add_homotopy(p, lambda s: float(np.interp(s, np.linspace(0, 1, len(v)), v)))
+
+A bent path like that is useful where a straight ramp leaves the branch.  The
+stepper chooses its own s, so the PATH passes through the values but a solve
+need not LAND on one: to force a stop at a value, give it its own ``stage`` or
+cap that stage with ``set_homotopy_cap()``.
+
+Raises
+------
+ValueError
+    If ``param`` is not an input of the set-up model, or ``map`` is empty.
+)doc" )
+      .def(
+          "reset_homotopy", []( O& self ){ self.reset_homotopy(); }, t_Redirect(), R"doc(
+Remove every homotopy parameter and the per-stage step caps set by
+``set_homotopy_cap()``.
+)doc" )
+      .def(
+          "set_homotopy_cap",
+          []( O& self, int stage, double cap ){ self.set_homotopy_cap( stage, cap ); },
+          py::arg( "stage" ), py::arg( "cap" ), t_Redirect(), R"doc(
+Override ``options.HOMOTOPY.STEP_CAP`` for one ``stage``; ``cap <= 0`` clears
+the override.  The cap is a PATH-FIDELITY setting: a stage that merely deforms a
+profile may run at 0.1 while one switching on a stiff coupling needs 0.05 or
+finer to stay on the same branch, and with one global cap the whole schedule
+pays for the worst stage.
+)doc" )
       // inputs
       .def(
           "set_input_values",

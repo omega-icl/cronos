@@ -45,6 +45,7 @@ Print reports at setup; none changes what is computed.  Those marked "default of
 | `CRONOS_AUDIT_TAG` | A one-line machine-readable `[cov1]` summary per setup, for corpus sweeps. | `ocfeslv.hpp` |
 | `CRONOS_AUDIT_TAUCOL` | The `[taucol/plan]` report: the plan's tau columns. | `ocfeslv.hpp` |
 | `CRONOS_DETERMINACY_GAP_MIN` | Determinacy audit: a gap at the rank cut below this triggers a re-evaluation at 1.3x the reference point (default 1e2). | `ocfeslv.hpp` |
+| `CRONOS_DISPLAY_LEVEL` | Floor for `DISPLAY_LEVEL`, an integer `0`..`9`: raises it wherever a driver set it lower, never lowers it, and does nothing when unset.  Applied to the setup and solve reports alike, so a whole sweep can be run with the classification logged without editing drivers.  A value that is not an integer 0..9 is reported once and ignored. | `ffmodel.hpp` |
 | `CRONOS_HEADER_FULL` | Print the solver header's revision summary at setup (display level 2). | `ocfeslv.hpp` |
 | `CRONOS_KEEP_EXPLICIT_AUDIT` | Check that every explicit tau column arrives with its row (the keep-explicit invariant). | `ocfeslv.hpp` |
 | `CRONOS_KPRIME_STRUCTURAL` | With the numeric determinacy audit on, print the structural determinacy line beside it (a corpus-wide equality check). | `ocfeslv.hpp` |
@@ -98,6 +99,7 @@ Change behaviour; kept ONLY for the corpus drivers that exercise them.  A model 
 
 | variable | what it does | read in |
 |---|---|---|
+| `CRONOS_DROP_POLICY` | Override of `INTERFACE.DROP_POLICY` for every model: `0`, `1` or `2` for DROP_VERIFY, DROP_REDERIVE or DROP_OFF.  Unset leaves each driver's own value.  For sweeping the corpus with the redundant-continuity drop disabled without editing drivers (WORKPLAN 4R.28). | `ocfeslv.hpp` |
 | `CRONOS_FORCE_BAD_KEEP_EXPLICIT` | Fault injector for `OCFE_hybrid_adequacy`: makes the tau elimination stall, which is that driver's PASS condition. | `ocfeslv.hpp` |
 | `CRONOS_RESCUE_C2` | Receiver policy of the C2/C2b study (default on; 0 forces the original +1 everywhere).  Kept for `OCFE_receiver` until the receiver-policy study concludes. | `ocfeslv.hpp` |
 | `CRONOS_WEAK_NATURAL_PENALTY` | IC_WEAK receiver policy for continuity claims: 0, 1 or 2 (default).  Kept for `OCFE_receiver`, as above. | `ocfeslv.hpp` |

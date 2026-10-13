@@ -77,6 +77,7 @@ REGISTRY = {
   'CRONOS_DUMP_COLS': ( 'rank', '`=c1,c2,...`: dump the nonzeros of selected columns of the audited Jacobian.' ),
   'CRONOS_DUMP_J': ( 'rank', '`=<file>`: write the audited Jacobian in coordinate form.' ),
   # solve diagnostics
+  'CRONOS_DISPLAY_LEVEL': ( 'audit', 'Floor for `DISPLAY_LEVEL`, an integer `0`..`9`: raises it wherever a driver set it lower, never lowers it, and does nothing when unset.  Applied to the setup and solve reports alike, so a whole sweep can be run with the classification logged without editing drivers.  A value that is not an integer 0..9 is reported once and ignored.' ),
   'CRONOS_SOLVE_VERBOSE': ( 'solve', 'Force `SOLVE.VERBOSE` on in every driver (force-on only), to trace a whole sweep\'s solves without editing drivers.' ),
   'CRONOS_AUDIT_BETA': ( 'solve', 'After each IC_TRACE solve with the projection applied: beta = Z^T lambda and the violation it absorbs.' ),
   'CRONOS_AUDIT_SENS': ( 'solve', '||dF/dvar|| restricted to the tau columns, once per sensitivity setup.' ),
@@ -85,6 +86,7 @@ REGISTRY = {
   # test switches
   'CRONOS_FORCE_BAD_KEEP_EXPLICIT': ( 'test', 'Fault injector for `OCFE_hybrid_adequacy`: makes the tau elimination stall, which is that driver\'s PASS condition.' ),
   'CRONOS_RESCUE_C2': ( 'test', 'Receiver policy of the C2/C2b study (default on; 0 forces the original +1 everywhere).  Kept for `OCFE_receiver` until the receiver-policy study concludes.' ),
+  'CRONOS_DROP_POLICY': ( 'test', 'Override of `INTERFACE.DROP_POLICY` for every model: `0`, `1` or `2` for DROP_VERIFY, DROP_REDERIVE or DROP_OFF.  Unset leaves each driver\'s own value.  For sweeping the corpus with the redundant-continuity drop disabled without editing drivers (WORKPLAN 4R.28).' ),
   'CRONOS_WEAK_NATURAL_PENALTY': ( 'test', 'IC_WEAK receiver policy for continuity claims: 0, 1 or 2 (default).  Kept for `OCFE_receiver`, as above.' ),
 }
 MCPP = {   # read by MC++, not by CRONOS's headers -- documented, not scanned

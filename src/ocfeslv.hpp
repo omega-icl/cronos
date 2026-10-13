@@ -694,6 +694,12 @@ public:
                                    //!< When false the schedule is IGNORED and solve() runs directly at the
                                    //!< current input values -- useful for with/without contrast runs
                                    //!< without unregistering the model's parameters.
+      bool   SOLVE_S0;         //!< solve the s = 0 problem BEFORE the ramp, so every trial restarts from an actual
+                               //!< solution rather than from the caller's initial vector (false: the ramp takes
+                               //!< that vector as its start, as always).  A failure at s = 0 is reported as "the
+                               //!< continuation has no starting point".  Costs one solve; on a model whose initial
+                               //!< vector is already near the s = 0 solution it can shift the path (MBC5fig_ebal:
+                               //!< one extra backtrack).  (false)
       double STEP_CAP;         //!< max homotopy step in s, and the step the ramp STARTS at (0.1).
                                    //!< PATH FIDELITY KNOB, and the one that matters: a converged step is
                                    //!< NOT evidence of correctness -- too large a cap can move the
@@ -811,6 +817,7 @@ public:
         HOMOTOPY.STEP_SHRINK     = opt.HOMOTOPY.STEP_SHRINK;
         HOMOTOPY.STEP_MIN        = opt.HOMOTOPY.STEP_MIN;
         HOMOTOPY.AUTO_DESTAGE    = opt.HOMOTOPY.AUTO_DESTAGE;
+        HOMOTOPY.SOLVE_S0        = opt.HOMOTOPY.SOLVE_S0;
         HOMOTOPY.PREDICT         = opt.HOMOTOPY.PREDICT;
         HOMOTOPY.PREDICT_ORDER   = opt.HOMOTOPY.PREDICT_ORDER;
         FATAL.REDUCED_DOF = opt.FATAL.REDUCED_DOF;
@@ -1034,6 +1041,7 @@ public:
         HOMOTOPY.STEP_SHRINK     = 0.5;    //!< step shrink after a failed step; GROW*SHRINK MUST BE < 1
         HOMOTOPY.STEP_MIN        = 1e-5;   //!< abandon the stage below this step
         HOMOTOPY.AUTO_DESTAGE    = true;   //!< on stage failure, retry its parameters one at a time (LOUD)
+        HOMOTOPY.SOLVE_S0        = false;  //!< the ramp starts from the caller's vector (2026-10-10: option, 4R.18)
         HOMOTOPY.PREDICT         = true;   //!< guarded extrapolation predictor (kept only when it beats plain reuse)
         HOMOTOPY.PREDICT_ORDER   = 2;  //!< max order of the extrapolation from accepted points
         FATAL.REDUCED_DOF = true; //!< reject setup() on a structurally IC/BC-inconsistent reduced system
@@ -1102,6 +1110,15 @@ public:
   static int _knob_WEAK_NATURAL_PENALTY
     ()
     { return static_cast<int>( FFModel::Options::_env_int( "CRONOS_WEAK_NATURAL_PENALTY", 2, 0, 2 ) ); }
+  //! @brief Corpus-sweep override for INTERFACE.DROP_POLICY (2026-10-12, WORKPLAN 4R.28).  CRONOS_DROP_POLICY=0|1|2
+  //! forces DROP_VERIFY / DROP_REDERIVE / DROP_OFF for EVERY model, whatever the driver set; unset (the default, -1)
+  //! leaves each driver's own value, so this changes nothing unless the variable is present.  Added because the drop
+  //! is a per-driver option and a sweep needs one switch: on OCFE_Burger_move --form q (a SQUARE symbol, so the
+  //! redundancy pass is not vetoed) the drop costs 6 rebuilds, 9 plan passes and a FAILED solve (60 iterations,
+  //! 37.5 s), where DROP_OFF keeps all 216 claims, builds one plan and converges in 7 iterations (0.2 s).
+  static int _knob_DROP_POLICY
+    ()
+    { return static_cast<int>( FFModel::Options::_env_int( "CRONOS_DROP_POLICY", -1, -1, 2 ) ); }
   //! @brief W-test the claims dropped by the redundancy pass on the built system, and restore as explicit the subset
   //! that is needed (one re-derive, revert-guarded).  Default on; (The CRONOS_DROP_WDECIDE variable is retired, 2026-10-07.)
   static bool _knob_DROP_WDECIDE
@@ -1367,6 +1384,9 @@ public:
     ()
     override
     {
+      // 2026-10-12: the CRONOS_DISPLAY_LEVEL floor is applied to the SOLVER's object first, so the slice below
+      // carries it into FFModel::options too and both layers report at the same level.
+      FFModel::Options::_force_display_from_env( options.DISPLAY_LEVEL );
       // slice the requested configuration into the APPLIED one (FFModel::options is the member the
       // model layer reads; `options` here is the solver's richer, shadowing object).
       FFModel::options = static_cast<FFModel::Options const&>( options );
@@ -4994,7 +5014,7 @@ public:
     // rev110 -- so a solve log carried a revision three steps stale.  Nothing else in
     // the build chain would have caught it: the makefile names the file, the build
     // oracle checks the instrument's format marker, and neither reads this.
-    = "ocfeslv  rev372  2026-10-10";
+    = "ocfeslv  rev373  2026-10-11";
 
   //! @brief The revision of this ocfeslv.hpp (HEADER_ID); FFModel::revision() gives the model layer's, which a
   //! binary may mix with another solver revision.
@@ -16345,7 +16365,7 @@ OCFESLV::_pinned_column_pairs
 ( std::vector<PlanInput::DofEdge>& out ) const
 {
   // Bare state-id sets of the INITIAL/BOUNDARY equations, computed once.
-  struct PinEq { t_Eqn const* er; std::set<size_t> bare; };
+  struct PinEq { t_Eqn const* er; std::set<size_t> bare; bool used = false; };
   std::vector<PinEq> pins;
   for( auto const& er : _mEqn ){
     if( er.opt->role != EqnRole::INITIAL && er.opt->role != EqnRole::BOUNDARY ) continue;
@@ -17752,7 +17772,10 @@ OCFESLV::_detect_redundant_continuity_claims
     return true;
   // DROP_OFF (item 10 step 3): disable the redundant-continuity drop entirely;
   // every continuity claim is kept explicit.  The most conservative baseline.
-  if( options.INTERFACE.DROP_POLICY == Options::DROP_OFF )
+  int const dp_env = _knob_DROP_POLICY();
+  auto const dp = dp_env < 0 ? options.INTERFACE.DROP_POLICY
+                             : static_cast<Options::InterfaceDropPolicy>( dp_env );
+  if( dp == Options::DROP_OFF )
     return true;
   if( draft.weak_sat_terms.empty() ) return true;
 
@@ -19836,7 +19859,11 @@ OCFESLV::_homotopy_ramp( std::vector<t_Homotopy const*> const& act, double s0, d
                        double* var, double* pinp, double const* cst,
                        std::vector<double>& saved, StageReport& st, double& s_out )
 {
-  size_t const nv = n_colloc_sta();
+  // 2026-10-10: the FULL solve vector -- the state coefficients AND the trace/tau unknowns appended to var[] (the
+  // claims kept explicit under IC_STRONG, every tau under IC_TRACE).  With n_colloc_sta() alone the traces were
+  // neither saved nor restored: after a failed trial they kept the diverged trial's values, and every later trial
+  // started from them -- the ramp never recovered from its first failure (OCFE_MMPDE2: 3840 states + 30 traces).
+  size_t const nv = n_colloc_sta() + n_colloc_trace();
   double cur = s0, d = cap;
   s_out = cur;
 
@@ -19899,6 +19926,7 @@ OCFESLV::_homotopy_ramp( std::vector<t_Homotopy const*> const& act, double s0, d
       sHist.push_back( cur ); xHist.push_back( saved );
       if( sHist.size() > 3 ){ sHist.erase( sHist.begin() ); xHist.erase( xHist.begin() ); }
       ++st.accepts;
+      _disp( 2 ) << "OCFESLV::solve_homotopy s=" << cur << " accepted (" << sr.iterations << " iterations)\n";
       d = std::min( cap, d * options.HOMOTOPY.STEP_GROW );
     }
     else{
@@ -19943,7 +19971,24 @@ OCFESLV::_solve_homotopy( double* var, double const* inp, double const* cst )
   for( auto const& h : _vHom )
     set_input_values( h.param, { _homotopy_value( h, 0. ) }, pinp );
 
-  std::vector<double> saved( var, var + n_colloc_sta() );
+  // 2026-10-10 (4R.18): SOLVE the s = 0 problem before the ramp.  The ramp takes `saved` as the solution at its
+  // start and restarts every trial from it; the caller's vector is only an initial guess, so without this every
+  // trial was a cold start, and a failed one shrank the step from a point that was never a solution (OCFE_MMPDE2).
+  // A failure here is said as such: the continuation has no starting point, which is not a failure to move.
+  if( options.HOMOTOPY.SOLVE_S0 ){
+    SolveReport const sr0 = solve( var, pinp, cst );
+    rep.solves += 1; rep.iterations += sr0.iterations; rep.final_residual = sr0.final_residual;
+    if( !sr0.converged ){
+      _disp( 1 ) << "OCFESLV::solve_homotopy ** the s = 0 problem did not converge (final residual "
+                 << sr0.final_residual << "): the continuation has no starting point\n";
+      rep.converged = false; rep.failed_at_s = 0.;
+      _homReport = rep;
+      agg.converged = false; agg.iterations = rep.iterations; agg.final_residual = rep.final_residual;
+      return agg;
+    }
+    _disp( 2 ) << "OCFESLV::solve_homotopy s=0 solved (" << sr0.iterations << " iterations)\n";
+  }
+  std::vector<double> saved( var, var + n_colloc_sta() + n_colloc_trace() );
 
   auto accumulate = [&]( StageReport const& st ){
     rep.stage.push_back( st );

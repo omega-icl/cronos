@@ -504,6 +504,24 @@ public:
     //! The adoption site is the last
     //! point before the solver reads the flag, so a force-on there beats any driver
     //! assignment.
+    //! @brief Raise DISPLAY_LEVEL from CRONOS_DISPLAY_LEVEL (2026-10-12).  A FLOOR: it never lowers what the driver
+    //! set, and does nothing when the variable is unset, so a corpus sweep can be run with the classification logged
+    //! without editing a single driver.  Applied in _apply_options(), where the caller's configuration lands before
+    //! any phase reads an option -- the field is also tested directly (not only through _disp), so raising the field
+    //! is what covers every report.
+    static void _force_display_from_env( int& level )
+    {
+      char const* v = std::getenv( "CRONOS_DISPLAY_LEVEL" );
+      if( !v ) return;
+      char* end = nullptr;
+      long const n = std::strtol( v, &end, 10 );
+      if( end == v || *end != '\0' || n < 0 || n > 9 ){
+        std::cerr << "OCFESLV ** CRONOS_DISPLAY_LEVEL='" << v << "' not recognised (an integer 0..9);"
+                     " leaving DISPLAY_LEVEL as the driver set it." << std::endl;
+        return;
+      }
+      if( static_cast<int>( n ) > level ) level = static_cast<int>( n );
+    }
     static void _force_verbose_from_env( bool& flag )
     {
       char const* v = std::getenv( "CRONOS_SOLVE_VERBOSE" );
@@ -5196,12 +5214,28 @@ const
 
   for( size_t i = 0; i < nDom; ++i ){
     std::vector<double> coeff_vals( nEqn * nState, 0. );
-    _dag->eval( sym.vCoeff[i], coeff_vals, eval_vars, eval_vals );
+    // 2026-10-12: CONTAINED.  A principal coefficient this context cannot evaluate -- measured: a quasi-linear flux
+    // whose coefficients depend on first derivatives held as proxies (OCFE_Burger_move_red, (sqrt(x_xi^2+u_xi^2))_xi
+    // under automatic order reduction: "missing variable v_u(t,xi)_xi") -- threw out of setup() and terminated the
+    // program.  Now: no evaluated symbol, exactly as when the coefficients are absent; the callers then report the
+    // block as undetermined.
+    try { _dag->eval( sym.vCoeff[i], coeff_vals, eval_vars, eval_vals ); }
+    catch( std::exception const& e ){
+      if( options.DISPLAY_LEVEL >= 1 )
+        std::cerr << "OCFESLV::_eval_symbol ** principal coefficients not evaluable at the reference point (" << e.what()
+                  << "): block left unclassified" << std::endl;
+      return std::vector<arma::mat>();
+    }
+    catch( ... ){
+      if( options.DISPLAY_LEVEL >= 1 )
+        std::cerr << "OCFESLV::_eval_symbol ** principal coefficients not evaluable at the reference point: block left"
+                  << " unclassified" << std::endl;
+      return std::vector<arma::mat>();
+    }
     for( size_t k = 0; k < nEqn; ++k )
       for( size_t j = 0; j < nState; ++j )
         Ai[i]( (arma::uword)k, (arma::uword)j ) = coeff_vals[ k * nState + j ];
   }
-
   return Ai;
 }
 
@@ -6527,6 +6561,12 @@ FFModel::_classify_pde
     }
     t_Classify cls_b = classify( Ai_b, sym_b.vDom, time_dom, n_sample, imag_tol,
                                  !sym_b.vAlgEqn.empty(), have_dn? &Ai_dn: nullptr, have_dn? &E0_dn: nullptr );
+    // 2026-10-12: a symbol WITH differential rows that could not be evaluated is INCONCLUSIVE, not algebraic.
+    // classify() reads an empty evaluation as ALGEBRAIC_FIELD, a CONCLUSIVE verdict meaning "no initial condition,
+    // nothing to march"; a block whose differential rows merely could not be evaluated has not been analysed at all.
+    // (OCFE_Burger_move_red's solve diverges either way -- measured -- so this corrects the verdict, not that solve.)
+    if( Ai_b.empty() && !sym_b.vEqn.empty() && !sym_b.vDom.empty() && sym_b.vCoeff.size() >= sym_b.vDom.size() )
+      cls_b.type = UNDETERMINED;
 
     // ---- (character, index) wiring -------------------------------------- //
     // Reference-free structural index (Pantelides-style incidence matching).
@@ -10803,6 +10843,7 @@ FFModel::setup
   // rev308: the caller's configuration lands here, BEFORE the thread cap reads MAXTHREAD and before any
   // phase reads an option.
   _apply_options();
+  Options::_force_display_from_env( options.DISPLAY_LEVEL );   // a floor from CRONOS_DISPLAY_LEVEL; see the helper
   if( !_check_transitions() ){ _setupStatus = SetupStatus::INCONSISTENT_MODEL;  return false; }   // see add_transition
   if( !_check_equation_reductions() ){ _setupStatus = SetupStatus::INCONSISTENT_MODEL;  return false; }   // the causality refusal
 

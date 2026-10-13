@@ -372,6 +372,15 @@ bind_ocfeslv_options(PyOpt& c)
       "input values -- useful for with/without contrast runs without "
       "unregistering the model's parameters.");
   c_HOMOTOPY.def_readwrite(
+      "SOLVE_S0", &mc::OCFESLV::Options::t_Homotopy::SOLVE_S0,
+      "solve the s = 0 problem BEFORE the ramp, so every trial restarts from "
+      "an actual solution rather than from the caller's initial vector (false: "
+      "the ramp takes that vector as its start, as always). A failure at s = 0 "
+      "is reported as \"the continuation has no starting point\". Costs one "
+      "solve; on a model whose initial vector is already near the s = 0 "
+      "solution it can shift the path (MBC5fig_ebal: one extra backtrack). "
+      "(false)");
+  c_HOMOTOPY.def_readwrite(
       "STEP_CAP", &mc::OCFESLV::Options::t_Homotopy::STEP_CAP,
       "max homotopy step in s, and the step the ramp STARTS at (0.1). PATH "
       "FIDELITY KNOB, and the one that matters: a converged step is NOT "

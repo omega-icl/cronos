@@ -95,19 +95,20 @@ int main( int argc, char** argv )
   // The SOLUTION must agree in every spelling; that is the hard requirement.
   bool sol_ok = all.size() == 3;
   for( auto const& R : all ) sol_ok = sol_ok && R.conv && R.err < 1e-3;
-  // The CLASSIFICATION must agree too.  The `r` spelling is a KNOWN GAP (WORKPLAN 4R.26): its defining row
-  // `r - (Dz_u)_z` is routed out of the principal symbol by the value-slaved row rule, so the symbol is left
-  // rectangular (2x1) and the block reads UNDETERMINED with no descriptor flag, where the other two spellings of the
-  // same problem read PARABOLIC/descriptor.  It matters because the descriptor verdict is what ODESLV reads.
-  // Reported as a known gap, not a failure, so a corpus sweep stays green; tighten this when 4R.26 is fixed.
+  // The CLASSIFICATION must agree too, and since 4R.26 it does: the value-slaved row rule no longer routes away the
+  // LAST provider of a (state, direction) derivative, so the `r` spelling keeps `r - (Dz_u)_z` and the block reads
+  // PARABOLIC/descriptor through the rectangular path, as the other two spellings do directly.  It matters because
+  // the descriptor verdict is what ODESLV reads (an algebraic state takes no initial condition).  A disagreement
+  // here is now a REGRESSION of 4R.26, not a known gap, and fails the driver.  CRONOS_SYMROW_B2=1 restores the old
+  // rule and should reproduce the old verdict: `r` UNDETERMINED/no descriptor, sym 2x1.
   bool cls_ok = sol_ok && all[0].type == all[1].type && all[0].descriptor == all[1].descriptor;
   bool const gap_r = cls_ok && ( all[2].type != all[0].type || all[2].descriptor != all[0].descriptor );
   cls_ok = cls_ok && !gap_r;
   if( !sol_ok )     std::printf( "FAIL: a spelling did not converge or the solutions disagree\n" );
-  else if( gap_r )  std::printf( "KNOWN GAP (WORKPLAN 4R.26): solutions agree (%.1e); the `r` spelling classifies %s/descriptor %s"
-                                 " against %s/descriptor %s\n", all[0].err, all[2].type.c_str(), all[2].descriptor ? "yes" : "no",
-                                 all[0].type.c_str(), all[0].descriptor ? "yes" : "no" );
+  else if( gap_r )  std::printf( "FAIL (REGRESSION of WORKPLAN 4R.26): solutions agree (%.1e) but the `r` spelling classifies"
+                                 " %s/descriptor %s against %s/descriptor %s\n", all[0].err, all[2].type.c_str(),
+                                 all[2].descriptor ? "yes" : "no", all[0].type.c_str(), all[0].descriptor ? "yes" : "no" );
   else if( cls_ok ) std::printf( "PASS: the three spellings agree on type, descriptor and solution\n" );
   else              std::printf( "FAIL: the `plain` and `w` spellings disagree\n" );
-  return sol_ok && ( cls_ok || gap_r ) ? 0 : 1;
+  return sol_ok && cls_ok ? 0 : 1;
 }

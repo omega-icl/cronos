@@ -4699,6 +4699,43 @@ const
       }
       // (b1) every direction in which THIS row differentiates sd is also taken by another row; or (b2)
       auto covered = [&]( FFVar const& sd, t_vid eqn_id )->bool {
+        // 4R.26 (2026-10-13): (b2) is applied only AFTER (b1), i.e. never to a row that is the LAST provider of a
+        // (state, direction) derivative.  (b2) exempts a materialised auxiliary on the grounds that it "is fully
+        // determined and its derivative is a derivative of a known quantity" -- true, but the SYMBOL still needs that
+        // derivative: routing its only carrier removes principal content, not a redundant definition.  Measured on
+        // OCFE_intermediate_dae (u_t = eps*r, r = u_zz -> r - (Dz_u)_z): routed, the block is 2x1 UNDETERMINED with
+        // no descriptor flag; kept, it is 3x2 and the RECT path -- which rev70 added for exactly this shape -- gives
+        // PARABOLIC/descriptor, agreeing with the same problem written u_t = eps*u_zz or with w = u_z.  The rule's
+        // premise, that a rectangular symbol must be avoided at any cost, predates that path.
+        if( !std::getenv( "CRONOS_SYMROW_B2" ) ){
+          // (b2) applies only where its own justification holds: the auxiliary's derivative IN THIS DIRECTION is
+          // "a derivative of a known quantity".  True for an aux that lifts an INTEGRAL or an evaluation --
+          // d/dz of Intz_a is the integrand, already present (OCFE_hybrid_adequacy's Z37) -- and FALSE for one that
+          // lifts a DERIVATIVE in the same direction: d/dz of Dz_u = u_z is u_zz, new principal content and the whole
+          // of the operator (OCFE_intermediate_dae's `r - (Dz_u)_z`).  So (b2) is refused exactly when sd's own
+          // definition is a partial derivative along the direction this row differentiates it in; otherwise it stands.
+          bool aux_same_dir = false;
+          if( _auxVarID.find( sd.id() ) != _auxVarID.end() )
+            for( auto const& ad : _auxDef ){
+              if( ad.aux.id() != sd.id() ) continue;
+              FFVar ae = ad.expr; auto sga = _dag->subgraph( 1, &ae );
+              for( auto const* op : sga.l_op ){
+                if( !op || !op->sameid( typeid(FFPartial) ) ) continue;
+                auto const* pop = mc::type_cast<FFPartial const>( op );
+                if( !pop ) continue;
+                for( auto const& [dv,ord] : pop->Indep().expr ){
+                  if( !ord ) continue;
+                  for( auto const& pd : eqn_diff_dir[ eqn_id ] )
+                    if( pd.first == sd.id().second && pd.second == dv.id().second ) aux_same_dir = true;
+                }
+              }
+              break;
+            }
+          if( _auxVarID.find( sd.id() ) != _auxVarID.end() && !aux_same_dir ) return true;   // (b2), justified
+          for( auto const& pd : eqn_diff_dir[ eqn_id ] )
+            if( pd.first == sd.id().second && diff_count_dir[ pd ] <= 1 ) return false;      // (b1)
+          return true;
+        }
         if( _auxVarID.find( sd.id() ) != _auxVarID.end() ) return true;        // (b2) LINK-defined materialised aux
         for( auto const& pd : eqn_diff_dir[ eqn_id ] )
           if( pd.first == sd.id().second && diff_count_dir[ pd ] <= 1 ) return false;

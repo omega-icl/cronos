@@ -24439,7 +24439,7 @@ OCFESLV::_prepare_interface_plan_tables
                   bool const audit_aux  = audit_zero
                     && auxiliary_algebraic_receiver_state( eqnvar, eqnopt, *cd.pvar, state_id );
                   if( audit_aux ){
-                    bool   c0_ok  = false;  double c0_val = 0.;  int c0_why = 1;   // why refused: 1 row in no symbol table   // C2: the receiving row's coefficient of the claimed state
+                    bool   c0_ok  = false;  int c0_why = 1;   // why refused: 1 row in no symbol table   // C2: the receiving row's coefficient of the claimed state
                     if( _classified ){   // rev291 (R4): C2's c0 read, unconditional
                       t_Symbol const& sya = _symbol_for_block( eqnopt.block_id );
                       auto read = [&]( std::vector<FFVar> const& rows, std::vector<FFVar> const& cols,
@@ -24453,7 +24453,7 @@ OCFESLV::_prepare_interface_plan_tables
                         FFVar const& c = coef[ gr * cols.size() + jc ];
                         bool const is_cst = ( c.id().first == FFVar::CINT || c.id().first == FFVar::CREAL || c.cst() );
                         double const v = is_cst ? c.num().val() : 0.;
-                        if( is_cst && std::fabs( v ) > 64. * DBL_EPSILON ){ c0_ok = true; c0_val = v; }
+                        if( is_cst && std::fabs( v ) > 64. * DBL_EPSILON ) c0_ok = true;
                         else if( is_cst ){
                           // rev294: is this row differentiating the claimed state in the claim's direction?
                           // If so the row HAS a flux coefficient for it (of lower order than the block's
@@ -24562,10 +24562,16 @@ OCFESLV::_prepare_interface_plan_tables
                         if( !read( sya.vAlgEqn, sya.vAlgState, sya.vAlgCoeff0, 0 ) )
                           read( sya.vEqn, sya.vAllState, sya.vCoeff0All, 5 );
                     }
-                    // ---- rev227 (C2): derive the coupling from the receiving row where c0 is CONSTANT ----
+                    // ---- rev227 (C2): is the receiving row's coefficient of the claimed state a nonzero CONSTANT? ----
                     // rev298: c2_derived went with the S1/S1d assignment it fed (rev291).
+                    // 2026-10-13 (4R.25): the derived VALUE is no longer assigned to the coupling.  It was, eight
+                    // lines above the unconditional fallback below, so it was overwritten on every edge and had been
+                    // dead since that fallback became unconditional -- the corpus has always run on the convention.
+                    // MEASURED before removing it: CRONOS_RESCUE_C2=0 (skip the whole block) gave a run identical to
+                    // the default, to the iteration count.  What c0 still decides is the LABEL and the counts: an
+                    // edge whose c0 is not a nonzero constant is coupling_undefined, which the plan reads.
                     if( _knob_RESCUE_C2() ){
-                      if( c0_ok ){ edge.coupling = c0_val; ++_rescueC2[ state_id ][0]; }
+                      if( c0_ok ){ ++_rescueC2[ state_id ][0]; }
                       else       { edge.coupling_undefined = true;            ++_rescueC2[ state_id ][1];
                                    ++_rescueC2Why[ state_id ][ c0_why ]; }   // rev293: WHY, reported with the counts
                     }
@@ -24741,7 +24747,8 @@ OCFESLV::_prepare_interface_plan_tables
       FFVar const* sv = _state_by_id( kv.first );
       _disp( 2 ) << "OCFESLV::setup ** interface: rescue C2 (rev227) -- state ";
       if( sv ) _disp( 2 ) << *sv; else _disp( 2 ) << "#" << kv.first;
-      _disp( 2 ) << ": " << kv.second[0] << " edge(s) coupling DERIVED from the row's constant c0, "
+      _disp( 2 ) << ": " << kv.second[0] << " edge(s) with a nonzero constant c0 in the receiving row"
+                    " (the coupling itself is the fallback convention, not this value), "
                 << kv.second[1] << " REFUSED";
       // rev293: WHY.  The old text said "coefficient not constant"; PDE25's refusals are all "zero" -- the state
       // enters the receiving row only differentiated, so there is no c0 to derive or evaluate.

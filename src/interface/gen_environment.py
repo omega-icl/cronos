@@ -86,6 +86,7 @@ REGISTRY = {
   # test switches
   'CRONOS_FORCE_BAD_KEEP_EXPLICIT': ( 'test', 'Fault injector for `OCFE_hybrid_adequacy`: makes the tau elimination stall, which is that driver\'s PASS condition.' ),
   'CRONOS_RESCUE_C2': ( 'test', 'Receiver policy of the C2/C2b study (default on; 0 forces the original +1 everywhere).  Kept for `OCFE_receiver` until the receiver-policy study concludes.' ),
+  'CRONOS_SYMROW_B2': ( 'test', 'Restores the pre-4R.26 value-slaved row routing, in which rule (b2) exempted a materialised order-reduction auxiliary from the (b1) uniqueness test, so a row could be routed out of the principal symbol even when it was the LAST provider of a derivative.  For bisection; `OCFE_intermediate_dae` reproduces the old verdict under it.' ),
   'CRONOS_DROP_POLICY': ( 'test', 'Override of `INTERFACE.DROP_POLICY` for every model: `0`, `1` or `2` for DROP_VERIFY, DROP_REDERIVE or DROP_OFF.  Unset leaves each driver\'s own value.  For sweeping the corpus with the redundant-continuity drop disabled without editing drivers (WORKPLAN 4R.28).' ),
   'CRONOS_WEAK_NATURAL_PENALTY': ( 'test', 'IC_WEAK receiver policy for continuity claims: 0, 1 or 2 (default).  Kept for `OCFE_receiver`, as above.' ),
 }

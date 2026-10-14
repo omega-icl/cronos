@@ -315,14 +315,28 @@ cst : list of float, optional
           "Output values after the last solve.")
       .def(
           "eval_solution",
-          [](O const& self, mc::FFVar const& state, M::t_Coord const& pt)
-          { return self.eval_solution(state, pt); }, py::arg("state"),
-          py::arg("point"), R"doc(
+          [](O const& self, mc::FFVar const& state, M::t_Coord const& pt,
+             std::optional<M::t_Side> const& side)
+          {
+            return self.eval_solution( state, pt, side ? &*side : nullptr );
+          },
+          py::arg("state"),
+          py::arg("point"), py::arg("side") = py::none(), R"doc(
 Value of ``state`` at ``point`` (a dict ``{domain: coordinate}``) in the last
 converged solution, in EITHER solve mode: the cached primal of a monolithic
 solve (``options.SOLVE.REUSE``) or the stored windows of a marching solve
 (``options.OUTPUT.MARCH_STORE``) -- both on by default.
-)doc")
+
+Evaluates a STATE or an INPUT; under marching the point itself selects the
+window, so the whole field is readable, not just the last window.
+
+``side`` is an optional per-direction dict for a coordinate where the value
+differs on either side of an element boundary or a transition, e.g.
+``side={t: FFDom.PLUS}``; directions left out default to ``FFDom.MINUS``.
+Under WEAK imposition the two element traces are genuinely different numbers;
+under the exact modes they agree to the solver tolerance and the side only
+chooses which element's polynomial is evaluated.
+")
       .def(
           "march_grid", [](O const& self) { return self.march_grid(); },
           "The window boundaries of the march (empty for a monolithic setup).")

@@ -3403,8 +3403,15 @@ public:
   //! Reads the framework's stored result: the cached primal (monolithic; needs SOLVE.REUSE) or
   //! the trajectory (marching; needs OUTPUT.MARCH_STORE) -- both are defaults.  const and
   //! side-effect-free.  Throws Exceptions::NOSTORE if no solution is cached.
+  //! @param state  the state OR input to evaluate
+  //! @param pt  the physical point, keyed by domain variable; under a marching solve the point itself selects the
+  //! window, so the whole stored field is readable and not merely the last window
+  //! @param side  2026-10-14: optional per-direction side (FFDom::MINUS, the default where absent, or FFDom::PLUS),
+  //! for a coordinate where the value differs on either side of an element boundary or a transition.  Under WEAK
+  //! imposition the two element traces are genuinely different numbers; under the exact modes they agree to the
+  //! solver tolerance and the side only picks which element's polynomial is evaluated.  Forwarded to eval_colloc().
   double eval_solution
-    ( FFVar const& state, t_Coord const& pt ) const;
+    ( FFVar const& state, t_Coord const& pt, t_Side const* side=nullptr ) const;
 
   protected:
   //! @brief Forward-sensitivity march: compute dF/d(control) for input @p control in the
@@ -19057,7 +19064,7 @@ OCFESLV::_solve_marching( double* var, double const* inp, double const* cst )
 
 inline double
 OCFESLV::eval_solution
-( FFVar const& state, t_Coord const& pt ) const
+( FFVar const& state, t_Coord const& pt, t_Side const* side ) const
 {
   if( !_issetup ) throw Exceptions( Exceptions::SETUP );
 
@@ -19069,13 +19076,13 @@ OCFESLV::eval_solution
       throw Exceptions( Exceptions::NOSTORE );   // marched with OUTPUT.MARCH_STORE disabled
     auto const& b = _marchTrajectory.back();
     return eval_colloc<double>( state, pt, b.var.data(),
-                                b.inp.empty() ? nullptr : b.inp.data(), nullptr );
+                                b.inp.empty() ? nullptr : b.inp.data(), nullptr, side );
   }
 
   // Monolithic solve: read from the cached primal solution (SOLVE.REUSE).
   if( _primalValid && _primalVar.size() == n_colloc_sta() )
     return eval_colloc<double>( state, pt, _primalVar.data(),
-                                _primalInp.empty() ? nullptr : _primalInp.data(), nullptr );
+                                _primalInp.empty() ? nullptr : _primalInp.data(), nullptr, side );
 
   throw Exceptions( Exceptions::NOSTORE );   // no cached solution: enable SOLVE.REUSE, or use eval_colloc() with a buffer
 }

@@ -696,6 +696,13 @@ by C++ to std::cout / std::cerr, are redirected to Python's ``sys.stdout`` /
       .def_property_readonly(
           "var_output", [](M const& self) { return self.var_output(); },
           "Declared outputs, as ``FFModel.t_Fct`` records.")
+      .def_static(
+          "setup_status_str", [](M::SetupStatus st) { return std::string(M::setup_status_str(st)); },
+          py::arg("status"), R"doc(
+One-line explanation of a ``SetupStatus``: what the failure was and, where the
+status admits of one, what to change.  The enum's own repr gives the name
+(``SetupStatus.OK``); this gives the sentence.
+)doc")
       .def(
           "report",
           [](M const& self)

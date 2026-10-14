@@ -265,6 +265,78 @@ for _what, _field, _value, _have in (
               "%s, backend NOT built in: setup() refuses (%s)" % (_what, _B.setup_status))
 
 # %% [markdown]
+# ## eval_solution: states and inputs, both solve modes, and the side at an element boundary
+#
+# `eval_colloc` is deliberately NOT bound: after a solve `eval_solution` is the entry point, and
+# under marching the point itself selects the window (`OUTPUT.MARCH_STORE`), so the whole field is
+# readable rather than only the last window.
+
+# %%
+def heatw(marching):
+    """A diffusion model with a distributed input, solved monolithically or by marching."""
+    G = FFGraph()
+    t, z, u, w = G.add_var("t"), G.add_var("z"), G.add_var("u(t,z)"), G.add_var("w(t)")
+    S = OCFESLV(G)
+    S.add_domain(t, FFDom(0., 0.4, 2, FFDom.LGR, 4))
+    S.add_domain(z, FFDom(0., 1., 4, FFDom.LGL, 5))
+    S.set_evolution_domain(t)
+    S.add_state(u, [t, z], ref=0.5)
+    S.add_input(w, [t], ref=1.25)
+    T_NO_LB, Z_INT = FFDom.ALL - FFDom.LB, FFDom.ALL - FFDom.LB - FFDom.UB
+    S.add_equation(OpP(u, t) - 0.05 * w * OpP(u, {z: 2}), [t, z], [T_NO_LB, Z_INT], OCFESLV.EqnOptions(Role.INTERIOR))
+    S.add_equation(u, [t, z], [T_NO_LB, FFDom.LB], OCFESLV.EqnOptions(Role.BOUNDARY))
+    S.add_equation(u, [t, z], [T_NO_LB, FFDom.UB], OCFESLV.EqnOptions(Role.BOUNDARY))
+    S.add_equation(u - pymcpp.sin(math.pi * z), [t, z], [FFDom.LB, FFDom.ALL], OCFESLV.EqnOptions(Role.INITIAL))
+    S.options.DISPLAY_LEVEL = 0
+    S.options.SOLVE.MARCHING = marching
+    S.setup()
+    var, inp = S.init()
+    S.solve(var, inp)
+    return S, t, z, u, w
+
+
+Sm, t_, z_, u_, w_ = heatw(False)
+Sr, _, _, _, _ = heatw(True)
+early, late = {t_: 0.1, z_: 0.5}, {t_: 0.35, z_: 0.5}
+check(abs(Sm.eval_solution(u_, early) - Sr.eval_solution(u_, early)) < 1e-6
+      and abs(Sm.eval_solution(u_, late) - Sr.eval_solution(u_, late)) < 1e-6,
+      "eval_solution: a state agrees between the monolithic and marching solves, in BOTH windows")
+check(abs(Sr.eval_solution(w_, {t_: 0.1}) - 1.25) < 1e-12 and abs(Sr.eval_solution(w_, {t_: 0.35}) - 1.25) < 1e-12,
+      "eval_solution: an INPUT is readable too, in either window")
+
+# the side at an element boundary: a real jump under IC_WEAK, none under the exact modes
+def sides(imposition):
+    """Evaluate at z = 0.25, an element boundary, from each side; returns (default, plus, minus)."""
+    G = FFGraph()
+    t, z, u = G.add_var("t"), G.add_var("z"), G.add_var("u(t,z)")
+    S = OCFESLV(G)
+    S.add_domain(t, FFDom(0., 0.4, 2, FFDom.LGR, 4))
+    S.add_domain(z, FFDom(0., 1., 4, FFDom.LGL, 5))
+    S.set_evolution_domain(t)
+    S.add_state(u, [t, z], ref=0.5)
+    T_NO_LB, Z_INT = FFDom.ALL - FFDom.LB, FFDom.ALL - FFDom.LB - FFDom.UB
+    S.add_equation(OpP(u, t) - 0.05 * OpP(u, {z: 2}), [t, z], [T_NO_LB, Z_INT], OCFESLV.EqnOptions(Role.INTERIOR))
+    S.add_equation(u, [t, z], [T_NO_LB, FFDom.LB], OCFESLV.EqnOptions(Role.BOUNDARY))
+    S.add_equation(u, [t, z], [T_NO_LB, FFDom.UB], OCFESLV.EqnOptions(Role.BOUNDARY))
+    S.add_equation(u - pymcpp.sin(math.pi * z), [t, z], [FFDom.LB, FFDom.ALL], OCFESLV.EqnOptions(Role.INITIAL))
+    S.options.DISPLAY_LEVEL = 0
+    S.options.INTERFACE.IMPOSITION = imposition
+    S.setup()
+    var, inp = S.init()
+    S.solve(var, inp)
+    pt = {t: 0.3, z: 0.25}
+    return (S.eval_solution(u, pt), S.eval_solution(u, pt, side={z: FFDom.PLUS}),
+            S.eval_solution(u, pt, side={z: FFDom.MINUS}))
+
+
+d_w, p_w, m_w = sides(OCFESLV.Options.IC_WEAK)
+d_s, p_s, m_s = sides(OCFESLV.Options.IC_STRONG)
+check(abs(p_w - m_w) > 1e-8, "eval_solution(side): the two traces differ under IC_WEAK (%.1e)" % abs(p_w - m_w))
+check(abs(p_s - m_s) < 1e-10, "eval_solution(side): the traces agree under IC_STRONG (%.1e)" % abs(p_s - m_s))
+check(abs(d_w - p_w) < 1e-14, "eval_solution(side): the default side is unchanged by the new argument")
+check(abs(p_w - p_s) < 1e-4, "eval_solution(side): weak and strong agree to the discretisation error (%.1e)" % abs(p_w - p_s))
+
+# %% [markdown]
 # ## Homotopy / continuation
 #
 # `add_homotopy` and `continuation_report` were unreachable from Python in v5.0.0 while their

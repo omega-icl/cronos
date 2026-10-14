@@ -34,6 +34,17 @@ Issues = "https://github.com/omega-icl/cronos/issues"
 
 [tool.scikit-build]
 minimum-version = "0.10"
+# 2026-10-14: a PERSISTENT build tree, one per wheel tag, instead of the temporary one scikit-build-core creates and
+# then deletes.  On Windows that deletion fails intermittently -- the wheel builds and installs, then cleanup raises
+# PermissionError [WinError 32] "being used by another process" on the build directory, and the job exits 1 with a
+# finished wheel on disk (seen on Windows-EPL cp311 while Windows-GPL passed; the two link different dependency
+# DLLs, so they meet the race differently).  The cause is the Windows POST_BUILD pair in CMakeLists: the dependency
+# DLLs are copied NEXT TO the module inside the build tree, and pybind11-stubgen then IMPORTS the freshly built
+# cronos.pyd from there, loading it and those DLLs; the handles are released when that subprocess exits, but a
+# virus scan of the newly written binaries can hold them past the rmtree.  With build-dir set there is no temporary
+# tree to delete, so the race cannot fail the build -- and the tree survives a failed CI job for inspection.
+# `build/` is already in .gitignore and in sdist.exclude below.
+build-dir = "build/{wheel_tag}"
 cmake.version = ">=3.18"
 build.verbose = true
 install.components = ["python_modules"]   # the module and its stub only (not the headers)

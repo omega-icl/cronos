@@ -461,9 +461,9 @@ public:
     //! values of INTERFACE.DROP_POLICY: drop and verify after the solve, re-derive what verification flags, or keep all.
     enum InterfaceDropPolicy
     {
-      DROP_VERIFY   = 0,  //!< structural drop + post-solve verify gate (default)
+      DROP_VERIFY   = 0,  //!< structural drop + post-solve verify gate (the default until 2026-10-14)
       DROP_REDERIVE = 1,  //!< verify-driven re-derive: protect over-dropped claims, re-solve
-      DROP_OFF      = 2   //!< disable the drop; keep all continuity claims explicit
+      DROP_OFF      = 2   //!< disable the drop; keep every continuity claim explicit (DEFAULT since 2026-10-14)
     };
     enum DerivCacheType
     {
@@ -546,7 +546,16 @@ public:
       //! claims and re-derive/re-solve until the verify gate is clean (correct on
       //! the linear suite, and the safe path for the nonlinear case).  DROP_OFF
       //! disables the drop entirely (every continuity claim kept explicit) -- the
-      //! most conservative, always-correct baseline.
+      //! most conservative, always-correct baseline, and the DEFAULT since 2026-10-14 (4R.28).
+      //! MEASURED, full OCFE corpus with CRONOS_DROP_POLICY=2: 182/182 programs, PASS and FAIL
+      //! identical (3646 / 17), classification identical, 23.0 min against 23.2 -- the drop changes
+      //! nothing the corpus asserts and costs nothing to disable.  Against that, where it DOES fire
+      //! it removed claims that were not implied: OCFE_Burger_move --form q (square, PARABOLIC, hence
+      //! drop-eligible) left the mesh flux g discontinuous by 14 across seams and failed after 60
+      //! iterations, where keeping the claims converges in 7 with every state continuous to round-off.
+      //! The eligibility rule's parabolic branch argues that flux continuity follows from value
+      //! continuity plus a constitutive LINK; a mesh relation g = M(q) x_xi is not constitutive in
+      //! that sense and the implication fails.  CRONOS_DROP_POLICY=0 restores the drop.
       InterfaceDropPolicy DROP_POLICY;
       //! @brief Column scaling for generated IC_TRACE tau variables.
       //! Claim-centred multipliers enter receiver rows as INTERFACE.TRACE_TAU_SCALE*lambda.
@@ -853,7 +862,7 @@ public:
 
         INTERFACE.TYPE      = IC_AUTO;
         INTERFACE.IMPOSITION     = IC_STRONG;  // since 2026-10-06 (formerly IC_WEAK): exact continuity rows
-        INTERFACE.DROP_POLICY = DROP_VERIFY;
+        INTERFACE.DROP_POLICY = DROP_OFF;      // since 2026-10-14 (was DROP_VERIFY); see the field doc
         INTERFACE.SAT_SIGMA0          = 10.0;
         INTERFACE.TRACE_TAU_SCALE     = 1.0;
         SOLVE.DERIV_CACHE         = DERIV_LAZY;

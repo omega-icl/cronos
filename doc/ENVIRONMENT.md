@@ -99,7 +99,7 @@ Change behaviour; kept ONLY for the corpus drivers that exercise them.  A model 
 
 | variable | what it does | read in |
 |---|---|---|
-| `CRONOS_DROP_POLICY` | Override of `INTERFACE.DROP_POLICY` for every model: `0`, `1` or `2` for DROP_VERIFY, DROP_REDERIVE or DROP_OFF.  Unset leaves each driver's own value.  For sweeping the corpus with the redundant-continuity drop disabled without editing drivers (WORKPLAN 4R.28). | `ocfeslv.hpp` |
+| `CRONOS_DROP_POLICY` | Override of `INTERFACE.DROP_POLICY` for every model: `0`, `1` or `2` for DROP_VERIFY, DROP_REDERIVE or DROP_OFF (the default since 2026-10-14).  `0` restores the redundant-continuity drop.  Unset leaves each driver's own value.  For sweeping the corpus with the redundant-continuity drop disabled without editing drivers (WORKPLAN 4R.28). | `ocfeslv.hpp` |
 | `CRONOS_FORCE_BAD_KEEP_EXPLICIT` | Fault injector for `OCFE_hybrid_adequacy`: makes the tau elimination stall, which is that driver's PASS condition. | `ocfeslv.hpp` |
 | `CRONOS_RESCUE_C2` | Receiver policy of the C2/C2b study (default on; 0 forces the original +1 everywhere).  Kept for `OCFE_receiver` until the receiver-policy study concludes. | `ocfeslv.hpp` |
 | `CRONOS_SYMROW_B2` | Restores the pre-4R.26 value-slaved row routing, in which rule (b2) exempted a materialised order-reduction auxiliary from the (b1) uniqueness test, so a row could be routed out of the principal symbol even when it was the LAST provider of a derivative.  For bisection; `OCFE_intermediate_dae` reproduces the old verdict under it. | `ffmodel.hpp` |

@@ -39,7 +39,7 @@ using namespace mc;
 
 static double const kPI = 3.14159265358979323846;
 typedef decltype( OCFESLV::Options::IC_WEAK ) Imp;
-struct Par { double eps = 1e-2, tf = 0.02, rtol = 1e-7, agree = 1e-6, tau = 1e-3, smooth = 0.02; size_t nel = 10, nnd = 8, nelt = 2; int maxit = 60, disp = 0; bool pos = false, gg = false; std::string form = "r"; };
+struct Par { double eps = 1e-2, tf = 0.02, rtol = 1e-7, agree = 1e-6, tau = 1e-3, smooth = 0.02; size_t nel = 10, nnd = 8, nelt = 2; int maxit = 60, disp = 0; bool pos = false, gg = false, defines = false; std::string form = "r"; };
 struct Res { std::string name; bool setup = false, conv = false; int its = 0; double resid = NAN, sec = 0., ju = NAN, jx = NAN, jq = NAN, jg = NAN, drift = NAN; std::vector<double> uf; };
 
 static double u0 ( double z ){ return std::sin( 2*kPI*z ) + 0.5*std::sin( kPI*z ); }
@@ -59,7 +59,7 @@ static Res run( Par const& P, bool mono, Imp imp, std::string const& name )
   oc.add_domain( t,  FFDom( 0., P.tf, P.nelt, FFDom::LGR, 4 ) );
   oc.add_domain( xi, FFDom( 0., 1., P.nel, FFDom::LGL, P.nnd ) );
   oc.set_evolution_domain( t );
-  bool const RF = ( P.form != "q" );   // --form q: no r state; the PDE differentiates q directly (a SQUARE symbol)
+  bool const RF = ( P.form != "q" );
   oc.add_state( u, { t, xi } ); oc.add_state( q, { t, xi } );
   if( RF ) oc.add_state( r, { t, xi } );
   for( FFVar const* s_ : { &x, &xg, &g } ) oc.add_state( *s_, { t, xi } );
@@ -67,19 +67,21 @@ static Res run( Par const& P, bool mono, Imp imp, std::string const& name )
   if( P.smooth > 0. ){ oc.add_state( Ms, { t, xi } ); oc.add_state( ms, { t, xi } ); }
   int const ALL = FFDom::ALL, LB = FFDom::LB, UB = FFDom::UB, T_INT = ALL - LB, X_INT = ALL - LB - UB;
   OCFESLV::EqnOptions inter( OCFESLV::EqnRole::INTERIOR ), bnd( OCFESLV::EqnRole::BOUNDARY ), ini( OCFESLV::EqnRole::INITIAL );
+  // --defines: declare each definition row's subject (EqnOptions::defines), the per-node receiver rule's input
+  auto defn = [&]( FFVar const& st ){ auto o = inter; if( P.defines ) o.defines = st; return o; };   // --form q: no r state; the PDE differentiates q directly (a SQUARE symbol)
   FFVar const Xxi = P.pos ? exp( xg ) : xg;
   FFVar const M   = sqrt( 1.0 + q * q );
   FFVar const W   = ( P.smooth > 0. ) ? Ms : M;
   // physics
   oc.add_equation( OpP( u, t ) - OpP( x, t ) * q - P.eps * ( RF ? FFVar( r ) : OpP( q, xi ) / Xxi ) + u * q, { t, xi }, { T_INT, X_INT }, inter );
-  oc.add_equation( q * Xxi - OpP( u, xi ), { t, xi }, { ALL, ALL }, inter );
-  if( RF ) oc.add_equation( r * Xxi - OpP( q, xi ), { t, xi }, { ALL, ALL }, inter );
+  oc.add_equation( q * Xxi - OpP( u, xi ), { t, xi }, { ALL, ALL }, defn( q ) );
+  if( RF ) oc.add_equation( r * Xxi - OpP( q, xi ), { t, xi }, { ALL, ALL }, defn( r ) );
   oc.add_equation( u - ( sin( 2.*kPI*x ) + 0.5*sin( kPI*x ) ), { t, xi }, { LB, ALL }, ini );
   oc.add_equation( u, { t, xi }, { T_INT, LB }, bnd );
   oc.add_equation( u, { t, xi }, { T_INT, UB }, bnd );
   // mesh: MMPDE5
-  oc.add_equation( Xxi - OpP( x, xi ), { t, xi }, { ALL, ALL }, inter );
-  oc.add_equation( g - W * Xxi,        { t, xi }, { ALL, ALL }, inter );
+  oc.add_equation( Xxi - OpP( x, xi ), { t, xi }, { ALL, ALL }, defn( xg ) );
+  oc.add_equation( g - W * Xxi,        { t, xi }, { ALL, ALL }, defn( g ) );
   if( P.gg ){
     oc.add_equation( gg - OpP( g, xi ),            { t, xi }, { ALL, ALL },     inter );
     oc.add_equation( P.tau * OpP( x, t ) - gg,     { t, xi }, { T_INT, X_INT }, inter );
@@ -159,6 +161,7 @@ int main( int argc, char** argv )
     if( num( "--cases" ) ){ cases   = argv[++i]; continue; }
     if( num( "--tau"    ) ){ P.tau    = std::atof( argv[++i] ); continue; }
     if( num( "--form"   ) ){ P.form   = argv[++i]; continue; }
+    if( std::string( argv[i] ) == "--defines" ){ P.defines = true; continue; }
     if( num( "--smooth" ) ){ P.smooth = std::atof( argv[++i] ); continue; }
     if( !std::strcmp( argv[i], "--pos" ) ){ P.pos = true; continue; }
     if( !std::strcmp( argv[i], "--gg"  ) ){ P.gg  = true; continue; }

@@ -1996,6 +1996,10 @@ protected:
   //! redundancy pass found their multiplier column dependent with only the natural receiver -- restored on the
   //! two-pass re-run ("silence where rank allows").  Cleared with _strong_dropped_claims.
   mutable std::set<t_FrozenInterfaceClaimKey> _exact_natural_restored;
+  //! @brief 2026-10-16: claims whose natural receiver was PROMOTED from a defining row by the per-node matching.
+  //! Natural for the pivot, NOT for the exact-natural silencing of their other edges: on OCFE_zchain silencing
+  //! those edges removed the projector's support (9 PASS -> 3), so a promoted claim keeps its duplicates live.
+  mutable std::set<t_FrozenInterfaceClaimKey> _promotedNatural;
 
   //! @brief Why each IC_STRONG claim was kept as an EXPLICIT tau rather than eliminated.
   //!
@@ -5649,6 +5653,16 @@ public:
   // Gated on CRONOS_AUDIT_TAUCOL.  Off => not one branch taken outside the report
   // itself, so the corpus is byte-identical.
   // =====================================================================
+
+  //! @brief 2026-10-15 (WORKPLAN 4R.21): the DEFINING ROW of each state, state id -> equation index.
+  //! A declaration (EqnOptions::defines) always wins.  Otherwise INFERRED: among the participating rows that are
+  //! not evolution rows, those whose FFInv letter in the state is L or S -- linear, or separably linear (the state
+  //! appears once, multiplied by a coefficient that may involve other states).  The FFPartial overload types its
+  //! OPERAND U, so a row that differentiates the state can never be L/S in it: "pointwise in the state" comes for
+  //! free, and no proxy substitution is needed.  Tie-break: a unique L beats any S; a unique S is taken; otherwise
+  //! the state is AMBIGUOUS and gets no inferred row (declare it).  Measured on OCFE_Burger_move --form q:
+  //! q -> QDEF (S; the PDE is excluded as an evolution row), g -> DEF (L), xg -> XGDEF (L over DEF's S).
+  std::map<size_t,size_t> _defining_rows() const;
 
   //! @brief true once CRONOS_AUDIT_TAUCOL has been read.  Static so the
   //! getenv cost is paid once per process, matching kEvoFace / kEvoFaceH.
@@ -16970,9 +16984,17 @@ OCFESLV::_build_interface_plan_draft
               // false of an isotherm q1*(T,c1,c2) where c1 sits inside a nonlinear function
               // alongside other states.
               //
-              // SCOPE LIMIT (Benoit).  FFInv is NOT overloaded for FFPartial / FFIntegral /
-              // FFEval in ocbase.hpp -- measured: 22 FFDep references there, ZERO FFInv.  So
-              // a subgraph containing any of those cannot be evaluated in FFInv arithmetic.
+              // SCOPE LIMIT, corrected 2026-10-15 (Benoit).  The earlier note here said FFInv is
+              // NOT overloaded for FFPartial / FFIntegral / FFEval in ocbase.hpp.  That is OUT OF
+              // DATE: MC++ 5.0.4's ocbase.hpp carries eval(... FFInv* ...) for all three (29 FFInv
+              // references).  The limit is different, and its own include comment states it: "these
+              // operations are not invertible, so their FFInv pass returns U" -- which is correct,
+              // a derivative is not invertible in its operand.  So a whole-row FFInv pass over a
+              // subgraph containing OpP still yields U, and the multiply-form q*x_xi = u_xi cannot
+              // be typed S that way.  Typing it S needs a STATE-SCOPED query -- "is this row
+              // separably linear in q, treating OpP(...) nodes as opaque coefficients?" -- which is
+              // a different question from evaluating the row in FFInv arithmetic, and is what
+              // EqnOptions::defines answers by declaration until such a query exists.
               // That costs nothing here: Defect A is BY DEFINITION about states whose defining
               // row is derivative-free, so the rows that matter are exactly the partial-free
               // ones.  Rows containing a partial are treated as "not an algebraic link"
@@ -17131,6 +17153,7 @@ OCFESLV::_build_interface_plan_draft
   // more than twice and the header is behaviourally identical to rev59.
   _strong_dropped_claims.clear();
   _exact_natural_restored.clear();
+  _promotedNatural.clear();
   _keepExplicitReason.clear();
   _strong_redundancy_pending = false;
   _strong_restore_pending    = false;
@@ -17198,7 +17221,96 @@ OCFESLV::_build_interface_plan_draft
 
     bool ok = _phase( _build_frozen_trace_constraints_and_tau_terms( draft ),
                       "trace_constraints_and_tau_terms" );
-    ok = ok && _phase( _build_interface_receiver_graph( draft ), "interface_receiver_graph" );
+    // 2026-10-15 (WORKPLAN 4R.21): the PER-NODE RECEIVER RULE.  A claim's receiver is the row differentiating the
+  // state across the face where one is collocated at the node; otherwise the state's DECLARED defining row
+  // (EqnOptions::defines), taken as a NATURAL receiver -- one edge, never silenced, never rescued.  Exact modes only
+  // (under IC_WEAK every rescue edge is a live SAT term by design).
+  //   MEASURED: at a causal element start the evolution rows are excluded, so a state whose only differentiating
+  // row is one of them has no natural receiver there.  OCFE_Burger_move --form q: q's 108 claim edges were all
+  // hosted by the PDE at time nodes 1-3 of each element and NONE at node 0; q's seam value then jumped by 14 at a
+  // causal start while u and x stayed continuous to 1e-9, scaling with mesh motion (14 -> 2.8 -> 3.3e-3 as tau
+  // froze it).  --form r: xg's rescue sprayed edges into every row it appears in, one of them RDEF, which is q's
+  // natural receiver there -- "system is singular" after tau=450.
+  if( options.INTERFACE.IMPOSITION == Options::IC_TRACE || options.INTERFACE.IMPOSITION == Options::IC_STRONG ){
+    // the declared defining row of each state (state id -> row id)
+    std::map<size_t,size_t> const defrow = _defining_rows();   // declared, else inferred by FFInv L/S
+    // HELD (2026-10-15): the same rule could cover reduce_order() auxiliaries without any declaration, by taking
+    // the LINK row that mentions the auxiliary as its defining row.  Measured: it fires (36 edges promoted on
+    // OCFE_Burger_move_red --red main) but does NOT make that model converge -- RED_MAIN has a further problem --
+    // while it DOES change the plan of corpus models that use order reduction (OCFE_PDE20f: same 19 PASS, residuals
+    // moving at round-off, 5.27e-13 -> 4.01e-13).  A behaviour change on the corpus that buys nothing yet; it ships
+    // when it is shown to fix something.  Until then only a DECLARED definition (EqnOptions::defines) is used, so a
+    // model that declares nothing is untouched by construction.
+    if( !defrow.empty() ){
+      // (claim, node) -> has a natural edge?  and the index of the declared row's edge there
+      std::map< std::pair<t_FrozenInterfaceClaimKey,size_t>, bool >   has_natural;
+      std::map< std::pair<t_FrozenInterfaceClaimKey,size_t>, size_t > decl_edge;
+      for( size_t i = 0; i < draft.receiver_edges.size(); ++i ){
+        auto const& e = draft.receiver_edges[i];
+        auto const k = std::make_pair( _freeze_interface_claim_key( e.claim_key ), e.receiver_emit_flat );
+        if( e.source == OCPlan::InterfaceEdgeSource::PRINCIPAL_SYMBOL ) has_natural[k] = true;
+        auto dr = defrow.find( e.claim_key.state_id );
+        if( dr != defrow.end() && e.row_id == dr->second ) decl_edge[k] = i;
+      }
+      // PER-NODE MATCHING (2026-10-16, Benoit's suggestion).  Promoting each claim's defining row on its own is not
+      // injective: on OCFE_zchain (p = g, q = g', r = g'') it put natural edges of DIFFERENT claims on the same
+      // (row, node) at 8 of 30 pairs, the projection lost its pivots, and the driver went from 9 PASS to 3.  So the
+      // assignment is a bipartite matching per node, claims x rows, by PRIORITY: class 2 = an existing natural edge,
+      // class 1 = the claim's defining row (declared or inferred).  Kuhn's augmenting path, class by class, and an
+      // augmentation may re-route an already-matched claim only along an edge of at least its current class, so a
+      // higher class is never traded for a lower one.  Matched class-1 edges are promoted to natural; everything
+      // else is left exactly as it was (unmatched rescue edges stay rescue, to be silenced and restorable).
+      size_t n_promoted = 0, n_pruned = 0;
+      std::map<size_t, std::vector<size_t>> by_node;                                  // node -> edge indices
+      for( size_t i = 0; i < draft.receiver_edges.size(); ++i ) by_node[ draft.receiver_edges[i].receiver_emit_flat ].push_back( i );
+      std::vector<OCPlan::InterfaceReceiverEdge> kept = draft.receiver_edges;
+      for( auto const& [node, idx] : by_node ){
+        // class of each edge at this node: 2 natural, 1 defining row, 0 other
+        auto cls = [&]( size_t i ){
+          auto const& e = kept[i];
+          if( e.source == OCPlan::InterfaceEdgeSource::PRINCIPAL_SYMBOL ) return 2;
+          auto dr = defrow.find( e.claim_key.state_id );
+          return ( dr != defrow.end() && e.row_id == dr->second )? 1: 0; };
+        std::map<t_FrozenInterfaceClaimKey,size_t> cid; std::map<size_t,size_t> rid;      // claim/row -> local index
+        std::vector<t_FrozenInterfaceClaimKey> claims; std::vector<size_t> rows;
+        for( size_t i : idx ){
+          auto k = _freeze_interface_claim_key( kept[i].claim_key );
+          if( !cid.count( k ) ){ cid[k] = claims.size(); claims.push_back( k ); }
+          if( !rid.count( kept[i].row_id ) ){ rid[ kept[i].row_id ] = rows.size(); rows.push_back( kept[i].row_id ); }
+        }
+        std::vector<int> match_row( rows.size(), -1 ), match_cls( rows.size(), -1 ), match_edge( rows.size(), -1 );
+        std::vector<int> claim_row( claims.size(), -1 );
+        for( int C = 2; C >= 1; --C ){
+          for( size_t c = 0; c < claims.size(); ++c ){
+            if( claim_row[c] >= 0 ) continue;
+            std::vector<char> seen( rows.size(), 0 );
+            std::function<bool(size_t)> aug = [&]( size_t cc ) -> bool {
+              for( size_t i : idx ){
+                if( cid[ _freeze_interface_claim_key( kept[i].claim_key ) ] != cc ) continue;
+                int const k = cls( i ); if( k < C ) continue;
+                size_t const r = rid[ kept[i].row_id ];
+                if( seen[r] ) continue; seen[r] = 1;
+                if( match_row[r] < 0 || ( match_cls[r] <= k && aug( (size_t)match_row[r] ) ) ){
+                  match_row[r] = (int)cc; match_cls[r] = k; match_edge[r] = (int)i; claim_row[cc] = (int)r; return true; }
+              }
+              return false; };
+            aug( c );
+          }
+        }
+        for( size_t r = 0; r < rows.size(); ++r )
+          if( match_edge[r] >= 0 && match_cls[r] == 1 ){
+            kept[ match_edge[r] ].source = OCPlan::InterfaceEdgeSource::PRINCIPAL_SYMBOL; ++n_promoted;
+            _promotedNatural.insert( _freeze_interface_claim_key( kept[ match_edge[r] ].claim_key ) ); }
+      }
+      if( n_promoted || n_pruned ){
+        draft.receiver_edges.swap( kept );
+        _disp( 2 ) << "OCFESLV::setup ** interface: per-node receiver rule -- " << n_promoted
+                   << " declared-definition edge(s) promoted to natural where no differentiating row is collocated, "
+                   << n_pruned << " rescue edge(s) pruned there" << std::endl;
+      }
+    }
+  }
+  ok = ok && _phase( _build_interface_receiver_graph( draft ), "interface_receiver_graph" );
     ok = ok && _phase( _build_frozen_weak_sat_terms( draft ), "frozen_weak_sat_terms" );
     ok = ok && _phase( _detect_redundant_continuity_claims( draft ),
                        "detect_redundant_continuity_claims" );
@@ -17444,6 +17556,7 @@ OCFESLV::_build_frozen_weak_sat_terms
       all_exact.insert( k );
       if( edge.source != OCPlan::InterfaceEdgeSource::PRINCIPAL_SYMBOL ) continue;
       if( kExactNat >= 2 && edge.row_id < _mEqn.size() && _mEqn[ edge.row_id ].opt->role == EqnRole::LINK ) continue;
+      if( _promotedNatural.count( k ) ) continue;   // promoted: natural for the pivot, not for silencing siblings
       natural_exact.insert( k );
     }
     for( auto const& k : all_exact ) if( !natural_exact.count( k ) ) ++n_exact_sole;
@@ -22613,6 +22726,54 @@ OCFESLV::_build_frozen_strong_tau_elimination
 }
 
 
+inline std::map<size_t,size_t>
+OCFESLV::_defining_rows() const
+{
+  std::map<size_t,size_t> out;
+  // declared
+  for( size_t ei = 0; ei < _mEqn.size(); ++ei )
+    if( _mEqn[ei].opt && _mEqn[ei].opt->defines.dag() )
+      out[ static_cast<size_t>( _mEqn[ei].opt->defines.id().second ) ] = ei;
+  // inferred
+  std::map<size_t, std::vector<std::pair<size_t,int>>> cand;   // state -> [(row, letter)]
+  for( size_t ei = 0; ei < _mEqn.size(); ++ei ){
+    if( !_mEqn[ei].opt || !_mEqn[ei].opt->participate_in_classification ) continue;
+    if( _evoDerivRows.count( ei ) ) continue;                     // a definition is not an evolution row
+    try {
+      std::vector<FFInv> invVar( _vVar.size() );
+      for( size_t k = 0; k < _vVar.size(); ++k ) invVar[k].indep( (int)k );
+      std::vector<FFInv> invInp( _vInp.size() ), invCst( _vCst.size() ), invDom( _vDom.size() );
+      FFInv invEqn; FFVar ev = _mEqn[ei].var;
+      auto sg = _dag->subgraph( 1, &ev );
+      _dag->eval( sg, 1, &ev, &invEqn, _vVar.size(), _vVar.data(), invVar.data(),
+                  _vInp.size(), _vInp.data(), invInp.data(), _vCst.size(), _vCst.data(), invCst.data(),
+                  _vDom.size(), _vDom.data(), invDom.data() );
+      for( auto const& [ind, ty] : invEqn.inv() ){
+        if( ind < 0 || (size_t)ind >= _vVar.size() ) continue;
+        if( ty != FFInv::TYPE::L && ty != FFInv::TYPE::S ) continue;
+        cand[ static_cast<size_t>( _vVar[ind].id().second ) ].push_back( { ei, (int)ty } );
+      }
+    } catch( ... ){ continue; }
+  }
+  std::map<size_t,size_t> inferred;
+  for( auto const& [sid, rows] : cand ){
+    if( out.count( sid ) ) continue;                               // declared wins
+    size_t nL = 0, nS = 0, rL = 0, rS = 0;
+    for( auto const& [ei, ty] : rows ){
+      if( ty == (int)FFInv::TYPE::L ){ ++nL; rL = ei; } else { ++nS; rS = ei; } }
+    if( nL == 1 ) inferred[sid] = rL;                              // a unique L beats any S
+    else if( nL == 0 && nS == 1 ) inferred[sid] = rS;              // a unique S is taken
+    // otherwise ambiguous: no inference
+  }
+  // A ROW DEFINES AT MOST ONE STATE.  `p - g = 0` is L in both p and g; the chain means p := g, but nothing in the
+  // row says which, and inferring it for BOTH admits g through a row that defines p -- OCFE_zchain went from 9 PASS
+  // to 3 that way.  Where two states would take the same row, neither gets it: declare the one that is defined.
+  std::map<size_t,size_t> row_users;
+  for( auto const& [sid, ei] : inferred ) ++row_users[ei];
+  for( auto const& [sid, ei] : inferred ) if( row_users[ei] == 1 ) out[sid] = ei;
+  return out;
+}
+
 inline void
 OCFESLV::_prepare_interface_plan_tables
 ( std::map<t_InterfaceClaimKey,size_t>& claims_out,
@@ -23058,7 +23219,48 @@ OCFESLV::_prepare_interface_plan_tables
                     << "\n";
       }
     }
-    if( !_is_auxiliary_state( *pst )
+    // 2026-10-15 (WORKPLAN 4R.21): a third admission route -- a participating row DECLARES this state as the one it
+    // defines (EqnOptions::defines).  The alias resolver above anchors on a reduce_order() auxiliary and requires the
+    // row to be affine in the state with exactly one other state in it; a hand-reduced model has no auxiliary to
+    // anchor to, and a metric-weighted definition (q*x_xi = u_xi, g = M*x_xi) is not affine, so neither route admits
+    // the moving-mesh states.  Admitting a declared state here builds its edges with the site's own geometry; the
+    // post-pass before the receiver graph then keeps only the declared row's edge, as NATURAL, at a node where no
+    // row differentiating the state across the face is collocated.
+    // ONLY THROUGH ITS DEFINING ROW: admitting the state into every row it appears in sprays rescue edges and
+    // changes the silence-and-restore balance of models the rescue already handles -- OCFE_zchain (p = g, q = g',
+    // r = g'') went from 9 PASS to 3 with no promotion at all, purely from the extra edges.  One edge, from the row
+    // that defines the state, is what the per-node matching needs and nothing else.
+    bool declared_here = false;
+    { auto const dr = _defining_rows(); auto it = dr.find( static_cast<size_t>( pst->id().second ) );
+      if( it != dr.end() && it->second < _mEqn.size() && _mEqn[ it->second ].var.id() == eqnvar.id() ){
+        // A DECLARATION is an instruction and admits unconditionally.  An INFERENCE admits only the population
+        // that actually lacks a receiver somewhere: the state IS differentiated in this face direction, and EVERY
+        // row differentiating it is an evolution row (excluded at a causal element start).  q through the PDE and
+        // g through RELAX qualify; a chain state differentiated by a LINK does not, and a state not differentiated
+        // in this direction at all (OCFE_zchain's transition evaluations Evtz_*) does not -- admitting those added
+        // 8 rescue terms the chain's silence-and-restore balance could not absorb (9 PASS -> 3).
+        bool const declared = _mEqn[ it->second ].opt && _mEqn[ it->second ].opt->defines.dag()
+                           && _mEqn[ it->second ].opt->defines.id() == pst->id();
+        if( declared ) declared_here = true;
+        else {
+          size_t n_diff = 0, n_evo = 0;
+          for( size_t ei = 0; ei < _mEqn.size(); ++ei ){
+            if( !_mEqn[ei].opt->participate_in_classification ) continue;
+            bool here = false;
+            FFSubgraph const& sgq = eqn_subgraph( _mEqn[ei].var );
+            for( auto const& op : sgq.l_op ){
+              if( !op || !op->sameid( typeid( FFPartial ) ) || op->varin.empty() || !op->varin[0] ) continue;
+              if( op->varin[0]->id() != pst->id() ) continue;
+              auto const* pop = mc::type_cast<FFPartial const>( op );
+              if( pop ) for( auto const& [dv, ordr] : pop->Indep().expr ){ (void)ordr; if( dv.id() == face_dom.id() ){ here = true; break; } }
+              if( here ) break;
+            }
+            if( here ){ ++n_diff; if( _evoDerivRows.count( ei ) ) ++n_evo; }
+          }
+          declared_here = ( n_diff > 0 && n_evo == n_diff );
+        }
+      } }
+    if( !declared_here && !_is_auxiliary_state( *pst )
      && alias_of_auxiliary( state_id, face_dom ) == nullptr ) return false;
     if( !state_depends_on_dom( state_id, face_dom ) ) return false;
     // rev155b (knob, default = pre-155b): CRONOS_AUX_EVO_CLAIMS=0 refuses this route in the

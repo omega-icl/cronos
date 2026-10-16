@@ -778,6 +778,15 @@ public:
     //! re-resolved once the evolution domain is known (_reresolve_auto_roles()) -- an equation on LB alone of the
     //! EVOLUTION domain is INITIAL, not BOUNDARY.
     bool    role_auto = false;
+    //! @brief 2026-10-15 (WORKPLAN 4R.21): the state this equation DEFINES pointwise, if the user declares one --
+    //! e.g. `q` for the row q*x_xi - u_xi = 0, `g` for g - M*x_xi = 0.  Unset (default-constructed FFVar, no DAG) for
+    //! an ordinary equation.  The attribution is not derivable for a user-declared state (reduce_order() records it
+    //! for its own auxiliaries in _auxDef; nothing marks the subject of a hand-written definition), so it is declared.
+    //! Where it is set, the interface plan takes this row as the state's continuity receiver at a node where no row
+    //! differentiating the state across the face is collocated (a causal element start), AS A NATURAL receiver --
+    //! one edge, never silenced, never rescued -- instead of minting no claim (a state whose only differentiating
+    //! row is an evolution row) or spraying rescue edges into every row the state appears in (a value-slaved state).
+    FFVar   defines;
 
     //! @brief Role-derived defaults: INITIAL, BOUNDARY, INTERFACE and DIAGNOSTIC equations do not enter
     //! classification.  (how a SOLVER imposes each role -- SAT reception, trace donation, the local
@@ -1008,6 +1017,12 @@ protected:
   //! in the direction it differentiates, by central difference.  Zero when nothing is declared, which is the
   //! right answer for a constant reference and the wrong one wherever the value divides: see the non-finite
   //! warning in _classification_reference().
+  //! @brief 2026-10-15: whether @p var has a DECLARED reference (a function or a scalar), as opposed to the zero
+  //! that _model_reference_value() returns for an undeclared one.
+  bool _has_declared_reference( FFVar const& var, unsigned const depth = 0 ) const;
+  //! @brief 2026-10-15: the derivative of @p var's reference value in direction @p dom at @p coord, by the same
+  //! central difference _model_reference_value() uses for an order-reduction auxiliary.
+  double _reference_derivative( FFVar const& var, FFVar const& dom, t_Coord const& coord ) const;
   double _model_reference_value
     ( FFVar const& var, t_Coord const& coord, unsigned const depth = 0 )
     const;
@@ -5197,6 +5212,41 @@ const
   for( size_t c = 0; c < _vCst.size(); ++c ){
     eval_vars.push_back( _vCst[c] );
     eval_vals.push_back( c < cst_vals.size() ? cst_vals[c] : 0. );
+  }
+  // 2026-10-15: DERIVATIVE PROXIES.  _principal_symbol holds each derivative d(state j)/d(dom i) as a proxy VAR
+  // v_<state>_<dom> (sym.vDerivProxy, flat i*nState+j), retained precisely so a coefficient that DEPENDS on a
+  // derivative -- a quasi-linear principal part -- "can be evaluated later".  Nothing gave the proxies a value,
+  // so such a coefficient failed on a "missing variable" and the block was left UNDETERMINED.  MEASURED on
+  // OCFE_Burger_move_red (RED_MAIN): the monitor M = sqrt(1 + (u_xi/x_xi)^2) puts v_u_xi in the mesh equation's
+  // principal coefficient; the block read UNDETERMINED, Ae_rank=0, where the SAME model with q = u_xi/x_xi written
+  // as a state (--form q) is PARABOLIC 6x6.  After order reduction the value exists: the auxiliary whose parent is
+  // state j and whose diff_dom is {dom i} IS that derivative, and it is a state with a reference value.  Provide it
+  // under the proxy.  A proxy with no such auxiliary gets no entry and the containment below keeps handling it;
+  // a model whose coefficients reference no proxy is untouched (the entries are unused).
+  if( sym.vDerivProxy.size() == nDom * nState ){
+    // The reference coordinate, as _classification_reference() builds it: each domain's reference value.
+    t_Coord coord;
+    for( size_t i = 0; i < _vDom.size() && i < dom_vals.size(); ++i ) coord[ _vDom[i] ] = dom_vals[i];
+    for( size_t i = 0; i < nDom; ++i )
+      for( size_t j = 0; j < nState; ++j ){
+        bool provided = false; double val = 0.;
+        // (1) PROMOTED: the derivative of the state's own declared reference -- the user's function, not a default.
+        if( _has_declared_reference( sym.vState[j] ) ){
+          val = _reference_derivative( sym.vState[j], sym.vDom[i], coord ); provided = std::isfinite( val );
+        }
+        // (2) FALLBACK: the auxiliary order reduction minted for exactly this derivative, if one exists.
+        if( !provided )
+          for( auto const& ad : _auxDef ){
+            if( ad.parent.id() != sym.vState[j].id() || ad.diff_dom.size() != 1
+             || ad.diff_dom.begin()->id() != sym.vDom[i].id() ) continue;
+            for( size_t p = 0; p < _vVar.size(); ++p )
+              if( _vVar[p].id() == ad.aux.id() ){
+                val = value_by_id( _vVar[p], _vVar, state_vals, p ); provided = std::isfinite( val ); break;
+              }
+            break;
+          }
+        if( provided ){ eval_vars.push_back( sym.vDerivProxy[ i * nState + j ] ); eval_vals.push_back( val ); }
+      }
   }
 
   // GUARD (rev67): nDom is sym.vDom.size(), but the loop below indexes sym.vCoeff.
@@ -11242,6 +11292,32 @@ const
   for( size_t i = 0; i < _vCst.size() && i < _vCstVal.size(); ++i )
     if( _vCst[i].id() == var.id() ) return _vCstVal[i];
   return 0.;
+}
+
+inline bool
+FFModel::_has_declared_reference( FFVar const& var, unsigned const depth ) const
+{
+  for( auto const& [v,f] : _classVarRefFun ) if( v.id() == var.id() ) return true;
+  for( auto const& [v,f] : _classInpRefFun ) if( v.id() == var.id() ) return true;
+  for( auto const& [v,x] : _classVarRef )    if( v.id() == var.id() ) return true;
+  // an order-reduction auxiliary inherits its parent's reference (its value is the parent's derivative), so a
+  // second-order proxy such as v_Daux2_u_xi -- u_xixi in a principal coefficient -- is derivable through the chain
+  if( depth < 8 )
+    for( auto const& aux : _auxDef )
+      if( aux.aux.id() == var.id() ) return _has_declared_reference( aux.parent, depth+1 );
+  return false;
+}
+
+inline double
+FFModel::_reference_derivative( FFVar const& var, FFVar const& dom, t_Coord const& coord ) const
+{
+  auto itd = _mDom.find( dom );
+  double const span = ( itd != _mDom.end() )? ( itd->second.up_dom - itd->second.lo_dom ): 1.;
+  double const h    = 1e-4 * ( std::fabs( span ) > 0.? std::fabs( span ): 1. );
+  t_Coord cp = coord, cm = coord;
+  cp[dom] = coord.count( dom )? coord.at( dom ) + h: h;
+  cm[dom] = coord.count( dom )? coord.at( dom ) - h: -h;
+  return ( _model_reference_value( var, cp ) - _model_reference_value( var, cm ) ) / ( 2.*h );
 }
 
 inline void

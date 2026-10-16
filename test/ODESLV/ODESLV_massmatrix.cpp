@@ -10,7 +10,7 @@ struct Probe : public ODESLV_BASE {
   std::string const& err() const { return _extractError; }
   size_t nx() const { return _nx; }
   std::vector<std::vector<FFVar>> const& de() const { return _mDE; }
-  std::vector<FFVar> const& lhs() const { return _mLHS; }
+  std::vector<std::vector<FFVar>> const& lhs() const { return _mLHS; }   // per stage, like de()
   std::vector<FFVar> const& states() const { return _mX; }
   FFGraph* mdag() const { return FFModel::_dag; }
 };

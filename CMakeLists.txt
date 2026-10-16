@@ -381,6 +381,7 @@ set(SUNDIALS_ROOT
 file(GLOB _sundials_opt LIST_DIRECTORIES true "/opt/sundials*" "/usr/local/sundials*")
 set(_cronos_sundials_components
     cvodes
+    idas
     nvecserial
     sunmatrixdense
     sunlinsoldense
@@ -891,7 +892,11 @@ message(STATUS "--------------------------------------------------------")
 # Install headers
 set(CRONOS_HEADERS
     base_cvodes.hpp
+    base_dynamic.hpp
+    base_idas.hpp
     base_sundials.hpp
+    daeslv_base.hpp
+    daeslv_idas.hpp
     ffmodel.hpp
     ffocfe.hpp
     ffode.hpp
@@ -949,7 +954,7 @@ set(CRONOS_SLOW_TEST_TIMEOUT 1800 CACHE STRING "CTest timeout (s) for a 'slow' d
 if(ENABLE_EXAMPLES)
   enable_testing()
   # the ODESLV drivers' directory has been named both ways
-  foreach(_dir ODESLV ODESLVS OCFESLV)
+  foreach(_dir ODESLV ODESLVS OCFESLV DAESLV)
     if(NOT IS_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/test/${_dir}")
       continue()
     endif()

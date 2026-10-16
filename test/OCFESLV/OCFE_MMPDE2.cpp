@@ -119,9 +119,14 @@ static bool   GDIRECT = true;   // --gdirect : DEF as g = M*x_xi (a RECEIVER row
 // claim at those nodes and is free to jump: measured on OCFE_Burger_move as q 1.4e+01 -> 1.2e-08 with the
 // declaration, and --form r going from SINGULAR to converging in 8 iterations.  Off by default so the driver's
 // existing behaviour is unchanged and the two can be compared.
-static bool   DEFINES = false;  // --defines : declare QDEF/RDEF/GRAD/DEF/GGDEF's subjects
+static bool   DEFINES = true;   // --no-defines : do NOT declare QDEF/RDEF/GRAD/DEF/GGDEF's subjects (default: declare)
 static double XGFLOOR = 0.0;    // --xgfloor f : floor x_xi at f (absolute); 0 = off.  See the DENSITY FLOOR note.
 static double MCAP    = 0.0;    // --mcap c   : cap the monitor at c (smooth min); 0 = off.  See MONITOR CAP.
+// --mreg c (2026-10-16): the REGULARISED monitor, M + c * int_0^1 M dxi -- a floor RELATIVE TO THE MEAN, which is
+// what bounds the concentration RATIO.  (Dividing M by its integral does nothing: equidistribution is invariant
+// under a constant factor.)  The ratio is then at most 1 + max(M)/(c*mean(M)), so c sets the budget directly,
+// where --mcap clips the peak and leaves the trough alone.  Nonlocal: the row carries an FFIntegral over xi.
+static double MREG    = 0.3;    // default since 2026-10-16: see the regularised-monitor note above
 static double ADAPT   = 2.25;    // --adapt A : the arc-length density M = sqrt(1+A*q^2); ratio 75 = x*'s (<= 0: prescribed only)
 static bool   RAMP         = false;
 static bool   EQIC         = false;
@@ -131,7 +136,13 @@ static bool   MONO         = false;  // --mono : one monolithic solve over all o
 static double QCAP         = 50.0;
 static double SMOOTH       = 0.0;    // --smooth eps : Helmholtz-smoothed monitor Ms - eps^2 Ms_xixi = M, Ms_xi = 0 at the ends (4R.19)   // --qcap Q : the monitor's gradient cap (0: none); 50 = 0.5/delta
 static bool   SPECTRUM     = false;  // --spectrum : the per-window dense singular-value audit (slow; MMPDE1's study)
-static bool   POSITIVE     = true;   // --no-positive : x_xi as a plain state (default: x_xi = exp(w))
+static bool   POSITIVE     = true;   // --no-positive : x_xi as a plain state (default: x_xi = exp(w)).
+// KEPT ON, 2026-10-16, against my own prediction.  The argument for dropping it was that the regularised monitor
+// (--mreg) bounds the concentration RATIO, making the exponent unnecessary; MEASURED, that is false -- at Pe = 24
+// with --mreg 0.3 the plain state TANGLES, min x_xi = -2.93, where the exponent converges with min x_xi = 0.197 and
+// node error 2.2e-2.  Regularisation bounds the monitor's ratio, not the mesh's SIGN; the two are independent and
+// both are needed.  The exponent's own weakness stands (it bounds the sign and not the magnitude: x_xi reached
+// 5.9e-102 before --mreg), which is why the regularisation matters -- it keeps the exponent away from that range.
 static bool   QUASI_STATIC = false;  // --tau 0 selects the QUASI-STATIC (index-2) form; default dynamic
 static bool   SEAMPROBE  = false;  // --seamprobe : one-sided values either side of every seam
 static bool   PDE_ALL_T  = false;  // --pde-all-t : DEFECT B remedy (a), never previously run
@@ -337,7 +348,9 @@ static Result run( Params const& p, size_t nel_xi, int display )
   // converges, while the node error stays 2.8e-2 (the solution is fine, the mesh equation is not).  Capping M
   // bounds the concentration ratio the monitor can request, which keeps the equation consistent.  A smooth min,
   // so the row stays differentiable; 0 disables it (the default).
-  FFVar const Mun  = sqrt( 1.0 + ADAPT * q2c );
+  FFVar const Mbase = sqrt( 1.0 + ADAPT * q2c );
+  FFIntegral OpI;
+  FFVar const Mun  = ( MREG > 0. ) ? ( Mbase + MREG * OpI( Mbase, xi ) ) : Mbase;
   FFVar const Mraw = ( MCAP > 0. )
                    ? 0.5 * ( Mun + MCAP - sqrt( sqr( Mun - MCAP ) + sqr( 0.05 * MCAP ) ) )   // smooth min(Mun, MCAP)
                    : Mun;
@@ -1583,8 +1596,11 @@ int main( int argc, char** argv )
     if( !std::strcmp( argv[i], "--eps"    ) && i+1 < argc ){ PEPS = std::atof( argv[++i] ); continue; }
     if( !std::strcmp( argv[i], "--gdirect" ) ){ GDIRECT = true; continue; }
     if( !std::strcmp( argv[i], "--defines" ) ){ DEFINES = true; continue; }
+    if( !std::strcmp( argv[i], "--no-defines" ) ){ DEFINES = false; continue; }
+    if( !std::strcmp( argv[i], "--positive" ) ){ POSITIVE = true; continue; }
     if( !std::strcmp( argv[i], "--xgfloor" ) && i+1 < argc ){ XGFLOOR = std::atof( argv[++i] ); continue; }
     if( !std::strcmp( argv[i], "--mcap"    ) && i+1 < argc ){ MCAP    = std::atof( argv[++i] ); continue; }
+    if( !std::strcmp( argv[i], "--mreg"    ) && i+1 < argc ){ MREG    = std::atof( argv[++i] ); continue; }
     if( !std::strcmp( argv[i], "--chain"   ) ){ GDIRECT = false; continue; }   // 2026-09-09: restore the chained form
     if( !std::strcmp( argv[i], "--adapt" ) && i+1 < argc ){ ADAPT = std::atof( argv[++i] ); continue; }
     if( !std::strcmp( argv[i], "--seamprobe" ) ){ SEAMPROBE = true; continue; }

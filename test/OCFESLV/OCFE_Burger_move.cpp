@@ -39,7 +39,7 @@ using namespace mc;
 
 static double const kPI = 3.14159265358979323846;
 typedef decltype( OCFESLV::Options::IC_WEAK ) Imp;
-struct Par { double eps = 1e-2, tf = 0.02, rtol = 1e-7, agree = 1e-6, tau = 1e-3, smooth = 0.02; size_t nel = 10, nnd = 8, nelt = 2; int maxit = 60, disp = 0; bool pos = false, gg = false, defines = false; std::string form = "r"; };
+struct Par { double eps = 1e-2, tf = 0.02, rtol = 1e-7, agree = 1e-6, tau = 1e-3, smooth = 0.02; size_t nel = 10, nnd = 8, nelt = 2; int maxit = 60, disp = 0; bool pos = false, gg = false, defines = true; std::string form = "r"; };   // defines ON since 2026-10-16
 struct Res { std::string name; bool setup = false, conv = false; int its = 0; double resid = NAN, sec = 0., ju = NAN, jx = NAN, jq = NAN, jg = NAN, drift = NAN; std::vector<double> uf; };
 
 static double u0 ( double z ){ return std::sin( 2*kPI*z ) + 0.5*std::sin( kPI*z ); }
@@ -162,6 +162,7 @@ int main( int argc, char** argv )
     if( num( "--tau"    ) ){ P.tau    = std::atof( argv[++i] ); continue; }
     if( num( "--form"   ) ){ P.form   = argv[++i]; continue; }
     if( std::string( argv[i] ) == "--defines" ){ P.defines = true; continue; }
+    if( std::string( argv[i] ) == "--no-defines" ){ P.defines = false; continue; }
     if( num( "--smooth" ) ){ P.smooth = std::atof( argv[++i] ); continue; }
     if( !std::strcmp( argv[i], "--pos" ) ){ P.pos = true; continue; }
     if( !std::strcmp( argv[i], "--gg"  ) ){ P.gg  = true; continue; }

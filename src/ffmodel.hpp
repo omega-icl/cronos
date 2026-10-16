@@ -5225,14 +5225,26 @@ const
   // a model whose coefficients reference no proxy is untouched (the entries are unused).
   if( sym.vDerivProxy.size() == nDom * nState ){
     // The reference coordinate, as _classification_reference() builds it: each domain's reference value.
+    // 2026-10-16 FIX: build the probe coordinate exactly as _classification_reference() does -- from _mDom, so
+    // EVERY domain has a value.  Building it from _vDom truncated to dom_vals.size() left a domain out, and a user
+    // reference function then saw an incomplete map: check_ffmodel.py's `ref=lambda c: 4.*c[z]*(1.-c[z])` raised
+    // KeyError: z and broke the wheel build's checks.  A C++ lambda would have thrown std::out_of_range from
+    // c.at(...) just as fatally; the corpus missed it only because its models happened to be called with complete
+    // maps.
     t_Coord coord;
+    for( auto const& [dvar,dom] : _mDom ) coord[dvar] = _default_dom_ref( dvar );
     for( size_t i = 0; i < _vDom.size() && i < dom_vals.size(); ++i ) coord[ _vDom[i] ] = dom_vals[i];
     for( size_t i = 0; i < nDom; ++i )
       for( size_t j = 0; j < nState; ++j ){
         bool provided = false; double val = 0.;
         // (1) PROMOTED: the derivative of the state's own declared reference -- the user's function, not a default.
+        // GUARDED: a reference function is the USER'S code and may reject a coordinate we construct (a Python
+        // lambda raises, a C++ one throws from .at()).  A proxy value is an optimisation of the classification,
+        // never a reason to fail setup, so a throwing reference simply falls through to (2) and then to the
+        // containment, exactly as an undeclared one does.
         if( _has_declared_reference( sym.vState[j] ) ){
-          val = _reference_derivative( sym.vState[j], sym.vDom[i], coord ); provided = std::isfinite( val );
+          try { val = _reference_derivative( sym.vState[j], sym.vDom[i], coord ); provided = std::isfinite( val ); }
+          catch( ... ){ provided = false; }
         }
         // (2) FALLBACK: the auxiliary order reduction minted for exactly this derivative, if one exists.
         if( !provided )
@@ -5241,7 +5253,9 @@ const
              || ad.diff_dom.begin()->id() != sym.vDom[i].id() ) continue;
             for( size_t p = 0; p < _vVar.size(); ++p )
               if( _vVar[p].id() == ad.aux.id() ){
-                val = value_by_id( _vVar[p], _vVar, state_vals, p ); provided = std::isfinite( val ); break;
+                try { val = value_by_id( _vVar[p], _vVar, state_vals, p ); provided = std::isfinite( val ); }
+                catch( ... ){ provided = false; }
+                break;
               }
             break;
           }

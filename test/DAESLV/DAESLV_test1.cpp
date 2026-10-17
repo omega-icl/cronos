@@ -48,8 +48,8 @@ int main()
     M.add_equation( OpP(y,t) + y*z, {t}, {TI},          io );
     M.add_equation( z - y*y,        {t}, {FFDom::ALL},  io );
     M.add_equation( y - 1.,         {t}, {FFDom::LB},   ii );
-    M.FFModel::options.DISPLAY_LEVEL = 0;
-    M.options.RTOL = M.options.ATOL = 1e-10;
+    M.options.DISPLAY_LEVEL = 0;
+    M.options.SOLVE.RTOL = M.options.SOLVE.ATOL = 1e-10;
     if( !M.setup() ){ std::cout << "    setup failed: " << M.extract_error() << "\n"; ++n_fail; }
     else{
       std::cout << "    rows=" << M.n_residual() << " differential=" << M.n_differential()
@@ -60,6 +60,12 @@ int main()
         check( "IDACalcIC: y'(0) = -1",        M.val_deriv_init()[0], -1., 1e-9 );
         check( "y(1) = (1+2t)^(-1/2)", M.val_state().back()[0], 1./std::sqrt(3.), 1e-8 );
         check( "z(1) = (1+2t)^(-1)",   M.val_state().back()[1], 1./3.,            1e-8 );
+        // solve() must not depend on what the previous call left behind: the INITIAL rows can carry
+        // states, and evaluating them against stale values once gave a different answer each run.
+        std::vector<double> const first = M.val_state().back();
+        M.solve( {} );
+        check( "solve() is idempotent on y", M.val_state().back()[0], first[0], 0. );
+        check( "solve() is idempotent on z", M.val_state().back()[1], first[1], 0. );
         std::cout << "    steps=" << M.stats.numSteps << " res=" << M.stats.numRES
                   << " jac=" << M.stats.numJAC << "\n";
       } } }
@@ -78,7 +84,7 @@ int main()
       M.add_equation( OpP(x1,t) + x0, {t}, {TI}, io );
       M.add_equation( x0 - 0., {t}, {FFDom::LB}, ii );
       M.add_equation( x1 - 1., {t}, {FFDom::LB}, ii );
-      M.FFModel::options.DISPLAY_LEVEL = 0; M.options.RTOL=M.options.ATOL=1e-10;
+      M.options.DISPLAY_LEVEL = 0; M.options.SOLVE.RTOL=M.options.SOLVE.ATOL=1e-10;
       if( M.setup() && M.solve( {} ) == DAESLV_IDAS::NORMAL ){ dae0=M.val_state().back()[0]; dae1=M.val_state().back()[1]; }
       else { std::cout << "    DAESLV failed: " << M.extract_error() << "\n"; ++n_fail; } }
     { FFGraph G; ODESLVS_CVODES A; A.set_dag( &G );
@@ -116,7 +122,7 @@ int main()
       M.add_equation( 1.*OpP(x0,t) + 3.*OpP(x1,t) - ( 3.*x0 - x1 ), {t}, {TI}, io );
       M.add_equation( x0 - 1., {t}, {FFDom::LB}, ii );
       M.add_equation( x1 - 2., {t}, {FFDom::LB}, ii );
-      M.FFModel::options.DISPLAY_LEVEL = 0; M.options.RTOL=M.options.ATOL=1e-10;
+      M.options.DISPLAY_LEVEL = 0; M.options.SOLVE.RTOL=M.options.SOLVE.ATOL=1e-10;
       if( M.setup() && M.solve( {} ) == DAESLV_IDAS::NORMAL ){ d0=M.val_state().back()[0]; d1=M.val_state().back()[1]; }
       else { std::cout << "    DAESLV failed: " << M.extract_error() << "\n"; ++n_fail; } }
     { FFGraph G; ODESLVS_CVODES A; A.set_dag( &G );

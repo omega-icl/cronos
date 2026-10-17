@@ -84,6 +84,14 @@ protected:
     override
     { return true; }
 
+  //! @brief A DAE consumer must be able to SOLVE the initial rows -- a materialised hidden constraint is
+  //! nonlinear in the state it pins -- so it keeps them undivided as well as reduced.
+  bool _wants_initial_rows
+    ()
+    const
+    override
+    { return true; }
+
   //! @brief An algebraic state has no row giving its derivative, by definition, so the explicit-row
   //! requirement that ODESLV imposes would refuse every DAE.
   bool _require_explicit_rows

@@ -73,168 +73,132 @@ public:
   //! @brief IDAS options
   struct Options
   {
-    //! @brief Constructor
-    Options():
-      INTMETH(MSBDF), NLINSOL(NEWTON), LINSOL(DENSE),
-      H0(0e0), HMIN(1e-12), HMAX(0e0), NMAX(2000), MAXORD(5),
-      RTOL(1e-7), ATOL(1e-9), ETOL(1e-16),
-      QERR(true), MAXFAIL(10), MAXCORR(5), SUPPRESSALG(false),
-      CALCIC(YA_YDP), TOUT1(0e0), NMAXIC(5), MAXJACIC(4), MAXNLIIC(10),
-      LSOFFIC(false), STEPTOLIC(0e0),
-      AUTOTOLS(false), RTOLS(1e-7), ATOLS(1e-9), ETOLS(1e-14),
-      FSACORR(STAGGERED), FSAERR(true), QERRS(true),
-      RTOLB(1e-7), ATOLB(1e-9), ETOLB(1e-16), QERRB(true),
-      ASAINTERP(HERMITE), ASACHKPT(2000)
-      {}
-    //! @brief Assignment operator
-    template <typename U> Options& operator=
-      ( U&options ){
-        INTMETH   = options.INTMETH;
-        NLINSOL   = options.NLINSOL;
-        LINSOL    = options.LINSOL;
-        H0        = options.H0;
-        HMIN      = options.HMIN;
-        HMAX      = options.HMAX;
-        NMAX      = options.NMAX;
-        MAXORD    = options.MAXORD;
-        RTOL      = options.RTOL;
-        ATOL      = options.ATOL;
-        ETOL      = options.ETOL;
-        QERR      = options.QERR;
-        MAXFAIL   = options.MAXFAIL;
-        MAXCORR   = options.MAXCORR;
-        SUPPRESSALG = options.SUPPRESSALG;
-        CALCIC    = options.CALCIC;
-        TOUT1     = options.TOUT1;
-        NMAXIC    = options.NMAXIC;
-        MAXJACIC  = options.MAXJACIC;
-        MAXNLIIC  = options.MAXNLIIC;
-        LSOFFIC   = options.LSOFFIC;
-        STEPTOLIC = options.STEPTOLIC;
-        AUTOTOLS  = options.AUTOTOLS;
-        RTOLS     = options.RTOLS;
-        ATOLS     = options.ATOLS;
-        ETOLS     = options.ETOLS;
-        FSACORR   = options.FSACORR;
-        FSAERR    = options.FSAERR;
-        QERRS     = options.QERRS;
-        RTOLB     = options.RTOLB;
-        ATOLB     = options.ATOLB;
-        ETOLB     = options.ETOLB;
-        QERRB     = options.QERRB;
-        ASAINTERP = options.ASAINTERP;
-        ASACHKPT  = options.ASACHKPT;
-        return *this;
-      }
-    //! @brief Enumeration type for FSA method.  NOTE: IDAS has NO STAGGERED1 (CVODES does)
     enum FSA_STRATEGY{
       SIMULTANEOUS=IDA_SIMULTANEOUS, //!< Simultaneous state/sensitivity correction
       STAGGERED=IDA_STAGGERED        //!< Sensitivity corrections after state corrections
     };
-    //! @brief Enumeration type for ASA method
     enum ASA_STRATEGY{
       HERMITE=IDA_HERMITE,	//!< Cubic Hermite interpolation
       POLYNOMIAL=IDA_POLYNOMIAL	//!< Variable degree polynomial interpolation
     };
-    //! @brief Enumeration of numerical integration algorithms.  NOTE: IDAS is BDF-ONLY -- there is
-    //! no MSADAMS here on purpose, so asking for Adams does not compile rather than being ignored
     enum INTEGRATION_METHOD{
       MSBDF=0	//!< Variable-coefficient linear multistep backward differentiation formula (BDF) method
     };
-    //! @brief Enumeration of nonlinear solver strategies
     enum NONLINEAR_SOLVER{
       FIXEDPOINT=0,	//!< Fixed point nonlinear solver
       NEWTON		//!< Newton nonlinear solver
     };
-    //! @brief Enumeration of linear solver strategies (within Newton nonlinear solver).  NOTE: there
-    //! is NO DIAG here -- CVDiag has no IDAS counterpart, which is why the default is DENSE
     enum LINEAR_SOLVER{
       DENSE=0,	//!< Use analytic dense Jacobian and internal direct dense linear algebra functions
       DENSEDQ,	//!< Use approximate dense Jacobian by way of a difference quotient and internal direct dense linear algebra
       SPARSE	//!< Use analytic sparse Jacobian and the KLU sparse direct solver.  Requires a build with KLU
 		//!< (CRONOS__WITH_KLU); otherwise the integrator REFUSES it at setup
     };
-    //! @brief Enumeration of consistent-initialisation modes, passed to IDACalcIC
     enum CALCIC_MODE{
       NONE=0,	//!< Take the supplied (y0, yp0) as consistent; do not call IDACalcIC
       YA_YDP,	//!< IDA_YA_YDP_INIT: solve for the algebraic components of y and for y', given the
 		//!< differential components of y.  Requires the id vector (IDASetId)
       Y		//!< IDA_Y_INIT: solve for y given y', holding y' fixed
     };
-    //! @brief Numerical integration method [Default: MSBDF -- the only one IDAS has]
-    INTEGRATION_METHOD INTMETH;
-    //! @brief Nonlinear solver method [Default: NEWTON]
-    NONLINEAR_SOLVER NLINSOL;
-    //! @brief Linear solver method and Jacobian approximation [Default: DENSE -- CVODES says DIAG,
-    //! which IDAS does not have]
-    LINEAR_SOLVER LINSOL;
-    //! @brief Initial step-size [Default: 0e0 (auto)]
-    double H0;
-    //! @brief Minimum step-size [Default: 0e0]
-    double HMIN;
-    //! @brief Maximum step-size [Default: 0e0 (+inf)]
-    double HMAX;
-    //! @brief Maximum number of steps in a time stage [Default: 0 (2000)]
-    unsigned int NMAX;
-    //! @brief Maximum BDF order, 1 to 5 [Default: 5] (IDASetMaxOrd)
-    int MAXORD;
-    //! @brief Relative (scalar) integration tolerance
-    sunrealtype RTOL;
-    //! @brief Absolute (scalar) integration tolerance
-    sunrealtype ATOL;
-    //! @brief Absolute (scalar) integration tolerance for ellipsoid shape matrix
-    sunrealtype ETOL;
-    //! @brief Whether or not (state) quadrature error control is performed?
-    bool QERR;
-    //! @brief Maximum number of error test failures per step
-    int MAXFAIL;
-    //! @brief Maximum number of nonlinear solver iterations per step
-    int MAXCORR;
-    //! @brief Whether to EXCLUDE the algebraic variables from the local error test [Default: false]
-    //! (IDASetSuppressAlg).  No CVODES counterpart -- there are no algebraic variables there
-    bool SUPPRESSALG;
-    //! @brief Consistent-initialisation mode [Default: YA_YDP] (IDACalcIC)
-    CALCIC_MODE CALCIC;
-    //! @brief First output time handed to IDACalcIC, which only uses its DIRECTION and rough
-    //! magnitude [Default: 0e0 = let the integrator pick from the stage length]
-    double TOUT1;
-    //! @brief Maximum number of steps in the IC calculation [Default: 5] (IDASetMaxNumStepsIC)
-    int NMAXIC;
-    //! @brief Maximum number of Jacobian re-evaluations in the IC calculation [Default: 4] (IDASetMaxNumJacsIC)
-    int MAXJACIC;
-    //! @brief Maximum number of Newton iterations per IC step [Default: 10] (IDASetMaxNumItersIC)
-    int MAXNLIIC;
-    //! @brief Whether to switch the IC line search OFF [Default: false] (IDASetLineSearchOffIC)
-    bool LSOFFIC;
-    //! @brief Step tolerance of the IC calculation [Default: 0e0 (auto)] (IDASetStepToleranceIC)
-    double STEPTOLIC;
-    //! @brief Whether integration tolerances for FS are to be set automatically?
-    bool AUTOTOLS;
-    //! @brief Relative (scalar) integration tolerance for FSA
-    sunrealtype RTOLS;
-    //! @brief Absolute (scalar) integration tolerance for FSA
-    sunrealtype ATOLS;
-    //! @brief Absolute (scalar) integration tolerance for ellipsoid shape matrix in FSA
-    sunrealtype ETOLS;
-    //! @brief FSA correction strategy
-    FSA_STRATEGY FSACORR;
-    //! @brief Whether or not FSA error control is performed?
-    bool FSAERR;
-    //! @brief Whether or not FSA quadrature error control is performed?
-    bool QERRS;
-    //! @brief Relative (scalar) integration tolerance for ASA
-    sunrealtype RTOLB;
-    //! @brief Absolute (scalar) integration tolerance for ASA
-    sunrealtype ATOLB;
-    //! @brief Absolute (scalar) integration tolerance for ellipsoid shape matrix in ASA
-    sunrealtype ETOLB;
-    //! @brief Whether or not ASA quadrature error control is performed?
-    bool QERRB;
-    //! @brief ASA interpolation strategy
-    ASA_STRATEGY ASAINTERP;
-    //! @brief Number of steps between each check point for ASA
-    int ASACHKPT;
-  } options;
+
+    //! @brief Everything the integration takes: method, linear and nonlinear solver, step control, tolerances,
+    //! and the sensitivity and adjoint settings.  Grouped as OCFESLV groups its SOLVE, which has no
+    //! SENS/ADJOINT substructures either.
+    struct t_Solve
+    {
+      //! @brief Enumeration type for FSA method.  NOTE: IDAS has NO STAGGERED1 (CVODES does)
+      //! @brief Enumeration type for ASA method
+      //! @brief Enumeration of numerical integration algorithms.  NOTE: IDAS is BDF-ONLY -- there is
+      //! no MSADAMS here on purpose, so asking for Adams does not compile rather than being ignored
+      //! @brief Enumeration of nonlinear solver strategies
+      //! @brief Enumeration of linear solver strategies (within Newton nonlinear solver).  NOTE: there
+      //! is NO DIAG here -- CVDiag has no IDAS counterpart, which is why the default is DENSE
+      //! @brief Enumeration of consistent-initialisation modes, passed to IDACalcIC
+      //! @brief Numerical integration method [Default: MSBDF -- the only one IDAS has]
+      INTEGRATION_METHOD INTMETH = MSBDF;
+      //! @brief Nonlinear solver method [Default: NEWTON]
+      NONLINEAR_SOLVER NLINSOL = NEWTON;
+      //! @brief Linear solver method and Jacobian approximation [Default: DENSE -- CVODES says DIAG,
+      //! which IDAS does not have]
+      LINEAR_SOLVER LINSOL = DENSE;
+      //! @brief Initial step-size [Default: 0e0 (auto)]
+      double H0 = 0e0;
+      //! @brief Minimum step-size [Default: 0e0]
+      double HMIN = 1e-12;
+      //! @brief Maximum step-size [Default: 0e0 (+inf)]
+      double HMAX = 0e0;
+      //! @brief Maximum number of steps in a time stage [Default: 0 (2000)]
+      unsigned int NMAX = 2000;
+      //! @brief Maximum BDF order, 1 to 5 [Default: 5] (IDASetMaxOrd)
+      int MAXORD = 5;
+      //! @brief Relative (scalar) integration tolerance
+      sunrealtype RTOL = 1e-7;
+      //! @brief Absolute (scalar) integration tolerance
+      sunrealtype ATOL = 1e-9;
+      //! @brief Absolute (scalar) integration tolerance for ellipsoid shape matrix
+      sunrealtype ETOL = 1e-16;
+      //! @brief Whether or not (state) quadrature error control is performed?
+      bool QERR = true;
+      //! @brief Maximum number of error test failures per step
+      int MAXFAIL = 10;
+      //! @brief Maximum number of nonlinear solver iterations per step
+      int MAXCORR = 5;
+      //! @brief Whether to EXCLUDE the algebraic variables from the local error test [Default: false]
+      //! (IDASetSuppressAlg).  No CVODES counterpart -- there are no algebraic variables there
+      bool SUPPRESSALG = false;
+      //! @brief Whether integration tolerances for FS are to be set automatically?
+      bool AUTOTOLS = false;
+      //! @brief Relative (scalar) integration tolerance for FSA
+      sunrealtype RTOLS = 1e-7;
+      //! @brief Absolute (scalar) integration tolerance for FSA
+      sunrealtype ATOLS = 1e-9;
+      //! @brief Absolute (scalar) integration tolerance for ellipsoid shape matrix in FSA
+      sunrealtype ETOLS = 1e-14;
+      //! @brief FSA correction strategy
+      FSA_STRATEGY FSACORR = STAGGERED;
+      //! @brief Whether or not FSA error control is performed?
+      bool FSAERR = true;
+      //! @brief Whether or not FSA quadrature error control is performed?
+      bool QERRS = true;
+      //! @brief Relative (scalar) integration tolerance for ASA
+      sunrealtype RTOLB = 1e-7;
+      //! @brief Absolute (scalar) integration tolerance for ASA
+      sunrealtype ATOLB = 1e-9;
+      //! @brief Absolute (scalar) integration tolerance for ellipsoid shape matrix in ASA
+      sunrealtype ETOLB = 1e-16;
+      //! @brief Whether or not ASA quadrature error control is performed?
+      bool QERRB = true;
+      //! @brief ASA interpolation strategy
+      ASA_STRATEGY ASAINTERP = HERMITE;
+      //! @brief Number of steps between each check point for ASA
+      int ASACHKPT = 2000;
+    } SOLVE;
+
+    //! @brief Consistent initialisation: the IDACalcIC controls, and where a KINSOL initial-condition solve's
+    //! own options belong.
+    struct t_Initial
+    {
+      //! @brief Consistent-initialisation mode [Default: YA_YDP] (IDACalcIC)
+      CALCIC_MODE CALCIC = YA_YDP;
+      //! @brief First output time handed to IDACalcIC, which only uses its DIRECTION and rough
+      //! magnitude [Default: 0e0 = let the integrator pick from the stage length]
+      double TOUT1 = 0e0;
+      //! @brief Maximum number of steps in the IC calculation [Default: 5] (IDASetMaxNumStepsIC)
+      int NMAXIC = 5;
+      //! @brief Maximum number of Jacobian re-evaluations in the IC calculation [Default: 4] (IDASetMaxNumJacsIC)
+      int MAXJACIC = 4;
+      //! @brief Maximum number of Newton iterations per IC step [Default: 10] (IDASetMaxNumItersIC)
+      int MAXNLIIC = 10;
+      //! @brief Whether to switch the IC line search OFF [Default: false] (IDASetLineSearchOffIC)
+      bool LSOFFIC = false;
+      //! @brief Step tolerance of the IC calculation [Default: 0e0 (auto)] (IDASetStepToleranceIC)
+      double STEPTOLIC = 0e0;
+    } INITIAL;
+
+    //! @brief Assignment operator
+    template <typename U> Options& operator=
+      ( U& options ){ SOLVE = options.SOLVE; INITIAL = options.INITIAL; return *this; }
+  };
 
   //! @brief Structure storing integration statistics
   struct Stats

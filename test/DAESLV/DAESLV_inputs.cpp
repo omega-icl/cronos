@@ -46,8 +46,8 @@ int main()
     auto io=FFModel::EqnOptions(FFModel::EqnRole::INTERIOR,0), ii=FFModel::EqnOptions(FFModel::EqnRole::INITIAL,0);
     M.add_equation( OpP(y,t) + k*y, {t}, {TI},        io );
     M.add_equation( y - 1.,         {t}, {FFDom::LB}, ii );
-    M.FFModel::options.DISPLAY_LEVEL = 0;
-    M.options.RTOL = M.options.ATOL = 1e-10;
+    M.options.DISPLAY_LEVEL = 0;
+    M.options.SOLVE.RTOL = M.options.SOLVE.ATOL = 1e-10;
     if( !M.setup() ){ std::cout << "    setup failed: " << M.extract_error() << "\n"; ++n_fail; }
     else{
       std::cout << "    nc=" << M.nc() << " np=" << M.np() << "\n";
@@ -78,8 +78,8 @@ int main()
     auto io=FFModel::EqnOptions(FFModel::EqnRole::INTERIOR,0), ii=FFModel::EqnOptions(FFModel::EqnRole::INITIAL,0);
     M.add_equation( OpP(y,t) + k*y, {t}, {TI},        io );
     M.add_equation( y - 1.,         {t}, {FFDom::LB}, ii );
-    M.FFModel::options.DISPLAY_LEVEL = 0;
-    M.options.RTOL = M.options.ATOL = 1e-10;
+    M.options.DISPLAY_LEVEL = 0;
+    M.options.SOLVE.RTOL = M.options.SOLVE.ATOL = 1e-10;
     if( !M.setup() ){ std::cout << "    setup failed: " << M.extract_error() << "\n"; ++n_fail; }
     else{
       std::cout << "    np=" << M.np() << " input levels=" << M.n_input_levels() << "\n";
@@ -102,8 +102,8 @@ int main()
     auto io=FFModel::EqnOptions(FFModel::EqnRole::INTERIOR,0), ii=FFModel::EqnOptions(FFModel::EqnRole::INITIAL,0);
     M.add_equation( OpP(y,t) + y - u, {t}, {TI},        io );
     M.add_equation( y - 0.,           {t}, {FFDom::LB}, ii );
-    M.FFModel::options.DISPLAY_LEVEL = 0;
-    M.options.RTOL = M.options.ATOL = 1e-10;
+    M.options.DISPLAY_LEVEL = 0;
+    M.options.SOLVE.RTOL = M.options.SOLVE.ATOL = 1e-10;
     if( !M.setup() ){ std::cout << "    setup failed: " << M.extract_error() << "\n"; ++n_fail; }
     else{
       size_t const nl = M.n_input_levels();

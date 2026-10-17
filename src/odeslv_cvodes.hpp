@@ -255,13 +255,23 @@ public:
     }
 
   //! @brief Setup local copy of parametric ODEs
+  //! @brief Apply the caller's options before setup() reads any of them -- the virtual hook FFModel calls
+  //! (ffmodel.hpp:10882), as OCFESLV and DAESLV_IDAS use.  NOTE setup() ALSO calls this explicitly: the
+  //! DESCRIPTION path skips FFModel::setup(), so relying on the hook alone would leave the split undone there.
+  void _apply_options
+    ()
+    override
+    {
+      FFModel::options     = static_cast<FFModel::Options const&>( options );
+      BASE_CVODES::options = static_cast<BASE_CVODES::Options const&>( options );
+    }
+
   bool setup
     ()
     { std::lock_guard<std::recursive_mutex> dag_lock_( dag_mutex() );   // see FFModel::dag_mutex()
       // the solver IS the model now, so one call does both halves: the split of `options` into the two parents,
       // FFModel::setup() unless it has already run (it is idempotent to skip, not to repeat), then the local copy.
-      FFModel::options     = static_cast<FFModel::Options const&>( options );
-      BASE_CVODES::options = static_cast<BASE_CVODES::Options const&>( options );
+      _apply_options();            // the split, via the hook; see the note there on why it is called here too
       // The DESCRIPTION path (set_dag/set_state/set_initial/..., the fdiff sink) writes the staging
       // vectors directly and populates no FFModel model, so FFModel::setup() -- which validates domains,
       // states and equations -- must be skipped for it.  _SETUP() then takes the description as given.

@@ -251,13 +251,23 @@ class ODESLVS_CVODES
     }
 
   //! @brief Setup local copy of parametric ODEs
+  //! @brief Apply the caller's options before setup() reads any of them -- the virtual hook FFModel calls
+  //! (ffmodel.hpp:10882), as OCFESLV and DAESLV_IDAS use.  NOTE setup() ALSO calls this explicitly: the
+  //! DESCRIPTION path skips FFModel::setup(), so relying on the hook alone would leave the split undone there.
+  void _apply_options
+    ()
+    override
+    {
+      FFModel::options     = static_cast<FFModel::Options const&>( options );
+      BASE_CVODES::options = static_cast<BASE_CVODES::Options const&>( options );
+    }
+
   bool setup
     ()
     { std::lock_guard<std::recursive_mutex> dag_lock_( dag_mutex() );   // see FFModel::dag_mutex()
       // as ODESLV_CVODES::setup(): split `options` (inherited from ODESLV_CVODES) into the two parents, set the
       // model up if it has not been, then take the local copy of the description.
-      FFModel::options     = static_cast<FFModel::Options const&>( options );
-      BASE_CVODES::options = static_cast<BASE_CVODES::Options const&>( options );
+      _apply_options();            // the split, via the hook; see the note there on why it is called here too
       // See ODESLV_CVODES::setup(): the DESCRIPTION path populates no FFModel model, so its validation
       // must be skipped -- _SETUP() takes the staging vectors as given.
       if( !FFModel::is_setup() && !FFModel::setup() ){

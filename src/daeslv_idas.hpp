@@ -52,14 +52,27 @@ public:
   virtual ~DAESLV_IDAS()
     { unregistration(); delete _dag; }
 
-  //! @brief The INTEGRATOR's options.  Both FFModel and BASE_IDAS declare `options`, so an unqualified
-  //! `solver.options` would be ambiguous; this names the IDAS one, and the model's stay reachable as
-  //! `solver.FFModel::options`.  (ODESLV_CVODES instead declares its own Options member that hides both --
-  //! worth revisiting here once DAESLV_IDAS needs options of its own.)
-  using BASE_IDAS::options;
+  //! @brief The solver's options: FFModel's groups (DISPLAY_LEVEL, CLASSIFY, REDUCE, FATAL, TTOL) together
+  //! with the integrator's SOLVE and INITIAL.  This SHADOWS FFModel::options, exactly as OCFESLV's does, and
+  //! _apply_options() is the single moment the two are reconciled -- without that override a caller's
+  //! REDUCE/CLASSIFY settings would be written here and never read by the model.
+  struct Options
+  : public FFModel::Options
+  , public BASE_IDAS::Options
+  {} options;
+
 
   //! @brief Statistics of the last solve
   Stats stats;
+
+  //! @brief Apply the caller's options to the model before setup() reads any of them (ocfeslv.hpp:1383).
+  void _apply_options
+    ()
+    override
+    {
+      FFModel::Options::_force_display_from_env( options.DISPLAY_LEVEL );
+      FFModel::options = static_cast<FFModel::Options const&>( options );
+    }
 
   //! @brief Extract the model as a DAE and build the evaluation plan.  False with err() set.
   bool setup
@@ -429,9 +442,18 @@ DAESLV_IDAS::solve
   for( size_t j = 0; j < _nc; ++j ) _dVAR[ 1 + 2*_nx + _np + j ] = c[j];
   _xk.clear();  _xk.reserve( _ns + 1 );
 
-  // initial values: the INITIAL rows, which may depend on the parameters
+  // Initial values: the INITIAL rows, which may depend on the parameters AND on the states -- a
+  // materialised hidden constraint becomes ic[i] = -R/L with R carrying other states.  Seed from the
+  // declared references first, so the result does not depend on what the previous call left in _dVAR.
+  // NOTE this is ONE PASS: when the rows are implicit in each other it is a starting point for
+  // IDACalcIC, not a solution of them.  See the plan's IC-solve item.
   std::vector<double> y0( _nx, 0. );
   _dVAR[0] = _dT[0];
+  { // _classification_reference() is the canonical reference point and is VIRTUAL -- OCFESLV overrides it
+    // to sample the collocated field -- so take the seed from it rather than re-deriving one here.
+    std::vector<double> sref, iref, cref, dref;
+    _classification_reference( sref, iref, cref, dref );
+    for( size_t i = 0; i < _nx; ++i ){ _dVAR[1+i] = i < sref.size()? sref[i]: 0.; _dVAR[1+_nx+i] = 0.; } }
   _dag->eval( _dWRK, _vIC.size(), _vIC.data(), y0.data(),
               _vVAR.size(), _vVAR.data(), _dVAR.data() );
 
@@ -452,7 +474,7 @@ DAESLV_IDAS::solve
   void* mem = IDACreate( ctx );
   // mirrors ODESLV_CVODES's switch, minus DIAG, which IDAS does not have
 #if !defined( CRONOS__WITH_KLU )
-  if( BASE_IDAS::options.LINSOL == BASE_IDAS::Options::SPARSE ){
+  if( options.SOLVE.LINSOL == BASE_IDAS::Options::SPARSE ){
     std::cerr << "DAESLV_IDAS ** LINSOL = SPARSE requires KLU, which this build does not include"
               << "; choose DENSE or DENSEDQ, or use a build with KLU" << std::endl;
     N_VDestroy( yy ); N_VDestroy( yp ); N_VDestroy( id ); IDAFree( &mem ); SUNContext_Free( &ctx );
@@ -463,7 +485,7 @@ DAESLV_IDAS::solve
   SUNMatrix A = nullptr;
   SUNLinearSolver LS = nullptr;
 #if defined( CRONOS__WITH_KLU )
-  if( BASE_IDAS::options.LINSOL == BASE_IDAS::Options::SPARSE ){
+  if( options.SOLVE.LINSOL == BASE_IDAS::Options::SPARSE ){
     A  = SUNSparseMatrix( (sunindextype)_nx, (sunindextype)_nx, (sunindextype)_nnzjacmax, CSC_MAT, ctx );
     LS = SUNLinSol_KLU( yy, A, ctx );
   }
@@ -477,26 +499,26 @@ DAESLV_IDAS::solve
   reregistration();
   do{
     if( IDAInit( mem, MC_IDRES__, _dT[0], yy, yp ) != IDA_SUCCESS ){ ok = false; why = "IDAInit"; break; }
-    IDASStolerances( mem, BASE_IDAS::options.RTOL, BASE_IDAS::options.ATOL );
+    IDASStolerances( mem, options.SOLVE.RTOL, options.SOLVE.ATOL );
     if( IDASetLinearSolver( mem, LS, A ) != IDA_SUCCESS ){ ok = false; why = "IDASetLinearSolver"; break; }
     IDASetId( mem, id );
-    if( BASE_IDAS::options.LINSOL != BASE_IDAS::Options::DENSEDQ )
+    if( options.SOLVE.LINSOL != BASE_IDAS::Options::DENSEDQ )
       IDASetJacFn( mem, MC_IDJAC__ );         // analytic; DENSEDQ leaves IDAS its difference quotient
-    IDASetSuppressAlg( mem, BASE_IDAS::options.SUPPRESSALG );
-    IDASetMaxOrd( mem, BASE_IDAS::options.MAXORD );
-    if( BASE_IDAS::options.NMAX ) IDASetMaxNumSteps( mem, (long)BASE_IDAS::options.NMAX );
-    if( BASE_IDAS::options.HMAX > 0. ) IDASetMaxStep( mem, BASE_IDAS::options.HMAX );
-    if( BASE_IDAS::options.H0 > 0. ) IDASetInitStep( mem, BASE_IDAS::options.H0 );
-    IDASetMaxNumStepsIC( mem, BASE_IDAS::options.NMAXIC );
-    IDASetMaxNumJacsIC( mem, BASE_IDAS::options.MAXJACIC );
-    IDASetMaxNumItersIC( mem, BASE_IDAS::options.MAXNLIIC );
-    IDASetLineSearchOffIC( mem, BASE_IDAS::options.LSOFFIC );
-    if( BASE_IDAS::options.STEPTOLIC > 0. ) IDASetStepToleranceIC( mem, BASE_IDAS::options.STEPTOLIC );
+    IDASetSuppressAlg( mem, options.SOLVE.SUPPRESSALG );
+    IDASetMaxOrd( mem, options.SOLVE.MAXORD );
+    if( options.SOLVE.NMAX ) IDASetMaxNumSteps( mem, (long)options.SOLVE.NMAX );
+    if( options.SOLVE.HMAX > 0. ) IDASetMaxStep( mem, options.SOLVE.HMAX );
+    if( options.SOLVE.H0 > 0. ) IDASetInitStep( mem, options.SOLVE.H0 );
+    IDASetMaxNumStepsIC( mem, options.INITIAL.NMAXIC );
+    IDASetMaxNumJacsIC( mem, options.INITIAL.MAXJACIC );
+    IDASetMaxNumItersIC( mem, options.INITIAL.MAXNLIIC );
+    IDASetLineSearchOffIC( mem, options.INITIAL.LSOFFIC );
+    if( options.INITIAL.STEPTOLIC > 0. ) IDASetStepToleranceIC( mem, options.INITIAL.STEPTOLIC );
 
-    if( BASE_IDAS::options.CALCIC != BASE_IDAS::Options::NONE ){
-      double t1 = BASE_IDAS::options.TOUT1;
+    if( options.INITIAL.CALCIC != BASE_IDAS::Options::NONE ){
+      double t1 = options.INITIAL.TOUT1;
       if( t1 == 0. ) t1 = _dT.size() > 1? _dT[1]: _dT[0] + 1.;
-      int const icopt = ( BASE_IDAS::options.CALCIC == BASE_IDAS::Options::YA_YDP )? IDA_YA_YDP_INIT: IDA_Y_INIT;
+      int const icopt = ( options.INITIAL.CALCIC == BASE_IDAS::Options::YA_YDP )? IDA_YA_YDP_INIT: IDA_Y_INIT;
       if( IDACalcIC( mem, icopt, t1 ) != IDA_SUCCESS ){ ok = false; why = "IDACalcIC"; break; }
       IDAGetConsistentIC( mem, yy, yp );
       ++stats.numIC;
@@ -524,13 +546,13 @@ DAESLV_IDAS::solve
 #if defined( CRONOS__WITH_KLU )
         // the stage's rows changed, so the Jacobian's nonzero count or structure may have too: force a new
         // SYMBOLIC and numeric factorization, exactly as ODESLV_CVODES does at its own restarts
-        if( BASE_IDAS::options.LINSOL == BASE_IDAS::Options::SPARSE
+        if( options.SOLVE.LINSOL == BASE_IDAS::Options::SPARSE
          && SUNLinSol_KLUReInit( _sun_ls, _sun_mat, (sunindextype)_nnzjacmax, 2 ) ){
           ok = false; why = "SUNLinSol_KLUReInit"; break;
         }
 #endif
-        if( BASE_IDAS::options.CALCIC != BASE_IDAS::Options::NONE ){
-          int const icopt = ( BASE_IDAS::options.CALCIC == BASE_IDAS::Options::YA_YDP )? IDA_YA_YDP_INIT: IDA_Y_INIT;
+        if( options.INITIAL.CALCIC != BASE_IDAS::Options::NONE ){
+          int const icopt = ( options.INITIAL.CALCIC == BASE_IDAS::Options::YA_YDP )? IDA_YA_YDP_INIT: IDA_Y_INIT;
           if( IDACalcIC( mem, icopt, tb ) != IDA_SUCCESS ){ ok = false; why = "IDACalcIC at a stage boundary"; break; }
           IDAGetConsistentIC( mem, yy, yp );
           ++stats.numIC;

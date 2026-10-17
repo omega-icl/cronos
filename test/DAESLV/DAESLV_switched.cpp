@@ -47,8 +47,8 @@ int main()
     M.add_equation( OpP(y,t) + y - u, {t}, {TI},         io );
     M.add_equation( z - u*y,          {t}, {FFDom::ALL}, io );
     M.add_equation( y - 0.,           {t}, {FFDom::LB},  ii );
-    M.FFModel::options.DISPLAY_LEVEL = 0;
-    M.options.RTOL = M.options.ATOL = 1e-10;
+    M.options.DISPLAY_LEVEL = 0;
+    M.options.SOLVE.RTOL = M.options.SOLVE.ATOL = 1e-10;
     if( !M.setup() ){ std::cout << "    setup failed: " << M.extract_error() << "\n"; ++n_fail; }
     else{
       std::cout << "    input levels=" << M.n_input_levels() << " differential=" << M.n_differential()
@@ -84,9 +84,9 @@ int main()
       M.add_equation( OpP(y,t) + y - u, {t}, {TI},         io );
       M.add_equation( z - u*y,          {t}, {FFDom::ALL}, io );
       M.add_equation( y - 0.,           {t}, {FFDom::LB},  ii );
-      M.FFModel::options.DISPLAY_LEVEL = 0;
-      M.options.RTOL = M.options.ATOL = 1e-10;
-      M.options.LINSOL = ( mode == 0 )? BASE_IDAS::Options::DENSE
+      M.options.DISPLAY_LEVEL = 0;
+      M.options.SOLVE.RTOL = M.options.SOLVE.ATOL = 1e-10;
+      M.options.SOLVE.LINSOL = ( mode == 0 )? BASE_IDAS::Options::DENSE
                        : ( mode == 1 )? BASE_IDAS::Options::DENSEDQ
                                       : BASE_IDAS::Options::SPARSE;
       char const* nm = ( mode == 0 )? "DENSE   ": ( mode == 1 )? "DENSEDQ ": "SPARSE  ";

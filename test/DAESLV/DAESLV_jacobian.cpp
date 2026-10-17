@@ -45,7 +45,7 @@ int main()
     M.add_equation( OpP(y,t) + y*z, {t}, {TI},         io );   // nonlinear in BOTH states
     M.add_equation( z - y*y,        {t}, {FFDom::ALL}, io );
     M.add_equation( y - 1.,         {t}, {FFDom::LB},  ii );
-    M.FFModel::options.DISPLAY_LEVEL = 0;
+    M.options.DISPLAY_LEVEL = 0;
     if( !M.setup() ){ std::cout << "    setup failed: " << M.extract_error() << "\n"; ++n_fail; }
     else{
       SUNContext ctx; SUNContext_Create( SUN_COMM_NULL, &ctx );

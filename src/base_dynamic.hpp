@@ -62,6 +62,11 @@ class BASE_DYNAMIC
   //! representable here, which _mLHS (one coefficient per state) cannot do: _mLHS is the DIAGONAL projection
   //! ODESLV needs, this is the general form.  Filled only when _wants_mass_rows(), so ODESLV never pays for it.
   std::vector< std::vector< std::vector< std::pair<size_t,FFVar> > > > _mMASS;
+  //! The INITIAL rows as RESIDUALS, undivided, in declaration order.  _mIC holds the same rows reduced to
+  //! one value per state, which is only faithful when each row is affine in the state it pins; these are what
+  //! an initial-condition SOLVE needs.  Filled only when _wants_initial_rows().
+  std::vector<FFVar>                   _mICRES;
+
   //! Each evolution row with EVERY time derivative set to zero, per stage: _mRES[s][k].
   std::vector< std::vector<FFVar> >    _mRES;
   std::vector<std::vector<FFVar>>      _mIC;    //!< initial values (one entry: no state discontinuities)
@@ -104,6 +109,13 @@ class BASE_DYNAMIC
     ()
     const
     { return !dynamic_form().blocker.empty(); }
+
+  //! @brief Whether to keep the INITIAL rows as residuals as well as values.  Default false, so a consumer
+  //! that only evaluates _mIC pays nothing; a consumer that SOLVES the rows overrides it.
+  virtual bool _wants_initial_rows
+    ()
+    const
+    { return false; }
 
   //! @brief Whether every state must be given its derivative EXPLICITLY by some row.  True for an explicit
   //! integrator; a DAE consumer overrides to false, since an algebraic state has no such row by definition.
@@ -280,6 +292,23 @@ class BASE_DYNAMIC
     ()
     const
     { return _nx; }
+
+  //! @brief The INITIAL rows as residuals, undivided; empty unless the consumer asked for them.
+  //! THE CONSISTENT-IC SYSTEM.  In general an INITIAL row may depend on a state's TIME DERIVATIVE at the
+  //! initial point, so the solve cannot be posed over the states alone: its unknowns are (x, dx/dt) and its
+  //! equations are these rows TOGETHER WITH the INTERIOR rows evaluated at t0, which are what relate dx/dt
+  //! to x.  The dx/dt unknowns are only the DIFFERENTIAL ones -- an algebraic state's derivative appears in
+  //! no row -- so the system is square when the number of INITIAL rows equals the number of differential
+  //! states.  For the index-3 pendulum that is 4 rows against 4 differential states among 5, giving 9
+  //! equations in 9 unknowns.  This is the same system IDACalcIC(IDA_YA_YDP_INIT) solves, with the id
+  //! vector saying which half of x is given.
+  //! CAUTION: these live in the WORKING model's dag, not necessarily FFModel::_dag -- the reduction mints
+  //! its auxiliaries there -- so evaluate each through its OWN row.dag().  The two graphs can carry the
+  //! same indices, which is the trap the naming-convention note above records.
+  std::vector<FFVar> const& initial_rows
+    ()
+    const
+    { return _mICRES; }
 
   //! @brief Number of constants
   size_t nc
@@ -607,14 +636,40 @@ BASE_DYNAMIC::_extract_from_model
   }
 
   std::vector<FFVar> ic( _nx, FFVar( 0. ) );
+  _mICRES.clear();
   for( auto const& eqn : var_equation() ){
     if( !eqn.opt || eqn.opt->role != EqnRole::INITIAL ) continue;
+    // Keep the row UNDIVIDED, as _mRES keeps the evolution rows.  _split_in factorises a row as
+    // L * target + R with L = d(res)/d(target), which is the row only when it is AFFINE in that target;
+    // a materialised hidden constraint is not -- x^2 + y^2 - 1 split on y gives ic[y] = (1+y^2-x^2)/(2y),
+    // self-referential.  The divided form LOSES the row, so an IC solve has to work from these.
+    if( _wants_initial_rows() ) _mICRES.push_back( _in_model_dag( subst1( eqn.var ) ) );
     for( size_t i = 0; i < _nx; ++i ){
       FFVar L, R;
       if( !_split_in( subst1( eqn.var ), _mX[i], L, R ) ) continue;
       if( L.cst() && L.num().val() == 0. ) continue;
       ic[i] = ( L.cst() && L.num().val() == 1. )? _in_model_dag( -R ): _in_model_dag( -R / L );
     }
+  }
+  // An INITIAL row is IMPLICIT when its extracted value still depends on another STATE: _split_in leaves
+  // the rest of the row in R, so two coupled initial conditions become ic[i] = f(x_j).  ONE evaluation
+  // cannot resolve them, and the two consumers then fail differently and late -- ODESLV with a
+  // missing-variable error out of the subgraph, a DAE consumer by reading whatever its working vector
+  // happened to hold.  Neither names the model, so say it here, while the rows are in hand.
+  {
+    std::vector<FFVar> dIC;
+    try{ dIC = FFModel::_dag->FAD( ic, std::vector<FFVar>( _mX.begin(), _mX.end() ) ); }
+    catch( ... ){ dIC.clear(); }
+    if( dIC.size() == ic.size() * _nx )
+      for( size_t i = 0; i < ic.size(); ++i )
+        for( size_t j = 0; j < _nx; ++j ){
+          FFVar const& d = dIC[ i * _nx + j ];
+          if( d.cst() && d.num().val() == 0. ) continue;
+          _extractError = "the initial condition for " + _mX[i].name() + " still depends on "
+                        + _mX[j].name() + ": the INITIAL rows are implicit in each other, and resolving"
+                          " them needs an initial-condition SOLVE, which neither solver does yet";
+          return false;
+        }
   }
   _mIC.assign( 1, ic );
   // TRANSITIONS (add_transition, 2026-09-29): one initial-value entry PER STAGE -- stage 0 the INITIAL equations, the

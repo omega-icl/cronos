@@ -73,10 +73,30 @@ public:
     const
     { return _vInpLvl.size(); }
 
-  //! @brief Integrate from the initial time to each time in @p tout, with parameter values @p p.
-  //! The state at the last time is left in val_state().  False with err() set.
-  bool solve
-    ( std::vector<double> const& p, std::vector<double> const& tout );
+  //! @brief Computes solution of parametric DAEs over the DECLARED horizon.  Mirrors
+  //! ODESLV_CVODES::solve: the model's domain already fixes the horizon, so no output times are passed --
+  //! the state at every stage time is left in val_state().
+  STATUS solve
+    ( std::vector<double> const& p, std::vector<double> const& c=std::vector<double>(),
+      std::ostream& os=std::cout );
+
+  //! @brief Computes solution of parametric DAEs
+  STATUS solve
+    ( double const* p, double const* c=nullptr, std::ostream& os=std::cout )
+    { std::vector<double> P, C;                 // assign() rather than the range constructor: with p or c
+      if( p && _np ) P.assign( p, p + _np );    // null, or the count zero, the constructor forms a pointer
+      if( c && _nc ) C.assign( c, c + _nc );    // GCC cannot prove is in bounds, and warns under -Wall
+      return solve( P, C, os ); }
+
+  //! @brief Solve with the input and constant values given BY NAME, as ODESLV_CVODES does:
+  //! { {u, {v1,...,vn}}, ..., {K, {k}} }.  assemble_values() validates the list and names the offender.
+  STATUS solve
+    ( std::vector<FFModel::InputVal> const& vIn, std::ostream& os=std::cout )
+    {
+      std::vector<double> P, c;  std::string err;
+      if( !assemble_values( vIn, P, c, err ) ) throw std::invalid_argument( "DAESLV::solve ** " + err + "\n" );
+      return solve( P, c, os );
+    }
 
   //! @brief Nonzeros of the Jacobian IDAS factorizes -- the UNION of the dF/dy and dF/dy' patterns.
   size_t nnz_jac
@@ -84,11 +104,12 @@ public:
     const
     { return _nnzjac; }
 
-  //! @brief The state vector at the end of the last solve.
-  std::vector<double> const& val_state
+  //! @brief Retreive state values at stage times -- one entry for the initial point and one per stage, as
+  //! ODESLV_CVODES's _xk is filled, so val_state().back() is the state at the end of the horizon.
+  std::vector< std::vector<double> > const& val_state
     ()
     const
-    { return _dX; }
+    { return _xk; }
 
   //! @brief The state vector right after consistent initialisation, before any step.
   std::vector<double> const& val_state_init
@@ -112,7 +133,7 @@ protected:
   //! model's dag is never mutated: the mass coefficients and remainders are inserted FIRST and the
   //! derivative variables created HERE, so dy/dt exists only in the solver's own graph.
   FFGraph* _dag = nullptr;
-  std::vector<FFVar> _pT, _pX, _pP, _pYP;    //!< the inserted variables, and dy/dt, all local
+  std::vector<FFVar> _pT, _pX, _pP, _pC, _pYP;    //!< the inserted variables, and dy/dt, all local
   struct StagePlan {
     std::vector<FFVar> F;                    //!< the residual rows of this stage
     std::vector<FFVar> eval;                 //!< [ F, dF/dy entries, dF/dy' entries ]
@@ -137,6 +158,7 @@ protected:
   std::vector<double> _dEVAL;                //!< values of _vEVAL
   std::vector<double> _dWRK;                 //!< eval work array
   std::vector<FFVar>  _vIC;                  //!< initial values, as expressions
+  std::vector< std::vector<double> > _xk;    //!< state at the initial point and at each stage time
   std::vector<double> _dX, _dX0, _dXP0;      //!< state now, and (state, derivative) after IDACalcIC
 
   //! @brief The DAE residual: F = M(t,y,p) * yp + R(t,y,p).
@@ -237,6 +259,8 @@ DAESLV_IDAS::_build_plans
   _pX.assign( _nx, FFVar() ); _dag->insert( FFModel::_dag, _nx, _mX.data(), _pX.data() );
   _pP.assign( _np, FFVar() );
   if( _np ) _dag->insert( FFModel::_dag, _np, _mP.data(), _pP.data() );
+  _pC.assign( _nc, FFVar() );
+  if( _nc ) _dag->insert( FFModel::_dag, _nc, _mC.data(), _pC.data() );
   _pYP.clear();
   for( size_t i = 0; i < _nx; ++i ) _pYP.push_back( _dag->add_var( "d" + _mX[i].name() + "/dt" ) );
 
@@ -245,6 +269,7 @@ DAESLV_IDAS::_build_plans
   for( auto const& v : _pX  ) _vVAR.push_back( v );
   for( auto const& v : _pYP ) _vVAR.push_back( v );
   for( auto const& v : _pP  ) _vVAR.push_back( v );
+  for( auto const& v : _pC  ) _vVAR.push_back( v );   // constants are variables of the eval, with fixed values
   _dVAR.assign( _vVAR.size(), 0. );
 
   _plan.assign( _mMASS.size(), StagePlan() );
@@ -346,10 +371,6 @@ DAESLV_IDAS::setup
   if( !_extract_dae() ) return false;
   _nres = n_residual();
 
-  if( _nc ){
-    _extractError = "this model declares constants; DAESLV_IDAS v1 does not insert them into its local dag yet";
-    return false;
-  }
   if( !_build_plans() ) return false;
   _vInpLvl.clear();
   for( auto const& [ name, levels ] : _mInpLevels )
@@ -390,17 +411,23 @@ DAESLV_IDAS::IDRES__
 }
 
 inline
-bool
+DAESLV_IDAS::STATUS
 DAESLV_IDAS::solve
-( std::vector<double> const& p, std::vector<double> const& tout )
+( std::vector<double> const& p, std::vector<double> const& c, std::ostream& os )
 {
-  if( _vEVAL.empty() ){ _extractError = "solve() before a successful setup()"; return false; }
+  if( _vEVAL.empty() ){ _extractError = "solve() before a successful setup()"; return FATAL; }
   if( p.size() != _np ){
     _extractError = std::to_string( p.size() ) + " parameter value(s) for " + std::to_string( _np )
                   + " parameter(s)";
-    return false;
+    return FATAL;
+  }
+  if( c.size() != _nc ){
+    _extractError = std::to_string( c.size() ) + " constant value(s) for " + std::to_string( _nc );
+    return FATAL;
   }
   for( size_t j = 0; j < _np; ++j ) _dVAR[ 1 + 2*_nx + j ] = p[j];
+  for( size_t j = 0; j < _nc; ++j ) _dVAR[ 1 + 2*_nx + _np + j ] = c[j];
+  _xk.clear();  _xk.reserve( _ns + 1 );
 
   // initial values: the INITIAL rows, which may depend on the parameters
   std::vector<double> y0( _nx, 0. );
@@ -410,7 +437,7 @@ DAESLV_IDAS::solve
 
   _init_stats( stats );
   SUNContext ctx = nullptr;
-  if( SUNContext_Create( SUN_COMM_NULL, &ctx ) < 0 ){ _extractError = "SUNContext_Create failed"; return false; }
+  if( SUNContext_Create( SUN_COMM_NULL, &ctx ) < 0 ){ _extractError = "SUNContext_Create failed"; return FATAL; }
   N_Vector yy = N_VNew_Serial( (sunindextype)_nx, ctx );
   N_Vector yp = N_VNew_Serial( (sunindextype)_nx, ctx );
   N_Vector id = N_VNew_Serial( (sunindextype)_nx, ctx );
@@ -430,7 +457,7 @@ DAESLV_IDAS::solve
               << "; choose DENSE or DENSEDQ, or use a build with KLU" << std::endl;
     N_VDestroy( yy ); N_VDestroy( yp ); N_VDestroy( id ); IDAFree( &mem ); SUNContext_Free( &ctx );
     _extractError = "LINSOL = SPARSE without KLU";
-    return false;
+    return FATAL;
   }
 #endif
   SUNMatrix A = nullptr;
@@ -468,7 +495,7 @@ DAESLV_IDAS::solve
 
     if( BASE_IDAS::options.CALCIC != BASE_IDAS::Options::NONE ){
       double t1 = BASE_IDAS::options.TOUT1;
-      if( t1 == 0. ) t1 = tout.empty()? _dT[0] + 1.: tout.front();
+      if( t1 == 0. ) t1 = _dT.size() > 1? _dT[1]: _dT[0] + 1.;
       int const icopt = ( BASE_IDAS::options.CALCIC == BASE_IDAS::Options::YA_YDP )? IDA_YA_YDP_INIT: IDA_Y_INIT;
       if( IDACalcIC( mem, icopt, t1 ) != IDA_SUCCESS ){ ok = false; why = "IDACalcIC"; break; }
       IDAGetConsistentIC( mem, yy, yp );
@@ -478,6 +505,7 @@ DAESLV_IDAS::solve
       _dX0[i]  = N_VGetArrayPointer( yy )[i];
       _dXP0[i] = N_VGetArrayPointer( yp )[i];
     }
+    _xk.push_back( _dX0 );                       // the initial point, as ODESLV_CVODES records it
 
     // The rows differ stage by stage exactly when an input is time-varying -- _mMASS then holds _ns
     // entries rather than one.  At such a boundary the BDF history describes a problem that no longer
@@ -509,12 +537,9 @@ DAESLV_IDAS::solve
         }
       }
       sunrealtype tret = ta;
-      for( double const t : tout ){
-        if( t <= ta || t > tb ) continue;
-        if( IDASolve( mem, t, &tret, yy, yp, IDA_NORMAL ) != IDA_SUCCESS ){ ok = false; why = "IDASolve"; break; }
-      }
-      if( ok && sg + 1 < _ns && tret < tb )
+      if( ok && tret < tb )
         if( IDASolve( mem, tb, &tret, yy, yp, IDA_NORMAL ) != IDA_SUCCESS ){ ok = false; why = "IDASolve to the stage boundary"; }
+      if( ok ) _xk.push_back( std::vector<double>( N_VGetArrayPointer( yy ), N_VGetArrayPointer( yy ) + _nx ) );
     }
     if( !ok ) break;
     for( size_t i = 0; i < _nx; ++i ) _dX[i] = N_VGetArrayPointer( yy )[i];
@@ -529,8 +554,8 @@ DAESLV_IDAS::solve
   IDAFree( &mem );
   SUNContext_Free( &ctx );
   _final_stats( stats );
-  if( !ok ) _extractError = why + " failed";
-  return ok;
+  if( !ok ){ _extractError = why + " failed"; os << "DAESLV_IDAS ** " << _extractError << std::endl; }
+  return ok? NORMAL: FAILURE;
 }
 
 } // end namespace mc

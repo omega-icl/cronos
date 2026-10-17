@@ -53,13 +53,15 @@ int main()
     else{
       std::cout << "    input levels=" << M.n_input_levels() << " differential=" << M.n_differential()
                 << " algebraic=" << M.n_algebraic() << "\n";
-      if( !M.solve( { 1., 2. }, { 2. } ) ){ std::cout << "    solve failed: " << M.extract_error() << "\n"; ++n_fail; }
+      // by NAME, as ODESLV_CVODES allows: assemble_values() checks the list and names any offender
+      if( M.solve( { { u, { 1., 2. } } } ) != DAESLV_IDAS::NORMAL ){
+        std::cout << "    solve failed: " << M.extract_error() << "\n"; ++n_fail; }
       else{
         double const y1 = 1. - std::exp(-1.);
         double const y2 = 2. + ( y1 - 2. ) * std::exp(-1.);
-        check( "y(2) = 2 + (y(1)-2)e^-1",  M.val_state()[0], y2,      1e-8 );
-        check( "z(2) = u y(2) with u = 2", M.val_state()[1], 2.*y2,   1e-8 );
-        check( "z tracks the NEW level, not the old", M.val_state()[1] > 1.5*y2, true*1., 0.5 );
+        check( "y(2) = 2 + (y(1)-2)e^-1",  M.val_state().back()[0], y2,      1e-8 );
+        check( "z(2) = u y(2) with u = 2", M.val_state().back()[1], 2.*y2,   1e-8 );
+        check( "z tracks the NEW level, not the old", M.val_state().back()[1] > 1.5*y2, true*1., 0.5 );
         std::cout << "    consistent initialisations = " << M.stats.numIC
                   << "  (1 at t0 + 1 per restarting stage boundary)\n";
         check( "restarted at the switch (numIC == 2)", (double)M.stats.numIC, 2., 0. );
@@ -88,15 +90,15 @@ int main()
                        : ( mode == 1 )? BASE_IDAS::Options::DENSEDQ
                                       : BASE_IDAS::Options::SPARSE;
       char const* nm = ( mode == 0 )? "DENSE   ": ( mode == 1 )? "DENSEDQ ": "SPARSE  ";
-      if( !M.setup() || !M.solve( { 1., 2. }, { 2. } ) ){
+      if( !M.setup() || M.solve( { 1., 2. } ) != DAESLV_IDAS::NORMAL ){
         std::cout << "    " << nm << " failed: " << M.extract_error() << "\n"; ++n_fail; continue; }
-      if( mode == 0 ){ ref0 = M.val_state()[0]; ref1 = M.val_state()[1]; nnz = M.nnz_jac();
+      if( mode == 0 ){ ref0 = M.val_state().back()[0]; ref1 = M.val_state().back()[1]; nnz = M.nnz_jac();
         std::cout << "    Jacobian nonzeros (union of dF/dy and dF/dy') = " << nnz << " of "
                   << M.id().size()*M.id().size() << "\n"; }
-      std::cout << "    " << nm << " y(2)=" << std::setprecision(12) << M.val_state()[0]
+      std::cout << "    " << nm << " y(2)=" << std::setprecision(12) << M.val_state().back()[0]
                 << "  jac evals=" << M.stats.numJAC << "\n";
-      check( std::string(nm) + "agrees with DENSE on y(2)", M.val_state()[0], ref0, 1e-7 );
-      check( std::string(nm) + "agrees with DENSE on z(2)", M.val_state()[1], ref1, 1e-7 );
+      check( std::string(nm) + "agrees with DENSE on y(2)", M.val_state().back()[0], ref0, 1e-7 );
+      check( std::string(nm) + "agrees with DENSE on z(2)", M.val_state().back()[1], ref1, 1e-7 );
     } }
 
 

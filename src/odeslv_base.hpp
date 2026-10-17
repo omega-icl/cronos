@@ -155,13 +155,6 @@ class ODESLV_BASE
       _decisionFlag = IVP._decisionFlag;
     }
 
-  //! @brief Integrator status (was BASE_DE::STATUS -- a solver's verdict, not a model's)
-  enum STATUS{
-     NORMAL=0,  //!< Normal execution
-     FAILURE,   //!< Integration breakdown
-     FATAL      //!< Interruption due to errors in third-party libraries
-  };
-
   //! @brief Number of parameters (was BASE_DE::np)
   //! @brief The parameter vector the solver actually integrates against: the time-invariant inputs and,
   //! for each time-varying input, its minted per-element nodal values -- in _mP order, the order np()
@@ -177,144 +170,10 @@ class ODESLV_BASE
     () const override
     { return _ndxSEN; }
 
-  //! @brief Flat index, in the parameter vector (var_parameter() order -- the vector FFODESLV's operator() takes),
-  //! of the START of element block @p ndx_el of the declared input @p var: the same contract as
-  //! OCFESLV::pos_input.  A time-invariant input has a single block (@p ndx_el ignored).  A distributed input
-  //! has one block per element of its evolution domain, keyed in @p ndx_el by that domain variable (element 0
-  //! if absent); within a block its n_node nodal DOFs are contiguous, at pos_input(...) + j.  Throws if @p var
-  //! is not an input of the extracted model or the element is out of range.  Valid after setup().
-  size_t pos_input
-    ( FFVar const& var, std::map<FFVar,size_t,lt_FFVar> const& ndx_el = std::map<FFVar,size_t,lt_FFVar>() )
-    const
-    {
-      auto const ndx = parameter_index( var );
-      if( ndx.empty() ) throw std::runtime_error( "ODESLV::pos_input ** " + var.name() + " is not a parameter-input of the extracted model\n" );
-      auto const itn = _mInpNodes.find( var.name() );
-      if( itn == _mInpNodes.cend() ) return ndx[0];               // time-invariant: one block
-      size_t const n_node = itn->second.size()? itn->second.size(): 1;
-      size_t e = 0;
-      if( !_mT.empty() ){ auto const ite = ndx_el.find( _mT[0] ); if( ite != ndx_el.cend() ) e = ite->second; }
-      if( (e+1)*n_node > ndx.size() ) throw std::runtime_error( "ODESLV::pos_input ** element out of range for " + var.name() + "\n" );
-      return ndx[ e*n_node ];
-    }
-
-  //! @brief The nodal DOF count of one element block of input @p var (1 for a time-invariant input).
-  size_t size_input
-    ( FFVar const& var )
-    const
-    {
-      auto const itn = _mInpNodes.find( var.name() );
-      return ( itn == _mInpNodes.cend() || itn->second.empty() )? 1: itn->second.size();
-    }
-
   //! @brief ODESLV substitutes fixed-input values at extraction (setup), not per call.
   bool _fixed_inputs_applied_per_call
     () const override
     { return false; }
-
-  //! @brief Write the DOF values of declared input @p w (control_dofs order) into the flat parameter vector @p P
-  //! (size np(), var_parameter() order) -- the ODESLV counterpart of OCFESLV::set_input_values.  Returns false if
-  //! @p w is not a parameter-input, the value count is wrong, or @p P is too short.  Valid after setup().
-  bool set_parameter_values
-    ( FFVar const& w, std::vector<double> const& vals, std::vector<double>& P )
-    const
-    {
-      auto const ndx = parameter_index( w );
-      if( ndx.empty() || vals.size() != ndx.size() || P.size() < _np ) return false;
-      for( size_t k=0; k<ndx.size(); ++k ) P[ ndx[k] ] = vals[k];
-      return true;
-    }
-
-  //! @brief Read the DOF values of declared input @p w (control_dofs order) from the flat parameter vector @p P.
-  //! Empty if @p w is not a parameter-input or @p P is too short.
-  std::vector<double> get_parameter_values
-    ( FFVar const& w, std::vector<double> const& P )
-    const
-    {
-      auto const ndx = parameter_index( w );
-      std::vector<double> v;
-      if( ndx.empty() || P.size() < _np ) return v;
-      for( size_t k : ndx ) v.push_back( P[k] );
-      return v;
-    }
-
-  //! @brief Build the flat parameter vector @p P and constant vector @p c from values given BY NAME: every declared
-  //! input (except a fixed one) and every constant, exactly once, each a value list in control_dofs() order or a
-  //! generator.  Returns false with the reason in @p err on an unknown or duplicate entry, a wrong count, or a
-  //! missing input or constant.
-  bool assemble_values
-    ( std::vector<FFModel::InputVal> const& vIn, std::vector<double>& P, std::vector<double>& c, std::string& err )
-    const
-    {
-      err.clear();  P.assign( _np, 0. );
-      auto const& vC = var_constant();  c.assign( vC.size(), 0. );
-      std::vector<FFVar> seen;
-      for( auto const& a : vIn ){
-        for( auto const& u : seen ) if( u.id().second == a.input.id().second ){ err = a.input.name() + " is given more than once"; return false; }
-        seen.push_back( a.input );
-        int ic = -1; for( size_t k=0; k<vC.size(); ++k ) if( vC[k].id().second == a.input.id().second ){ ic = (int)k; break; }
-        if( ic >= 0 ){                                    // a constant: one value
-          double const v = a.gen? a.gen( DofIndex() ): ( a.vals.size() == 1? a.vals[0]: std::nan("") );
-          if( !a.gen && a.vals.size() != 1 ){ err = "constant " + a.input.name() + " takes exactly one value"; return false; }
-          c[ic] = v;  continue;
-        }
-        if( parameter_index( a.input ).empty() ){
-          err = a.input.name() + " is neither a parameter-input nor a constant of the extracted model"
-              + std::string( fixed_input( a.input )? " (it is fixed)": "" );
-          return false;
-        }
-        std::vector<double> v;
-        if( a.gen ){ for( auto const& d : control_dofs( a.input ) ) v.push_back( a.gen( d ) ); }
-        else v = a.vals;
-        if( !set_parameter_values( a.input, v, P ) ){
-          err = a.input.name() + " has " + std::to_string( parameter_index( a.input ).size() ) + " DOFs, but "
-              + std::to_string( v.size() ) + " values were given";
-          return false;
-        }
-      }
-      std::string missing;
-      for( auto const& [w,dom] : var_declared_input() ){
-        if( fixed_input( w ) ) continue;
-        bool in = false; for( auto const& u : seen ) if( u.id().second == w.id().second ){ in = true; break; }
-        if( !in ) missing += " " + w.name();
-      }
-      for( auto const& k : vC ){
-        bool in = false; for( auto const& u : seen ) if( u.id().second == k.id().second ){ in = true; break; }
-        if( !in ) missing += " " + k.name();
-      }
-      if( !missing.empty() ){ err = "every declared input and constant must be given; missing:" + missing; return false; }
-      return true;
-    }
-
-  //! @brief The declared input a parameter @p p belongs to, and p's DOF index within it (element-major for
-  //! a distributed input, 0 for a time-invariant one): the inverse of parameter_index().  Returns false if
-  //! @p p is not a parameter of the extracted model.  Valid after setup().
-  bool input_of_parameter
-    ( FFVar const& p, FFVar& w, size_t& dof ) const
-    {
-      for( auto const& [win, dom] : var_declared_input() ){
-        auto const ndx = parameter_index( win );
-        for( size_t j = 0; j < ndx.size(); ++j )
-          if( _mP[ ndx[j] ].id().second == p.id().second ){ w = win; dof = j; return true; }
-      }
-      return false;
-    }
-
-  //! @brief The parameter indices (in var_parameter() order) of the DOFs of the declared input @p w: one
-  //! for a time-invariant input, its minted levels for a distributed one, empty if @p w is not an input of
-  //! the extracted model.  Valid after setup().  This is the layout query fdiff_seed_all() relies on --
-  //! time-invariant parameters come FIRST in the extracted order, so no positional assumption holds.
-  std::vector<size_t> parameter_index
-    ( FFVar const& w ) const override
-    {
-      std::vector<FFVar> dofs;
-      auto const itl = _mInpLevels.find( w.name() );
-      if( itl != _mInpLevels.cend() ) dofs = itl->second; else dofs.assign( 1, w );
-      std::vector<size_t> ndx;
-      for( auto const& d : dofs )
-        for( size_t i=0; i<_np; ++i ) if( _mP[i].id().second == d.id().second ){ ndx.push_back( i ); break; }
-      return ndx;
-    }
 
   //! @brief Revision of the ODESLV headers (odeslv_base.hpp, odeslvs_base.hpp, odeslv_cvodes.hpp, odeslvs_cvodes.hpp,
   //! which change together): bump it with any change to one of them.  Since 2026-10-07, so that a sweep log can show

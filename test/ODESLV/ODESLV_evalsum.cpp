@@ -16,8 +16,8 @@ template <class F> static bool build( M& m, F outputs, size_t nstage = 2 ){
   m.I.add_equation( OpP( m.x0, m.t ) - m.p*m.x0*(1.-m.x1), {m.t}, {T_INT}, io ); m.I.add_equation( OpP( m.x1, m.t ) - m.p*m.x1*(m.x0-1.), {m.t}, {T_INT}, io );
   m.I.add_equation( m.x0 - 1.2, {m.t}, {mc::FFDom::LB}, ii ); m.I.add_equation( m.x1 - ( 1.1 + 0.01*m.p ), {m.t}, {mc::FFDom::LB}, ii );
   outputs( m );
-  m.I.options.DISPLAY = 0; m.I.options.LINSOL = mc::BASE_CVODES::Options::DENSE;
-  m.I.options.ATOL = m.I.options.ATOLS = m.I.options.ATOLB = 1e-10; m.I.options.RTOL = m.I.options.RTOLS = m.I.options.RTOLB = 1e-10;
+  m.I.options.SOLVE.VERBOSE = false; m.I.options.SOLVE.LINSOL = mc::BASE_CVODES::Options::DENSE;
+  m.I.options.SOLVE.ATOL = m.I.options.SOLVE.ATOLS = m.I.options.SOLVE.ATOLB = 1e-10; m.I.options.SOLVE.RTOL = m.I.options.SOLVE.RTOLS = m.I.options.SOLVE.RTOLB = 1e-10;
   return m.I.setup(); }
 struct R { std::vector<double> F, Gf, Ga; bool ok = false; };
 static R solve( M& m ){

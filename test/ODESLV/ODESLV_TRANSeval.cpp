@@ -51,7 +51,7 @@ static Run run( int form, std::vector<double> const& P0 ){
   I.add_output( OpE( x1, t, 1. ) ); I.add_output( OpE( x2, t, 1. ) );
   I.add_output( OpE( x2, t, T2, FFDom::MINUS ) ); I.add_output( OpE( x2, t, T2, FFDom::PLUS ) );
   I.add_output( OpI( std::vector<FFVar>{ x1 + x2 }, { t } )[0] );
-  I.options.DISPLAY = 0; I.options.ATOL = I.options.ATOLS = I.options.ATOLB = 1e-12; I.options.RTOL = I.options.RTOLS = I.options.RTOLB = 1e-12;
+  I.options.SOLVE.VERBOSE = false; I.options.SOLVE.ATOL = I.options.SOLVE.ATOLS = I.options.SOLVE.ATOLB = 1e-12; I.options.SOLVE.RTOL = I.options.SOLVE.RTOLS = I.options.SOLVE.RTOLB = 1e-12;
   std::ostringstream os; auto* old = std::cerr.rdbuf( os.rdbuf() ); bool const su = I.setup(); std::cerr.rdbuf( old ); R.msg = os.str();
   if( !su ) return R;
   for( auto const& tr : I.var_transition() ) R.trn.push_back( { tr.tau, tr.dom.id() == t.id() || tr.dom.name() == t.name() } );

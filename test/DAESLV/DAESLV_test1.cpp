@@ -99,7 +99,7 @@ int main()
       A.add_equation( x0 - 0., {t}, {FFDom::LB}, ii );
       A.add_equation( x1 - 1., {t}, {FFDom::LB}, ii );
       A.add_output( OpE( x0, t, T_END ) ); A.add_output( OpE( x1, t, T_END ) );
-      A.options.RTOL=A.options.ATOL=1e-10; A.options.DISPLAY = 0;
+      A.options.SOLVE.RTOL=A.options.SOLVE.ATOL=1e-10; A.options.SOLVE.VERBOSE = false;
       if( A.setup() ){ A.solve( std::vector<double>{} ); ode0=A.val_function()[0]; ode1=A.val_function()[1]; }
       else { std::cout << "    ODESLV setup failed\n"; ++n_fail; } }
     check( "DAESLV x0(1) = sin(1)", dae0, std::sin(T_END), 1e-8 );
@@ -137,7 +137,7 @@ int main()
       A.add_equation( x0 - 1., {t}, {FFDom::LB}, ii );
       A.add_equation( x1 - 2., {t}, {FFDom::LB}, ii );
       A.add_output( OpE( x0, t, T_END ) ); A.add_output( OpE( x1, t, T_END ) );
-      A.options.RTOL=A.options.ATOL=1e-10; A.options.DISPLAY = 0;
+      A.options.SOLVE.RTOL=A.options.SOLVE.ATOL=1e-10; A.options.SOLVE.VERBOSE = false;
       if( A.setup() ){ A.solve( std::vector<double>{} ); o0=A.val_function()[0]; o1=A.val_function()[1]; }
       else { std::cout << "    ODESLV setup failed\n"; ++n_fail; } }
     check( "implicit == explicit on x0", d0, o0, 1e-7 );

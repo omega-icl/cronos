@@ -55,15 +55,15 @@ int main()
   IVP.add_output( OpEval( X0 - 1., t, tf ) );                  // test2's FCT[1] and FCT[2] at the end; FCT[0] was
   IVP.add_output( OpEval( X1,      t, tf ) );                  // the parameter TF itself, which needs no output
 
-  IVP.options.INTMETH   = mc::BASE_CVODES::Options::MSBDF;
-  IVP.options.NLINSOL   = mc::BASE_CVODES::Options::NEWTON;
-  IVP.options.LINSOL    = mc::BASE_CVODES::Options::DENSE;//SPARSE;
-  IVP.options.NMAX      = 0;
-  IVP.options.DISPLAY   = 1;
-  IVP.options.ATOL      = IVP.options.ATOLB = IVP.options.ATOLS = 1e-9;
-  IVP.options.RTOL      = IVP.options.RTOLB = IVP.options.RTOLS = 1e-9;
+  IVP.options.SOLVE.INTMETH   = mc::BASE_CVODES::Options::MSBDF;
+  IVP.options.SOLVE.NLINSOL   = mc::BASE_CVODES::Options::NEWTON;
+  IVP.options.SOLVE.LINSOL    = mc::BASE_CVODES::Options::DENSE;//SPARSE;
+  IVP.options.SOLVE.NMAX      = 0;
+  IVP.options.SOLVE.VERBOSE   = true;
+  IVP.options.SOLVE.ATOL      = IVP.options.SOLVE.ATOLB = IVP.options.SOLVE.ATOLS = 1e-9;
+  IVP.options.SOLVE.RTOL      = IVP.options.SOLVE.RTOLB = IVP.options.SOLVE.RTOLS = 1e-9;
 #if defined( SAVE_RESULTS )
-  IVP.options.RESRECORD = true;
+  IVP.options.OUTPUT.RESRECORD = true;
 #endif
 
   if( !IVP.setup() ){

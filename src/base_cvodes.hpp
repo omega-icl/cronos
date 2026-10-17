@@ -64,48 +64,6 @@ public:
   //! @brief GSL options
   struct Options
   {
-    //! @brief Constructor
-    Options():
-      INTMETH(MSBDF), NLINSOL(NEWTON), LINSOL(DIAG), 
-      H0(0e0), HMIN(1e-12), HMAX(0e0), NMAX(2000),
-      RTOL(1e-7), ATOL(1e-9), ETOL(1e-16),
-      QERR(true), MAXFAIL(10), MAXCORR(5),
-      AUTOTOLS(false), RTOLS(1e-7), ATOLS(1e-9), ETOLS(1e-14),
-      FSACORR(STAGGERED), FSAERR(true), QERRS(true),
-      RTOLB(1e-7), ATOLB(1e-9), ETOLB(1e-16), QERRB(true),
-      ASAINTERP(HERMITE), ASACHKPT(2000)
-      {}
-    //! @brief Assignment operator
-    template <typename U> Options& operator=
-      ( U&options ){
-        INTMETH   = options.INTMETH;
-        NLINSOL   = options.NLINSOL;
-        LINSOL    = options.LINSOL;
-        H0        = options.H0;
-        HMIN      = options.HMIN;
-        HMAX      = options.HMAX;
-        NMAX      = options.NMAX;
-        RTOL      = options.RTOL;
-        ATOL      = options.ATOL;
-        ETOL      = options.ETOL;
-        QERR      = options.QERR;
-        MAXFAIL   = options.MAXFAIL;
-        MAXCORR   = options.MAXCORR;
-        AUTOTOLS  = options.AUTOTOLS;
-        RTOLS     = options.RTOLS;
-        ATOLS     = options.ATOLS;
-        ETOLS     = options.ETOLS;
-        FSACORR   = options.FSACORR;
-        FSAERR    = options.FSAERR;
-        QERRS     = options.QERRS;
-        RTOLB     = options.RTOLB;
-        ATOLB     = options.ATOLB;
-        ETOLB     = options.ETOLB;
-        QERRB     = options.QERRB;
-        ASAINTERP = options.ASAINTERP;
-        ASACHKPT  = options.ASACHKPT;
-        return *this;
-      }
     //! @brief Enumeration type for FSA method
     enum FSA_STRATEGY{
       SIMULTANEOUS=CV_SIMULTANEOUS, //!< Simultaneous state/sensitivity correction
@@ -135,58 +93,79 @@ public:
       SPARSE	//!< Use analytic sparse Jacobian and the KLU sparse direct solver.  Requires a build with KLU
 		//!< (CRONOS__WITH_KLU); otherwise the integrator REFUSES it at setup.  Always defined (2026-10-09).
     };
-    //! @brief Numerical integration method [Default: MSBDF]
-    INTEGRATION_METHOD INTMETH;
-    //! @brief Nonlinear solver method [Default: NEWTON]
-    NONLINEAR_SOLVER NLINSOL;
-    //! @brief Linear solver method and Jacobian approximation [Default: DIAG]
-    LINEAR_SOLVER LINSOL;
-    //! @brief Initial step-size [Default: 0e0 (auto)]
-    double H0;
-    //! @brief Minimum step-size [Default: 0e0]
-    double HMIN;
-    //! @brief Maximum step-size [Default: 0e0 (+inf)]
-    double HMAX;
-    //! @brief Maximum number of steps in a time stage [Default: 0 (2000)]
-    unsigned int NMAX;
-    //! @brief Relative (scalar) integration tolerance
-    sunrealtype RTOL;
-    //! @brief Absolute (scalar) integration tolerance
-    sunrealtype ATOL;
-    //! @brief Absolute (scalar) integration tolerance for ellipsoid shape matrix
-    sunrealtype ETOL;    
-    //! @brief Whether or not (state) quadrature error control is performed?
-    bool QERR;
-    //! @brief Maximum number of error test failures per step
-    int MAXFAIL;
-    //! @brief Maximum  number of nonlinear solver iterations per step
-    int MAXCORR;
-    //! @brief Whether integration tolerances for FS are to be set automatically?
-    bool AUTOTOLS;
-    //! @brief Relative (scalar) integration tolerance for FSA
-    sunrealtype RTOLS;
-    //! @brief Absolute (scalar) integration tolerance for FSA
-    sunrealtype ATOLS;
-    //! @brief Absolute (scalar) integration tolerance for ellipsoid shape matrix in FSA
-    sunrealtype ETOLS;      
-    //! @brief FSA correction strategy
-    FSA_STRATEGY FSACORR;
-    //! @brief Whether or not FSA error control is performed?
-    bool FSAERR;
-    //! @brief Whether or not FSA quadrature error control is performed?
-    bool QERRS;
-    //! @brief Relative (scalar) integration tolerance for ASA
-    sunrealtype RTOLB;
-    //! @brief Absolute (scalar) integration tolerance for ASA
-    sunrealtype ATOLB;
-    //! @brief Absolute (scalar) integration tolerance for ellipsoid shape matrix in ASA
-    sunrealtype ETOLB;    
-    //! @brief Whether or not ASA quadrature error control is performed?
-    bool QERRB;
-    //! @brief ASA interpolation strategy
-    ASA_STRATEGY ASAINTERP;
-    //! @brief Number of steps between each check point for ASA
-    int ASACHKPT;
+
+    //! @brief Everything the integration takes: method, linear and nonlinear solver, step control,
+    //! tolerances, and the sensitivity and adjoint settings.  Grouped as OCFESLV groups its SOLVE, which
+    //! has no SENS/ADJOINT substructures either.
+    struct t_Solve
+    {
+      //! @brief Enumeration type for FSA method
+      //! @brief Enumeration type for ASA method
+      //! @brief Enumeration of numerical integration algorithms
+      //! @brief Enumeration of nonlinear solver strategies
+      //! @brief Enumeration of linear solver strategies (within Newton nonlinear solver)
+      //! @brief Numerical integration method [Default: MSBDF]
+      INTEGRATION_METHOD INTMETH = MSBDF;
+      //! @brief Nonlinear solver method [Default: NEWTON]
+      NONLINEAR_SOLVER NLINSOL = NEWTON;
+      //! @brief Linear solver method and Jacobian approximation [Default: DIAG]
+      LINEAR_SOLVER LINSOL = DIAG;
+      //! @brief Initial step-size [Default: 0e0 (auto)]
+      double H0 = 0e0;
+      //! @brief Minimum step-size [Default: 0e0]
+      double HMIN = 1e-12;
+      //! @brief Maximum step-size [Default: 0e0 (+inf)]
+      double HMAX = 0e0;
+      //! @brief Maximum number of steps in a time stage [Default: 0 (2000)]
+      unsigned int NMAX = 2000;
+      //! @brief Relative (scalar) integration tolerance
+      sunrealtype RTOL = 1e-7;
+      //! @brief Absolute (scalar) integration tolerance
+      sunrealtype ATOL = 1e-9;
+      //! @brief Absolute (scalar) integration tolerance for ellipsoid shape matrix
+      sunrealtype ETOL = 1e-16;
+      //! @brief Whether or not (state) quadrature error control is performed?
+      bool QERR = true;
+      //! @brief Maximum number of error test failures per step
+      int MAXFAIL = 10;
+      //! @brief Maximum  number of nonlinear solver iterations per step
+      int MAXCORR = 5;
+      //! @brief Whether integration tolerances for FS are to be set automatically?
+      bool AUTOTOLS = false;
+      //! @brief Relative (scalar) integration tolerance for FSA
+      sunrealtype RTOLS = 1e-7;
+      //! @brief Absolute (scalar) integration tolerance for FSA
+      sunrealtype ATOLS = 1e-9;
+      //! @brief Absolute (scalar) integration tolerance for ellipsoid shape matrix in FSA
+      sunrealtype ETOLS = 1e-14;
+      //! @brief FSA correction strategy
+      FSA_STRATEGY FSACORR = STAGGERED;
+      //! @brief Whether or not FSA error control is performed?
+      bool FSAERR = true;
+      //! @brief Whether or not FSA quadrature error control is performed?
+      bool QERRS = true;
+      //! @brief Relative (scalar) integration tolerance for ASA
+      sunrealtype RTOLB = 1e-7;
+      //! @brief Absolute (scalar) integration tolerance for ASA
+      sunrealtype ATOLB = 1e-9;
+      //! @brief Absolute (scalar) integration tolerance for ellipsoid shape matrix in ASA
+      sunrealtype ETOLB = 1e-16;
+      //! @brief Whether or not ASA quadrature error control is performed?
+      bool QERRB = true;
+      //! @brief ASA interpolation strategy
+      ASA_STRATEGY ASAINTERP = HERMITE;
+      //! @brief Number of steps between each check point for ASA
+      int ASACHKPT = 2000;
+
+      //! @brief per-step trace to stdout.  Was ODESLV_CVODES::Options::DISPLAY, an int whose every live
+      //! use was 0 or 1; the negative branches it once had are commented out.  Named as OCFESLV names its
+      //! SOLVE.VERBOSE, which this now sits beside.
+      bool VERBOSE = true;
+    } SOLVE;
+
+    //! @brief Assignment operator
+    template <typename U> Options& operator=
+      ( U& options ){ SOLVE = options.SOLVE; return *this; }
   } options;
 
   //! @brief Structure storing integration statistics

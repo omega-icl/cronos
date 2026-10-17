@@ -38,7 +38,7 @@ static bool build( Model& m, int kind, bool only_d = false ){   // kind 0: dose;
   if( kind == 3 ) m.I.add_transition( m.x + m.d, 2.*m.x, m.t, TAU );
   m.I.add_output( OpE( m.x, m.t, TAU, FFDom::MINUS ) ); m.I.add_output( OpE( m.x, m.t, TAU, FFDom::PLUS ) );
   m.I.add_output( OpE( m.x, m.t, TF ) ); m.I.add_output( OpE( m.y, m.t, TF ) ); m.I.add_output( OpI( std::vector<FFVar>{ m.x }, { m.t } )[0] );
-  m.I.options.DISPLAY = 0; m.I.options.ATOL = m.I.options.ATOLS = m.I.options.ATOLB = 1e-12; m.I.options.RTOL = m.I.options.RTOLS = m.I.options.RTOLB = 1e-12;
+  m.I.options.SOLVE.VERBOSE = false; m.I.options.SOLVE.ATOL = m.I.options.SOLVE.ATOLS = m.I.options.SOLVE.ATOLB = 1e-12; m.I.options.SOLVE.RTOL = m.I.options.SOLVE.RTOLS = m.I.options.SOLVE.RTOLB = 1e-12;
   if( only_d ) m.I.register_control( m.d );                                 // registered BEFORE setup
   std::ostringstream os; auto* old = std::cerr.rdbuf( os.rdbuf() ); bool const ok = m.I.setup(); std::cerr.rdbuf( old );
   return ok; }

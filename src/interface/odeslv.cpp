@@ -187,7 +187,7 @@ settings).
 
   // --- ODESLV records ---
   py::class_<t_ResSolve>(pyODESLV, "ResultsSolve", R"doc(
-Trajectories recorded by the last ``solve`` (``options.RESRECORD`` points), as
+Trajectories recorded by the last ``solve`` (``options.OUTPUT.RESRECORD`` points), as
 NumPy arrays.
 )doc")
       .def_readonly("t", &t_ResSolve::t,
@@ -436,7 +436,7 @@ replaced by ``values``.
             records(self.results_solve, self.nx(), r.t, r.x, r.q, false);
             return r;
           },
-          "Trajectories of the last ``solve`` (``options.RESRECORD``), as "
+          "Trajectories of the last ``solve`` (``options.OUTPUT.RESRECORD``), as "
           "NumPy arrays.")
       .def_property_readonly(
           "results_fsens",

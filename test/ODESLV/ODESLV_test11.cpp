@@ -83,13 +83,13 @@ Run build_and_solve( int reg, bool verbose = false )
   IVP.add_output( OpEval( X0 - 1., t, tf ) );
   IVP.add_output( OpEval( X1,      t, tf ) );
 
-  IVP.options.INTMETH   = mc::BASE_CVODES::Options::MSBDF;
-  IVP.options.NLINSOL   = mc::BASE_CVODES::Options::NEWTON;
-  IVP.options.LINSOL    = mc::BASE_CVODES::Options::SPARSE;
-  IVP.options.NMAX      = 0;
-  IVP.options.DISPLAY   = verbose? 1: 0;
-  IVP.options.ATOL      = IVP.options.ATOLB = IVP.options.ATOLS = 1e-9;
-  IVP.options.RTOL      = IVP.options.RTOLB = IVP.options.RTOLS = 1e-9;
+  IVP.options.SOLVE.INTMETH   = mc::BASE_CVODES::Options::MSBDF;
+  IVP.options.SOLVE.NLINSOL   = mc::BASE_CVODES::Options::NEWTON;
+  IVP.options.SOLVE.LINSOL    = mc::BASE_CVODES::Options::SPARSE;
+  IVP.options.SOLVE.NMAX      = 0;
+  IVP.options.SOLVE.VERBOSE   = verbose;
+  IVP.options.SOLVE.ATOL      = IVP.options.SOLVE.ATOLB = IVP.options.SOLVE.ATOLS = 1e-9;
+  IVP.options.SOLVE.RTOL      = IVP.options.SOLVE.RTOLB = IVP.options.SOLVE.RTOLS = 1e-9;
 
   // Registration BEFORE setup(): FFModel::control_ndof reads the declaration, and setup() reindexes,
   // so this is the path the OCFESLV drivers (which register after setup) never exercise.
@@ -137,8 +137,8 @@ H build( mc::FFGraph& DAG, mc::ODESLVS_CVODES& IVP, size_t n_node = 1 )
   IVP.add_equation( h.X0 - 0.,                                                {h.t}, {mc::FFDom::LB}, ii );
   IVP.add_equation( h.X1 - h.X10,                                             {h.t}, {mc::FFDom::LB}, ii );
   IVP.add_output( OpEval( h.X0 - 1., h.t, tf ) ); IVP.add_output( OpEval( h.X1, h.t, tf ) );
-  IVP.options.LINSOL = mc::BASE_CVODES::Options::DENSE; IVP.options.DISPLAY = 0;
-  IVP.options.ATOL = IVP.options.ATOLS = 1e-10; IVP.options.RTOL = IVP.options.RTOLS = 1e-10;
+  IVP.options.SOLVE.LINSOL = mc::BASE_CVODES::Options::DENSE; IVP.options.SOLVE.VERBOSE = false;
+  IVP.options.SOLVE.ATOL = IVP.options.SOLVE.ATOLS = 1e-10; IVP.options.SOLVE.RTOL = IVP.options.SOLVE.RTOLS = 1e-10;
   return h;
 }
 

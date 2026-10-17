@@ -598,7 +598,7 @@ bool
 ODESLVS_CVODES::_ARM_ASA
 ()
 {
-  _cv_flag = CVodeAdjInit( _cv_mem, options.ASACHKPT, options.ASAINTERP );
+  _cv_flag = CVodeAdjInit( _cv_mem, options.SOLVE.ASACHKPT, options.SOLVE.ASAINTERP );
   if( _check_cv_flag( &_cv_flag, "CVodeAdjInit", 1 ) ) return false;
   return true;
 }
@@ -630,7 +630,7 @@ ODESLVS_CVODES::_INI_CVODES_ASA
 ( unsigned const ifct, int& indexB, unsigned& iusrB )
 {
   // Create CVodeS memory block for the ADAMS or BDF method
-  _cv_flag = CVodeCreateB( _cv_mem, options.INTMETH, &indexB );
+  _cv_flag = CVodeCreateB( _cv_mem, options.SOLVE.INTMETH, &indexB );
   if( _check_cv_flag( &_cv_flag, "CVodeCreateB", 1 ) ) return false;
 
   // Specify error output
@@ -654,7 +654,7 @@ ODESLVS_CVODES::_INI_CVODES_ASA
   // Specify the nonlinear solver -- ONE matrix, linear solver and nonlinear solver PER backward problem
   if( !ifct ) _free_backward_solvers();
   if( _sun_matB.size() <= ifct ){ _sun_matB.resize( ifct+1, nullptr ); _sun_lsB.resize( ifct+1, nullptr ); _sun_nlsB.resize( ifct+1, nullptr ); }
-  switch( options.NLINSOL ){
+  switch( options.SOLVE.NLINSOL ){
    // Fixed point nonlinear solver
    case Options::FIXEDPOINT:
     _sun_nlsB[ifct] = SUNNonlinSol_FixedPoint( _Ny[ifct], 0, sunctx );
@@ -666,14 +666,14 @@ ODESLVS_CVODES::_INI_CVODES_ASA
 #if !defined( CRONOS__WITH_KLU )
     // 2026-10-09: SPARSE is always defined; without KLU it is REFUSED here (adjoint) -- the switch's DIAG/default
     // case would otherwise run a different (diagonal) solver silently.
-    if( options.LINSOL == Options::SPARSE ){
+    if( options.SOLVE.LINSOL == Options::SPARSE ){
       std::cerr << "ODESLVS_CVODES ** LINSOL = SPARSE requires KLU, which this build does not include"
                 << " (build_info()['backends']); choose DIAG, DENSE or DENSEDQ, or use a build with KLU" << std::endl;
       return false;
     }
 #endif
     // Specify the linear solver and Jacobian approximation
-    switch( options.LINSOL ){
+    switch( options.SOLVE.LINSOL ){
      case Options::DIAG: default:
        _cv_flag = CVDiagB( _cv_mem, indexB );
        if( _check_cv_flag( &_cv_flag, "CVDiag", 1) ) return false;
@@ -688,7 +688,7 @@ ODESLVS_CVODES::_INI_CVODES_ASA
        if( _check_cv_flag( (void *)_sun_lsB[ifct], "SUNLinSol_Dense", 0 ) ) return false;
        _cv_flag = CVodeSetLinearSolverB( _cv_mem, indexB, _sun_lsB[ifct], _sun_matB[ifct] );
        if( _check_cv_flag( &_cv_flag, "CVodeSetLinearSolverB", 1 ) ) return false;
-       _cv_flag = CVodeSetJacFnB( _cv_mem, indexB, options.LINSOL==Options::DENSE? MC_CVJACB__: nullptr );
+       _cv_flag = CVodeSetJacFnB( _cv_mem, indexB, options.SOLVE.LINSOL==Options::DENSE? MC_CVJACB__: nullptr );
        if ( _check_cv_flag( &_cv_flag, "CVodeSetJacFnB", 1 ) ) return false;
        break;
 
@@ -714,19 +714,19 @@ ODESLVS_CVODES::_INI_CVODES_ASA
   if( _check_cv_flag( &_cv_flag, "CVodeSetNonlinearSolverB", 1 ) ) return false;
 
   // Specify the relative and absolute tolerances for states
-  _cv_flag = CVodeSStolerancesB( _cv_mem, indexB, options.RTOLB, options.ATOLB );
+  _cv_flag = CVodeSStolerancesB( _cv_mem, indexB, options.SOLVE.RTOLB, options.SOLVE.ATOLB );
   if( _check_cv_flag( &_cv_flag, "CVodeSStolerancesB", 1 ) ) return false;
 
   // Specify minimum stepsize
-  _cv_flag = CVodeSetMinStepB( _cv_mem, indexB, options.HMIN>0.? options.HMIN:0. );
+  _cv_flag = CVodeSetMinStepB( _cv_mem, indexB, options.SOLVE.HMIN>0.? options.SOLVE.HMIN:0. );
   if( _check_cv_flag( &_cv_flag, "CVodeSetMinStepB", 1 ) ) return false;
 
   // Specify maximum stepsize
-  _cv_flag = CVodeSetMaxStepB( _cv_mem, indexB, options.HMAX>0.? options.HMAX: 0. );
+  _cv_flag = CVodeSetMaxStepB( _cv_mem, indexB, options.SOLVE.HMAX>0.? options.SOLVE.HMAX: 0. );
   if( _check_cv_flag( &_cv_flag, "CVodeSetMaxStepB", 1 ) ) return false;
 
   // Specify maximum number of steps between two stage times
-  _cv_flag = CVodeSetMaxNumStepsB( _cv_mem, indexB, options.NMAX );
+  _cv_flag = CVodeSetMaxNumStepsB( _cv_mem, indexB, options.SOLVE.NMAX );
   if( _check_cv_flag( &_cv_flag, "CVodeSetMaxNumStepsB", 1 ) ) return false;
 
   // Initialize the integrator memory for the quadrature variables
@@ -735,11 +735,11 @@ ODESLVS_CVODES::_INI_CVODES_ASA
   if( _check_cv_flag( &_cv_flag, "CVodeQuadInitB", 1 ) ) return false;
 
   // Specify whether or not to perform error control on quadrature
-  _cv_flag = CVodeSetQuadErrConB( _cv_mem, indexB, options.QERRB );
+  _cv_flag = CVodeSetQuadErrConB( _cv_mem, indexB, options.SOLVE.QERRB );
   if( _check_cv_flag( &_cv_flag, "CVodeSetQuadErrConB", 1 ) ) return false;
 
   // Specify the relative and absolute tolerances for quadratures
-  _cv_flag = CVodeQuadSStolerancesB( _cv_mem, indexB, options.RTOLB, options.ATOLB );
+  _cv_flag = CVodeQuadSStolerancesB( _cv_mem, indexB, options.SOLVE.RTOLB, options.SOLVE.ATOLB );
   if( _check_cv_flag( &_cv_flag, "CVodeQuadSStolerancesB", 1 ) ) return false;
 
   return true;
@@ -751,7 +751,7 @@ ODESLVS_CVODES::_INI_CVODES_FSA
 ()
 {
   // Allocate memory for sensitivity integration
-  _cv_flag = CVodeSensInit1( _cv_mem, _nsen, options.FSACORR, MC_CVRHSF__, _Ny );
+  _cv_flag = CVodeSensInit1( _cv_mem, _nsen, options.SOLVE.FSACORR, MC_CVRHSF__, _Ny );
   if( _check_cv_flag( &_cv_flag, "CVodeSensInit1", 1 ) ) return false;
 
   // Specify error output
@@ -762,18 +762,18 @@ ODESLVS_CVODES::_INI_CVODES_FSA
 //  if( _check_cv_flag( &_cv_flag, "CVodeSetErrFile", 1 ) ) return false;
 
   // Specify absolute and relative tolerances for sensitivities
-  if( options.AUTOTOLS ){
+  if( options.SOLVE.AUTOTOLS ){
     _cv_flag = CVodeSensEEtolerances( _cv_mem );
     if( _check_cv_flag( &_cv_flag, "CVodeSensEEtolerances", 1) ) return false;
   }
   else{
-    std::vector<sunrealtype> ATOLS( _nsen, options.ATOLS );
-    _cv_flag = CVodeSensSStolerances( _cv_mem, options.RTOLS, ATOLS.data() );
+    std::vector<sunrealtype> ATOLS( _nsen, options.SOLVE.ATOLS );
+    _cv_flag = CVodeSensSStolerances( _cv_mem, options.SOLVE.RTOLS, ATOLS.data() );
     if( _check_cv_flag( &_cv_flag, "CVodeSensSStolerances", 1) ) return false;
   }
 
   // Specify the error control strategy for sensitivity variables
-  _cv_flag = CVodeSetSensErrCon( _cv_mem, options.FSAERR );
+  _cv_flag = CVodeSetSensErrCon( _cv_mem, options.SOLVE.FSAERR );
   if( _check_cv_flag( &_cv_flag, "CVodeSetSensErrCon", 1 ) ) return false;
 
   // Specify problem parameter information for sensitivity calculations
@@ -782,10 +782,10 @@ ODESLVS_CVODES::_INI_CVODES_FSA
 
   // Specify the nonlinear solver for sensitivity calculations
   if( _sun_nlsF ){ SUNNonlinSolFree( _sun_nlsF );  _sun_nlsF = nullptr; } /* Free the nonlinear solver memory */
-  switch( options.NLINSOL ){
+  switch( options.SOLVE.NLINSOL ){
    // Fixed point nonlinear solver
    case Options::FIXEDPOINT:
-    switch( options.FSACORR ){
+    switch( options.SOLVE.FSACORR ){
      case Options::SIMULTANEOUS:
       _sun_nlsF = SUNNonlinSol_FixedPointSens( _nsen+1, _Nx, 0, sunctx);
       break;
@@ -800,7 +800,7 @@ ODESLVS_CVODES::_INI_CVODES_FSA
    
    // Newton nonlinear solver
    case Options::NEWTON:
-    switch( options.FSACORR ){
+    switch( options.SOLVE.FSACORR ){
      case Options::SIMULTANEOUS:
       _sun_nlsF = SUNNonlinSol_NewtonSens( _nsen+1, _Nx, sunctx);
       break;
@@ -815,7 +815,7 @@ ODESLVS_CVODES::_INI_CVODES_FSA
   }
   
   // Attach sensitivity nonlinear solver to CVodeS
-  switch( options.FSACORR ){
+  switch( options.SOLVE.FSACORR ){
    case Options::SIMULTANEOUS:
     _cv_flag = CVodeSetNonlinearSolverSensSim( _cv_mem, _sun_nlsF );
     if( _check_cv_flag( &_cv_flag, "CVodeSetNonlinearSolverSensSim", 1 ) ) return false;
@@ -836,17 +836,17 @@ ODESLVS_CVODES::_INI_CVODES_FSA
   if( _check_cv_flag( &_cv_flag, "CVodeQuadSensInit", 1 ) ) return false;
   
   // Specify whether or not to perform error control on quadrature
-  _cv_flag = CVodeSetQuadSensErrCon( _cv_mem, options.QERRS );
+  _cv_flag = CVodeSetQuadSensErrCon( _cv_mem, options.SOLVE.QERRS );
   if( _check_cv_flag( &_cv_flag, "CVodeSetQuadSensErrCon", 1 ) ) return false;
 
   // Specify absolute and relative tolerances for quadratures
-  if( options.AUTOTOLS ){
+  if( options.SOLVE.AUTOTOLS ){
     _cv_flag = CVodeQuadSensEEtolerances( _cv_mem );
     if( _check_cv_flag( &_cv_flag, "CVodeQuadSensEEtolerances", 1 ) ) return false;
   }
   else{
-    std::vector<sunrealtype> ATOLS( _nsen, options.ATOLS );
-    _cv_flag = CVodeQuadSensSStolerances( _cv_mem, options.RTOLS, ATOLS.data() );
+    std::vector<sunrealtype> ATOLS( _nsen, options.SOLVE.ATOLS );
+    _cv_flag = CVodeQuadSensSStolerances( _cv_mem, options.SOLVE.RTOLS, ATOLS.data() );
     if( _check_cv_flag( &_cv_flag, "CVodeQuadSensSStolerances", 1 ) ) return false;
   }
 
@@ -865,7 +865,7 @@ ODESLVS_CVODES::_CC_CVODES_ASA
   if( _check_cv_flag( &_cv_flag, "CVodeReInitB", 1 ) ) return false;
 
 #if defined( CRONOS__WITH_KLU )
-  switch( options.LINSOL ){
+  switch( options.SOLVE.LINSOL ){
     case Options::SPARSE:
       // Function SUNLinSol_KLUReInit(SUNLinearSolver S, SUNMatrix A, sunindextype nnz, int reinit_type)
       // needed to reinitialize memory and flag for a new factorization (symbolic and numeric) to be conducted at
@@ -894,7 +894,7 @@ ODESLVS_CVODES::_CC_CVODES_FSA
 ()
 {
   // Reinitialize CVodeS memory block for current sensitivity _Ny
-  _cv_flag = CVodeSensReInit( _cv_mem, options.FSACORR, _Ny );
+  _cv_flag = CVodeSensReInit( _cv_mem, options.SOLVE.FSACORR, _Ny );
   if( _check_cv_flag( &_cv_flag, "CVodeSensReInit", 1 ) ) return false;
 
   return true;
@@ -1035,7 +1035,7 @@ ODESLVS_CVODES::CVJACB__
 {
   //std::cerr << "Entering: ODESLV_CVODES::MC_CVJACB__\n";
   bool flag = false;
-  switch( options.LINSOL ){
+  switch( options.SOLVE.LINSOL ){
    case Options::DIAG:
    case Options::DENSEDQ:
     flag = false;
@@ -1172,7 +1172,7 @@ ODESLVS_CVODES::_states_ASA
     // Initialize adjoint integration
     if( !_INI_ASA( p ) ) return STATUS::FATAL;
     _t = _dT[_ns];
-    const unsigned NSTEP = options.RESRECORD? options.RESRECORD: 1;
+    const unsigned NSTEP = options.OUTPUT.RESRECORD? options.OUTPUT.RESRECORD: 1;
 
     // Terminal adjoint & quadrature values
     _lk.resize( _ns+1, std::vector<std::vector<double>>( _nf ) );
@@ -1191,14 +1191,14 @@ ODESLVS_CVODES::_states_ASA
       // Display / record / return adjoint terminal values
       _lk[_ns].push_back( std::vector<double>( _Dy, _Dy+_ny ) );
       _qpk[_ns].push_back( std::vector<double>( _Dyq, _Dyq+_nsen ) );
-      if( options.DISPLAY >= 1 ){
+      if( options.SOLVE.VERBOSE ){
         std::ostringstream ol; ol << " l[" << _ifct << "]";
         if( !_ifct ) _print_interm( _dT[_ns], _nx, _Dy, ol.str(), os );
         else         _print_interm( _nx, _Dy, ol.str(), os );
         std::ostringstream oq; oq << " qp[" << _ifct << "]";
         _print_interm( _nsen, _Dyq, oq.str(), os );
       }
-      if( options.RESRECORD )
+      if( options.OUTPUT.RESRECORD )
         results_asens[_ifct].push_back( Results( _t, _nx, _Dy, _nsen, _Dyq ) );
 //      for( unsigned iy=0; lk && iy<_ny+_np; iy++ )
 //        lk[_ns][_ifct*(_nx+_np)+iy] = iy<_ny? _Dy[iy]: _Dyq[iy-_ny];
@@ -1256,7 +1256,7 @@ ODESLVS_CVODES::_states_ASA
           { _END_SEN( stats_asens ); return STATUS::FATAL; }
 
         // intermediate record
-        if( options.RESRECORD ){
+        if( options.OUTPUT.RESRECORD ){
           for( _ifct=0; _ifct < _nf; _ifct++ ){
             _cv_flag = CVodeGetB( _cv_mem, _indexB[_ifct], &_t, _Ny[_ifct]);
             if( _check_cv_flag( &_cv_flag, "CVodeGetB", 1) )
@@ -1351,14 +1351,14 @@ ODESLVS_CVODES::_states_ASA
         // Display / record / return adjoint terminal values
         _lk[_istg-1].push_back( std::vector<double>( _Dy, _Dy+_ny ) );
         _qpk[_istg-1].push_back( std::vector<double>( _Dyq, _Dyq+_nsen ) );
-        if( options.DISPLAY >= 1 ){
+        if( options.SOLVE.VERBOSE ){
           std::ostringstream ol; ol << " l[" << _ifct << "]";
           if( !_ifct ) _print_interm( _dT[_istg-1], _nx, _Dy, ol.str(), os );
           else         _print_interm( _nx, _Dy, ol.str(), os );
           std::ostringstream oq; oq << " qp[" << _ifct << "]";
           _print_interm( _nsen, _Dyq, oq.str(), os );
         }
-        if( options.RESRECORD )
+        if( options.OUTPUT.RESRECORD )
           results_asens[_ifct].push_back( Results( _t, _nx, _Dy, _nsen, _Dyq ) );
 //        for( unsigned iy=0; lk && iy<_ny+_np; iy++ )
 //          lk[_istg-1][_ifct*(_nx+_np)+iy] = iy<_ny? _Dy[iy]: _Dyq[iy-_ny];
@@ -1372,7 +1372,7 @@ ODESLVS_CVODES::_states_ASA
     for( unsigned ip=0; ip<_nsen; ++ip )
       _fp.push_back( std::vector<double>( _Dfp.data()+ip*_nf, _Dfp.data()+(ip+1)*_nf ) );
 //    for( unsigned i=0; fp && i<_nf*_np; i++ ) fp[i] = _Dfp[i];
-    if( options.DISPLAY >= 1 ){
+    if( options.SOLVE.VERBOSE ){
       for( unsigned iq=0; iq<_nsen; iq++ ){
         std::ostringstream ofp; ofp << " fp[" << iq << "]";
         _print_interm( _nf, _Dfp.data()+iq*_nf, ofp.str(), os );
@@ -1381,12 +1381,12 @@ ODESLVS_CVODES::_states_ASA
   }
   catch(...){
     _END_SEN( stats_asens );
-    if( options.DISPLAY >= 1 ) _print_stats( stats_asens, os );
+    if( options.SOLVE.VERBOSE ) _print_stats( stats_asens, os );
     return STATUS::FAILURE;
   }
 
   _END_SEN( stats_asens );
-  if( options.DISPLAY >= 1 ) _print_stats( stats_asens, os );
+  if( options.SOLVE.VERBOSE ) _print_stats( stats_asens, os );
   return STATUS::NORMAL;
 }
 
@@ -1556,7 +1556,7 @@ ODESLVS_CVODES::_states_FSA
     if( !ODESLV_CVODES::_INI_STA( p, c ) 
      || !_INI_FSA( p ) ) return STATUS::FATAL;
     _t = _dT[0];
-    const unsigned NSTEP = options.RESRECORD? options.RESRECORD: 1;
+    const unsigned NSTEP = options.OUTPUT.RESRECORD? options.OUTPUT.RESRECORD: 1;
 
     // Initial state/quadrature values
     if( !ODESLV_BASE::_IC_D_SET()
@@ -1573,11 +1573,11 @@ ODESLVS_CVODES::_states_FSA
     // Display / record / return initial results
     _xk.push_back( std::vector<double>( _Dx, _Dx+_nx ) );
     if( _nq ) _qk.push_back( std::vector<double>( _Dq, _Dq+_nq ) );
-    if( options.DISPLAY >= 1 ){
+    if( options.SOLVE.VERBOSE ){
       _print_interm( _t, _nx, _Dx, " x", os );
       _print_interm( _nq, _Dq, " q", os );
     }
-//    if( options.RESRECORD )
+//    if( options.OUTPUT.RESRECORD )
 //      results_solve.push_back( Results( _t, _nx, NV_DATA_S(_Nx), _nq, _nq? NV_DATA_S(_Nq): nullptr ) );
 
     // Initial state/quadrature sensitivities
@@ -1593,13 +1593,13 @@ ODESLVS_CVODES::_states_FSA
       // Display / record / return initial results
       _xpk[0].push_back( std::vector<double>( _Dy, _Dy+_nx ) );
       if( _nq ) _qpk[0].push_back( std::vector<double>( _Dyq, _Dyq+_nq ) );
-      if( options.DISPLAY >= 1 ){
+      if( options.SOLVE.VERBOSE ){
         std::ostringstream oxp; oxp << " xp[" << _isen << "]";
         _print_interm( _nx, _Dy, oxp.str(), os );
         std::ostringstream oqp; oqp << " qp[" << _isen << "]";
         _print_interm( _nq, _Dyq, oqp.str(), os );
       }
-//      if( options.RESRECORD )
+//      if( options.OUTPUT.RESRECORD )
 //        results_fsens[_isen].push_back( Results( _t, _nx, NV_DATA_S(_Ny[_isen]), _nq, _nq? NV_DATA_S(_Nyq[_isen]):nullptr ) );
 //      for( unsigned ix=0; xpk && ix<_nx+_nq; ix++ )
 //        xpk[0][(_nx+_nq)*_isen+ix] = ix<_nx? _Dy[ix]: _Dyq[ix-_nx];
@@ -1629,7 +1629,7 @@ ODESLVS_CVODES::_states_FSA
        && ( ( _Nq && !ODESLV_BASE::_IC_D_QUAD( NV_DATA_S( _Nq ) ) ) // quadrature reinitialization
          || !ODESLV_CVODES::_CC_CVODE_QUAD() ) )
         { _END_STA(); _END_SEN( stats_fsens ); return STATUS::FAILURE; }
-      if( options.RESRECORD )
+      if( options.OUTPUT.RESRECORD )
         results_solve.push_back( Results( _t, _nx, NV_DATA_S(_Nx), _nq, _nq? NV_DATA_S(_Nq): nullptr ) );
 
       for( _isen=0; _isen<_nsen; _isen++ ){
@@ -1649,7 +1649,7 @@ ODESLVS_CVODES::_states_FSA
         for( unsigned iy=0; _nq && iy<NV_LENGTH_S(_Nyq[_isen]); iy++ )
           std::cout << "_Nyq" << _isen << "[" << iy << "] = " << NV_Ith_S(_Nyq[_isen],iy) << std::endl;
 #endif
-        if( options.RESRECORD )
+        if( options.OUTPUT.RESRECORD )
           results_fsens[_isen].push_back( Results( _t, _nx, NV_DATA_S(_Ny[_isen]), _nq, _nq? NV_DATA_S(_Nyq[_isen]): nullptr ) );
       }
 
@@ -1673,11 +1673,11 @@ ODESLVS_CVODES::_states_FSA
         if( k+1 == NSTEP ) TSTOP = _dT[_istg+1];
         _cv_flag = CVode( _cv_mem, TSTOP, _Nx, &_t, CV_NORMAL );
         if( _check_cv_flag( &_cv_flag, "CVode", 1 ) )
-         //|| (options.NMAX && stats_fsens.numSteps > options.NMAX) )
+         //|| (options.SOLVE.NMAX && stats_fsens.numSteps > options.SOLVE.NMAX) )
           throw Exceptions( Exceptions::INTERN );
 
         // intermediate record
-        if( options.RESRECORD ){
+        if( options.OUTPUT.RESRECORD ){
           if( _nq ){
             _cv_flag = CVodeGetQuad( _cv_mem, &_t, _Nq );
             if( _check_cv_flag(&_cv_flag, "CVodeGetQuad", 1) )
@@ -1711,7 +1711,7 @@ ODESLVS_CVODES::_states_FSA
       // Display / return stage results
       _xk.push_back( std::vector<double>( _Dx, _Dx+_nx ) );
       if( _nq ) _qk.push_back( std::vector<double>( _Dq, _Dq+_nq ) );
-      if( options.DISPLAY >= 1 ){
+      if( options.SOLVE.VERBOSE ){
         _print_interm( _t, _nx, _Dx, " x", os );
         _print_interm( _nq, _Dq, " q", os );
       }
@@ -1743,7 +1743,7 @@ ODESLVS_CVODES::_states_FSA
         // Display / return stage results
         _xpk[_istg+1].push_back( std::vector<double>( _Dy, _Dy+_nx ) );
         if( _nq ) _qpk[_istg+1].push_back( std::vector<double>( _Dyq, _Dyq+_nq ) );
-        if( options.DISPLAY >= 1 ){
+        if( options.SOLVE.VERBOSE ){
           std::ostringstream oxp; oxp << " xp[" << _isen << "]";
           _print_interm( _nx, _Dy, oxp.str(), os );
           std::ostringstream oqp; oqp << " qp[" << _isen << "]";
@@ -1766,7 +1766,7 @@ ODESLVS_CVODES::_states_FSA
       _fp.push_back( std::vector<double>( _Dfp.data()+ip*_nf, _Dfp.data()+(ip+1)*_nf ) );
 //    for( unsigned i=0; f && i<_nf; i++ ) f[i] = _Df[i];
 //    for( unsigned i=0; fp && i<_nf*_np; i++ ) fp[i] = _Dfp[i];
-    if( options.DISPLAY >= 1 ){
+    if( options.SOLVE.VERBOSE ){
       _print_interm( _nf, _Df.data(), " f", os );
       for( unsigned iq=0; iq<_nsen; iq++ ){
         std::ostringstream ofp; ofp << " fp[" << iq << "]";
@@ -1780,7 +1780,7 @@ ODESLVS_CVODES::_states_FSA
     _cv_flag = CVodeGetNumSteps( _cv_mem, &nstp );
     stats_solve.numSteps += nstp;
     stats_fsens.numSteps += nstp;
-    if( options.DISPLAY >= 1 ) _print_stats( stats_fsens, os );
+    if( options.SOLVE.VERBOSE ) _print_stats( stats_fsens, os );
     return STATUS::FAILURE;
   }
 
@@ -1793,7 +1793,7 @@ ODESLVS_CVODES::_states_FSA
 #endif
 
   _END_STA(); _END_SEN( stats_fsens );
-  if( options.DISPLAY >= 1 ) _print_stats( stats_fsens, os );
+  if( options.SOLVE.VERBOSE ) _print_stats( stats_fsens, os );
   return STATUS::NORMAL;
 }
 

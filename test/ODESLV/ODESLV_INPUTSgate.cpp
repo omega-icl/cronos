@@ -76,7 +76,7 @@ int main(){
     int const T_INT = FFDom::ALL - FFDom::LB;
     I.add_equation( OpP( x, t ) + a*x - u, {t}, {T_INT}, FFModel::EqnOptions( FFModel::EqnRole::INTERIOR, 0 ) );
     I.add_equation( x - 1., {t}, {FFDom::LB}, FFModel::EqnOptions( FFModel::EqnRole::INITIAL, 0 ) );
-    outputs( I, t, x, u ); I.options.DISPLAY = 0; I.options.ATOL = I.options.ATOLS = I.options.ATOLB = 1e-12; I.options.RTOL = I.options.RTOLS = I.options.RTOLB = 1e-12;
+    outputs( I, t, x, u ); I.options.SOLVE.VERBOSE = false; I.options.SOLVE.ATOL = I.options.SOLVE.ATOLS = I.options.SOLVE.ATOLB = 1e-12; I.options.SOLVE.RTOL = I.options.SOLVE.RTOLS = I.options.SOLVE.RTOLB = 1e-12;
     bool ok = I.setup(); std::vector<double> Q( I.np() ); auto const ia = I.parameter_index( a )[0]; auto const iu = I.parameter_index( u );
     Q[ia] = P[0]; for( size_t k = 0; k < iu.size(); ++k ) Q[iu[k]] = P[1+k];
     ok = ok && I.solve_fsens( Q ) == ODESLVS_CVODES::STATUS::NORMAL; auto const F = I.val_function(); auto const G0 = I.val_function_gradient();

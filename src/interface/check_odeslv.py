@@ -74,16 +74,16 @@ A.add_equation(x1 - (1.1 + 0.01 * p1), [t], [FFDom.LB], ii)
 A.add_output(OpI(x1, t))
 A.add_output(OpE(x0 * x1, t, 10.))
 o = A.options
-o.INTMETH = ODESLV.Options.MSBDF
-o.NLINSOL = ODESLV.Options.NEWTON
-o.LINSOL = ODESLV.Options.SPARSE
-o.FSACORR = ODESLV.Options.STAGGERED
-o.NMAX = 2000
-o.ATOL = o.ATOLB = o.ATOLS = 1e-9
-o.RTOL = o.RTOLB = o.RTOLS = 1e-9
-o.QERR = o.QERRS = True
-o.ASACHKPT = 2000
-o.DISPLAY = 0
+o.SOLVE.INTMETH = ODESLV.Options.MSBDF
+o.SOLVE.NLINSOL = ODESLV.Options.NEWTON
+o.SOLVE.LINSOL = ODESLV.Options.SPARSE
+o.SOLVE.FSACORR = ODESLV.Options.STAGGERED
+o.SOLVE.NMAX = 2000
+o.SOLVE.ATOL = o.SOLVE.ATOLB = o.SOLVE.ATOLS = 1e-9
+o.SOLVE.RTOL = o.SOLVE.RTOLB = o.SOLVE.RTOLS = 1e-9
+o.SOLVE.QERR = o.SOLVE.QERRS = True
+o.SOLVE.ASACHKPT = 2000
+o.SOLVE.VERBOSE = 0
 check(A.setup(), "setup()  (%s)" % (A.extract_error() or "ok"))
 check(A.np() == 2 and A.nf() == 2 and A.nx() == 2, "sizes: np = nf = nx = 2")
 
@@ -128,9 +128,9 @@ B.add_input(p)
 B.add_equation(OpP(x, t) + p * x, [t], [INT])
 B.add_equation(x - 1., [t], [FFDom.LB], ii)   # INITIAL: AUTO would resolve LB alone to BOUNDARY
 B.add_output(OpE(x, t, 1.))
-B.options.RTOL = B.options.ATOL = B.options.RTOLS = B.options.ATOLS = 1e-10
-B.options.RTOLB = B.options.ATOLB = 1e-10
-B.options.RESRECORD = 10
+B.options.SOLVE.RTOL = B.options.SOLVE.ATOL = B.options.SOLVE.RTOLS = B.options.SOLVE.ATOLS = 1e-10
+B.options.SOLVE.RTOLB = B.options.SOLVE.ATOLB = 1e-10
+B.options.OUTPUT.RESRECORD = 10
 check(B.setup(), "setup()")
 check(B.solve({p: [0.7]}) == ODESLV.NORMAL, "solve by name {p: [0.7]}")
 check(close(B.val_function(), [math.exp(-0.7)], 1e-8), "x(1) == exp(-0.7)")
@@ -179,7 +179,7 @@ C.add_equation(OpP(x, t) + x, [t], [INT])
 C.add_equation(x - 1., [t], [FFDom.LB], ii)
 C.add_transition(x + 1., x, t, .5)
 C.add_output(OpE(x, t, 1.))
-C.options.RTOL = C.options.ATOL = 1e-10
+C.options.SOLVE.RTOL = C.options.SOLVE.ATOL = 1e-10
 check(C.setup(), "setup() with a transition  (%s)" % (C.extract_error() or "ok"))
 check(C.solve([]) == ODESLV.NORMAL and close(C.val_function(), [math.exp(-1.) + math.exp(-0.5)], 1e-8),
       "x(1) == exp(-1) + exp(-0.5)")
@@ -203,7 +203,7 @@ D.add_equation(OpP(x, t) - u, [t], [INT])
 D.add_equation(x, [t], [FFDom.LB], ii)
 D.add_output(OpE(x, t, 1.))
 D.register_control(u)
-D.options.RTOL = D.options.ATOL = D.options.RTOLS = D.options.ATOLS = 1e-10
+D.options.SOLVE.RTOL = D.options.SOLVE.ATOL = D.options.SOLVE.RTOLS = D.options.SOLVE.ATOLS = 1e-10
 check(D.setup(), "setup() with a distributed control  (%s)" % (D.extract_error() or "ok"))
 check(D.n_control_dof() == 4, "4 control DOFs (one per element)")
 gen = lambda dof: 1. + dof.element[t]                       # u_e = 1, 2, 3, 4
@@ -220,9 +220,9 @@ check(close(D.get_parameter_values(u, P), [1., 2., 3., 4.], 0.), "set/get_parame
 
 # %%
 o = ODESLV.Options()
-print("  defaults: INTMETH", o.INTMETH, "| LINSOL", o.LINSOL, "| RTOL", o.RTOL, "| REDUCE.ORDER", o.REDUCE.ORDER)
+print("  defaults: INTMETH", o.SOLVE.INTMETH, "| LINSOL", o.SOLVE.LINSOL, "| RTOL", o.SOLVE.RTOL, "| REDUCE.ORDER", o.REDUCE.ORDER)
 check(isinstance(o, FFModel.Options), "ODESLV.Options extends FFModel.Options")
-print("  doc of RTOL:", ODESLV.Options.RTOL.__doc__)
+print("  doc of RTOL:", ODESLV.Options.t_Solve.RTOL.__doc__)   # the nested GROUP type, not the property
 
 # %% [markdown]
 # ## blk_fct and the output index
@@ -251,7 +251,7 @@ _S8.add_equation(OpP(_x8, _t8) + _k8 * _x8, [_t8], [FFDom.ALL - FFDom.LB], ODESL
 _S8.add_equation(_x8 - 2. * _k8, [_t8], [FFDom.LB], ODESLV.EqnOptions(ODESLV.EqnRole.INITIAL))   # x(t) = 2 k exp(-k t)
 _j0 = _S8.add_output(_x8, [_t8], masks=[FFDom.ALL])
 _j1 = _S8.add_output(OpE(_x8, _t8, 1.))
-_S8.options.DISPLAY = 0
+_S8.options.SOLVE.VERBOSE = 0
 check(_S8.setup(), "a model with an output distributed over t sets up (%s)" % (_S8.extract_error() or "ok"))
 check((_j0, _j1) == (0, 1) and _S8.blk_fct(0) == (0, 5) and _S8.blk_fct(1) == (5, 1),
       "blk_fct: the distributed output takes one value per stage time (5), the point output the next (%s, %s)" % (_S8.blk_fct(0), _S8.blk_fct(1)))

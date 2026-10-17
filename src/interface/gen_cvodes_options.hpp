@@ -68,63 +68,91 @@ bind_cvodes_options(PyOpt& c)
              "Use analytic sparse Jacobian and the KLU sparse direct solver. "
              "Requires a build with KLU")
       .export_values();
-  c.def_readwrite("INTMETH", &mc::BASE_CVODES::Options::INTMETH,
-                  "Numerical integration method [Default: MSBDF]");
-  c.def_readwrite("NLINSOL", &mc::BASE_CVODES::Options::NLINSOL,
-                  "Nonlinear solver method [Default: NEWTON]");
-  c.def_readwrite(
-      "LINSOL", &mc::BASE_CVODES::Options::LINSOL,
+  py::class_<mc::BASE_CVODES::Options::t_Solve> c_SOLVE(
+      c, "t_Solve",
+      "Everything the integration takes: method, linear and nonlinear solver, "
+      "step control, tolerances, and the sensitivity and adjoint settings. "
+      "Grouped as OCFESLV groups its SOLVE, which has no SENS/ADJOINT "
+      "substructures either.");
+  c_SOLVE.def(py::init<>());
+  c_SOLVE.def_readwrite(
+      "INTMETH", &mc::BASE_CVODES::Options::t_Solve::INTMETH,
+      "Enumeration type for FSA method Enumeration type for ASA method "
+      "Enumeration of numerical integration algorithms Enumeration of "
+      "nonlinear solver strategies Enumeration of linear solver strategies "
+      "(within Newton nonlinear solver) Numerical integration method [Default: "
+      "MSBDF]");
+  c_SOLVE.def_readwrite("NLINSOL", &mc::BASE_CVODES::Options::t_Solve::NLINSOL,
+                        "Nonlinear solver method [Default: NEWTON]");
+  c_SOLVE.def_readwrite(
+      "LINSOL", &mc::BASE_CVODES::Options::t_Solve::LINSOL,
       "Linear solver method and Jacobian approximation [Default: DIAG]");
-  c.def_readwrite("H0", &mc::BASE_CVODES::Options::H0,
-                  "Initial step-size [Default: 0e0 (auto)]");
-  c.def_readwrite("HMIN", &mc::BASE_CVODES::Options::HMIN,
-                  "Minimum step-size [Default: 0e0]");
-  c.def_readwrite("HMAX", &mc::BASE_CVODES::Options::HMAX,
-                  "Maximum step-size [Default: 0e0 (+inf)]");
-  c.def_readwrite(
-      "NMAX", &mc::BASE_CVODES::Options::NMAX,
+  c_SOLVE.def_readwrite("H0", &mc::BASE_CVODES::Options::t_Solve::H0,
+                        "Initial step-size [Default: 0e0 (auto)]");
+  c_SOLVE.def_readwrite("HMIN", &mc::BASE_CVODES::Options::t_Solve::HMIN,
+                        "Minimum step-size [Default: 0e0]");
+  c_SOLVE.def_readwrite("HMAX", &mc::BASE_CVODES::Options::t_Solve::HMAX,
+                        "Maximum step-size [Default: 0e0 (+inf)]");
+  c_SOLVE.def_readwrite(
+      "NMAX", &mc::BASE_CVODES::Options::t_Solve::NMAX,
       "Maximum number of steps in a time stage [Default: 0 (2000)]");
-  c.def_readwrite("RTOL", &mc::BASE_CVODES::Options::RTOL,
-                  "Relative (scalar) integration tolerance");
-  c.def_readwrite("ATOL", &mc::BASE_CVODES::Options::ATOL,
-                  "Absolute (scalar) integration tolerance");
-  c.def_readwrite(
-      "ETOL", &mc::BASE_CVODES::Options::ETOL,
+  c_SOLVE.def_readwrite("RTOL", &mc::BASE_CVODES::Options::t_Solve::RTOL,
+                        "Relative (scalar) integration tolerance");
+  c_SOLVE.def_readwrite("ATOL", &mc::BASE_CVODES::Options::t_Solve::ATOL,
+                        "Absolute (scalar) integration tolerance");
+  c_SOLVE.def_readwrite(
+      "ETOL", &mc::BASE_CVODES::Options::t_Solve::ETOL,
       "Absolute (scalar) integration tolerance for ellipsoid shape matrix");
-  c.def_readwrite(
-      "QERR", &mc::BASE_CVODES::Options::QERR,
+  c_SOLVE.def_readwrite(
+      "QERR", &mc::BASE_CVODES::Options::t_Solve::QERR,
       "Whether or not (state) quadrature error control is performed?");
-  c.def_readwrite("MAXFAIL", &mc::BASE_CVODES::Options::MAXFAIL,
-                  "Maximum number of error test failures per step");
-  c.def_readwrite("MAXCORR", &mc::BASE_CVODES::Options::MAXCORR,
-                  "Maximum number of nonlinear solver iterations per step");
-  c.def_readwrite(
-      "AUTOTOLS", &mc::BASE_CVODES::Options::AUTOTOLS,
+  c_SOLVE.def_readwrite("MAXFAIL", &mc::BASE_CVODES::Options::t_Solve::MAXFAIL,
+                        "Maximum number of error test failures per step");
+  c_SOLVE.def_readwrite(
+      "MAXCORR", &mc::BASE_CVODES::Options::t_Solve::MAXCORR,
+      "Maximum number of nonlinear solver iterations per step");
+  c_SOLVE.def_readwrite(
+      "AUTOTOLS", &mc::BASE_CVODES::Options::t_Solve::AUTOTOLS,
       "Whether integration tolerances for FS are to be set automatically?");
-  c.def_readwrite("RTOLS", &mc::BASE_CVODES::Options::RTOLS,
-                  "Relative (scalar) integration tolerance for FSA");
-  c.def_readwrite("ATOLS", &mc::BASE_CVODES::Options::ATOLS,
-                  "Absolute (scalar) integration tolerance for FSA");
-  c.def_readwrite("ETOLS", &mc::BASE_CVODES::Options::ETOLS,
-                  "Absolute (scalar) integration tolerance for ellipsoid shape "
-                  "matrix in FSA");
-  c.def_readwrite("FSACORR", &mc::BASE_CVODES::Options::FSACORR,
-                  "FSA correction strategy");
-  c.def_readwrite("FSAERR", &mc::BASE_CVODES::Options::FSAERR,
-                  "Whether or not FSA error control is performed?");
-  c.def_readwrite("QERRS", &mc::BASE_CVODES::Options::QERRS,
-                  "Whether or not FSA quadrature error control is performed?");
-  c.def_readwrite("RTOLB", &mc::BASE_CVODES::Options::RTOLB,
-                  "Relative (scalar) integration tolerance for ASA");
-  c.def_readwrite("ATOLB", &mc::BASE_CVODES::Options::ATOLB,
-                  "Absolute (scalar) integration tolerance for ASA");
-  c.def_readwrite("ETOLB", &mc::BASE_CVODES::Options::ETOLB,
-                  "Absolute (scalar) integration tolerance for ellipsoid shape "
-                  "matrix in ASA");
-  c.def_readwrite("QERRB", &mc::BASE_CVODES::Options::QERRB,
-                  "Whether or not ASA quadrature error control is performed?");
-  c.def_readwrite("ASAINTERP", &mc::BASE_CVODES::Options::ASAINTERP,
-                  "ASA interpolation strategy");
-  c.def_readwrite("ASACHKPT", &mc::BASE_CVODES::Options::ASACHKPT,
-                  "Number of steps between each check point for ASA");
+  c_SOLVE.def_readwrite("RTOLS", &mc::BASE_CVODES::Options::t_Solve::RTOLS,
+                        "Relative (scalar) integration tolerance for FSA");
+  c_SOLVE.def_readwrite("ATOLS", &mc::BASE_CVODES::Options::t_Solve::ATOLS,
+                        "Absolute (scalar) integration tolerance for FSA");
+  c_SOLVE.def_readwrite("ETOLS", &mc::BASE_CVODES::Options::t_Solve::ETOLS,
+                        "Absolute (scalar) integration tolerance for ellipsoid "
+                        "shape matrix in FSA");
+  c_SOLVE.def_readwrite("FSACORR", &mc::BASE_CVODES::Options::t_Solve::FSACORR,
+                        "FSA correction strategy");
+  c_SOLVE.def_readwrite("FSAERR", &mc::BASE_CVODES::Options::t_Solve::FSAERR,
+                        "Whether or not FSA error control is performed?");
+  c_SOLVE.def_readwrite(
+      "QERRS", &mc::BASE_CVODES::Options::t_Solve::QERRS,
+      "Whether or not FSA quadrature error control is performed?");
+  c_SOLVE.def_readwrite("RTOLB", &mc::BASE_CVODES::Options::t_Solve::RTOLB,
+                        "Relative (scalar) integration tolerance for ASA");
+  c_SOLVE.def_readwrite("ATOLB", &mc::BASE_CVODES::Options::t_Solve::ATOLB,
+                        "Absolute (scalar) integration tolerance for ASA");
+  c_SOLVE.def_readwrite("ETOLB", &mc::BASE_CVODES::Options::t_Solve::ETOLB,
+                        "Absolute (scalar) integration tolerance for ellipsoid "
+                        "shape matrix in ASA");
+  c_SOLVE.def_readwrite(
+      "QERRB", &mc::BASE_CVODES::Options::t_Solve::QERRB,
+      "Whether or not ASA quadrature error control is performed?");
+  c_SOLVE.def_readwrite("ASAINTERP",
+                        &mc::BASE_CVODES::Options::t_Solve::ASAINTERP,
+                        "ASA interpolation strategy");
+  c_SOLVE.def_readwrite("ASACHKPT",
+                        &mc::BASE_CVODES::Options::t_Solve::ASACHKPT,
+                        "Number of steps between each check point for ASA");
+  c_SOLVE.def_readwrite(
+      "VERBOSE", &mc::BASE_CVODES::Options::t_Solve::VERBOSE,
+      "per-step trace to stdout. Was ODESLV_CVODES::Options::DISPLAY, an int "
+      "whose every live use was 0 or 1; the negative branches it once had are "
+      "commented out. Named as OCFESLV names its SOLVE.VERBOSE, which this now "
+      "sits beside.");
+  c.def_readwrite("SOLVE", &mc::BASE_CVODES::Options::SOLVE,
+                  "Everything the integration takes: method, linear and "
+                  "nonlinear solver, step control, tolerances, and the "
+                  "sensitivity and adjoint settings. Grouped as OCFESLV groups "
+                  "its SOLVE, which has no SENS/ADJOINT substructures either.");
 }

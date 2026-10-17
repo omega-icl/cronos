@@ -60,18 +60,18 @@ int main()
   IVP.add_output( OpE( X0 * X1, t, tf ) );          // test1's terminal state function
   //IVP.add_output( OpE( X0, t, 3.7 ) );              // a function OFF the stage partition (the addition)
 
-  IVP.options.INTMETH   = mc::BASE_CVODES::Options::MSBDF;
-  IVP.options.NLINSOL   = mc::BASE_CVODES::Options::NEWTON;
-  IVP.options.LINSOL    = mc::BASE_CVODES::Options::SPARSE;//DENSE;//SPARSE;
-  IVP.options.FSACORR   = mc::BASE_CVODES::Options::STAGGERED;
-  IVP.options.NMAX      = 2000;
-  IVP.options.DISPLAY   = 1;
-  IVP.options.ATOL      = IVP.options.ATOLB = IVP.options.ATOLS = 1e-9;
-  IVP.options.RTOL      = IVP.options.RTOLB = IVP.options.RTOLS = 1e-9;
-  IVP.options.QERR      = IVP.options.QERRS = 1;
-  IVP.options.ASACHKPT  = 2000;
+  IVP.options.SOLVE.INTMETH   = mc::BASE_CVODES::Options::MSBDF;
+  IVP.options.SOLVE.NLINSOL   = mc::BASE_CVODES::Options::NEWTON;
+  IVP.options.SOLVE.LINSOL    = mc::BASE_CVODES::Options::SPARSE;//DENSE;//SPARSE;
+  IVP.options.SOLVE.FSACORR   = mc::BASE_CVODES::Options::STAGGERED;
+  IVP.options.SOLVE.NMAX      = 2000;
+  IVP.options.SOLVE.VERBOSE   = true;
+  IVP.options.SOLVE.ATOL      = IVP.options.SOLVE.ATOLB = IVP.options.SOLVE.ATOLS = 1e-9;
+  IVP.options.SOLVE.RTOL      = IVP.options.SOLVE.RTOLB = IVP.options.SOLVE.RTOLS = 1e-9;
+  IVP.options.SOLVE.QERR      = IVP.options.SOLVE.QERRS = 1;
+  IVP.options.SOLVE.ASACHKPT  = 2000;
 #if defined( SAVE_RESULTS )
-  IVP.options.RESRECORD = 100;
+  IVP.options.OUTPUT.RESRECORD = 100;
 #endif
 
   if( !IVP.setup() ){                                   // one call: the model, then the local copy

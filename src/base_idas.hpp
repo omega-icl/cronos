@@ -73,27 +73,35 @@ public:
   //! @brief IDAS options
   struct Options
   {
+    //! @brief Enumeration type for FSA method.  NOTE: IDAS has NO STAGGERED1 (CVODES does)
     enum FSA_STRATEGY{
       SIMULTANEOUS=IDA_SIMULTANEOUS, //!< Simultaneous state/sensitivity correction
       STAGGERED=IDA_STAGGERED        //!< Sensitivity corrections after state corrections
     };
+    //! @brief Enumeration type for ASA method
     enum ASA_STRATEGY{
       HERMITE=IDA_HERMITE,	//!< Cubic Hermite interpolation
       POLYNOMIAL=IDA_POLYNOMIAL	//!< Variable degree polynomial interpolation
     };
+    //! @brief Enumeration of numerical integration algorithms.  NOTE: IDAS is BDF-ONLY -- there is
+    //! no MSADAMS here on purpose, so asking for Adams does not compile rather than being ignored
     enum INTEGRATION_METHOD{
       MSBDF=0	//!< Variable-coefficient linear multistep backward differentiation formula (BDF) method
     };
+    //! @brief Enumeration of nonlinear solver strategies
     enum NONLINEAR_SOLVER{
       FIXEDPOINT=0,	//!< Fixed point nonlinear solver
       NEWTON		//!< Newton nonlinear solver
     };
+    //! @brief Enumeration of linear solver strategies (within Newton nonlinear solver).  NOTE: there
+    //! is NO DIAG here -- CVDiag has no IDAS counterpart, which is why the default is DENSE
     enum LINEAR_SOLVER{
       DENSE=0,	//!< Use analytic dense Jacobian and internal direct dense linear algebra functions
       DENSEDQ,	//!< Use approximate dense Jacobian by way of a difference quotient and internal direct dense linear algebra
       SPARSE	//!< Use analytic sparse Jacobian and the KLU sparse direct solver.  Requires a build with KLU
 		//!< (CRONOS__WITH_KLU); otherwise the integrator REFUSES it at setup
     };
+    //! @brief Enumeration of consistent-initialisation modes, passed to IDACalcIC
     enum CALCIC_MODE{
       NONE=0,	//!< Take the supplied (y0, yp0) as consistent; do not call IDACalcIC
       YA_YDP,	//!< IDA_YA_YDP_INIT: solve for the algebraic components of y and for y', given the

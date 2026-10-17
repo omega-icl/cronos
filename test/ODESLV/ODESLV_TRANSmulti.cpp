@@ -41,7 +41,7 @@ int main(){
   I.add_output( OpE( x1, t, 1. ) ); I.add_output( OpE( x2, t, 1. ) );
   I.add_output( OpE( x2, t, T2, FFDom::MINUS ) ); I.add_output( OpE( x2, t, T2, FFDom::PLUS ) );
   I.add_output( OpI( std::vector<FFVar>{ x1 + x2 }, { t } )[0] );
-  I.options.DISPLAY = 0; I.options.ATOL = I.options.ATOLS = I.options.ATOLB = 1e-12; I.options.RTOL = I.options.RTOLS = I.options.RTOLB = 1e-12;
+  I.options.SOLVE.VERBOSE = false; I.options.SOLVE.ATOL = I.options.SOLVE.ATOLS = I.options.SOLVE.ATOLB = 1e-12; I.options.SOLVE.RTOL = I.options.SOLVE.RTOLS = I.options.SOLVE.RTOLB = 1e-12;
   bool ok = I.setup(); check( ok, "setup (two transitions)", 0. ); if( !ok ) return 1;
   std::vector<double> Q( I.np() ); std::vector<size_t> ix; for( size_t q = 0; q < 6; ++q ){ ix.push_back( I.parameter_index( p[q] )[0] ); Q[ix[q]] = P0[q]; }
   bool const of = I.solve_fsens( Q ) == ODESLVS_CVODES::STATUS::NORMAL; auto const F = I.val_function(); auto const Gf = I.val_function_gradient();

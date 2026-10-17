@@ -954,7 +954,9 @@ set(CRONOS_SLOW_TEST_TIMEOUT 1800 CACHE STRING "CTest timeout (s) for a 'slow' d
 if(ENABLE_EXAMPLES)
   enable_testing()
   # the ODESLV drivers' directory has been named both ways
-  foreach(_dir ODESLV ODESLVS OCFESLV DAESLV)
+  # ODESLVS has no directory of its own -- its drivers live in test/ODESLV -- so listing it here only
+  # produced an empty glob.  DAESLV is registered like the rest.
+  foreach(_dir ODESLV OCFESLV DAESLV)
     if(NOT IS_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/test/${_dir}")
       continue()
     endif()

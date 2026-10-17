@@ -74,12 +74,12 @@ static double scaled_err( std::vector<std::vector<double>> const& a, std::vector
 }
 static void tol_opts( mc::ODESLVS_CVODES& I, double tol, bool sparse )
 {
-  I.options.INTMETH = mc::BASE_CVODES::Options::MSBDF;  I.options.NLINSOL = mc::BASE_CVODES::Options::NEWTON;
-  I.options.LINSOL  = sparse? mc::BASE_CVODES::Options::SPARSE: mc::BASE_CVODES::Options::DENSE;
-  I.options.DISPLAY = 0;
+  I.options.SOLVE.INTMETH = mc::BASE_CVODES::Options::MSBDF;  I.options.SOLVE.NLINSOL = mc::BASE_CVODES::Options::NEWTON;
+  I.options.SOLVE.LINSOL  = sparse? mc::BASE_CVODES::Options::SPARSE: mc::BASE_CVODES::Options::DENSE;
+  I.options.SOLVE.VERBOSE = false;
   // NMAX: at RTOL 1e-10 the stiff stretch around t = 3.5 needs more than test3's 10000 steps (mxstep otherwise).
-  I.options.NMAX = 1000000;
-  I.options.ATOL = I.options.ATOLB = I.options.ATOLS = tol;  I.options.RTOL = I.options.RTOLB = I.options.RTOLS = tol;
+  I.options.SOLVE.NMAX = 1000000;
+  I.options.SOLVE.ATOL = I.options.SOLVE.ATOLB = I.options.SOLVE.ATOLS = tol;  I.options.SOLVE.RTOL = I.options.SOLVE.RTOLB = I.options.SOLVE.RTOLS = tol;
 }
 
 int main()
@@ -180,10 +180,10 @@ int main()
     { // FD instrument: named solves of the declared model at RTOL = ATOL = 1e-13 (F ~ 1e-4, so the model's
       // ATOL 1e-10 would leave ~1e-10/(2h) of noise -- 1e-4 relative); h = 1e-4 K.  The op keeps its COPY.
       double const h = 1e-4 * cval[K];
-      auto const oA = I.options.ATOL, oR = I.options.RTOL;  I.options.ATOL = I.options.RTOL = 1e-13;
+      auto const oA = I.options.SOLVE.ATOL, oR = I.options.SOLVE.RTOL;  I.options.SOLVE.ATOL = I.options.SOLVE.RTOL = 1e-13;
       auto vIp = vIn, vIm = vIn;  vIp[np+K].vals[0] += h;  vIm[np+K].vals[0] -= h;
       I.solve( vIp );  auto const Fp = I.val_function();  I.solve( vIm );  auto const Fm = I.val_function();
-      I.options.ATOL = oA;  I.options.RTOL = oR;
+      I.options.SOLVE.ATOL = oA;  I.options.SOLVE.RTOL = oR;
       double w = 0.;
       for( size_t k = 0; k < nf; ++k ){ double const fd = ( Fp[k] - Fm[k] ) / ( 2.*h );
         w = std::max( w, std::fabs( dS[k*nX+np+K] - fd ) / std::max( std::fabs( fd ), 1e-300 ) ); }

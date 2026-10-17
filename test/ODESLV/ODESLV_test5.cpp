@@ -103,10 +103,10 @@ Out solve( std::vector<double> const& U, bool adjoint = false )
   for( size_t k = 1; k <= Nel; ++k )                     // c at every element end
     IVP.add_output( OpEval( C, t, double(k) ) );
 
-  IVP.options.LINSOL  = mc::BASE_CVODES::Options::SPARSE;
-  IVP.options.DISPLAY = 0;
-  IVP.options.ATOL = IVP.options.ATOLB = IVP.options.ATOLS = 1e-11;
-  IVP.options.RTOL = IVP.options.RTOLB = IVP.options.RTOLS = 1e-11;
+  IVP.options.SOLVE.LINSOL  = mc::BASE_CVODES::Options::SPARSE;
+  IVP.options.SOLVE.VERBOSE = false;
+  IVP.options.SOLVE.ATOL = IVP.options.SOLVE.ATOLB = IVP.options.SOLVE.ATOLS = 1e-11;
+  IVP.options.SOLVE.RTOL = IVP.options.SOLVE.RTOLB = IVP.options.SOLVE.RTOLS = 1e-11;
 
   IVP.register_control( Uv );
   if( !IVP.setup() ){ R.err = IVP.extract_error(); return R; }

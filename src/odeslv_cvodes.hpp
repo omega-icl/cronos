@@ -175,10 +175,8 @@ public:
     //! @brief Constructor
     Options()
     : FFModel::Options(),
-      BASE_CVODES::Options(),
-      DISPLAY(1), RESRECORD(0)
+      BASE_CVODES::Options()
       {}
-      //{ JACAPPROX = CV_DENSE; }
     //! @brief Assignment operator
     template <typename OPT>
     Options& operator=
@@ -186,14 +184,18 @@ public:
       {
         FFModel::Options::operator=( options );
         BASE_CVODES::Options::operator=( options );
-        DISPLAY   = options.DISPLAY;
-        RESRECORD = options.RESRECORD;
+        OUTPUT = options.OUTPUT;
         return *this;
       }
-    //! @brief Display level (default: 1)
-    int DISPLAY;
-    //! @brief Whether or not to record results (default: 0)
-    unsigned RESRECORD;
+
+    //! @brief What the solver records or emits.  DISPLAY is gone: it was an int whose every live use was
+    //! 0 or 1, and it is now SOLVE.VERBOSE, beside OCFESLV's option of the same name.  The model's own
+    //! verbosity stays DISPLAY_LEVEL, inherited from FFModel::Options.
+    struct t_Output
+    {
+      //! @brief Whether or not to record results (default: 0)
+      unsigned RESRECORD = 0;
+    } OUTPUT;
    };
 
   //! @brief The options of this solver
@@ -443,7 +445,7 @@ ODESLV_CVODES::_INI_CVODE
   if( _cv_mem ) CVodeFree( &_cv_mem );
 
   // Create CVode memory block for the ADAMS or BDF method
-  _cv_mem = CVodeCreate( options.INTMETH, sunctx );
+  _cv_mem = CVodeCreate( options.SOLVE.INTMETH, sunctx );
   if( _check_cv_flag( (void*)_cv_mem, "CVodeCreate", 0 ) ) return false;
 
 //  // Specify error output
@@ -465,7 +467,7 @@ ODESLV_CVODES::_INI_CVODE
   if( _sun_nls ){ SUNNonlinSolFree( _sun_nls );  _sun_nls = nullptr; } /* Free the nonlinear solver memory */
   if( _sun_ls ) { SUNLinSolFree( _sun_ls );      _sun_ls  = nullptr; } /* Free the linear solver memory */
   if( _sun_mat ){ SUNMatDestroy( _sun_mat );     _sun_mat = nullptr; } /* Free the matrix memory */
-  switch( options.NLINSOL ){
+  switch( options.SOLVE.NLINSOL ){
    // Fixed point nonlinear solver
    case Options::FIXEDPOINT:
     _sun_nls = SUNNonlinSol_FixedPoint( _Nx, 0, sunctx );
@@ -484,14 +486,14 @@ ODESLV_CVODES::_INI_CVODE
 #if !defined( CRONOS__WITH_KLU )
     // 2026-10-09: SPARSE is always defined; without KLU it is REFUSED here -- the switch's DIAG/default case would
     // otherwise run a different (diagonal) solver silently.
-    if( options.LINSOL == Options::SPARSE ){
+    if( options.SOLVE.LINSOL == Options::SPARSE ){
       std::cerr << "ODESLV_CVODES ** LINSOL = SPARSE requires KLU, which this build does not include"
                 << " (build_info()['backends']); choose DIAG, DENSE or DENSEDQ, or use a build with KLU" << std::endl;
       return false;
     }
 #endif
     // Specify the linear solver and Jacobian approximation
-    switch( options.LINSOL ){
+    switch( options.SOLVE.LINSOL ){
      case Options::DIAG: default:
        _cv_flag = CVDiag( _cv_mem );
        if( _check_cv_flag( &_cv_flag, "CVDiag", 1) ) return false;
@@ -510,7 +512,7 @@ ODESLV_CVODES::_INI_CVODE
        _cv_flag = CVodeSetLinearSolver( _cv_mem, _sun_ls, _sun_mat );
        if( _check_cv_flag( &_cv_flag, "CVodeSetLinearSolver", 1 ) ) return false;
        // Set the user-supplied Jacobian routine Jac
-       _cv_flag = CVodeSetJacFn( _cv_mem, options.LINSOL==Options::DENSE? MC_CVJAC__: nullptr );
+       _cv_flag = CVodeSetJacFn( _cv_mem, options.SOLVE.LINSOL==Options::DENSE? MC_CVJAC__: nullptr );
        if ( _check_cv_flag( &_cv_flag, "CVodeSetJacFn", 1 ) ) return false;
        break;
        
@@ -536,27 +538,27 @@ ODESLV_CVODES::_INI_CVODE
   }
 
   // Specify the relative and absolute tolerances for states
-  _cv_flag = CVodeSStolerances( _cv_mem, options.RTOL, options.ATOL );
+  _cv_flag = CVodeSStolerances( _cv_mem, options.SOLVE.RTOL, options.SOLVE.ATOL );
   if( _check_cv_flag( &_cv_flag, "CVodeSStolerances", 1 ) ) return false;
 
   // Set maximum number of error test failures
-  _cv_flag = CVodeSetMaxErrTestFails( _cv_mem, options.MAXFAIL );
+  _cv_flag = CVodeSetMaxErrTestFails( _cv_mem, options.SOLVE.MAXFAIL );
   if ( _check_cv_flag( &_cv_flag, "CVodeSetMaxErrTestFails", 1 ) ) return false;
 
   // Set maximum number of error test failures
-  _cv_flag = CVodeSetMaxConvFails( _cv_mem, options.MAXFAIL );
+  _cv_flag = CVodeSetMaxConvFails( _cv_mem, options.SOLVE.MAXFAIL );
   if ( _check_cv_flag( &_cv_flag, "CVodeSetMaxConvFails", 1 ) ) return false;
 
   // Specify minimum stepsize
-  _cv_flag = CVodeSetMinStep( _cv_mem, options.HMIN>0.? options.HMIN:0. );
+  _cv_flag = CVodeSetMinStep( _cv_mem, options.SOLVE.HMIN>0.? options.SOLVE.HMIN:0. );
   if( _check_cv_flag( &_cv_flag, "CVodeSetMinStep", 1 ) ) return false;
 
   // Specify maximum stepsize
-  _cv_flag = CVodeSetMaxStep( _cv_mem, options.HMAX>0.? options.HMAX: 0. );
+  _cv_flag = CVodeSetMaxStep( _cv_mem, options.SOLVE.HMAX>0.? options.SOLVE.HMAX: 0. );
   if( _check_cv_flag( &_cv_flag, "CVodeSetMaxStep", 1 ) ) return false;
 
   // Specify maximum number of steps between two stage times
-  _cv_flag = CVodeSetMaxNumSteps( _cv_mem, options.NMAX );
+  _cv_flag = CVodeSetMaxNumSteps( _cv_mem, options.SOLVE.NMAX );
   if( _check_cv_flag( &_cv_flag, "CVodeSetMaxNumSteps", 1 ) ) return false;
 
   // Initialize the integrator memory for the quadrature variables
@@ -565,11 +567,11 @@ ODESLV_CVODES::_INI_CVODE
   if( _check_cv_flag( &_cv_flag, "CVodeQuadInit", 1 ) ) return false;
 
   // Specify whether or not to perform error control on quadrature
-  _cv_flag = CVodeSetQuadErrCon( _cv_mem, options.QERR );
+  _cv_flag = CVodeSetQuadErrCon( _cv_mem, options.SOLVE.QERR );
   if( _check_cv_flag( &_cv_flag, "CVodeSetQuadErrCon", 1 ) ) return false;
 
   // Specify the relative and absolute tolerances for quadratures
-  _cv_flag = CVodeQuadSStolerances( _cv_mem, options.RTOL, options.ATOL );
+  _cv_flag = CVodeQuadSStolerances( _cv_mem, options.SOLVE.RTOL, options.SOLVE.ATOL );
   if( _check_cv_flag( &_cv_flag, "CVodeQuadSStolerances", 1 ) ) return false;
 
   return true;
@@ -586,7 +588,7 @@ ODESLV_CVODES::_CC_CVODE_STA
   _nstpPrev = 0;   // the integrator's own step counter restarts with it
 
 #if defined( CRONOS__WITH_KLU )
-  switch( options.LINSOL ){
+  switch( options.SOLVE.LINSOL ){
     case Options::SPARSE:
       // Function SUNLinSol_KLUReInit(SUNLinearSolver S, SUNMatrix A, sunindextype nnz, int reinit_type)
       // needed to reinitialize memory and flag for a new factorization (symbolic and numeric) to be conducted at
@@ -767,8 +769,8 @@ ODESLV_CVODES::CVJAC__
 {
   //std::cerr << "Entering: ODESLV_CVODES::CVJAC__\n";
   bool flag = false;
-  //std::cerr << "Option: " << options.LINSOL << "\n";
-  switch( options.LINSOL ){
+  //std::cerr << "Option: " << options.SOLVE.LINSOL << "\n";
+  switch( options.SOLVE.LINSOL ){
    case Options::DIAG:
    case Options::DENSEDQ:
    default:
@@ -834,7 +836,7 @@ ODESLV_CVODES::_states_stage
   //if( _check_cv_flag( &_cv_flag, "CVodeSetInterpolateStopTime", 1 ) )
   //  { _END_STA(); return STATUS::FATAL; }
  
-  unsigned const NSTEP = options.RESRECORD? options.RESRECORD: 1;
+  unsigned const NSTEP = options.OUTPUT.RESRECORD? options.OUTPUT.RESRECORD: 1;
   double const TSTEP = ( _dT[istg+1] - t ) / NSTEP;
   double TSTOP = t + TSTEP;
   for( unsigned k=0; k<NSTEP; k++, TSTOP+=TSTEP ){
@@ -853,7 +855,7 @@ ODESLV_CVODES::_states_stage
       //  std::cout << "Reached t=" << t << " of TSTOP=" << TSTOP << std::endl;
       //}
     if( _check_cv_flag( &_cv_flag, store?"CVodeF":"CVode", 1 ) )
-     //|| (options.NMAX && stats_solve.numSteps > options.NMAX) )
+     //|| (options.SOLVE.NMAX && stats_solve.numSteps > options.SOLVE.NMAX) )
       throw Exceptions( Exceptions::INTERN );
 
     // intermediate record
@@ -870,7 +872,7 @@ ODESLV_CVODES::_states_stage
 
       // Display / return stage results
       //_GET_D_STA( NV_DATA_S(Nx), _nq && Nq? NV_DATA_S(Nq): nullptr );
-      //if( options.DISPLAY >= 1 ){
+      //if( options.SOLVE.VERBOSE ){
       //  _print_interm( TSTOP, _nx, _Dx, " x", os );
       //  _print_interm( _nq, _Dq, " q", os );
       //}
@@ -909,11 +911,11 @@ ODESLV_CVODES::_states
     // Display / record / return initial results
     _xk.push_back( std::vector<double>( _Dx, _Dx+_nx ) );
     if( _nq ) _qk.push_back( std::vector<double>( _Dq, _Dq+_nq ) );
-    if( options.DISPLAY >= 1 ){
+    if( options.SOLVE.VERBOSE ){
       _print_interm( _t, _nx, _Dx, " x", os );
       _print_interm( _nq, _Dq, " q", os );
     }
-//    if( options.RESRECORD )
+//    if( options.OUTPUT.RESRECORD )
 //      results_solve.push_back( Results( _t, _nx, NV_DATA_S(_Nx), _nq, _nq? NV_DATA_S(_Nq): nullptr ) );
 
     // Add initial function terms (if any)
@@ -929,7 +931,7 @@ ODESLV_CVODES::_states
 
       // Integrate states over stage
       bool const store_stg = ( _storeLastStageOnly && _istg+1 < _ns )? false: store;
-      _states_stage( _istg, _t, _Nx, _Nq, false, store_stg, options.RESRECORD, os );
+      _states_stage( _istg, _t, _Nx, _Nq, false, store_stg, options.OUTPUT.RESRECORD, os );
 
 //      // Store full state at stage time
 //      if( store ){
@@ -949,7 +951,7 @@ ODESLV_CVODES::_states
       // Display / return stage results
       _xk.push_back( std::vector<double>( _Dx, _Dx+_nx ) );
       if( _nq ) _qk.push_back( std::vector<double>( _Dq, _Dq+_nq ) );
-      if( options.DISPLAY >= 1 ){
+      if( options.SOLVE.VERBOSE ){
         _print_interm( _t, _nx, _Dx, " x", os );
         _print_interm( _nq, _Dq, " q", os );
       }
@@ -965,7 +967,7 @@ ODESLV_CVODES::_states
 
     // Display / return function values
     _f = _Df;
-    if( options.DISPLAY >= 1 ){
+    if( options.SOLVE.VERBOSE ){
       _print_interm( _nf, _Df.data(), " f", os );
       // Print final statistics to the screen
       // os << "\nFinal Statistics:\n";
@@ -977,7 +979,7 @@ ODESLV_CVODES::_states
     long int nstp;
     _cv_flag = CVodeGetNumSteps( _cv_mem, &nstp );
     stats_solve.numSteps += nstp - _nstpPrev; _nstpPrev = nstp;   // delta, not cumulative
-    if( options.DISPLAY >= 1 ) _print_stats( stats_solve, os );
+    if( options.SOLVE.VERBOSE ) _print_stats( stats_solve, os );
     //std::cout << "failed status: " << STATUS::FAILURE << std::endl;
     return STATUS::FAILURE;
   }
@@ -990,7 +992,7 @@ ODESLV_CVODES::_states
 #endif
 
   _END_STA( store );
-  if( options.DISPLAY >= 1 ) _print_stats( stats_solve, os );
+  if( options.SOLVE.VERBOSE ) _print_stats( stats_solve, os );
   //std::cout << "normal status: " << STATUS::NORMAL << std::endl;
   return STATUS::NORMAL;
 }

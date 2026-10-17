@@ -30,7 +30,7 @@ static R run( int kind ){
     case 6: I.add_transition( std::vector<FFVar>{ x1, x1 + d, x2 + x3 }, std::vector<FFVar>{ x1, x1*x1, x2 + x3 }, t, 0.5 );  break;
   }
   I.add_output( OpE( x1 + x2 + x3, t, 1. ) );
-  I.options.DISPLAY = 0;
+  I.options.SOLVE.VERBOSE = false;
   std::ostringstream os; auto* old = std::cerr.rdbuf( os.rdbuf() ); bool const ok = I.setup(); std::cerr.rdbuf( old );
   return { ok, os.str() + I.extract_error() }; }
 int main(){

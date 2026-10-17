@@ -34,7 +34,7 @@ static bool build( Model& m ){
   size_t const i5 = m.I.add_output( m.x*m.x, {m.t}, {(int)( FFDom::ALL - FFDom::LB - FFDom::UB )} );
   size_t const i6 = m.I.add_output( OpE( m.x, m.t, 1. ) );
   check( "add_output returns the output's index: 0..6", i0 == 0 && i1 == 1 && i2 == 2 && i3 == 3 && i4 == 4 && i5 == 5 && i6 == 6 );
-  m.I.options.DISPLAY = 0; m.I.options.ATOL = m.I.options.ATOLS = m.I.options.ATOLB = 1e-12; m.I.options.RTOL = m.I.options.RTOLS = m.I.options.RTOLB = 1e-12;
+  m.I.options.SOLVE.VERBOSE = false; m.I.options.SOLVE.ATOL = m.I.options.SOLVE.ATOLS = m.I.options.SOLVE.ATOLB = 1e-12; m.I.options.SOLVE.RTOL = m.I.options.SOLVE.RTOLS = m.I.options.SOLVE.RTOLB = 1e-12;
   std::ostringstream os; auto* old = std::cerr.rdbuf( os.rdbuf() ); bool const ok = m.I.setup(); std::cerr.rdbuf( old );
   return ok; }
 int main(){

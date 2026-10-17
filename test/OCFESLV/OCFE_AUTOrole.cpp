@@ -30,7 +30,7 @@ static double ode( bool late, Role ic, bool diag, std::string& err, Role& resolv
   if( late ) S.set_evolution_domain( t );
   resolved = S.var_equation()[1].opt->role;              // the declared record, before setup
   S.add_output( OpE( x, t, 1. ) );
-  S.options.RTOL = S.options.ATOL = 1e-10;  S.options.DISPLAY = 0;  S.options.DISPLAY_LEVEL = 0;
+  S.options.SOLVE.RTOL = S.options.SOLVE.ATOL = 1e-10;  S.options.SOLVE.VERBOSE = false;  S.options.DISPLAY_LEVEL = 0;
   std::ostringstream os; auto* old = std::cerr.rdbuf( os.rdbuf() );
   bool ok = S.setup();
   std::cerr.rdbuf( old );

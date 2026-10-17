@@ -18,8 +18,20 @@ template <class PyOpt>
 void
 bind_odeslv_options(PyOpt& c)
 {
-  c.def_readwrite("DISPLAY", &mc::ODESLV_CVODES::Options::DISPLAY,
-                  "Display level (default: 1)");
-  c.def_readwrite("RESRECORD", &mc::ODESLV_CVODES::Options::RESRECORD,
-                  "Whether or not to record results (default: 0)");
+  py::class_<mc::ODESLV_CVODES::Options::t_Output> c_OUTPUT(
+      c, "t_Output",
+      "What the solver records or emits. DISPLAY is gone: it was an int whose "
+      "every live use was 0 or 1, and it is now SOLVE.VERBOSE, beside "
+      "OCFESLV's option of the same name. The model's own verbosity stays "
+      "DISPLAY_LEVEL, inherited from FFModel::Options.");
+  c_OUTPUT.def(py::init<>());
+  c_OUTPUT.def_readwrite("RESRECORD",
+                         &mc::ODESLV_CVODES::Options::t_Output::RESRECORD,
+                         "Whether or not to record results (default: 0)");
+  c.def_readwrite(
+      "OUTPUT", &mc::ODESLV_CVODES::Options::OUTPUT,
+      "What the solver records or emits. DISPLAY is gone: it was an int whose "
+      "every live use was 0 or 1, and it is now SOLVE.VERBOSE, beside "
+      "OCFESLV's option of the same name. The model's own verbosity stays "
+      "DISPLAY_LEVEL, inherited from FFModel::Options.");
 }

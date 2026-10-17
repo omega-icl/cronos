@@ -71,7 +71,7 @@ B.add_equation(OpP(x, t) + p * x, [t], [INT])
 B.add_equation(x - 1., [t], [FFDom.LB], ii)
 B.add_output(OpE(x, t, 1.))
 for k in ("RTOL", "ATOL", "RTOLS", "ATOLS", "RTOLB", "ATOLB"):
-    setattr(B.options, k, 1e-10)
+    setattr(B.options.SOLVE, k, 1e-10)
 check(B.setup(), "solver setup()")
 P = G.add_var("P")
 OpODE = FFODESLV()
@@ -107,11 +107,11 @@ A.add_equation(x1 - (1.1 + 0.01 * p1), [t], [FFDom.LB], ii)
 A.add_output(OpI(x1, t))
 A.add_output(OpE(x0 * x1, t, 10.))
 o = A.options
-o.INTMETH, o.NLINSOL, o.LINSOL = ODESLV.Options.MSBDF, ODESLV.Options.NEWTON, ODESLV.Options.SPARSE
-o.NMAX = 2000
-o.ATOL = o.ATOLB = o.ATOLS = o.RTOL = o.RTOLB = o.RTOLS = 1e-9
-o.QERR = o.QERRS = True
-o.ASACHKPT = 2000
+o.SOLVE.INTMETH, o.SOLVE.NLINSOL, o.SOLVE.LINSOL = ODESLV.Options.MSBDF, ODESLV.Options.NEWTON, ODESLV.Options.SPARSE
+o.SOLVE.NMAX = 2000
+o.SOLVE.ATOL = o.SOLVE.ATOLB = o.SOLVE.ATOLS = o.SOLVE.RTOL = o.SOLVE.RTOLB = o.SOLVE.RTOLS = 1e-9
+o.SOLVE.QERR = o.SOLVE.QERRS = True
+o.SOLVE.ASACHKPT = 2000
 check(A.setup(), "solver setup()")
 P0, P1 = G2.add_var("P0"), G2.add_var("P1")
 Y = OpODE({p0: [P0], p1: [P1]}, A)
@@ -147,11 +147,11 @@ A.add_equation(x1 - (1.1 + 0.01 * p1), [t], [FFDom.LB], ii)
 A.add_output(OpI(x1, t))
 A.add_output(OpE(x0 * x1, t, 10.))
 o = A.options
-o.INTMETH, o.NLINSOL, o.LINSOL = ODESLV.Options.MSBDF, ODESLV.Options.NEWTON, ODESLV.Options.SPARSE
-o.NMAX = 2000
-o.ATOL = o.ATOLB = o.ATOLS = o.RTOL = o.RTOLB = o.RTOLS = 1e-9
-o.QERR = o.QERRS = True
-o.ASACHKPT = 2000
+o.SOLVE.INTMETH, o.SOLVE.NLINSOL, o.SOLVE.LINSOL = ODESLV.Options.MSBDF, ODESLV.Options.NEWTON, ODESLV.Options.SPARSE
+o.SOLVE.NMAX = 2000
+o.SOLVE.ATOL = o.SOLVE.ATOLB = o.SOLVE.ATOLS = o.SOLVE.RTOL = o.SOLVE.RTOLB = o.SOLVE.RTOLS = 1e-9
+o.SOLVE.QERR = o.SOLVE.QERRS = True
+o.SOLVE.ASACHKPT = 2000
 A.setup()
 G2 = G2b
 P0, P1 = G2.add_var("P0"), G2.add_var("P1")
@@ -193,7 +193,7 @@ D.add_equation(OpP(x, t) - u, [t], [INT])
 D.add_equation(x, [t], [FFDom.LB], ii)
 D.add_output(OpE(x, t, 1.))
 for k in ("RTOL", "ATOL", "RTOLS", "ATOLS"):
-    setattr(D.options, k, 1e-10)
+    setattr(D.options.SOLVE, k, 1e-10)
 check(D.setup(), "solver setup()")
 U = [G3.add_var("U%d" % e) for e in range(4)]
 yd = OpODE({u: lambda dof: U[dof.element[t]]}, D)   # generator: element e -> U[e]
@@ -218,7 +218,7 @@ S4.add_input(p)
 S4.add_equation(OpP(x, t) + p * x, [t], [INT])
 S4.add_equation(x - 1., [t], [FFDom.LB], ii)
 S4.add_output(OpE(x, t, 1.))
-S4.options.RTOL = S4.options.ATOL = 1e-10
+S4.options.SOLVE.RTOL = S4.options.SOLVE.ATOL = 1e-10
 S4.setup()
 P4 = G4.add_var("P")
 ys = OpODE({p: [P4]}, S4, FFODESLV.SHALLOW)

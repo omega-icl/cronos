@@ -42,8 +42,8 @@ int main(){
     I.add_equation( OpP( x, t ) + a*x - u, {t}, {T_INT},         mc::FFModel::EqnOptions( mc::FFModel::EqnRole::INTERIOR, 0 ) );
     I.add_equation( x - 1.,               {t}, {mc::FFDom::LB}, mc::FFModel::EqnOptions( mc::FFModel::EqnRole::INITIAL,  0 ) );
     for( double to : TOUT ) I.add_output( OpE( x, t, to ) );
-    I.options.LINSOL = mc::BASE_CVODES::Options::DENSE; I.options.DISPLAY = 0; I.options.NMAX = 100000;
-    I.options.ATOL = I.options.ATOLS = I.options.ATOLB = 1e-12; I.options.RTOL = I.options.RTOLS = I.options.RTOLB = 1e-12;
+    I.options.SOLVE.LINSOL = mc::BASE_CVODES::Options::DENSE; I.options.SOLVE.VERBOSE = false; I.options.SOLVE.NMAX = 100000;
+    I.options.SOLVE.ATOL = I.options.SOLVE.ATOLS = I.options.SOLVE.ATOLB = 1e-12; I.options.SOLVE.RTOL = I.options.SOLVE.RTOLS = I.options.SOLVE.RTOLB = 1e-12;
     if( !I.setup() ){ std::printf( "  setup failed: %s\n", I.extract_error().c_str() ); ++nfail; continue; }
     size_t const ne = M.eb.size()-1;
     std::vector<double> lv( ne*nn ); for( size_t k = 0; k < lv.size(); ++k ) lv[k] = 0.8*std::sin( 1.3*k + 0.4 ) + 0.2;

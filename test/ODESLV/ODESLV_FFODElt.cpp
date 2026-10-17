@@ -30,8 +30,8 @@ struct Model {
     S->add_equation( OpP( x, t ) + p * q * x, {t}, {T_INT}, mc::FFModel::EqnOptions( mc::FFModel::EqnRole::INTERIOR, 0 ) );
     S->add_equation( x - 1.,                  {t}, {mc::FFDom::LB}, mc::FFModel::EqnOptions( mc::FFModel::EqnRole::INITIAL, 0 ) );
     S->add_output( OpE( x, t, .5 ) );  S->add_output( OpE( x, t, 1. ) );
-    S->options.RTOL = S->options.ATOL = S->options.RTOLS = S->options.ATOLS = S->options.RTOLB = S->options.ATOLB = 1e-10;
-    S->options.DISPLAY = 0;
+    S->options.SOLVE.RTOL = S->options.SOLVE.ATOL = S->options.SOLVE.RTOLS = S->options.SOLVE.ATOLS = S->options.SOLVE.RTOLB = S->options.SOLVE.ATOLB = 1e-10;
+    S->options.SOLVE.VERBOSE = false;
     S->setup();
   }
   ~Model(){ delete S; }

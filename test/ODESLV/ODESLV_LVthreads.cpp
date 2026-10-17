@@ -56,10 +56,10 @@ static bool build( LV& M, bool staged )
   I.add_output( OpE( M.x0 * M.x1, M.t, tf ) );
   I.add_output( OpI( std::vector<mc::FFVar>{ M.x1 }, { M.t } )[0] );   // int x1 dt over the whole domain
   if( staged ) I.add_output( OpE( sqr( M.x0 ), M.t, T1 ) + OpE( sqr( M.x0 ), M.t, tf ) );   // x0^2 at the stage times
-  I.options.INTMETH = mc::BASE_CVODES::Options::MSBDF;  I.options.NLINSOL = mc::BASE_CVODES::Options::NEWTON;
-  I.options.LINSOL  = mc::BASE_CVODES::Options::DENSE;  I.options.NMAX = 2000;  I.options.DISPLAY = 0;
-  I.options.ATOL = I.options.ATOLS = I.options.ATOLB = 1e-10;
-  I.options.RTOL = I.options.RTOLS = I.options.RTOLB = 1e-10;
+  I.options.SOLVE.INTMETH = mc::BASE_CVODES::Options::MSBDF;  I.options.SOLVE.NLINSOL = mc::BASE_CVODES::Options::NEWTON;
+  I.options.SOLVE.LINSOL  = mc::BASE_CVODES::Options::DENSE;  I.options.SOLVE.NMAX = 2000;  I.options.SOLVE.VERBOSE = false;
+  I.options.SOLVE.ATOL = I.options.SOLVE.ATOLS = I.options.SOLVE.ATOLB = 1e-10;
+  I.options.SOLVE.RTOL = I.options.SOLVE.RTOLS = I.options.SOLVE.RTOLB = 1e-10;
   return I.setup();
 }
 

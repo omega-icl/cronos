@@ -25,7 +25,7 @@ INC_SUPERLU = -I/usr/include/superlu
 FLAG_SUPERLU =
 
 PATH_SUNDIALS = $(SUNDIALS_HOME)
-LIB_SUNDIALS = -L$(PATH_SUNDIALS)/lib -lsundials_sunlinsolklu -lsundials_cvodes -lsundials_idas -lsundials_nvecserial -lsundials_core -llapack -lblas
+LIB_SUNDIALS = -L$(PATH_SUNDIALS)/lib -lsundials_sunlinsolklu -lsundials_cvodes -lsundials_idas -lsundials_kinsol -lsundials_nvecserial -lsundials_core -llapack -lblas
 INC_SUNDIALS = -I$(PATH_SUNDIALS)/include
 FLAG_SUNDIALS = 
 

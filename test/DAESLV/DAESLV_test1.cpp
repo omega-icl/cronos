@@ -66,6 +66,16 @@ int main()
         M.solve( {} );
         check( "solve() is idempotent on y", M.val_state().back()[0], first[0], 0. );
         check( "solve() is idempotent on z", M.val_state().back()[1], first[1], 0. );
+        // the same model through the KINSOL corrector: it resolves the INITIAL rows TOGETHER WITH the
+        // interior rows at t0, so it must land on the same consistent point IDACalcIC does.
+        M.options.INITIAL.SOLVER = BASE_IDAS::Options::t_Initial::KINSOL;
+        if( M.solve( {} ) != DAESLV_IDAS::NORMAL ){
+          std::cout << "    KINSOL path failed: " << M.extract_error() << "\n"; ++n_fail; }
+        else{
+          check( "KINSOL corrector agrees with IDACalcIC on y", M.val_state().back()[0], first[0], 1e-9 );
+          check( "KINSOL corrector agrees with IDACalcIC on z", M.val_state().back()[1], first[1], 1e-9 );
+        }
+        M.options.INITIAL.SOLVER = BASE_IDAS::Options::t_Initial::IDACALCIC;
         std::cout << "    steps=" << M.stats.numSteps << " res=" << M.stats.numRES
                   << " jac=" << M.stats.numJAC << "\n";
       } } }

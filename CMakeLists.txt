@@ -382,6 +382,7 @@ file(GLOB _sundials_opt LIST_DIRECTORIES true "/opt/sundials*" "/usr/local/sundi
 set(_cronos_sundials_components
     cvodes
     idas
+    kinsol
     nvecserial
     sunmatrixdense
     sunlinsoldense
@@ -893,6 +894,7 @@ message(STATUS "--------------------------------------------------------")
 set(CRONOS_HEADERS
     base_cvodes.hpp
     base_dynamic.hpp
+    base_kinsol.hpp
     base_idas.hpp
     base_sundials.hpp
     daeslv_base.hpp

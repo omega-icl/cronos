@@ -84,13 +84,15 @@ protected:
     override
     { return true; }
 
-  //! @brief A DAE consumer must be able to SOLVE the initial rows -- a materialised hidden constraint is
-  //! nonlinear in the state it pins -- so it keeps them undivided as well as reduced.
-  bool _wants_initial_rows
+  //! @brief DAESLV_IDAS resolves them with BASE_KINSOL behind INITIAL.SOLVER, so implicit rows are not a
+  //! reason to refuse the model.  Whether a given configuration is SOLVABLE is a rank question, answered at
+  //! solve time with a diagnosis, not guessable from the rows at setup.
+  bool _solves_initial_rows
     ()
     const
     override
     { return true; }
+
 
   //! @brief An algebraic state has no row giving its derivative, by definition, so the explicit-row
   //! requirement that ODESLV imposes would refuse every DAE.

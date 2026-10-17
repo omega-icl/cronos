@@ -118,10 +118,19 @@ int main()
     check_bool( "and resolves it", R.resolved );
     // ... but the materialised hidden constraints are nonlinear in the states they pin, so the INITIAL
     // rows cannot be factorised affinely.  PINNED: flip this when the shared IC solve lands.
-    bool const refused = !M.setup();
-    std::cout << "    DAESLV setup refused=" << refused << "\n      " << M.extract_error() << "\n";
-    check_bool( "refused, naming the implicit INITIAL rows",
-                refused && M.extract_error().find( "implicit in each other" ) != std::string::npos );
+    // Since the IC solve landed, implicit INITIAL rows are no longer a reason to refuse: the model is
+    // ACCEPTED and the question moves to solve time.  This configuration is rank-deficient BY
+    // CONSTRUCTION -- released horizontally, the position constraint's gradient collapses onto the row
+    // pinning x -- so what is asserted is the DIAGNOSIS, not a trajectory (plan §3.12).
+    M.options.INITIAL.SOLVER = BASE_IDAS::Options::t_Initial::KINSOL;
+    check_bool( "the index-3 model is now ACCEPTED, not refused", M.setup() );
+    if( M.setup() ){
+      std::vector<double> yv, ypv;
+      auto const R = M.solve_ic( yv, ypv );
+      std::cout << "    solve_ic -> " << R.message << "\n";
+      check_bool( "the horizontal release is diagnosed as rank-deficient",
+                  R.status == BASE_KINSOL::RANK_DEFICIENT );
+    }
     // The UNDIVIDED rows are what an IC solve will work from.  They must vanish at the known consistent
     // initial point (1,0,0,0,0) -- the divided form cannot, since ic[y] = (1+y^2-x^2)/(2y) is singular there.
     auto const& rows = M.initial_rows();

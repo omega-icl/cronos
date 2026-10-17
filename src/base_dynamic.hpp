@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "base_kinsol.hpp"
 #include "ffmodel.hpp"
 
 namespace mc
@@ -67,6 +68,26 @@ class BASE_DYNAMIC
   //! an initial-condition SOLVE needs.  Filled only when _wants_initial_rows().
   std::vector<FFVar>                   _mICRES;
 
+  //! The model's derivative handle for each state, d _mX[i] / dt, in extraction order.  An INITIAL row may
+  //! depend on dx/dt(0) in ANY way -- h( x(0), y(0), dx/dt(0) ) = 0 is the general form -- so a consumer
+  //! SUBSTITUTES these for its own dx/dt variables (FFGraph::substitute handles auxiliary nodes, which a
+  //! derivative is) rather than splitting the row, which would assume it is AFFINE in each derivative.
+  std::vector<FFVar>                   _mDOT;
+
+  //! The CONSISTENT-INITIALISATION system, built once at extraction and owned here because it is the same
+  //! for every consumer: the INTERIOR rows at t0 together with the INITIAL rows, with every FFPartial(.,t)
+  //! SUBSTITUTED for a plain variable, in its own graph.  Nothing in it is ODE- or DAE-specific -- it never
+  //! asks what FORM the rows are in, only that derivative nodes become unknowns -- so neither the mass-row
+  //! decomposition nor a solver's local graph is involved.  The derivative unknowns are exactly those that
+  //! survive substitution: an algebraic state contributes none because its derivative appears nowhere.
+  FFGraph*                             _icDag = nullptr;
+  std::vector<FFVar>                   _icRow;     //!< the rows, in _icDag
+  std::vector<FFVar>                   _icUnk;     //!< x(0), y(0), then the dx(0) that actually appear
+  std::vector<size_t>                  _icDotOf;   //!< state index of each dx(0) unknown
+  std::vector<FFVar>                   _icEval;    //!< [ rows ; dense Jacobian, row-major ]
+  std::vector<double>                  _dIcEval, _dIcVar, _icWRK;
+  std::vector<FFVar>                   _icAll;     //!< t, states, parameters, then the derivative unknowns
+
   //! Each evolution row with EVERY time derivative set to zero, per stage: _mRES[s][k].
   std::vector< std::vector<FFVar> >    _mRES;
   std::vector<std::vector<FFVar>>      _mIC;    //!< initial values (one entry: no state discontinuities)
@@ -94,12 +115,13 @@ class BASE_DYNAMIC
     ( FFVar const& L, FFVar const& R, size_t i, std::vector<FFVar>& lhs, std::vector<FFVar>& de )
     = 0;
 
-  //! @brief Whether to collect the general mass-matrix form above.  ODESLV does not read it, so the default
-  //! is false and its extraction is unchanged; a DAE consumer overrides to true.
+  //! @brief Whether to keep the evolution rows in their GENERAL mass-matrix form, M.dx + R, as well as
+  //! divided.  Now TRUE by default: the undivided rows are what the shared consistent-initialisation
+  //! system is built from, so every consumer holds them, and the divided form is being phased out.
   virtual bool _wants_mass_rows
     ()
     const
-    { return false; }
+    { return true; }
 
   //! @brief Whether this consumer is stopped by the model's dynamic form.  The default refuses whatever
   //! dynamic_form() flags, which is what an explicit integrator wants.  A DAE consumer on IDAS accepts the
@@ -110,12 +132,22 @@ class BASE_DYNAMIC
     const
     { return !dynamic_form().blocker.empty(); }
 
-  //! @brief Whether to keep the INITIAL rows as residuals as well as values.  Default false, so a consumer
-  //! that only evaluates _mIC pays nothing; a consumer that SOLVES the rows overrides it.
-  virtual bool _wants_initial_rows
+  //! @brief Whether the consumer can SOLVE the INITIAL rows rather than evaluate them once.  False refuses
+  //! rows implicit in each other at setup, which is right for a consumer that only evaluates _mIC; a
+  //! consumer with an initial-condition solve overrides it and takes them.
+  virtual bool _solves_initial_rows
     ()
     const
     { return false; }
+
+  //! @brief Whether to keep the INITIAL rows as residuals as well as values.  Now TRUE by default: the
+  //! divided form _mIC is being phased out in favour of solving the rows jointly with the dynamics
+  //! residual at t0, in BOTH solvers, so the rows themselves are what every consumer should hold.  The
+  //! hook stays virtual for a consumer that genuinely wants neither.
+  virtual bool _wants_initial_rows
+    ()
+    const
+    { return true; }
 
   //! @brief Whether every state must be given its derivative EXPLICITLY by some row.  True for an explicit
   //! integrator; a DAE consumer overrides to false, since an algebraic state has no such row by definition.
@@ -293,6 +325,35 @@ class BASE_DYNAMIC
     const
     { return _nx; }
 
+  //! @brief Rows of the consistent-initialisation system (INTERIOR at t0 + INITIAL), in _icDag.
+  std::vector<FFVar> const& ic_rows
+    ()
+    const
+    { return _icRow; }
+
+  //! @brief Its unknowns: the states, then the state derivatives that appear in some row.
+  std::vector<FFVar> const& ic_unknowns
+    ()
+    const
+    { return _icUnk; }
+
+  //! @brief Whether every INITIAL row pins one state EXPLICITLY (x_i - c, no other state, no derivative).
+  //! Then the divided form is exact and a Newton solve buys nothing -- the common case, worth bypassing.
+  bool explicit_initial_conditions
+    ()
+    const;
+
+  //! @brief Solve the consistent-initialisation system, leaving the result in @p x and @p dx.
+  BASE_KINSOL::Report solve_ic
+    ( std::vector<double>& x, std::vector<double>& dx, BASE_KINSOL::Knobs const& k,
+      std::vector<double> const& par = std::vector<double>() );
+
+  //! @brief The model's d _mX[i] / dt handles, to substitute out of the INITIAL rows.
+  std::vector<FFVar> const& state_derivatives
+    ()
+    const
+    { return _mDOT; }
+
   //! @brief The INITIAL rows as residuals, undivided; empty unless the consumer asked for them.
   //! THE CONSISTENT-IC SYSTEM.  In general an INITIAL row may depend on a state's TIME DERIVATIVE at the
   //! initial point, so the solve cannot be posed over the states alone: its unknowns are (x, dx/dt) and its
@@ -344,6 +405,31 @@ class BASE_DYNAMIC
   /** @} */
 
  protected:
+
+  //! @brief Residual and dense Jacobian of the IC system, for BASE_KINSOL.
+  static int _ic_res
+    ( int const n, double const* z, double* f, void* user );
+  static int _ic_jac
+    ( int const n, double const* z, double* J, void* user );
+
+  //! @brief Every variable the IC rows are evaluated against, in _dIcVar order.
+  std::vector<FFVar> const& _icUnkAll
+    ()
+    const
+    { return _icAll; }
+
+  //! @brief The starting point: the declared references (virtual, so OCFESLV's sampling is honoured).
+  std::vector<double> _ic_seed
+    ()
+    const
+    { std::vector<double> sref, iref, cref, dref;
+      const_cast<BASE_DYNAMIC*>(this)->_classification_reference( sref, iref, cref, dref );
+      sref.resize( _nx, 0. );
+      return sref; }
+
+  //! @brief Build the consistent-initialisation system in its own graph.  Called at the end of extraction.
+  bool _build_ic_system
+    ();
 
   //! @brief Read @p res as L * @p tgt + R, both as EXPRESSIONS, so a state-dependent coefficient is carried
   //! rather than refused.  L comes from differentiating a fresh leaf put in the target's place -- taking
@@ -635,8 +721,14 @@ BASE_DYNAMIC::_extract_from_model
     }
   }
 
+
+
   std::vector<FFVar> ic( _nx, FFVar( 0. ) );
-  _mICRES.clear();
+  _mICRES.clear();  _mDOT.clear();
+  if( _wants_initial_rows() ){
+    _mDOT.resize( _nx );
+    for( size_t i = 0; i < _nx; ++i ) _mDOT[i] = OpP( _mX[i], tvar );
+  }
   for( auto const& eqn : var_equation() ){
     if( !eqn.opt || eqn.opt->role != EqnRole::INITIAL ) continue;
     // Keep the row UNDIVIDED, as _mRES keeps the evolution rows.  _split_in factorises a row as
@@ -665,9 +757,10 @@ BASE_DYNAMIC::_extract_from_model
         for( size_t j = 0; j < _nx; ++j ){
           FFVar const& d = dIC[ i * _nx + j ];
           if( d.cst() && d.num().val() == 0. ) continue;
+          if( _solves_initial_rows() ) break;          // the consumer resolves them; nothing to refuse
           _extractError = "the initial condition for " + _mX[i].name() + " still depends on "
                         + _mX[j].name() + ": the INITIAL rows are implicit in each other, and resolving"
-                          " them needs an initial-condition SOLVE, which neither solver does yet";
+                          " them needs an initial-condition SOLVE, which this solver does not do";
           return false;
         }
   }
@@ -851,6 +944,7 @@ BASE_DYNAMIC::_extract_from_model
     for( size_t k = 0; k < _ns; ++k ) _mQUAD[k] = subst_inputs( quad, elem_of_stage( k ) );
   }
   _nq = _mQ.size();
+  if( !_build_ic_system() ) return false;
   return true;
 }
 
@@ -879,6 +973,153 @@ BASE_DYNAMIC::_split_in
   }
   catch( ... ){ return false; }
   return true;
+}
+
+inline
+bool
+BASE_DYNAMIC::_build_ic_system
+()
+{
+  delete _icDag; _icDag = new FFGraph;
+  _icRow.clear(); _icUnk.clear(); _icDotOf.clear(); _icEval.clear();
+  if( _mICRES.empty() || _mRES.empty() ) return true;         // nothing to solve
+
+  // 1. the rows, in the MODEL's graph: the interior rows of stage 0, plus the initial rows.
+  std::vector<FFVar> rows;
+  for( size_t k = 0; k < _mRES[0].size(); ++k ){
+    FFVar r = _mRES[0][k];
+    for( auto const& [ ix, co ] : _mMASS[0][k] ) r += co * _mDOT[ix];   // M.dx + R, undivided
+    rows.push_back( r );
+  }
+  size_t const nDyn = rows.size();
+  rows.insert( rows.end(), _mICRES.begin(), _mICRES.end() );
+
+  // 2. substitute every derivative node for a plain variable -- FFGraph::substitute takes auxiliary
+  //    nodes, which a derivative is.  After this the rows are ordinary expressions.
+  std::vector<FFVar> ph( _nx );
+  for( size_t i = 0; i < _nx; ++i ) ph[i] = FFModel::_dag->add_var( "ic_d" + std::to_string(i) );
+  std::vector<FFVar> plain;
+  try{ plain = FFModel::_dag->substitute( rows, _mDOT, ph ); }
+  catch( ... ){ _extractError = "substituting the state derivatives in the initial-condition rows failed";
+                return false; }
+
+  // 3. which derivatives actually appear?  Those are the extra unknowns; an algebraic state has none.
+  std::vector<bool> used( _nx, false );
+  std::vector<FFVar> const dPh = FFModel::_dag->FAD( plain, ph );
+  for( size_t r = 0; r < plain.size(); ++r )
+    for( size_t i = 0; i < _nx; ++i ){
+      FFVar const& d = dPh[ r*_nx + i ];
+      if( !( d.cst() && d.num().val() == 0. ) ) used[i] = true;
+    }
+
+  // 4. move it all into this system's OWN graph
+  std::vector<FFVar> srcV{ _mT[0] }, dstV( 1 );
+  for( size_t i = 0; i < _nx; ++i ) srcV.push_back( _mX[i] );
+  for( size_t j = 0; j < _np; ++j ) srcV.push_back( _mP[j] );
+  for( size_t i = 0; i < _nx; ++i ) if( used[i] ) srcV.push_back( ph[i] );
+  dstV.assign( srcV.size(), FFVar() );
+  _icDag->insert( FFModel::_dag, srcV.size(), srcV.data(), dstV.data() );
+  _icAll = dstV;
+  _icRow.assign( plain.size(), FFVar() );
+  _icDag->insert( FFModel::_dag, plain.size(), plain.data(), _icRow.data() );
+
+  // unknowns: the states, then the derivatives that appear
+  for( size_t i = 0; i < _nx; ++i ) _icUnk.push_back( dstV[ 1 + i ] );
+  { size_t at = 1 + _nx + _np;
+    for( size_t i = 0; i < _nx; ++i ) if( used[i] ){ _icUnk.push_back( dstV[at++] ); _icDotOf.push_back( i ); } }
+
+  if( _icRow.size() != _icUnk.size() ){
+    _extractError = "the consistent-initialisation system is not square: " + std::to_string( _icRow.size() )
+                  + " row(s) (" + std::to_string( nDyn ) + " dynamic + " + std::to_string( _mICRES.size() )
+                  + " initial) for " + std::to_string( _icUnk.size() ) + " unknown(s)";
+    _icRow.clear(); _icUnk.clear();
+    return true;                                   // not fatal: the consumer reports it if it needs the solve
+  }
+  _icEval = _icRow;
+  std::vector<FFVar> const J = _icDag->FAD( _icRow, _icUnk );
+  _icEval.insert( _icEval.end(), J.begin(), J.end() );
+  _dIcEval.assign( _icEval.size(), 0. );
+  _dIcVar.assign( 1 + _nx + _np + _icDotOf.size(), 0. );
+  return true;
+}
+
+inline
+bool
+BASE_DYNAMIC::explicit_initial_conditions
+()
+const
+{
+  if( _mICRES.empty() ) return false;
+  std::vector<FFVar> const dX = FFModel::_dag->FAD( _mICRES, _mX );
+  std::vector<FFVar> const dD = FFModel::_dag->FAD( _mICRES, _mDOT );
+  for( size_t r = 0; r < _mICRES.size(); ++r ){
+    size_t nst = 0;
+    for( size_t i = 0; i < _nx; ++i ){
+      FFVar const& d = dX[ r*_nx + i ];
+      if( !( d.cst() && d.num().val() == 0. ) ){ if( !d.cst() ) return false; ++nst; }
+      FFVar const& e = dD[ r*_nx + i ];
+      if( !( e.cst() && e.num().val() == 0. ) ) return false;      // carries a derivative
+    }
+    if( nst != 1 ) return false;                                   // not one state, pinned linearly
+  }
+  return true;
+}
+
+inline
+BASE_KINSOL::Report
+BASE_DYNAMIC::solve_ic
+( std::vector<double>& x, std::vector<double>& dx, BASE_KINSOL::Knobs const& k,
+  std::vector<double> const& par )
+{
+  BASE_KINSOL::Report R;
+  if( _icRow.empty() ){
+    R.message = _extractError.empty()? "no consistent-initialisation system was built": _extractError;
+    return R;
+  }
+  _dIcVar[0] = _dT.empty()? 0.: _dT[0];
+  for( size_t j = 0; j < _np && j < par.size(); ++j ) _dIcVar[ 1 + _nx + j ] = par[j];
+  { std::vector<double> const ref = _ic_seed();
+    for( size_t i = 0; i < _nx; ++i ) _dIcVar[1+i] = ref[i];
+    for( size_t d = 0; d < _icDotOf.size(); ++d ) _dIcVar[ 1 + _nx + _np + d ] = 0.; }
+
+  std::vector<double> z( _icUnk.size() );
+  for( size_t i = 0; i < _nx; ++i ) z[i] = _dIcVar[1+i];
+  for( size_t d = 0; d < _icDotOf.size(); ++d ) z[_nx+d] = _dIcVar[ 1 + _nx + _np + d ];
+
+  R = BASE_KINSOL::solve( (int)z.size(), &BASE_DYNAMIC::_ic_res, &BASE_DYNAMIC::_ic_jac, this, z, k );
+
+  x.assign( _nx, 0. ); dx.assign( _nx, 0. );
+  for( size_t i = 0; i < _nx; ++i ) x[i] = z[i];
+  for( size_t d = 0; d < _icDotOf.size(); ++d ) dx[ _icDotOf[d] ] = z[_nx+d];
+  return R;
+}
+
+inline
+int
+BASE_DYNAMIC::_ic_res
+( int const n, double const* z, double* f, void* user )
+{
+  BASE_DYNAMIC* M = static_cast<BASE_DYNAMIC*>( user );
+  for( int i = 0; i < n; ++i ) M->_dIcVar[ i < (int)M->_nx? 1+i: 1 + M->_nx + M->_np + ( i - M->_nx ) ] = z[i];
+  M->_icDag->eval( M->_icWRK, M->_icRow.size(), M->_icEval.data(), M->_dIcEval.data(),
+                   M->_icUnkAll().size(), M->_icUnkAll().data(), M->_dIcVar.data() );
+  for( int i = 0; i < n; ++i ) f[i] = M->_dIcEval[i];
+  return 0;
+}
+
+inline
+int
+BASE_DYNAMIC::_ic_jac
+( int const n, double const* z, double* J, void* user )
+{
+  BASE_DYNAMIC* M = static_cast<BASE_DYNAMIC*>( user );
+  for( int i = 0; i < n; ++i ) M->_dIcVar[ i < (int)M->_nx? 1+i: 1 + M->_nx + M->_np + ( i - M->_nx ) ] = z[i];
+  M->_icDag->eval( M->_icWRK, M->_icEval.size(), M->_icEval.data(), M->_dIcEval.data(),
+                   M->_icUnkAll().size(), M->_icUnkAll().data(), M->_dIcVar.data() );
+  size_t const nr = M->_icRow.size();
+  for( int i = 0; i < n; ++i )
+    for( int j = 0; j < n; ++j ) J[ i + n*j ] = M->_dIcEval[ nr + i*n + j ];   // FAD row-major -> column
+  return 0;
 }
 
 } // end namespace mc

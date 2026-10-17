@@ -24,6 +24,7 @@
 #include "sunnonlinsol/sunnonlinsol_newton.h"     /* access to the newton SUNNonlinearSolver      */
 #include "sunnonlinsol/sunnonlinsol_fixedpoint.h" /* access to the fixed point SUNNonlinearSolver */
 
+#include "base_kinsol.hpp"
 #include "base_sundials.hpp"
 
 namespace mc
@@ -186,6 +187,15 @@ public:
     //! own options belong.
     struct t_Initial
     {
+      //! @brief Which corrector resolves the initial conditions.  IDACALCIC is IDAS's own, the fast path
+      //! for rows already explicit in each state; KINSOL solves the INITIAL rows TOGETHER WITH the interior
+      //! rows at t0, which is what rows implicit in each other need (plan D4/§3.12).
+      enum IC_SOLVER { IDACALCIC=0, KINSOL };
+      //! @brief the corrector to use (default: IDACALCIC)
+      IC_SOLVER SOLVER = IDACALCIC;
+      //! @brief the KINSOL corrector's own knobs, embedded rather than a fourth options object
+      BASE_KINSOL::Knobs KIN;
+
       //! @brief Consistent-initialisation mode [Default: YA_YDP] (IDACalcIC)
       CALCIC_MODE CALCIC = YA_YDP;
       //! @brief First output time handed to IDACalcIC, which only uses its DIRECTION and rough

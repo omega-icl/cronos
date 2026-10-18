@@ -682,6 +682,20 @@ ODESLV_BASE::_IC_D_STA
 ( double const& t, REALTYPE* x )
 {
   *_Dt = t; // current time
+  // The DIVIDED form is exact only where every INITIAL row pins one state linearly with no derivative.
+  // Otherwise ic[i] carries other states, or a derivative, and cannot be evaluated at all -- so the rows
+  // go to the SHARED consistent-initialisation solve in BASE_DYNAMIC instead, which poses them jointly
+  // with the dynamics residual at t0 over (x, dx/dt).  The explicit case stays on the fast path: a Newton
+  // solve buys nothing there, and it is the common one.
+  if( !explicit_initial_conditions() && !ic_rows().empty() ){
+    std::vector<double> xv, dxv, par( _np, 0. );
+    for( size_t j = 0; j < _np; ++j ) par[j] = _DVAR[ _nx + 1 + j ];
+    BASE_KINSOL::Knobs k;
+    BASE_KINSOL::Report const R = BASE_DYNAMIC::solve_ic( xv, dxv, k, par );
+    if( R.status == BASE_KINSOL::FAILED ) return false;
+    for( size_t i = 0; i < _nx; ++i ) ((double*)x)[i] = xv[i];
+    return true;
+  }
   _dag->eval( _nx, _pIC, (double*)x, _np+1, _pVAR+_nx, _DVAR+_nx );
   return true;
 }

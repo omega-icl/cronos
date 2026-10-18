@@ -86,6 +86,9 @@ class BASE_DYNAMIC
   std::vector<size_t>                  _icDotOf;   //!< state index of each dx(0) unknown
   std::vector<FFVar>                   _icEval;    //!< [ rows ; dense Jacobian, row-major ]
   std::vector<double>                  _dIcEval, _dIcVar, _icWRK;
+  size_t                               _icNnz = 0; //!< structural nonzeros of the IC Jacobian
+  std::vector<size_t>                  _icJrow, _icJcol, _icAt;  //!< _icAt[e]: CSC slot of SFAD entry e
+  BASE_KINSOL::Sparsity                _icSp;
   std::vector<FFVar>                   _icAll;     //!< t, states, parameters, then the derivative unknowns
 
   //! Each evolution row with EVERY time derivative set to zero, per stage: _mRES[s][k].
@@ -138,7 +141,7 @@ class BASE_DYNAMIC
   virtual bool _solves_initial_rows
     ()
     const
-    { return false; }
+    { return true; }
 
   //! @brief Whether to keep the INITIAL rows as residuals as well as values.  Now TRUE by default: the
   //! divided form _mIC is being phased out in favour of solving the rows jointly with the dynamics
@@ -343,6 +346,18 @@ class BASE_DYNAMIC
     ()
     const;
 
+  //! @brief Reinitialise consistently at a STAGE boundary: rebuild the system for stage @p sg with
+  //! continuity on the differential states, take the left state as data, and solve it.  The same solve as
+  //! at t0 -- a stage restart is a consistent initialisation, not a separate mechanism (plan §3.13).
+  BASE_KINSOL::Report restart_ic
+    ( size_t const sg, std::vector<double> const& xleft, std::vector<double>& x, std::vector<double>& dx,
+      BASE_KINSOL::Knobs const& k, std::vector<double> const& par = std::vector<double>() )
+    { _icLeft = xleft;
+      if( !_build_ic_system( sg ) ){ BASE_KINSOL::Report R; R.message = _extractError; return R; }
+      BASE_KINSOL::Report const R = solve_ic( x, dx, k, par );
+      _icLeft.clear();
+      return R; }
+
   //! @brief Solve the consistent-initialisation system, leaving the result in @p x and @p dx.
   BASE_KINSOL::Report solve_ic
     ( std::vector<double>& x, std::vector<double>& dx, BASE_KINSOL::Knobs const& k,
@@ -411,6 +426,8 @@ class BASE_DYNAMIC
     ( int const n, double const* z, double* f, void* user );
   static int _ic_jac
     ( int const n, double const* z, double* J, void* user );
+  static int _ic_spjac
+    ( int const n, double const* z, double* val, void* user );
 
   //! @brief Every variable the IC rows are evaluated against, in _dIcVar order.
   std::vector<FFVar> const& _icUnkAll
@@ -427,9 +444,22 @@ class BASE_DYNAMIC
       sref.resize( _nx, 0. );
       return sref; }
 
+  //! @brief Is state @p i differential, i.e. does its derivative appear in some evolution row?
+  bool _differential_state
+    ( size_t const i )
+    const
+    { for( auto const& st : _mMASS ) for( auto const& row : st )
+        for( auto const& [ ix, co ] : row ) if( ix == i ) return true;
+      return false; }
+
   //! @brief Build the consistent-initialisation system in its own graph.  Called at the end of extraction.
   bool _build_ic_system
-    ();
+    ( size_t const sg = 0 );
+
+  //! @brief Left-side state values at a stop, the data of the continuity rows.  Sized _nx; only the
+  //! DIFFERENTIAL entries are read, since an algebraic state is re-determined by its own rows.
+  std::vector<double>                  _icLeft;
+  size_t                               _icNlft = 0;  //!< left-state placeholders in _dIcVar, after the derivatives
 
   //! @brief Read @p res as L * @p tgt + R, both as EXPRESSIONS, so a state-dependent coefficient is carried
   //! rather than refused.  L comes from differentiating a fresh leaf put in the target's place -- taking
@@ -978,21 +1008,33 @@ BASE_DYNAMIC::_split_in
 inline
 bool
 BASE_DYNAMIC::_build_ic_system
-()
+( size_t const sg )
 {
   delete _icDag; _icDag = new FFGraph;
   _icRow.clear(); _icUnk.clear(); _icDotOf.clear(); _icEval.clear();
-  if( _mICRES.empty() || _mRES.empty() ) return true;         // nothing to solve
+  // Stage 0 takes the INITIAL rows; a later stage takes CONTINUITY on the differential states, which is
+  // §3.13's default transition -- the same system, differing only in which rows arrive and in the left
+  // state being data.  So a stage restart IS a consistent initialisation, not a separate mechanism.
+  bool const at_t0 = ( sg == 0 );
+  if( _mRES.empty() || ( at_t0 && _mICRES.empty() ) ) return true;
+  size_t const S = ( sg < _mRES.size() )? sg: _mRES.size() - 1;
 
   // 1. the rows, in the MODEL's graph: the interior rows of stage 0, plus the initial rows.
   std::vector<FFVar> rows;
-  for( size_t k = 0; k < _mRES[0].size(); ++k ){
-    FFVar r = _mRES[0][k];
-    for( auto const& [ ix, co ] : _mMASS[0][k] ) r += co * _mDOT[ix];   // M.dx + R, undivided
+  for( size_t k = 0; k < _mRES[S].size(); ++k ){
+    FFVar r = _mRES[S][k];
+    for( auto const& [ ix, co ] : _mMASS[S][k] ) r += co * _mDOT[ix];   // M.dx + R, undivided
     rows.push_back( r );
   }
   size_t const nDyn = rows.size();
-  rows.insert( rows.end(), _mICRES.begin(), _mICRES.end() );
+  std::vector<FFVar> lph;                       // left-state placeholders, data of the continuity rows
+  if( at_t0 ) rows.insert( rows.end(), _mICRES.begin(), _mICRES.end() );
+  else{
+    lph.resize( _nx );
+    for( size_t i = 0; i < _nx; ++i ) lph[i] = FFModel::_dag->add_var( "ic_lft" + std::to_string(i) );
+    for( size_t i = 0; i < _nx; ++i )
+      if( _differential_state( i ) ) rows.push_back( _mX[i] - lph[i] );
+  }
 
   // 2. substitute every derivative node for a plain variable -- FFGraph::substitute takes auxiliary
   //    nodes, which a derivative is.  After this the rows are ordinary expressions.
@@ -1017,6 +1059,7 @@ BASE_DYNAMIC::_build_ic_system
   for( size_t i = 0; i < _nx; ++i ) srcV.push_back( _mX[i] );
   for( size_t j = 0; j < _np; ++j ) srcV.push_back( _mP[j] );
   for( size_t i = 0; i < _nx; ++i ) if( used[i] ) srcV.push_back( ph[i] );
+  for( auto const& v : lph ) srcV.push_back( v );
   dstV.assign( srcV.size(), FFVar() );
   _icDag->insert( FFModel::_dag, srcV.size(), srcV.data(), dstV.data() );
   _icAll = dstV;
@@ -1035,11 +1078,40 @@ BASE_DYNAMIC::_build_ic_system
     _icRow.clear(); _icUnk.clear();
     return true;                                   // not fatal: the consumer reports it if it needs the solve
   }
+  // SFAD, not FAD: the dense form builds n^2 expressions and evaluates them all, most of them structural
+  // zeros.  This mirrors what the integrator already does for its own Jacobian, and is what lets a sparse
+  // linear solver be offered under KINSOL rather than only a dense one.
   _icEval = _icRow;
-  std::vector<FFVar> const J = _icDag->FAD( _icRow, _icUnk );
-  _icEval.insert( _icEval.end(), J.begin(), J.end() );
+  { auto const Js = _icDag->SFAD( _icRow.size(), _icRow.data(), _icUnk.size(), _icUnk.data() );
+    _icNnz = std::get<0>( Js );
+    _icJrow.assign( _icNnz, 0 ); _icJcol.assign( _icNnz, 0 );
+    for( unsigned e = 0; e < _icNnz; ++e ){
+      _icJrow[e] = std::get<1>( Js )[e];
+      _icJcol[e] = std::get<2>( Js )[e];
+    }
+    _icEval.insert( _icEval.end(), std::get<3>( Js ), std::get<3>( Js ) + _icNnz );
+    delete[] std::get<1>( Js ); delete[] std::get<2>( Js ); delete[] std::get<3>( Js );
+    // CSC, as the integrator's KLU path builds it, plus where each SFAD entry lands in the value array
+    size_t const n = _icUnk.size();
+    std::vector< std::pair<size_t,size_t> > key;        // (col, row) ordered
+    for( size_t e = 0; e < _icNnz; ++e ) key.emplace_back( _icJcol[e], _icJrow[e] );
+    std::vector<size_t> ord( _icNnz );
+    for( size_t e = 0; e < _icNnz; ++e ) ord[e] = e;
+    std::sort( ord.begin(), ord.end(), [&]( size_t a, size_t b ){ return key[a] < key[b]; } );
+    _icSp.colptr.assign( n + 1, 0 );
+    _icSp.rowidx.assign( _icNnz, 0 );
+    _icAt.assign( _icNnz, 0 );
+    for( size_t k2 = 0; k2 < _icNnz; ++k2 ){
+      size_t const e = ord[k2];
+      _icSp.rowidx[k2] = (sunindextype)_icJrow[e];
+      _icAt[e] = k2;
+      ++_icSp.colptr[ _icJcol[e] + 1 ];
+    }
+    for( size_t c = 0; c < n; ++c ) _icSp.colptr[c+1] += _icSp.colptr[c];
+    _icSp.jac = &BASE_DYNAMIC::_ic_spjac; }
   _dIcEval.assign( _icEval.size(), 0. );
-  _dIcVar.assign( 1 + _nx + _np + _icDotOf.size(), 0. );
+  _icNlft = lph.size();
+  _dIcVar.assign( 1 + _nx + _np + _icDotOf.size() + _icNlft, 0. );
   return true;
 }
 
@@ -1079,14 +1151,17 @@ BASE_DYNAMIC::solve_ic
   _dIcVar[0] = _dT.empty()? 0.: _dT[0];
   for( size_t j = 0; j < _np && j < par.size(); ++j ) _dIcVar[ 1 + _nx + j ] = par[j];
   { std::vector<double> const ref = _ic_seed();
-    for( size_t i = 0; i < _nx; ++i ) _dIcVar[1+i] = ref[i];
-    for( size_t d = 0; d < _icDotOf.size(); ++d ) _dIcVar[ 1 + _nx + _np + d ] = 0.; }
+    for( size_t i = 0; i < _nx; ++i ) _dIcVar[1+i] = _icLeft.size() == _nx? _icLeft[i]: ref[i];
+    for( size_t d = 0; d < _icDotOf.size(); ++d ) _dIcVar[ 1 + _nx + _np + d ] = 0.;
+    // the continuity rows read the LEFT state as data; seeding from it too is the best start there is
+    for( size_t i = 0; i < _icNlft && i < _icLeft.size(); ++i )
+      _dIcVar[ 1 + _nx + _np + _icDotOf.size() + i ] = _icLeft[i]; }
 
   std::vector<double> z( _icUnk.size() );
   for( size_t i = 0; i < _nx; ++i ) z[i] = _dIcVar[1+i];
   for( size_t d = 0; d < _icDotOf.size(); ++d ) z[_nx+d] = _dIcVar[ 1 + _nx + _np + d ];
 
-  R = BASE_KINSOL::solve( (int)z.size(), &BASE_DYNAMIC::_ic_res, &BASE_DYNAMIC::_ic_jac, this, z, k );
+  R = BASE_KINSOL::solve( (int)z.size(), &BASE_DYNAMIC::_ic_res, &BASE_DYNAMIC::_ic_jac, this, z, k, &_icSp );
 
   x.assign( _nx, 0. ); dx.assign( _nx, 0. );
   for( size_t i = 0; i < _nx; ++i ) x[i] = z[i];
@@ -1117,8 +1192,23 @@ BASE_DYNAMIC::_ic_jac
   M->_icDag->eval( M->_icWRK, M->_icEval.size(), M->_icEval.data(), M->_dIcEval.data(),
                    M->_icUnkAll().size(), M->_icUnkAll().data(), M->_dIcVar.data() );
   size_t const nr = M->_icRow.size();
-  for( int i = 0; i < n; ++i )
-    for( int j = 0; j < n; ++j ) J[ i + n*j ] = M->_dIcEval[ nr + i*n + j ];   // FAD row-major -> column
+  for( int i = 0; i < n*n; ++i ) J[i] = 0.;                       // scatter the SFAD entries, column-major
+  for( size_t e = 0; e < M->_icNnz; ++e )
+    J[ M->_icJrow[e] + (size_t)n * M->_icJcol[e] ] = M->_dIcEval[ nr + e ];
+  return 0;
+}
+
+inline
+int
+BASE_DYNAMIC::_ic_spjac
+( int const n, double const* z, double* val, void* user )
+{
+  BASE_DYNAMIC* M = static_cast<BASE_DYNAMIC*>( user );
+  for( int i = 0; i < n; ++i ) M->_dIcVar[ i < (int)M->_nx? 1+i: 1 + M->_nx + M->_np + ( i - M->_nx ) ] = z[i];
+  M->_icDag->eval( M->_icWRK, M->_icEval.size(), M->_icEval.data(), M->_dIcEval.data(),
+                   M->_icUnkAll().size(), M->_icUnkAll().data(), M->_dIcVar.data() );
+  size_t const nr = M->_icRow.size();
+  for( size_t e = 0; e < M->_icNnz; ++e ) val[ M->_icAt[e] ] = M->_dIcEval[ nr + e ];
   return 0;
 }
 

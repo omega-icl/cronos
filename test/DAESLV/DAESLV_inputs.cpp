@@ -190,6 +190,17 @@ int main()
       check( "x(0) = 1",     y[0],  1., 1e-10 );
       check( "z(0) = 1",     y[1],  1., 1e-10 );
       check( "dx/dt(0) = -1", yp[0], -1., 1e-10 );
+      // the same solve through the SPARSE (KLU) linear solver: same pattern the integrator's Jacobian
+      // uses, and it must land on the same point
+      M.options.INITIAL.KIN.SPARSE = true;
+      std::vector<double> ys, yps;
+      auto const Rs = M.solve_ic( ys, yps );
+      check_bool( "SPARSE (KLU) IC solve converges", Rs.status == BASE_KINSOL::OK );
+      if( Rs.status == BASE_KINSOL::OK ){
+        check( "SPARSE agrees with DENSE on x(0)",     ys[0],  y[0],  1e-14 );
+        check( "SPARSE agrees with DENSE on dx/dt(0)", yps[0], yp[0], 1e-14 );
+      }
+      M.options.INITIAL.KIN.SPARSE = false;
       if( M.solve( std::vector<double>{} ) == DAESLV_IDAS::NORMAL )
         check( "x(1) = (1+2t)^(-1/2)", M.val_state().back()[0], 1./std::sqrt(3.), 1e-8 );
       else { std::cout << "    solve failed: " << M.extract_error() << "\n"; ++n_fail; }

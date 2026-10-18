@@ -112,11 +112,14 @@ public:
       return solve( P, c, os );
     }
 
-  //! @brief Solve the consistent-IC system from the current working point, leaving it in @p y and @p yp.
-  //! Reports AT_ROOT when it was already consistent and RANK_DEFICIENT when the free initial data is
-  //! degenerate at this configuration -- see BASE_KINSOL.
+  //! @brief Solve the consistent-initialisation system.  A thin forward to the SHARED solve in
+  //! BASE_DYNAMIC -- the system is the same for an ODE and a DAE, so it is built and solved there; this
+  //! only supplies the knobs from INITIAL.KIN and the current parameter values.
   BASE_KINSOL::Report solve_ic
-    ( std::vector<double>& y, std::vector<double>& yp );
+    ( std::vector<double>& y, std::vector<double>& yp )
+    { std::vector<double> par( _np, 0. );
+      for( size_t j = 0; j < _np && 1 + 2*_nx + j < _dVAR.size(); ++j ) par[j] = _dVAR[ 1 + 2*_nx + j ];
+      return BASE_DYNAMIC::solve_ic( y, yp, options.INITIAL.KIN, par ); }
 
   //! @brief Nonzeros of the Jacobian IDAS factorizes -- the UNION of the dF/dy and dF/dy' patterns.
   size_t nnz_jac
@@ -165,11 +168,6 @@ protected:
   //! rows (the INTERIOR rows, which relate dx/dt to x) TOGETHER WITH the INITIAL rows, in the unknowns
   //! x and the DIFFERENTIAL dx/dt -- an algebraic state's derivative appears in no row.  Square when the
   //! INITIAL rows number the differential states, which is what initial_data() already audits.
-  std::vector<FFVar>  _vICRES;               //!< the INITIAL rows, inserted into the solver-local dag
-  std::vector<FFVar>  _vICEVAL;              //!< [ rows ; dense Jacobian, row-major ]
-  std::vector<double> _dICEVAL;
-  std::vector<size_t> _icUnk;                //!< index into _vVAR of each unknown
-  size_t _nICrow = 0;
   std::vector<StagePlan> _plan;              //!< one per stage (one entry when the rows do not change)
   std::vector<FFVar> _vYP;                   //!< unused; kept so older call sites still compile
   size_t _nJy = 0, _nJyp = 0;                //!< entry counts of the two blocks, for the active stage
@@ -250,12 +248,6 @@ protected:
   //! @brief Build the solver-local dag and every stage's residual + Jacobian plan.
   bool _build_plans
     ();
-
-  //! @brief Residual and dense Jacobian of the IC system, for BASE_KINSOL.
-  static int _ic_res
-    ( int const n, double const* z, double* f, void* user );
-  static int _ic_jac
-    ( int const n, double const* z, double* J, void* user );
 
   //! @brief Mass-matrix entries of stage @p s.
   size_t _ncoefOf
@@ -351,87 +343,7 @@ DAESLV_IDAS::_build_plans
     if( P.nnz > _nnzjacmax ) _nnzjacmax = P.nnz;
   }
   // The IC system.  Its rows live in the SAME local dag as everything else, so no cross-graph insert.
-  // An INITIAL row may depend on dx/dt(0) in ANY way, so SUBSTITUTE the model's derivative handles for
-  // ordinary variables -- FFGraph::substitute handles auxiliary nodes, which a derivative is, where
-  // compose does not -- and insert the result like any other expression.  A split would instead assume
-  // the row is affine in each derivative, the very assumption that makes _mIC unable to carry a row
-  // nonlinear in the state it pins.
-  _vICRES.clear();
-  if( !_mICRES.empty() ){
-    std::vector<FFVar> ph( _nx );
-    for( size_t i = 0; i < _nx; ++i ) ph[i] = FFModel::_dag->add_var( "ic_dot_" + std::to_string(i) );
-    std::vector<FFVar> const plain = FFModel::_dag->substitute( _mICRES, state_derivatives(), ph );
-    std::vector<FFVar> lph( _nx ), loc( plain.size() );
-    _dag->insert( FFModel::_dag, _nx, ph.data(), lph.data() );
-    _dag->insert( FFModel::_dag, plain.size(), const_cast<FFVar*>( plain.data() ), loc.data() );
-    _vICRES = _dag->substitute( loc, lph, _pYP );          // the placeholders ARE this solver's dx/dt
-  }
-  {
-    std::vector<FFVar> rows = _plan[0].F;                       // the interior rows at t0
-    rows.insert( rows.end(), _vICRES.begin(), _vICRES.end() );  // ... and the initial rows
-    std::vector<FFVar> unk;
-    _icUnk.clear();
-    for( size_t i = 0; i < _nx; ++i ){ unk.push_back( _pX[i] );  _icUnk.push_back( 1 + i ); }
-    for( size_t i = 0; i < _nx; ++i )
-      if( id()[i] > 0.5 ){ unk.push_back( _pYP[i] ); _icUnk.push_back( 1 + _nx + i ); }
-    _nICrow = rows.size();
-    if( _nICrow == unk.size() ){            // square; otherwise leave the system unbuilt and say so on use
-      _vICEVAL = rows;
-      std::vector<FFVar> const J = _dag->FAD( rows, unk );      // dense: the IC system is small
-      _vICEVAL.insert( _vICEVAL.end(), J.begin(), J.end() );
-      _dICEVAL.assign( _vICEVAL.size(), 0. );
-    }
-    else _nICrow = 0;
-  }
   return _build_rows( 0 );
-}
-
-inline
-int
-DAESLV_IDAS::_ic_res
-( int const n, double const* z, double* f, void* user )
-{
-  DAESLV_IDAS* M = static_cast<DAESLV_IDAS*>( user );
-  for( int i = 0; i < n; ++i ) M->_dVAR[ M->_icUnk[i] ] = z[i];
-  M->_dag->eval( M->_dWRK, M->_nICrow, M->_vICEVAL.data(), M->_dICEVAL.data(),
-                 M->_vVAR.size(), M->_vVAR.data(), M->_dVAR.data() );
-  for( int i = 0; i < n; ++i ) f[i] = M->_dICEVAL[i];
-  return 0;
-}
-
-inline
-int
-DAESLV_IDAS::_ic_jac
-( int const n, double const* z, double* J, void* user )
-{
-  DAESLV_IDAS* M = static_cast<DAESLV_IDAS*>( user );
-  for( int i = 0; i < n; ++i ) M->_dVAR[ M->_icUnk[i] ] = z[i];
-  M->_dag->eval( M->_dWRK, M->_vICEVAL.size(), M->_vICEVAL.data(), M->_dICEVAL.data(),
-                 M->_vVAR.size(), M->_vVAR.data(), M->_dVAR.data() );
-  for( int i = 0; i < n; ++i )                       // FAD is row-major; BASE_KINSOL wants column-major
-    for( int j = 0; j < n; ++j ) J[ i + n*j ] = M->_dICEVAL[ M->_nICrow + i*n + j ];
-  return 0;
-}
-
-inline
-BASE_KINSOL::Report
-DAESLV_IDAS::solve_ic
-( std::vector<double>& y, std::vector<double>& yp )
-{
-  BASE_KINSOL::Report R;
-  if( !_nICrow ){
-    R.message = "the initial-condition system is not square: " + std::to_string( _mICRES.size() )
-              + " INITIAL row(s) for " + std::to_string( n_differential() ) + " differential state(s)";
-    return R;
-  }
-  std::vector<double> z( _icUnk.size() );
-  for( size_t i = 0; i < _icUnk.size(); ++i ) z[i] = _dVAR[ _icUnk[i] ];
-  R = BASE_KINSOL::solve( (int)z.size(), &DAESLV_IDAS::_ic_res, &DAESLV_IDAS::_ic_jac, this, z,
-                          options.INITIAL.KIN );
-  for( size_t i = 0; i < _icUnk.size(); ++i ) _dVAR[ _icUnk[i] ] = z[i];
-  y.assign( _nx, 0. ); yp.assign( _nx, 0. );
-  for( size_t i = 0; i < _nx; ++i ){ y[i] = _dVAR[1+i]; yp[i] = _dVAR[1+_nx+i]; }
-  return R;
 }
 
 inline
@@ -675,7 +587,25 @@ DAESLV_IDAS::solve
           ok = false; why = "SUNLinSol_KLUReInit"; break;
         }
 #endif
-        if( options.INITIAL.CALCIC != BASE_IDAS::Options::NONE ){
+        if( options.INITIAL.SOLVER == BASE_IDAS::Options::t_Initial::KINSOL ){
+          // A stage boundary is a consistent initialisation: the stage's rows together with CONTINUITY on
+          // the differential states, the left state as data.  Same solve as t0 (plan §3.13), and unlike
+          // IDACalcIC it reports WHY it failed -- a degenerate configuration is named, not just flagged.
+          std::vector<double> const xL( N_VGetArrayPointer( yy ), N_VGetArrayPointer( yy ) + _nx );
+          std::vector<double> xp, dxp, par( _np, 0. );
+          for( size_t j = 0; j < _np; ++j ) par[j] = _dVAR[ 1 + 2*_nx + j ];
+          BASE_KINSOL::Report const R = restart_ic( sg, xL, xp, dxp, options.INITIAL.KIN, par );
+          if( R.status == BASE_KINSOL::FAILED ){ ok = false; why = "restart_ic: " + R.message; break; }
+          if( R.status == BASE_KINSOL::RANK_DEFICIENT )
+            os << "DAESLV_IDAS ** at the stage boundary: " << R.message << std::endl;
+          for( size_t i = 0; i < _nx; ++i ){
+            N_VGetArrayPointer( yy )[i] = xp[i];
+            N_VGetArrayPointer( yp )[i] = dxp[i];
+          }
+          if( IDAReInit( mem, ta, yy, yp ) != IDA_SUCCESS ){ ok = false; why = "IDAReInit after restart_ic"; break; }
+          ++stats.numIC;
+        }
+        else if( options.INITIAL.CALCIC != BASE_IDAS::Options::NONE ){
           int const icopt = ( options.INITIAL.CALCIC == BASE_IDAS::Options::YA_YDP )? IDA_YA_YDP_INIT: IDA_Y_INIT;
           if( IDACalcIC( mem, icopt, tb ) != IDA_SUCCESS ){ ok = false; why = "IDACalcIC at a stage boundary"; break; }
           IDAGetConsistentIC( mem, yy, yp );

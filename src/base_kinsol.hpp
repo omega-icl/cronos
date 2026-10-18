@@ -93,20 +93,40 @@ public:
   typedef int (*ResFn)( int n, double const* y, double* f, void* user );
   //! @brief Dense Jacobian callback, column-major J[i + n*j] = dF_i/dy_j.  Returns 0 on success.
   typedef int (*JacFn)( int n, double const* y, double* J, void* user );
+  //! @brief Sparse Jacobian callback: fills the CSC VALUE array in the order of the pattern below.
+  typedef int (*SpJacFn)( int n, double const* y, double* val, void* user );
+
+  //! @brief The CSC pattern and its callback, as the integrator's KLU path carries them.  Supply this and
+  //! set Knobs::SPARSE to factorize with SUNLinSol_KLU instead of dense LU; without it SPARSE would select
+  //! KLU for the solve while leaving KINSOL to difference-quotient the Jacobian, which is worse than dense.
+  struct Sparsity
+  {
+    std::vector<sunindextype> colptr, rowidx;
+    SpJacFn jac = nullptr;
+  };
 
   //! @brief Solve F(y) = 0 from the starting point in @p y, which holds the solution on return
   static Report solve
-    ( int const n, ResFn res, JacFn jac, void* user, std::vector<double>& y, Knobs const& k );
+    ( int const n, ResFn res, JacFn jac, void* user, std::vector<double>& y, Knobs const& k,
+      Sparsity const* sp = nullptr );
 
 protected:
   BASE_KINSOL() {}
   virtual ~BASE_KINSOL() {}
 
 private:
-  struct Shim { ResFn res; JacFn jac; void* user; int n; std::vector<double> Jbuf; };
+  struct Shim { ResFn res; JacFn jac; SpJacFn spjac; void* user; int n; std::vector<double> Jbuf;
+                std::vector<sunindextype> colptr, rowidx; };
   static int _res( N_Vector uu, N_Vector ff, void* p )
     { Shim* s = static_cast<Shim*>( p );
       return s->res( s->n, N_VGetArrayPointer( uu ), N_VGetArrayPointer( ff ), s->user ); }
+  static int _spjac( N_Vector uu, N_Vector, SUNMatrix J, void* p, N_Vector, N_Vector )
+    { Shim* s = static_cast<Shim*>( p );
+      // the PATTERN has to be rewritten every call: KINSOL zeroes the matrix first, which clears the
+      // index arrays along with the data.  The integrator's sparse Jacobian does the same.
+      for( int c = 0; c <= s->n; ++c )           SM_INDEXPTRS_S( J )[c] = s->colptr[c];
+      for( size_t e = 0; e < s->rowidx.size(); ++e ) SM_INDEXVALS_S( J )[e] = s->rowidx[e];
+      return s->spjac( s->n, N_VGetArrayPointer( uu ), SM_DATA_S( J ), s->user ); }
   static int _jac( N_Vector uu, N_Vector, SUNMatrix J, void* p, N_Vector, N_Vector )
     { Shim* s = static_cast<Shim*>( p );
       int const rc = s->jac( s->n, N_VGetArrayPointer( uu ), s->Jbuf.data(), s->user );
@@ -118,7 +138,8 @@ private:
 inline
 BASE_KINSOL::Report
 BASE_KINSOL::solve
-( int const n, ResFn res, JacFn jac, void* user, std::vector<double>& y, Knobs const& k )
+( int const n, ResFn res, JacFn jac, void* user, std::vector<double>& y, Knobs const& k,
+  Sparsity const* sp )
 {
   Report R;
   // AT the root already?  KINSOL's setup fails (-11) on a zero residual, and a reinitialisation after a
@@ -131,10 +152,18 @@ BASE_KINSOL::solve
 
   SUNContext ctx = nullptr;
   if( SUNContext_Create( SUN_COMM_NULL, &ctx ) < 0 ){ R.message = "SUNContext_Create failed"; return R; }
+  // Silence SUNDIALS' own error banner on THIS context: a failure here is INTERPRETED below -- a singular
+  // Jacobian is reported as a rank diagnosis naming the model -- so "[ERROR] ... failed in an unrecoverable
+  // manner" is noise above a passing suite, and misleading about the cause.  We own the context, so the
+  // handler is cleared only for the IC solve.
+  SUNContext_ClearErrHandlers( ctx );
   N_Vector uu = N_VNew_Serial( n, ctx ), sc = N_VNew_Serial( n, ctx );
   N_VConst( 1., sc );
   for( int i = 0; i < n; ++i ) N_VGetArrayPointer( uu )[i] = y[i];
-  Shim shim{ res, jac, user, n, std::vector<double>( (size_t)n * n ) };
+  bool const sparse = ( k.SPARSE && sp && sp->jac && !sp->colptr.empty() );
+  Shim shim{ res, jac, sparse? sp->jac: nullptr, user, n, std::vector<double>( (size_t)n * n ),
+             sparse? sp->colptr: std::vector<sunindextype>(),
+             sparse? sp->rowidx: std::vector<sunindextype>() };
 
   void* mem = KINCreate( ctx );
   KINInit( mem, _res, uu );
@@ -145,12 +174,20 @@ BASE_KINSOL::solve
   KINSetMaxSetupCalls( mem, k.MAXSETUP );
   SUNMatrix A = nullptr; SUNLinearSolver LS = nullptr;
 #if defined (CRONOS__WITH_KLU)
-  if( k.SPARSE ){ A = SUNSparseMatrix( n, n, n*n, CSC_MAT, ctx ); LS = SUNLinSol_KLU( uu, A, ctx ); }
+  if( sparse ){
+    // the same shape the integrator's KLU path uses: CSC, pattern copied in, analytic values per call
+    sunindextype const nnz = sp->rowidx.size();
+    A = SUNSparseMatrix( n, n, nnz? nnz: 1, CSC_MAT, ctx );
+    for( int c = 0; c <= n; ++c )      SM_INDEXPTRS_S( A )[c] = sp->colptr[c];
+    for( sunindextype e = 0; e < nnz; ++e ) SM_INDEXVALS_S( A )[e] = sp->rowidx[e];
+    LS = SUNLinSol_KLU( uu, A, ctx );
+  }
   else
 #endif
   { A = SUNDenseMatrix( n, n, ctx ); LS = SUNLinSol_Dense( uu, A, ctx ); }
   KINSetLinearSolver( mem, LS, A );
-  if( jac && !k.SPARSE ) KINSetJacFn( mem, _jac );        // dense analytic; sparse analytic is a later step
+  if( sparse )        KINSetJacFn( mem, _spjac );        // analytic, CSC
+  else if( jac )      KINSetJacFn( mem, _jac );          // analytic, dense
 
   R.kin_flag = KINSol( mem, uu, k.LINESEARCH? KIN_LINESEARCH: KIN_NONE, sc, sc );
   KINGetNumNonlinSolvIters( mem, &R.iterations );

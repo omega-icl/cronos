@@ -121,6 +121,20 @@ public:
       for( size_t j = 0; j < _np && 1 + 2*_nx + j < _dVAR.size(); ++j ) par[j] = _dVAR[ 1 + 2*_nx + j ];
       return BASE_DYNAMIC::solve_ic( y, yp, options.INITIAL.KIN, par ); }
 
+  //! @brief The IC knobs, from this solver's INITIAL group.
+  BASE_KINSOL::Knobs _ic_knobs
+    ()
+    const
+    override
+    { return options.INITIAL.KIN; }
+
+  //! @brief Whether the explicit fast path may be taken; see BASE_DYNAMIC's hook.
+  bool _ic_bypass_explicit
+    ()
+    const
+    override
+    { return options.INITIAL.BYPASS_EXPLICIT; }
+
   //! @brief Nonzeros of the Jacobian IDAS factorizes -- the UNION of the dF/dy and dF/dy' patterns.
   size_t nnz_jac
     ()
@@ -455,6 +469,7 @@ DAESLV_IDAS::solve
   }
   for( size_t j = 0; j < _np; ++j ) _dVAR[ 1 + 2*_nx + j ] = p[j];
   for( size_t j = 0; j < _nc; ++j ) _dVAR[ 1 + 2*_nx + _np + j ] = c[j];
+  _dIcCst.assign( c.begin(), c.begin() + _nc );   // the IC system is evaluated in its own graph
   _xk.clear();  _xk.reserve( _ns + 1 );
 
   // Initial values: the INITIAL rows, which may depend on the parameters AND on the states -- a
@@ -594,7 +609,7 @@ DAESLV_IDAS::solve
           std::vector<double> const xL( N_VGetArrayPointer( yy ), N_VGetArrayPointer( yy ) + _nx );
           std::vector<double> xp, dxp, par( _np, 0. );
           for( size_t j = 0; j < _np; ++j ) par[j] = _dVAR[ 1 + 2*_nx + j ];
-          BASE_KINSOL::Report const R = restart_ic( sg, xL, xp, dxp, options.INITIAL.KIN, par );
+          BASE_KINSOL::Report const R = restart_ic( ta, xL, xp, dxp, options.INITIAL.KIN, par );
           if( R.status == BASE_KINSOL::FAILED ){ ok = false; why = "restart_ic: " + R.message; break; }
           if( R.status == BASE_KINSOL::RANK_DEFICIENT )
             os << "DAESLV_IDAS ** at the stage boundary: " << R.message << std::endl;

@@ -635,6 +635,7 @@ endif()
 if(ENABLE_PYTHON)
   set(CRONOS_PY_SOURCES
       src/interface/ffdom.cpp
+      src/interface/base_kinsol.cpp
       src/interface/ffmodel.cpp
       src/interface/odeslv.cpp
       src/interface/ffode.cpp

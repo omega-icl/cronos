@@ -74,22 +74,69 @@ class BASE_DYNAMIC
   //! derivative is) rather than splitting the row, which would assume it is AFFINE in each derivative.
   std::vector<FFVar>                   _mDOT;
 
+  //! @brief Plain DAG variables standing for the state time-derivatives, and for the LEFT state at a
+  //! stop.  Created ONCE with the rest of the local model, beside _mDOT, because they are part of it:
+  //! the IC system is the rows with every FFPartial(.,t) node substituted for one of these, so minting
+  //! them per _build_ic_system() call accumulated ~4 variables in the model's dag per restart.  They
+  //! are rebuilt whenever the model is, which is the point -- a set held across a re-extraction would
+  //! name variables of the PREVIOUS dag.
+  std::vector<FFVar>                   _mDotVar;
+  std::vector<FFVar>                   _mLftVar;
+
   //! The CONSISTENT-INITIALISATION system, built once at extraction and owned here because it is the same
   //! for every consumer: the INTERIOR rows at t0 together with the INITIAL rows, with every FFPartial(.,t)
   //! SUBSTITUTED for a plain variable, in its own graph.  Nothing in it is ODE- or DAE-specific -- it never
   //! asks what FORM the rows are in, only that derivative nodes become unknowns -- so neither the mass-row
   //! decomposition nor a solver's local graph is involved.  The derivative unknowns are exactly those that
   //! survive substitution: an algebraic state contributes none because its derivative appears nowhere.
-  FFGraph*                             _icDag = nullptr;
-  std::vector<FFVar>                   _icRow;     //!< the rows, in _icDag
-  std::vector<FFVar>                   _icUnk;     //!< x(0), y(0), then the dx(0) that actually appear
-  std::vector<size_t>                  _icDotOf;   //!< state index of each dx(0) unknown
-  std::vector<FFVar>                   _icEval;    //!< [ rows ; dense Jacobian, row-major ]
-  std::vector<double>                  _dIcEval, _dIcVar, _icWRK;
-  size_t                               _icNnz = 0; //!< structural nonzeros of the IC Jacobian
-  std::vector<size_t>                  _icJrow, _icJcol, _icAt;  //!< _icAt[e]: CSC slot of SFAD entry e
-  BASE_KINSOL::Sparsity                _icSp;
-  std::vector<FFVar>                   _icAll;     //!< t, states, parameters, then the derivative unknowns
+  //! @brief One assembled system: its graph, rows, unknowns and the sparsity KINSOL factorises.  TWO of
+  //! these are built, ONCE each, at the end of extraction -- never per call, and never per stage:
+  //!   _icStart  the INTERIOR rows at t0 together with the INITIAL rows;
+  //!   _icStop   the INTERIOR rows together with CONTINUITY on the differential states, for every stop.
+  //! They differ only in which rows arrive, which is §3.13's point that a stage restart IS a consistent
+  //! initialisation.  Neither carries a stage index: the time-varying inputs are left as the placeholders
+  //! _mUpVar and BOUND per stop, because stages do not carry different equations -- they carry the same
+  //! rows at a different instant.  One build, one SFAD pattern, one CSC structure, so KLU keeps its
+  //! SYMBOLIC factorisation across every restart.
+  struct t_ICSys
+  {
+    FFGraph*                           dag = nullptr;
+    std::vector<FFVar>                 row;      //!< the rows, in dag
+    std::vector<FFVar>                 unk;      //!< the states, then the derivatives that appear
+    std::vector<size_t>                dotOf;    //!< state index of each derivative unknown
+    std::vector<FFVar>                 eval;     //!< [ rows ; the SFAD Jacobian entries ]
+    std::vector<FFVar>                 all;      //!< every variable, in dVar order
+    std::vector<double>                dEval, dVar, wrk;
+    size_t                             nnz = 0;  //!< structural nonzeros of the Jacobian
+    std::vector<size_t>                jrow, jcol, at;   //!< at[e]: CSC slot of SFAD entry e
+    BASE_KINSOL::Sparsity              sp;
+    size_t                             nLft = 0; //!< left-state placeholders in dVar, after the derivatives
+    bool                               ok = false;
+    ~t_ICSys(){ delete dag; }
+  };
+  t_ICSys                              _icStart, _icStop;
+
+  //! @brief The system the KINSOL callbacks are currently evaluating.  Set by _ic_solve() before the call;
+  //! the callbacks are static trampolines and have nothing else to go on.
+  t_ICSys*                             _icCur = nullptr;
+
+  //! @brief The evolution rows BEFORE the per-stage input substitution, kept because the IC systems are
+  //! built from them: once subst_inputs() has run, the input variable is gone from the expression and there
+  //! is nothing left to parameterise.  _mMASS/_mRES stay as they are, per stage, for the integrator.
+  std::vector< std::vector< std::pair<size_t,FFVar> > > _mMASSraw;
+  std::vector<FFVar>                   _mRESraw;
+
+  //! @brief The time-varying inputs, and one placeholder variable per input standing for its value at the
+  //! instant the system is being solved at -- u(tau^+) at a stop, u(t0) at the start.  A jump row needing
+  //! u(tau^-) as well gets a second set when transitions land; nothing reads one yet, so none is minted.
+  std::vector<FFVar>                   _mTVInp, _mUpVar;
+
+  //! @brief Element boundaries of the evolution domain, to find the element a stop falls in.
+  std::vector<double>                  _mElemBnd;
+
+  //! @brief Per time-varying input, the PARAMETER index of each of its level DOFs, so a stop can read the
+  //! level values out of the parameter vector it is given.
+  std::vector< std::vector<size_t> >   _mInpParNdx;
 
   //! Each evolution row with EVERY time derivative set to zero, per stage: _mRES[s][k].
   std::vector< std::vector<FFVar> >    _mRES;
@@ -148,6 +195,23 @@ class BASE_DYNAMIC
   //! residual at t0, in BOTH solvers, so the rows themselves are what every consumer should hold.  The
   //! hook stays virtual for a consumer that genuinely wants neither.
   virtual bool _wants_initial_rows
+    ()
+    const
+    { return true; }
+
+  //! @brief The knobs of the IC solve, from the consumer's own INITIAL group.  A hook rather than a
+  //! member: the knobs belong to the solver's one `options` object, as everywhere else, and BASE_DYNAMIC
+  //! has none.  The default is the plain KINSOL defaults, which is what a consumer with no INITIAL group
+  //! would have got anyway.
+  virtual BASE_KINSOL::Knobs _ic_knobs
+    ()
+    const
+    { return BASE_KINSOL::Knobs(); }
+
+  //! @brief Whether to take the explicit fast path where every INITIAL row pins one state linearly with
+  //! no derivative.  There the divided form is exact and a Newton iteration buys nothing, so this is on
+  //! by default; a consumer exposes it so the solve can be forced for comparison.
+  virtual bool _ic_bypass_explicit
     ()
     const
     { return true; }
@@ -332,13 +396,13 @@ class BASE_DYNAMIC
   std::vector<FFVar> const& ic_rows
     ()
     const
-    { return _icRow; }
+    { return _icStart.row; }
 
   //! @brief Its unknowns: the states, then the state derivatives that appear in some row.
   std::vector<FFVar> const& ic_unknowns
     ()
     const
-    { return _icUnk; }
+    { return _icStart.unk; }
 
   //! @brief Whether every INITIAL row pins one state EXPLICITLY (x_i - c, no other state, no derivative).
   //! Then the divided form is exact and a Newton solve buys nothing -- the common case, worth bypassing.
@@ -346,19 +410,26 @@ class BASE_DYNAMIC
     ()
     const;
 
-  //! @brief Reinitialise consistently at a STAGE boundary: rebuild the system for stage @p sg with
-  //! continuity on the differential states, take the left state as data, and solve it.  The same solve as
-  //! at t0 -- a stage restart is a consistent initialisation, not a separate mechanism (plan §3.13).
+  //! @brief Reinitialise consistently at a stop at time @p tau: the evolution rows in force after it,
+  //! together with CONTINUITY on the differential states, the left state @p xleft as data.  The same solve
+  //! as at t0 -- a stage restart is a consistent initialisation, not a separate mechanism (plan §3.13).
+  //! The system is NOT rebuilt here: it was assembled once at extraction, and all that varies between
+  //! stops is @p tau and the input values bound from it, so KLU keeps its symbolic factorisation across
+  //! every restart.  Takes the stop TIME rather than a stage index, because a transition's tau need not
+  //! fall on a stage boundary.
   BASE_KINSOL::Report restart_ic
-    ( size_t const sg, std::vector<double> const& xleft, std::vector<double>& x, std::vector<double>& dx,
+    ( double const tau, std::vector<double> const& xleft, std::vector<double>& x, std::vector<double>& dx,
       BASE_KINSOL::Knobs const& k, std::vector<double> const& par = std::vector<double>() )
-    { _icLeft = xleft;
-      if( !_build_ic_system( sg ) ){ BASE_KINSOL::Report R; R.message = _extractError; return R; }
-      BASE_KINSOL::Report const R = solve_ic( x, dx, k, par );
+    { if( !_icStop.ok ){ BASE_KINSOL::Report R;
+        R.message = _extractError.empty()? "no restart system was built": _extractError; return R; }
+      _icLeft = xleft;
+      BASE_KINSOL::Report const R = _ic_solve( _icStop, tau, x, dx, k, par );
       _icLeft.clear();
       return R; }
 
-  //! @brief Solve the consistent-initialisation system, leaving the result in @p x and @p dx.
+  //! @brief Solve the consistent-initialisation system, leaving the result in @p x and @p dx.  The ONE
+  //! entry point both solvers take at t0: ODESLV through _IC_D_STA, DAESLV through its setup, so the
+  //! initial state and its derivative come from the same system on both sides rather than from two.
   BASE_KINSOL::Report solve_ic
     ( std::vector<double>& x, std::vector<double>& dx, BASE_KINSOL::Knobs const& k,
       std::vector<double> const& par = std::vector<double>() );
@@ -422,6 +493,8 @@ class BASE_DYNAMIC
  protected:
 
   //! @brief Residual and dense Jacobian of the IC system, for BASE_KINSOL.
+  static void _ic_scatter( BASE_DYNAMIC* M, int const n, double const* z );
+
   static int _ic_res
     ( int const n, double const* z, double* f, void* user );
   static int _ic_jac
@@ -433,7 +506,7 @@ class BASE_DYNAMIC
   std::vector<FFVar> const& _icUnkAll
     ()
     const
-    { return _icAll; }
+    { return _icCur? _icCur->all: _icStart.all; }
 
   //! @brief The starting point: the declared references (virtual, so OCFESLV's sampling is honoured).
   std::vector<double> _ic_seed
@@ -444,6 +517,40 @@ class BASE_DYNAMIC
       sref.resize( _nx, 0. );
       return sref; }
 
+  //! @brief The element-local Lagrange interpolant of @p nodal at @p sc, with @p sn the node positions
+  //! normalised to [0,1].  Templated so there is ONE basis in the code: subst_inputs() instantiates it on
+  //! FFVar to bake the interpolant into the rows, and a stop instantiates it on double to bind u(tau).
+  //! A piecewise-constant input has a single node and the interpolant is its level, as it must be.
+  template <typename T>
+  static T _interp_level
+    ( std::vector<double> const& sn, std::vector<T> const& nodal, T const& sc )
+    {
+      if( sn.size() < 2 || nodal.size() < sn.size() ) return nodal.at( 0 );
+      T out( 0. );
+      for( size_t j = 0; j < sn.size(); ++j ){
+        T Lj( 1. );
+        for( size_t k = 0; k < sn.size(); ++k )
+          if( k != j ) Lj = Lj * ( ( sc - sn[k] ) / ( sn[j] - sn[k] ) );
+        out = out + Lj * nodal[j];
+      }
+      return out;
+    }
+
+  //! @brief The element @p tau falls in, on the side @p side, from the stored boundaries.  The extraction
+  //! lambda of the same name, kept as a member because a stop needs it long after extraction has returned.
+  size_t _elem_of
+    ( double const tau, int const side )
+    const
+    {
+      if( _mElemBnd.size() < 2 ) return 0;
+      size_t const ne = _mElemBnd.size() - 1;
+      size_t e = (size_t)( std::upper_bound( _mElemBnd.begin(), _mElemBnd.end(), tau ) - _mElemBnd.begin() );
+      e = e? e-1: 0;  if( e >= ne ) e = ne - 1;
+      if( side == FFDom::MINUS ){ if( e > 0 && std::fabs( tau - _mElemBnd[e] ) <= options.TTOL ) --e; }
+      else if( e+1 < ne && std::fabs( tau - _mElemBnd[e+1] ) <= options.TTOL ) ++e;
+      return e;
+    }
+
   //! @brief Is state @p i differential, i.e. does its derivative appear in some evolution row?
   bool _differential_state
     ( size_t const i )
@@ -452,14 +559,26 @@ class BASE_DYNAMIC
         for( auto const& [ ix, co ] : row ) if( ix == i ) return true;
       return false; }
 
-  //! @brief Build the consistent-initialisation system in its own graph.  Called at the end of extraction.
+  //! @brief Build BOTH consistent-initialisation systems, once, at the end of extraction.
   bool _build_ic_system
-    ( size_t const sg = 0 );
+    ();
+
+  //! @brief Assemble one of them: @p at_stop picks continuity rows over the INITIAL rows.
+  bool _assemble_ic
+    ( t_ICSys& S, bool const at_stop );
+
+  //! @brief Solve @p S at @p tau, with the time-varying inputs bound to their values there.
+  BASE_KINSOL::Report _ic_solve
+    ( t_ICSys& S, double const tau, std::vector<double>& x, std::vector<double>& dx,
+      BASE_KINSOL::Knobs const& k, std::vector<double> const& par );
+
+  //! @brief Constant values for the IC system, in _mC order.  Filled by the consumer where it already
+  //! receives them -- the constants are bound per solve(), so they cannot be baked in at build time.
+  std::vector<double>                  _dIcCst;
 
   //! @brief Left-side state values at a stop, the data of the continuity rows.  Sized _nx; only the
   //! DIFFERENTIAL entries are read, since an algebraic state is re-determined by its own rows.
   std::vector<double>                  _icLeft;
-  size_t                               _icNlft = 0;  //!< left-state placeholders in _dIcVar, after the derivatives
 
   //! @brief Read @p res as L * @p tgt + R, both as EXPRESSIONS, so a state-dependent coefficient is carried
   //! rather than refused.  L comes from differentiating a fresh leaf put in the target's place -- taking
@@ -710,14 +829,9 @@ BASE_DYNAMIC::_extract_from_model
       size_t const nn = sn.size();
       if( nn < 2 ){ rep.push_back( lv[elem] ); continue; }   // piecewise constant: the level itself
       FFVar const sc = ( tvar - te ) / he;                   // element-local coordinate in [0,1]
-      FFVar expr( 0. );
-      for( size_t j = 0; j < nn; ++j ){
-        FFVar Lj( 1. );
-        for( size_t k = 0; k < nn; ++k )
-          if( k != j ) Lj *= ( sc - sn[k] ) / ( sn[j] - sn[k] );
-        expr += Lj * lv[elem*nn + j];
-      }
-      rep.push_back( expr );
+      std::vector<FFVar> nodal;
+      for( size_t j = 0; j < nn; ++j ) nodal.push_back( lv[elem*nn + j] );
+      rep.push_back( _interp_level( sn, nodal, sc ) );
     }
     return FFModel::_dag->compose( ex, tgt, rep ); };
   auto subst_mass = [&]( size_t const elem ){            // the same input substitution, on the sparse rows
@@ -732,6 +846,9 @@ BASE_DYNAMIC::_extract_from_model
     std::vector<FFVar> R;
     for( size_t k = 0; k < res_raw.size(); ++k ) R.push_back( done[n++] );
     return std::make_pair( M, R ); };
+  _mMASSraw = mass_raw;  _mRESraw = res_raw;   // the IC systems are built from these, not from _mRES
+  _mTVInp   = tv_inputs;
+  _mElemBnd.assign( tdom.elem_bnd.begin(), tdom.elem_bnd.end() );
   if( tv_inputs.empty() ){
     _mDE .assign( 1, rhs );
     _mLHS.assign( 1, lhs );
@@ -755,6 +872,7 @@ BASE_DYNAMIC::_extract_from_model
 
   std::vector<FFVar> ic( _nx, FFVar( 0. ) );
   _mICRES.clear();  _mDOT.clear();
+  _mDotVar.clear();  _mLftVar.clear();
   if( _wants_initial_rows() ){
     _mDOT.resize( _nx );
     for( size_t i = 0; i < _nx; ++i ) _mDOT[i] = OpP( _mX[i], tvar );
@@ -974,6 +1092,25 @@ BASE_DYNAMIC::_extract_from_model
     for( size_t k = 0; k < _ns; ++k ) _mQUAD[k] = subst_inputs( quad, elem_of_stage( k ) );
   }
   _nq = _mQ.size();
+  // The IC system's placeholders are minted HERE, once, and not where _mDOT is built: they must be the
+  // LAST variables added to the model's dag.  Minting them mid-extraction -- before the parameters and
+  // the initial rows are finalised -- segfaults FFODESLV's embedding, which is why the original code
+  // created them inside _build_ic_system().  Hoisting them out of the per-call path is right; hoisting
+  // them EARLIER is not.
+  _mUpVar.clear();  _mInpParNdx.clear();
+  if( _wants_initial_rows() ){
+    _mDotVar.resize( _nx );  _mLftVar.resize( _nx );
+    for( size_t i = 0; i < _nx; ++i ){
+      _mDotVar[i] = FFModel::_dag->add_var( "ic_d"   + std::to_string(i) );
+      _mLftVar[i] = FFModel::_dag->add_var( "ic_lft" + std::to_string(i) );
+    }
+    // one placeholder per time-varying input, standing for its value at the instant being solved at, and
+    // the parameter indices of that input's levels so the value can be computed there
+    for( size_t j = 0; j < _mTVInp.size(); ++j ){
+      _mUpVar.push_back( FFModel::_dag->add_var( "ic_u" + std::to_string(j) ) );
+      _mInpParNdx.push_back( parameter_index( _mTVInp[j] ) );
+    }
+  }
   if( !_build_ic_system() ) return false;
   return true;
 }
@@ -1008,110 +1145,127 @@ BASE_DYNAMIC::_split_in
 inline
 bool
 BASE_DYNAMIC::_build_ic_system
-( size_t const sg )
+()
 {
-  delete _icDag; _icDag = new FFGraph;
-  _icRow.clear(); _icUnk.clear(); _icDotOf.clear(); _icEval.clear();
-  // Stage 0 takes the INITIAL rows; a later stage takes CONTINUITY on the differential states, which is
-  // §3.13's default transition -- the same system, differing only in which rows arrive and in the left
-  // state being data.  So a stage restart IS a consistent initialisation, not a separate mechanism.
-  bool const at_t0 = ( sg == 0 );
-  if( _mRES.empty() || ( at_t0 && _mICRES.empty() ) ) return true;
-  size_t const S = ( sg < _mRES.size() )? sg: _mRES.size() - 1;
+  _icStart.ok = _icStop.ok = false;
+  if( _mRESraw.empty() ) return true;
+  // BOTH systems, once.  They share every row but the last block: the start takes the INITIAL rows, a stop
+  // takes CONTINUITY on the differential states with the left state as data.  Built from the RAW rows, so
+  // the time-varying inputs are still present to be replaced by _mUpVar and bound per stop -- that, and
+  // nothing else, is what made this per-stage before.
+  bool ok = _assemble_ic( _icStart, false );
+  if( ok && _wants_initial_rows() ) ok = _assemble_ic( _icStop, true );
+  return ok;
+}
 
-  // 1. the rows, in the MODEL's graph: the interior rows of stage 0, plus the initial rows.
+inline
+bool
+BASE_DYNAMIC::_assemble_ic
+( t_ICSys& S, bool const at_stop )
+{
+  delete S.dag;  S.dag = new FFGraph;
+  S.row.clear(); S.unk.clear(); S.dotOf.clear(); S.eval.clear();
+  if( !at_stop && _mICRES.empty() ) return true;
+
+  // 1. the rows, in the MODEL's graph: the undivided evolution rows, then the closing block.
   std::vector<FFVar> rows;
-  for( size_t k = 0; k < _mRES[S].size(); ++k ){
-    FFVar r = _mRES[S][k];
-    for( auto const& [ ix, co ] : _mMASS[S][k] ) r += co * _mDOT[ix];   // M.dx + R, undivided
+  for( size_t k = 0; k < _mRESraw.size(); ++k ){
+    FFVar r = _mRESraw[k];
+    for( auto const& [ ix, co ] : _mMASSraw[k] ) r += co * _mDOT[ix];   // M.dx + R, undivided
     rows.push_back( r );
   }
   size_t const nDyn = rows.size();
-  std::vector<FFVar> lph;                       // left-state placeholders, data of the continuity rows
-  if( at_t0 ) rows.insert( rows.end(), _mICRES.begin(), _mICRES.end() );
-  else{
-    lph.resize( _nx );
-    for( size_t i = 0; i < _nx; ++i ) lph[i] = FFModel::_dag->add_var( "ic_lft" + std::to_string(i) );
+  if( !at_stop ) rows.insert( rows.end(), _mICRES.begin(), _mICRES.end() );
+  else
     for( size_t i = 0; i < _nx; ++i )
-      if( _differential_state( i ) ) rows.push_back( _mX[i] - lph[i] );
+      if( _differential_state( i ) ) rows.push_back( _mX[i] - _mLftVar[i] );
+
+  // 2. the time-varying inputs become the placeholders u(tau), bound per stop.  compose(), not
+  //    substitute(): an input is a plain VARIABLE, where a derivative is an auxiliary node.
+  if( !_mTVInp.empty() ){
+    try{ rows = FFModel::_dag->compose( rows, _mTVInp, _mUpVar ); }
+    catch( ... ){ _extractError = "parameterising the time-varying inputs of the initial-condition rows failed";
+                  return false; }
   }
 
-  // 2. substitute every derivative node for a plain variable -- FFGraph::substitute takes auxiliary
+  // 3. substitute every derivative node for a plain variable -- FFGraph::substitute takes auxiliary
   //    nodes, which a derivative is.  After this the rows are ordinary expressions.
-  std::vector<FFVar> ph( _nx );
-  for( size_t i = 0; i < _nx; ++i ) ph[i] = FFModel::_dag->add_var( "ic_d" + std::to_string(i) );
   std::vector<FFVar> plain;
-  try{ plain = FFModel::_dag->substitute( rows, _mDOT, ph ); }
+  try{ plain = FFModel::_dag->substitute( rows, _mDOT, _mDotVar ); }
   catch( ... ){ _extractError = "substituting the state derivatives in the initial-condition rows failed";
                 return false; }
 
-  // 3. which derivatives actually appear?  Those are the extra unknowns; an algebraic state has none.
+  // 4. which derivatives actually appear?  Those are the extra unknowns; an algebraic state has none.
   std::vector<bool> used( _nx, false );
-  std::vector<FFVar> const dPh = FFModel::_dag->FAD( plain, ph );
+  std::vector<FFVar> const dPh = FFModel::_dag->FAD( plain, _mDotVar );
   for( size_t r = 0; r < plain.size(); ++r )
     for( size_t i = 0; i < _nx; ++i ){
       FFVar const& d = dPh[ r*_nx + i ];
       if( !( d.cst() && d.num().val() == 0. ) ) used[i] = true;
     }
 
-  // 4. move it all into this system's OWN graph
+  // 5. move it all into this system's OWN graph
   std::vector<FFVar> srcV{ _mT[0] }, dstV( 1 );
   for( size_t i = 0; i < _nx; ++i ) srcV.push_back( _mX[i] );
   for( size_t j = 0; j < _np; ++j ) srcV.push_back( _mP[j] );
-  for( size_t i = 0; i < _nx; ++i ) if( used[i] ) srcV.push_back( ph[i] );
-  for( auto const& v : lph ) srcV.push_back( v );
+  for( size_t j = 0; j < _nc; ++j ) srcV.push_back( _mC[j] );
+  for( auto const& v : _mUpVar ) srcV.push_back( v );
+  for( size_t i = 0; i < _nx; ++i ) if( used[i] ) srcV.push_back( _mDotVar[i] );
+  if( at_stop ) for( size_t i = 0; i < _nx; ++i ) srcV.push_back( _mLftVar[i] );
   dstV.assign( srcV.size(), FFVar() );
-  _icDag->insert( FFModel::_dag, srcV.size(), srcV.data(), dstV.data() );
-  _icAll = dstV;
-  _icRow.assign( plain.size(), FFVar() );
-  _icDag->insert( FFModel::_dag, plain.size(), plain.data(), _icRow.data() );
+  S.dag->insert( FFModel::_dag, srcV.size(), srcV.data(), dstV.data() );
+  S.all = dstV;
+  S.row.assign( plain.size(), FFVar() );
+  S.dag->insert( FFModel::_dag, plain.size(), plain.data(), S.row.data() );
 
-  // unknowns: the states, then the derivatives that appear
-  for( size_t i = 0; i < _nx; ++i ) _icUnk.push_back( dstV[ 1 + i ] );
-  { size_t at = 1 + _nx + _np;
-    for( size_t i = 0; i < _nx; ++i ) if( used[i] ){ _icUnk.push_back( dstV[at++] ); _icDotOf.push_back( i ); } }
+  size_t const nU = _mUpVar.size();
+  for( size_t i = 0; i < _nx; ++i ) S.unk.push_back( dstV[ 1 + i ] );
+  { size_t at = 1 + _nx + _np + _nc + nU;
+    for( size_t i = 0; i < _nx; ++i ) if( used[i] ){ S.unk.push_back( dstV[at++] ); S.dotOf.push_back( i ); } }
+  S.nLft = at_stop? _nx: 0;
 
-  if( _icRow.size() != _icUnk.size() ){
-    _extractError = "the consistent-initialisation system is not square: " + std::to_string( _icRow.size() )
-                  + " row(s) (" + std::to_string( nDyn ) + " dynamic + " + std::to_string( _mICRES.size() )
-                  + " initial) for " + std::to_string( _icUnk.size() ) + " unknown(s)";
-    _icRow.clear(); _icUnk.clear();
+  if( S.row.size() != S.unk.size() ){
+    _extractError = "the consistent-initialisation system is not square: " + std::to_string( S.row.size() )
+                  + " row(s) (" + std::to_string( nDyn ) + " dynamic + "
+                  + std::to_string( S.row.size() - nDyn ) + ( at_stop? " continuity": " initial" )
+                  + ") for " + std::to_string( S.unk.size() ) + " unknown(s)";
+    S.row.clear(); S.unk.clear();
     return true;                                   // not fatal: the consumer reports it if it needs the solve
   }
   // SFAD, not FAD: the dense form builds n^2 expressions and evaluates them all, most of them structural
   // zeros.  This mirrors what the integrator already does for its own Jacobian, and is what lets a sparse
   // linear solver be offered under KINSOL rather than only a dense one.
-  _icEval = _icRow;
-  { auto const Js = _icDag->SFAD( _icRow.size(), _icRow.data(), _icUnk.size(), _icUnk.data() );
-    _icNnz = std::get<0>( Js );
-    _icJrow.assign( _icNnz, 0 ); _icJcol.assign( _icNnz, 0 );
-    for( unsigned e = 0; e < _icNnz; ++e ){
-      _icJrow[e] = std::get<1>( Js )[e];
-      _icJcol[e] = std::get<2>( Js )[e];
+  S.eval = S.row;
+  { auto const Js = S.dag->SFAD( S.row.size(), S.row.data(), S.unk.size(), S.unk.data() );
+    S.nnz = std::get<0>( Js );
+    S.jrow.assign( S.nnz, 0 ); S.jcol.assign( S.nnz, 0 );
+    for( unsigned e = 0; e < S.nnz; ++e ){
+      S.jrow[e] = std::get<1>( Js )[e];
+      S.jcol[e] = std::get<2>( Js )[e];
     }
-    _icEval.insert( _icEval.end(), std::get<3>( Js ), std::get<3>( Js ) + _icNnz );
+    S.eval.insert( S.eval.end(), std::get<3>( Js ), std::get<3>( Js ) + S.nnz );
     delete[] std::get<1>( Js ); delete[] std::get<2>( Js ); delete[] std::get<3>( Js );
     // CSC, as the integrator's KLU path builds it, plus where each SFAD entry lands in the value array
-    size_t const n = _icUnk.size();
+    size_t const n = S.unk.size();
     std::vector< std::pair<size_t,size_t> > key;        // (col, row) ordered
-    for( size_t e = 0; e < _icNnz; ++e ) key.emplace_back( _icJcol[e], _icJrow[e] );
-    std::vector<size_t> ord( _icNnz );
-    for( size_t e = 0; e < _icNnz; ++e ) ord[e] = e;
+    for( size_t e = 0; e < S.nnz; ++e ) key.emplace_back( S.jcol[e], S.jrow[e] );
+    std::vector<size_t> ord( S.nnz );
+    for( size_t e = 0; e < S.nnz; ++e ) ord[e] = e;
     std::sort( ord.begin(), ord.end(), [&]( size_t a, size_t b ){ return key[a] < key[b]; } );
-    _icSp.colptr.assign( n + 1, 0 );
-    _icSp.rowidx.assign( _icNnz, 0 );
-    _icAt.assign( _icNnz, 0 );
-    for( size_t k2 = 0; k2 < _icNnz; ++k2 ){
+    S.sp.colptr.assign( n + 1, 0 );
+    S.sp.rowidx.assign( S.nnz, 0 );
+    S.at.assign( S.nnz, 0 );
+    for( size_t k2 = 0; k2 < S.nnz; ++k2 ){
       size_t const e = ord[k2];
-      _icSp.rowidx[k2] = (sunindextype)_icJrow[e];
-      _icAt[e] = k2;
-      ++_icSp.colptr[ _icJcol[e] + 1 ];
+      S.sp.rowidx[k2] = (sunindextype)S.jrow[e];
+      S.at[e] = k2;
+      ++S.sp.colptr[ S.jcol[e] + 1 ];
     }
-    for( size_t c = 0; c < n; ++c ) _icSp.colptr[c+1] += _icSp.colptr[c];
-    _icSp.jac = &BASE_DYNAMIC::_ic_spjac; }
-  _dIcEval.assign( _icEval.size(), 0. );
-  _icNlft = lph.size();
-  _dIcVar.assign( 1 + _nx + _np + _icDotOf.size() + _icNlft, 0. );
+    for( size_t c = 0; c < n; ++c ) S.sp.colptr[c+1] += S.sp.colptr[c];
+    S.sp.jac = &BASE_DYNAMIC::_ic_spjac; }
+  S.dEval.assign( S.eval.size(), 0. );
+  S.dVar.assign( 1 + _nx + _np + _nc + nU + S.dotOf.size() + S.nLft, 0. );
+  S.ok = true;
   return true;
 }
 
@@ -1143,30 +1297,76 @@ BASE_DYNAMIC::solve_ic
 ( std::vector<double>& x, std::vector<double>& dx, BASE_KINSOL::Knobs const& k,
   std::vector<double> const& par )
 {
+  _icLeft.clear();
+  return _ic_solve( _icStart, _dT.empty()? 0.: _dT[0], x, dx, k, par );
+}
+
+inline
+BASE_KINSOL::Report
+BASE_DYNAMIC::_ic_solve
+( t_ICSys& S, double const tau, std::vector<double>& x, std::vector<double>& dx,
+  BASE_KINSOL::Knobs const& k, std::vector<double> const& par )
+{
   BASE_KINSOL::Report R;
-  if( _icRow.empty() ){
+  if( S.row.empty() ){
     R.message = _extractError.empty()? "no consistent-initialisation system was built": _extractError;
     return R;
   }
-  _dIcVar[0] = _dT.empty()? 0.: _dT[0];
-  for( size_t j = 0; j < _np && j < par.size(); ++j ) _dIcVar[ 1 + _nx + j ] = par[j];
+  size_t const nU = _mUpVar.size();
+  S.dVar[0] = tau;                      // the instant this system is being solved at, NOT always t0
+  for( size_t j = 0; j < _np && j < par.size(); ++j ) S.dVar[ 1 + _nx + j ] = par[j];
+  for( size_t j = 0; j < _nc && j < _dIcCst.size(); ++j ) S.dVar[ 1 + _nx + _np + j ] = _dIcCst[j];
+
+  // Bind each time-varying input to its value AT tau.  This is the whole of what used to require a system
+  // per stage: the geometry lives in computing these numbers, never in the rows.  u(tau^+) -- the element
+  // STARTING at tau -- because the rows being solved are those in force after the stop.
+  if( nU ){
+    size_t const e = _elem_of( tau, FFDom::PLUS );
+    double const te = _mElemBnd.at( e ), he = _mElemBnd.at( e+1 ) - te;
+    double const sc = he > 0.? ( tau - te ) / he: 0.;
+    for( size_t j = 0; j < nU; ++j ){
+      auto const& sn  = _mInpNodes[ _mTVInp[j].name() ];
+      auto const& ndx = _mInpParNdx[j];
+      size_t const nn = sn.size();
+      std::vector<double> nodal;
+      if( nn < 2 ){ if( e < ndx.size() ) nodal.push_back( par.at( ndx[e] ) ); }
+      else for( size_t q = 0; q < nn && e*nn+q < ndx.size(); ++q ) nodal.push_back( par.at( ndx[e*nn+q] ) );
+      S.dVar[ 1 + _nx + _np + _nc + j ] = nodal.empty()? 0.: _interp_level( sn, nodal, sc );
+    }
+  }
+
+  size_t const dot0 = 1 + _nx + _np + _nc + nU;
   { std::vector<double> const ref = _ic_seed();
-    for( size_t i = 0; i < _nx; ++i ) _dIcVar[1+i] = _icLeft.size() == _nx? _icLeft[i]: ref[i];
-    for( size_t d = 0; d < _icDotOf.size(); ++d ) _dIcVar[ 1 + _nx + _np + d ] = 0.;
+    for( size_t i = 0; i < _nx; ++i ) S.dVar[1+i] = _icLeft.size() == _nx? _icLeft[i]: ref[i];
+    for( size_t d = 0; d < S.dotOf.size(); ++d ) S.dVar[ dot0 + d ] = 0.;
     // the continuity rows read the LEFT state as data; seeding from it too is the best start there is
-    for( size_t i = 0; i < _icNlft && i < _icLeft.size(); ++i )
-      _dIcVar[ 1 + _nx + _np + _icDotOf.size() + i ] = _icLeft[i]; }
+    for( size_t i = 0; i < S.nLft && i < _icLeft.size(); ++i )
+      S.dVar[ dot0 + S.dotOf.size() + i ] = _icLeft[i]; }
 
-  std::vector<double> z( _icUnk.size() );
-  for( size_t i = 0; i < _nx; ++i ) z[i] = _dIcVar[1+i];
-  for( size_t d = 0; d < _icDotOf.size(); ++d ) z[_nx+d] = _dIcVar[ 1 + _nx + _np + d ];
+  std::vector<double> z( S.unk.size() );
+  for( size_t i = 0; i < _nx; ++i ) z[i] = S.dVar[1+i];
+  for( size_t d = 0; d < S.dotOf.size(); ++d ) z[_nx+d] = S.dVar[ dot0 + d ];
 
-  R = BASE_KINSOL::solve( (int)z.size(), &BASE_DYNAMIC::_ic_res, &BASE_DYNAMIC::_ic_jac, this, z, k, &_icSp );
+  _icCur = &S;
+  R = BASE_KINSOL::solve( (int)z.size(), &BASE_DYNAMIC::_ic_res, &BASE_DYNAMIC::_ic_jac, this, z, k, &S.sp );
+  _icCur = nullptr;
 
   x.assign( _nx, 0. ); dx.assign( _nx, 0. );
   for( size_t i = 0; i < _nx; ++i ) x[i] = z[i];
-  for( size_t d = 0; d < _icDotOf.size(); ++d ) dx[ _icDotOf[d] ] = z[_nx+d];
+  for( size_t d = 0; d < S.dotOf.size(); ++d ) dx[ S.dotOf[d] ] = z[_nx+d];
   return R;
+}
+
+//! Scatter the KINSOL iterate into the current system's value array: the states first, then the
+//! derivative unknowns, which sit after the parameters, constants and input placeholders.
+inline
+void
+BASE_DYNAMIC::_ic_scatter
+( BASE_DYNAMIC* M, int const n, double const* z )
+{
+  t_ICSys& S = *M->_icCur;
+  size_t const dot0 = 1 + M->_nx + M->_np + M->_nc + M->_mUpVar.size();
+  for( int i = 0; i < n; ++i ) S.dVar[ i < (int)M->_nx? 1+i: dot0 + ( i - M->_nx ) ] = z[i];
 }
 
 inline
@@ -1175,10 +1375,11 @@ BASE_DYNAMIC::_ic_res
 ( int const n, double const* z, double* f, void* user )
 {
   BASE_DYNAMIC* M = static_cast<BASE_DYNAMIC*>( user );
-  for( int i = 0; i < n; ++i ) M->_dIcVar[ i < (int)M->_nx? 1+i: 1 + M->_nx + M->_np + ( i - M->_nx ) ] = z[i];
-  M->_icDag->eval( M->_icWRK, M->_icRow.size(), M->_icEval.data(), M->_dIcEval.data(),
-                   M->_icUnkAll().size(), M->_icUnkAll().data(), M->_dIcVar.data() );
-  for( int i = 0; i < n; ++i ) f[i] = M->_dIcEval[i];
+  t_ICSys& S = *M->_icCur;
+  _ic_scatter( M, n, z );
+  S.dag->eval( S.wrk, S.row.size(), S.eval.data(), S.dEval.data(),
+               S.all.size(), S.all.data(), S.dVar.data() );
+  for( int i = 0; i < n; ++i ) f[i] = S.dEval[i];
   return 0;
 }
 
@@ -1188,13 +1389,14 @@ BASE_DYNAMIC::_ic_jac
 ( int const n, double const* z, double* J, void* user )
 {
   BASE_DYNAMIC* M = static_cast<BASE_DYNAMIC*>( user );
-  for( int i = 0; i < n; ++i ) M->_dIcVar[ i < (int)M->_nx? 1+i: 1 + M->_nx + M->_np + ( i - M->_nx ) ] = z[i];
-  M->_icDag->eval( M->_icWRK, M->_icEval.size(), M->_icEval.data(), M->_dIcEval.data(),
-                   M->_icUnkAll().size(), M->_icUnkAll().data(), M->_dIcVar.data() );
-  size_t const nr = M->_icRow.size();
+  t_ICSys& S = *M->_icCur;
+  _ic_scatter( M, n, z );
+  S.dag->eval( S.wrk, S.eval.size(), S.eval.data(), S.dEval.data(),
+               S.all.size(), S.all.data(), S.dVar.data() );
+  size_t const nr = S.row.size();
   for( int i = 0; i < n*n; ++i ) J[i] = 0.;                       // scatter the SFAD entries, column-major
-  for( size_t e = 0; e < M->_icNnz; ++e )
-    J[ M->_icJrow[e] + (size_t)n * M->_icJcol[e] ] = M->_dIcEval[ nr + e ];
+  for( size_t e = 0; e < S.nnz; ++e )
+    J[ S.jrow[e] + (size_t)n * S.jcol[e] ] = S.dEval[ nr + e ];
   return 0;
 }
 
@@ -1204,11 +1406,12 @@ BASE_DYNAMIC::_ic_spjac
 ( int const n, double const* z, double* val, void* user )
 {
   BASE_DYNAMIC* M = static_cast<BASE_DYNAMIC*>( user );
-  for( int i = 0; i < n; ++i ) M->_dIcVar[ i < (int)M->_nx? 1+i: 1 + M->_nx + M->_np + ( i - M->_nx ) ] = z[i];
-  M->_icDag->eval( M->_icWRK, M->_icEval.size(), M->_icEval.data(), M->_dIcEval.data(),
-                   M->_icUnkAll().size(), M->_icUnkAll().data(), M->_dIcVar.data() );
-  size_t const nr = M->_icRow.size();
-  for( size_t e = 0; e < M->_icNnz; ++e ) val[ M->_icAt[e] ] = M->_dIcEval[ nr + e ];
+  t_ICSys& S = *M->_icCur;
+  _ic_scatter( M, n, z );
+  S.dag->eval( S.wrk, S.eval.size(), S.eval.data(), S.dEval.data(),
+               S.all.size(), S.all.data(), S.dVar.data() );
+  size_t const nr = S.row.size();
+  for( size_t e = 0; e < S.nnz; ++e ) val[ S.at[e] ] = S.dEval[ nr + e ];
   return 0;
 }
 

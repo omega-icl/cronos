@@ -72,7 +72,7 @@ int main()
         // reinitialisation that produced a plausible-but-wrong post-boundary state would have passed.
         { std::vector<double> xL{ y1, 1.*y1 }, xp, dxp;          // the left state at the switch
           BASE_KINSOL::Knobs kk;
-          auto const R = M.restart_ic( 1, xL, xp, dxp, kk, { 1., 2. } );
+          auto const R = M.restart_ic( 1., xL, xp, dxp, kk, { 1., 2. } );   // the stop TIME, t = 1
           check( "restart_ic resolves the boundary", R.status == BASE_KINSOL::OK? 1.: 0., 1., 0. );
           if( R.status == BASE_KINSOL::OK ){
             check( "y continuous across the switch",        xp[0],  y1,          1e-12 );

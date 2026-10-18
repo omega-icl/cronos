@@ -17,6 +17,7 @@
 #include <cassert>
 #include <cmath>
 #include <iomanip>
+#include <iostream>
 #include <fstream>
 #include <algorithm>
 #include <vector>
@@ -620,6 +621,10 @@ ODESLV_BASE::_INI_D_STA
 {
   // Set constants
   for( unsigned ic=0; c && ic<_nc; ++ic ) _pC[ic].set( c[ic] );
+  // and give the shared IC system its own copy: it is evaluated in _icDag, which these .set() values
+  // do not reach
+  _dIcCst.assign( _nc, 0. );
+  for( unsigned ic=0; c && ic<_nc; ++ic ) _dIcCst[ic] = c[ic];
 
   // Size and set DAG evaluation arrays
   _nVAR0 = _nx+_np+1;
@@ -682,17 +687,23 @@ ODESLV_BASE::_IC_D_STA
 ( double const& t, REALTYPE* x )
 {
   *_Dt = t; // current time
-  // The DIVIDED form is exact only where every INITIAL row pins one state linearly with no derivative.
+  // The DIVIDED form is exact only where every INITIAL row pins one state linearly with no derivative,
+  // and the bypass is a KNOB (INITIAL.BYPASS_EXPLICIT) rather than a fixed rule, so the shared solve can
+  // be forced on an explicit model and the two routes compared on one model.
   // Otherwise ic[i] carries other states, or a derivative, and cannot be evaluated at all -- so the rows
   // go to the SHARED consistent-initialisation solve in BASE_DYNAMIC instead, which poses them jointly
   // with the dynamics residual at t0 over (x, dx/dt).  The explicit case stays on the fast path: a Newton
   // solve buys nothing there, and it is the common one.
-  if( !explicit_initial_conditions() && !ic_rows().empty() ){
+  if( !( _ic_bypass_explicit() && explicit_initial_conditions() ) && !ic_rows().empty() ){
     std::vector<double> xv, dxv, par( _np, 0. );
     for( size_t j = 0; j < _np; ++j ) par[j] = _DVAR[ _nx + 1 + j ];
-    BASE_KINSOL::Knobs k;
-    BASE_KINSOL::Report const R = BASE_DYNAMIC::solve_ic( xv, dxv, k, par );
+    BASE_KINSOL::Report const R = BASE_DYNAMIC::solve_ic( xv, dxv, _ic_knobs(), par );
     if( R.status == BASE_KINSOL::FAILED ) return false;
+    // A rank-deficient root is a DIAGNOSIS, not a failure: the iterate is accurate only to sqrt(FTOL)
+    // there, so say which it is rather than returning it as if it were converged, exactly as DAESLV does
+    // at its own stops.  Dropping it here was an asymmetry between the two consumers of one solve.
+    if( R.status == BASE_KINSOL::RANK_DEFICIENT )
+      std::cerr << "ODESLV ** at the initial time: " << R.message << std::endl;
     for( size_t i = 0; i < _nx; ++i ) ((double*)x)[i] = xv[i];
     return true;
   }

@@ -191,10 +191,14 @@ public:
       //! for rows already explicit in each state; KINSOL solves the INITIAL rows TOGETHER WITH the interior
       //! rows at t0, which is what rows implicit in each other need (plan D4/§3.12).
       enum IC_SOLVER { IDACALCIC=0, KINSOL };
-      //! @brief the corrector to use (default: IDACALCIC)
-      IC_SOLVER SOLVER = IDACALCIC;
+      //! @brief the corrector to use (default: KINSOL -- the SHARED system, so the initial state and its
+      //! derivative come from the same solve ODESLV takes.  IDACALCIC is kept as the IDAS-native path)
+      IC_SOLVER SOLVER = KINSOL;
       //! @brief the KINSOL corrector's own knobs, embedded rather than a fourth options object
       BASE_KINSOL::Knobs KIN;
+      //! @brief skip the solve where every INITIAL row pins one state linearly with no derivative, the
+      //! case in which the divided form is exact (default: true)
+      bool BYPASS_EXPLICIT = true;
 
       //! @brief Consistent-initialisation mode [Default: YA_YDP] (IDACalcIC)
       CALCIC_MODE CALCIC = YA_YDP;

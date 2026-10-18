@@ -10,6 +10,7 @@
 namespace py = pybind11;
 
 void mc_ffdom(py::module_&);
+void mc_base_kinsol(py::module_&);
 void mc_ffmodel(py::module_&);
 void mc_odeslv(py::module_&);
 void mc_ffodeslv(py::module_&);
@@ -72,6 +73,7 @@ from ``pymcpp``, which this module imports.
   }
 #endif
   mc_ffdom(m);
+  mc_base_kinsol(m);   // the IC-solve types both solvers' INITIAL groups hold by value
   mc_ffmodel(m);
   mc_odeslv(m);    // after mc_ffmodel: ODESLV derives from FFModel
   mc_ffodeslv(m);  // after mc_odeslv: FFODESLV takes an ODESLV

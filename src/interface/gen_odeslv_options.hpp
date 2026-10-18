@@ -34,4 +34,30 @@ bind_odeslv_options(PyOpt& c)
       "every live use was 0 or 1, and it is now SOLVE.VERBOSE, beside "
       "OCFESLV's option of the same name. The model's own verbosity stays "
       "DISPLAY_LEVEL, inherited from FFModel::Options.");
+  py::class_<mc::ODESLV_CVODES::Options::t_Initial> c_INITIAL(
+      c, "t_Initial",
+      "How the initial conditions are resolved. An ODE consumer has one too, "
+      "because the INITIAL rows can be implicit in each other or carry a "
+      "derivative, and then one evaluation of the divided form is not a "
+      "solution of them: the rows go to the SHARED system in BASE_DYNAMIC, "
+      "posed jointly with the dynamics residual at t0 over (x, dx/dt). Same "
+      "group, same knobs as DAESLV's.");
+  c_INITIAL.def(py::init<>());
+  c_INITIAL.def_readwrite("KIN", &mc::ODESLV_CVODES::Options::t_Initial::KIN,
+                          "the KINSOL corrector's own knobs, embedded rather "
+                          "than a third options object");
+  c_INITIAL.def_readwrite(
+      "BYPASS_EXPLICIT",
+      &mc::ODESLV_CVODES::Options::t_Initial::BYPASS_EXPLICIT,
+      "skip the solve where every INITIAL row pins one state linearly with no "
+      "derivative, the case in which the divided form is exact and a Newton "
+      "iteration buys nothing (default: true)");
+  c.def_readwrite(
+      "INITIAL", &mc::ODESLV_CVODES::Options::INITIAL,
+      "How the initial conditions are resolved. An ODE consumer has one too, "
+      "because the INITIAL rows can be implicit in each other or carry a "
+      "derivative, and then one evaluation of the divided form is not a "
+      "solution of them: the rows go to the SHARED system in BASE_DYNAMIC, "
+      "posed jointly with the dynamics residual at t0 over (x, dx/dt). Same "
+      "group, same knobs as DAESLV's.");
 }

@@ -184,7 +184,8 @@ public:
       {
         FFModel::Options::operator=( options );
         BASE_CVODES::Options::operator=( options );
-        OUTPUT = options.OUTPUT;
+        OUTPUT  = options.OUTPUT;
+        INITIAL = options.INITIAL;
         return *this;
       }
 
@@ -196,10 +197,37 @@ public:
       //! @brief Whether or not to record results (default: 0)
       unsigned RESRECORD = 0;
     } OUTPUT;
+
+    //! @brief How the initial conditions are resolved.  An ODE consumer has one too, because the INITIAL
+    //! rows can be implicit in each other or carry a derivative, and then one evaluation of the divided
+    //! form is not a solution of them: the rows go to the SHARED system in BASE_DYNAMIC, posed jointly
+    //! with the dynamics residual at t0 over (x, dx/dt).  Same group, same knobs as DAESLV's.
+    struct t_Initial
+    {
+      //! @brief the KINSOL corrector's own knobs, embedded rather than a third options object
+      BASE_KINSOL::Knobs KIN;
+      //! @brief skip the solve where every INITIAL row pins one state linearly with no derivative, the
+      //! case in which the divided form is exact and a Newton iteration buys nothing (default: true)
+      bool BYPASS_EXPLICIT = true;
+    } INITIAL;
    };
 
   //! @brief The options of this solver
   Options options;
+
+  //! @brief The IC knobs, from this solver's INITIAL group.
+  BASE_KINSOL::Knobs _ic_knobs
+    ()
+    const
+    override
+    { return options.INITIAL.KIN; }
+
+  //! @brief Whether the explicit fast path may be taken; see BASE_DYNAMIC's hook.
+  bool _ic_bypass_explicit
+    ()
+    const
+    override
+    { return options.INITIAL.BYPASS_EXPLICIT; }
 
   //! @brief Structure for setting up storing the solver exceptions
   class Exceptions

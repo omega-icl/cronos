@@ -185,18 +185,6 @@ class ODESLV_BASE
   //! @brief The revision of the ODESLV headers (HEADER_ID), e.g. for a bug report
   static char const* revision() { return HEADER_ID; }
 
-  //! @brief The block of output @p ndx (in add_output() order) in val_function(): (first, count).  A scalar output
-  //! takes ONE value; an output DISTRIBUTED over the evolution direction takes one value per kept STAGE TIME
-  //! (ODESLV has no collocation nodes), in time order.  (max, 0) if setup() has not run or @p ndx is out of range --
-  //! the convention of OCFESLV::blk_fct, so a script reads the outputs of either solver alike (WORKPLAN 2.2, 1.7).
-  std::pair<size_t,size_t> blk_fct
-    ( size_t const ndx )
-    const
-    {
-      return this->is_setup() && ndx < _blkFct.size()? _blkFct[ndx]
-                                                     : std::make_pair( std::numeric_limits<size_t>::max(), size_t(0) );
-    }
-
 protected:
   // ---- what the old base class provided, now this class's own --------------------------------------------
   //! @brief The parameter indices the sensitivity runs over, in FFModel's CANONICAL CONTROL ORDER, so

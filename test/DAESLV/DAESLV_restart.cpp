@@ -88,16 +88,21 @@ int main()
     check( "y(T) == the closed form, across 7 restarts", yT, ye, 1e-7 );
     check( "z(T) == u_last * the closed form",           zT, P.back() * ye, 1e-7 ); }
 
-  // RECORDED, not gated: the same model through IDACalcIC does NOT reproduce it.  IDACalcIC is handed
-  // the same stops and the same rows, and YA_YDP_INIT should hold the differential state y fixed and
-  // solve only z and the derivatives -- continuity, exactly what the KINSOL stop imposes.  It drifts
-  // instead, by ~3e-2 at T over eight elements.  Orthogonal to the parameterised system (the KINSOL path
-  // is the one that matches the closed form); worth a look before INITIAL.SOLVER=IDACALCIC is relied on.
-  M.options.INITIAL.SOLVER = BASE_IDAS::Options::t_Initial::IDACALCIC;
+  // solve() must be IDEMPOTENT on a MULTI-STAGE model.  DAESLV_test1 checks idempotence on a single
+  // stage, where the rows never change, so it could not see that the loop left _build_rows at the LAST
+  // stage and a second solve started stage 0 with the previous run's input levels.  The error here was
+  // 3.4e-02 at T, and it was reproducible -- a wrong answer, not a flaky one.
   M.solve( P );
-  std::cout << "    [recorded] IDACalcIC on the same stops: y(T)=" << std::scientific << std::setprecision(10)
-            << M.val_state().back()[0] << "  vs KINSOL " << yT
-            << "  d=" << std::setprecision(2) << std::fabs( M.val_state().back()[0] - yT ) << "\n";
+  check( "solve() is idempotent on y(T)", M.val_state().back()[0], yT, 0. );
+  check( "solve() is idempotent on z(T)", M.val_state().back()[1], zT, 0. );
+
+  // The two correctors AGREE on this model, each from its own setup().  Switching INITIAL.SOLVER after
+  // setup() is what used to differ, and that was the idempotence defect above, not the corrector:
+  // IDACalcIC in YA_YDP_INIT tracks the closed form here to 5e-10.
+  M.options.INITIAL.SOLVER = BASE_IDAS::Options::t_Initial::IDACALCIC;
+  M.setup();
+  M.solve( P );
+  check( "IDACalcIC agrees with KINSOL on y(T)", M.val_state().back()[0], yT, 1e-7 );
 
   std::cout << "\n==========  DAESLV_restart: " << n_pass << " passed, " << n_fail << " failed -- "
             << ( n_fail? "FAILURES": "ALL PASS" ) << "  ==========\n\n";

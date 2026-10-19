@@ -143,6 +143,21 @@ public:
 
   //! @brief Retreive state values at stage times -- one entry for the initial point and one per stage, as
   //! ODESLV_CVODES's _xk is filled, so val_state().back() is the state at the end of the horizon.
+  //! @brief The output functions, in add_output() order via function_block().  A term is accumulated at
+  //! each stage time it belongs to, so a distributed output contributes once per stage.
+  std::vector<double> const& val_function
+    ()
+    const
+    { return _dF; }
+
+  //! @brief Quadratures at every stage time, one row per time, _nq wide.  Each row is that STAGE's
+  //! increment, not a running total: a quadrature restarts at zero on every stage, and summing them is
+  //! val_function()'s job.  Row 0 is zero.
+  std::vector< std::vector<double> > const& val_quad
+    ()
+    const
+    { return _qk; }
+
   std::vector< std::vector<double> > const& val_state
     ()
     const
@@ -172,6 +187,7 @@ protected:
   FFGraph* _dag = nullptr;
   std::vector<FFVar> _pT, _pX, _pP, _pC, _pYP;    //!< the inserted variables, and dy/dt, all local
   struct StagePlan {
+    std::vector<FFVar> Q;                    //!< this stage's _nq quadrature integrands, in _dag
     std::vector<FFVar> F;                    //!< the residual rows of this stage
     std::vector<FFVar> eval;                 //!< [ F, dF/dy entries, dF/dy' entries ]
     std::vector<int>   ixJy, ixJyp;          //!< where each entry lands in the CSC value array
@@ -193,6 +209,21 @@ protected:
   SUNLinearSolver _sun_ls = nullptr;
   std::vector<FFVar>  _vInpLvl;              //!< the per-stage input LEVEL variables, in declaration order
   std::vector< std::pair<size_t,size_t> > _coefAt;  //!< (row, state) of each coefficient, in eval order
+  //! @brief The function-evaluation context.  Its OWN variable list rather than _vVAR's, because a
+  //! function term may reference a QUADRATURE (an INTEGRAL capture is carried as one) and the residual
+  //! path has no quadrature variables in scope -- and because _vVAR is the hot path of every residual
+  //! and Jacobian call, which this is not.
+  std::vector<FFVar>  _pQv;                  //!< quadrature variables (_mQ), in _dag
+  std::vector<FFVar>  _vFVAR;                //!< [ t, states, quadratures, parameters, constants ]
+  std::vector<double> _dFVAR;                //!< their values
+  std::vector< std::vector<FFVar> > _vFCT;   //!< function terms, one entry per stage time
+  std::vector<double> _dF;                   //!< the accumulated function values, val_function() order
+
+  std::vector<FFVar>  _vQUAD;                //!< this stage's quadrature integrands, in _dag
+  std::vector<double> _dQUAD;                //!< their values
+  std::vector< std::vector<double> > _qk;    //!< quadratures at every stage time, val_quad() order
+  std::vector< std::vector<double> > _fk;    //!< function values, per stage, val_function() order
+
   std::vector<FFVar>  _vEVAL;                //!< [ every coefficient, then every remainder ]
   std::vector<FFVar>  _vVAR;                 //!< [ t, states..., parameters... ]
   std::vector<double> _dVAR;                 //!< values of _vVAR
@@ -207,11 +238,22 @@ protected:
     ( sunrealtype tt, N_Vector yy, N_Vector yp, N_Vector rr, void* user_data )
     override;
 
-  //! @brief v0 has no quadratures.
+  //! @brief The quadrature integrands of the current stage.  IDAS hands this BOTH yy and yp, where the
+  //! CVODES counterpart gets only y, so an integrand may depend on the state derivative -- strictly more
+  //! than ODESLV can express.  Nothing uses that yet; the point is that the mass matrix costs nothing
+  //! here, because the integrand is evaluated, never solved.
   int IDQUAD__
-    ( sunrealtype, N_Vector, N_Vector, N_Vector, void* )
+    ( sunrealtype tt, N_Vector yy, N_Vector yp, N_Vector rrQ, void* user_data )
     override
-    { return -1; }
+    { if( !_nq ) return -1;
+      double const* y = N_VGetArrayPointer( yy ); double const* ypv = N_VGetArrayPointer( yp );
+      _dVAR[0] = tt;
+      for( size_t i = 0; i < _nx; ++i ){ _dVAR[1+i] = y[i]; _dVAR[1+_nx+i] = ypv[i]; }
+      _dag->eval( _dWRK, _vQUAD.size(), _vQUAD.data(), _dQUAD.data(),
+                  _vVAR.size(), _vVAR.data(), _dVAR.data() );
+      double* q = N_VGetArrayPointer( rrQ );
+      for( size_t i = 0; i < _nq; ++i ) q[i] = _dQUAD[i];
+      return 0; }
 
   //! @brief v0 uses the IDAS difference-quotient Jacobian; this is never installed.
   //! @brief The analytic Jacobian  dF/dy + c_j dF/dy' .  With F = M(t,y,p) y' + R(t,y,p),
@@ -254,6 +296,10 @@ protected:
   void _eval_rows
     ( double const t, double const* y, double const* yp );
 
+  //! @brief Accumulate the function terms of stage time @p k.
+  void _eval_fct
+    ( size_t const k, double const t, double const* y, double const* q );
+
   //! @brief Build the evaluation plan for stage @p s: the residual as ONE expression in (t, y, y', p), and
   //! its two sparse Jacobian blocks by SFAD, mirroring ODESLV_BASE's _pJAC = _dag->SFAD( nx, RHS, nx, X ).
   bool _build_rows
@@ -269,6 +315,15 @@ protected:
     const
     { size_t n = 0; for( auto const& row : _mMASS[s] ) n += row.size(); return n; }
 };
+
+//! @brief C trampoline for the quadrature integrands, reaching the registered solver's IDQUAD__.
+inline
+int
+MC_IDQUAD__
+( sunrealtype tt, N_Vector yy, N_Vector yp, N_Vector rrQ, void* user_data )
+{
+  return ( BASE_IDAS::PTR_BASE_IDAS->*PTR_IDQUAD )( tt, yy, yp, rrQ, user_data );
+}
 
 //! @brief C trampoline for the residual: IDAS calls this, which reaches the registered solver's IDRES__.
 //! Named as ODESLV_CVODES names its own (MC_CVRHS__, MC_CVJAC__).
@@ -302,6 +357,31 @@ DAESLV_IDAS::_build_plans
   if( _np ) _dag->insert( FFModel::_dag, _np, _mP.data(), _pP.data() );
   _pC.assign( _nc, FFVar() );
   if( _nc ) _dag->insert( FFModel::_dag, _nc, _mC.data(), _pC.data() );
+  // the function context: quadrature variables, then the terms per stage time, exactly as ODESLV
+  // assembles _vFCT -- the shared extraction already split every output into INTEGRAL and POINT parts
+  _pQv.assign( _nq, FFVar() );
+  if( _nq ) _dag->insert( FFModel::_dag, _nq, _mQ.data(), _pQv.data() );
+  _vFVAR.clear();
+  _vFVAR.push_back( _pT[0] );
+  for( auto const& v : _pX  ) _vFVAR.push_back( v );
+  for( auto const& v : _pQv ) _vFVAR.push_back( v );
+  for( auto const& v : _pP  ) _vFVAR.push_back( v );
+  for( auto const& v : _pC  ) _vFVAR.push_back( v );
+  _dFVAR.assign( _vFVAR.size(), 0. );
+  _vFCT.clear();
+  if( _nf ){
+    if( _mFCT.size() == 1 ){                 // not distributed: the terms belong to the final time
+      _vFCT.assign( _ns+1, std::vector<FFVar>() );
+      _vFCT[_ns].assign( _nf, FFVar( 0. ) );
+      _dag->insert( FFModel::_dag, _mFCT[0], _vFCT[_ns] );
+    }
+    else{
+      _vFCT.assign( _mFCT.size(), std::vector<FFVar>( _nf, FFVar( 0. ) ) );
+      size_t k = 0;
+      for( auto const& mFCTk : _mFCT ) _dag->insert( FFModel::_dag, mFCTk, _vFCT[k++] );
+    }
+  }
+
   _pYP.clear();
   for( size_t i = 0; i < _nx; ++i ) _pYP.push_back( _dag->add_var( "d" + _mX[i].name() + "/dt" ) );
 
@@ -325,6 +405,13 @@ DAESLV_IDAS::_build_plans
       for( auto const& [ ix, co ] : _mMASS[sg][k] ){ at.emplace_back( k, ix ); Msrc.push_back( co ); }
     if( !Msrc.empty() ) _dag->insert( FFModel::_dag, Msrc.size(), Msrc.data(), M.data() );
     _dag->insert( FFModel::_dag, _mRES[sg].size(), const_cast<FFVar*>( _mRES[sg].data() ), R.data() );
+    // the quadrature integrands of this stage, from the SAME per-stage forms ODESLV uses: INTEGRAL
+    // captures were turned into quadratures by the shared extraction, so there is nothing to re-derive
+    if( _nq ){
+      auto const& mq = _mQUAD[ sg < _mQUAD.size()? sg: _mQUAD.size()-1 ];
+      P.Q.assign( _nq, FFVar() );
+      _dag->insert( FFModel::_dag, _nq, const_cast<FFVar*>( mq.data() ), P.Q.data() );
+    }
     P.F = R;
     for( size_t c = 0; c < at.size(); ++c ) P.F[ at[c].first ] += M[c] * _pYP[ at[c].second ];
 
@@ -368,6 +455,7 @@ DAESLV_IDAS::_build_rows
   size_t const ss = ( s < _plan.size() )? s: _plan.size() - 1;
   StagePlan const& P = _plan[ss];
   _vEVAL = P.eval;
+  _vQUAD = P.Q;  _dQUAD.assign( _nq, 0. );
   _offJy = P.offJy;  _offJyp = P.offJyp;
   _nJy = P.nJy;      _nJyp = P.nJyp;
   _ixJy = P.ixJy;    _ixJyp = P.ixJyp;
@@ -426,6 +514,23 @@ DAESLV_IDAS::setup
   return true;
 }
 
+//! Accumulate the function terms of stage time @p k.  The eval ADDS (the trailing unit scalar), because a
+//! function can take contributions at several stage times -- a distributed output has one per stage.
+inline
+void
+DAESLV_IDAS::_eval_fct
+( size_t const k, double const t, double const* y, double const* q )
+{
+  if( !_nf || k >= _vFCT.size() || _vFCT[k].empty() ) return;
+  _dFVAR[0] = t;
+  for( size_t i = 0; i < _nx; ++i ) _dFVAR[1+i] = y[i];
+  for( size_t i = 0; i < _nq; ++i ) _dFVAR[1+_nx+i] = q? q[i]: 0.;
+  for( size_t j = 0; j < _np; ++j ) _dFVAR[1+_nx+_nq+j] = _dVAR[ 1 + 2*_nx + j ];
+  for( size_t j = 0; j < _nc; ++j ) _dFVAR[1+_nx+_nq+_np+j] = _dVAR[ 1 + 2*_nx + _np + j ];
+  static double const one = 1.;
+  _dag->eval( _nf, _vFCT[k].data(), _dF.data(), _vFVAR.size(), _vFVAR.data(), _dFVAR.data(), &one );
+}
+
 inline
 void
 DAESLV_IDAS::_eval_rows
@@ -478,6 +583,13 @@ DAESLV_IDAS::solve
   // NOTE this is ONE PASS: when the rows are implicit in each other it is a starting point for
   // IDACalcIC, not a solution of them.  See the plan's IC-solve item.
   std::vector<double> y0( _nx, 0. );
+  // Stage 0's rows are built by setup(), but the stage loop leaves them at the LAST stage, so a second
+  // solve() on the same object started stage 0 with the previous run's final input levels -- measured at
+  // 3.4e-02 on an 8-element model, reproducibly.  Rebuilt HERE, before the IDAS memory and its linear
+  // solver are sized from the rows, not after.  Invisible to a single-stage model, which is why the
+  // idempotence check in DAESLV_test1 passed throughout: with one stage the rows never change.
+  if( _mMASS.size() > 1 && !_build_rows( 0 ) ){ _extractError = "_build_rows(0)"; return FAILURE; }
+
   _dVAR[0] = _dT[0];
   { // _classification_reference() is the canonical reference point and is VIRTUAL -- OCFESLV overrides it
     // to sample the collocated field -- so take the seed from it rather than re-deriving one here.
@@ -522,13 +634,15 @@ DAESLV_IDAS::solve
 
   bool ok = true;
   std::string why;
+  N_Vector Nq = nullptr;                       // the quadrature vector, null when the model has none
   void* mem = IDACreate( ctx );
   // mirrors ODESLV_CVODES's switch, minus DIAG, which IDAS does not have
 #if !defined( CRONOS__WITH_KLU )
   if( options.SOLVE.LINSOL == BASE_IDAS::Options::SPARSE ){
     std::cerr << "DAESLV_IDAS ** LINSOL = SPARSE requires KLU, which this build does not include"
               << "; choose DENSE or DENSEDQ, or use a build with KLU" << std::endl;
-    N_VDestroy( yy ); N_VDestroy( yp ); N_VDestroy( id ); IDAFree( &mem ); SUNContext_Free( &ctx );
+    N_VDestroy( yy ); N_VDestroy( yp ); N_VDestroy( id ); if( Nq ) N_VDestroy( Nq ); if( Nq ) N_VDestroy( Nq );
+    IDAFree( &mem ); SUNContext_Free( &ctx );
     _extractError = "LINSOL = SPARSE without KLU";
     return FATAL;
   }
@@ -551,6 +665,19 @@ DAESLV_IDAS::solve
   do{
     if( IDAInit( mem, MC_IDRES__, _dT[0], yy, yp ) != IDA_SUCCESS ){ ok = false; why = "IDAInit"; break; }
     IDASStolerances( mem, options.SOLVE.RTOL, options.SOLVE.ATOL );
+
+    // Quadratures, mirroring ODESLV's CVodeQuad* block.  Ordering is deliberate and was measured, not
+    // assumed: IDAQuadInit AFTER IDAInit and the tolerances, and the ReInit at a restart AFTER
+    // IDAReInit, because both allocate against the memory the preceding call sized.
+    if( _nq ){
+      Nq = N_VNew_Serial( (sunindextype)_nq, ctx );
+      for( size_t i = 0; i < _nq; ++i ) N_VGetArrayPointer( Nq )[i] = 0.;
+      if( IDAQuadInit( mem, MC_IDQUAD__, Nq ) != IDA_SUCCESS ){ ok = false; why = "IDAQuadInit"; break; }
+      IDASetQuadErrCon( mem, options.SOLVE.QERR );
+      if( options.SOLVE.QERR
+       && IDAQuadSStolerances( mem, options.SOLVE.RTOL, options.SOLVE.ATOL ) != IDA_SUCCESS ){
+        ok = false; why = "IDAQuadSStolerances"; break; }
+    }
     if( IDASetLinearSolver( mem, LS, A ) != IDA_SUCCESS ){ ok = false; why = "IDASetLinearSolver"; break; }
     IDASetId( mem, id );
     if( options.SOLVE.LINSOL != BASE_IDAS::Options::DENSEDQ )
@@ -579,6 +706,9 @@ DAESLV_IDAS::solve
       _dXP0[i] = N_VGetArrayPointer( yp )[i];
     }
     _xk.push_back( _dX0 );                       // the initial point, as ODESLV_CVODES records it
+    _qk.clear();  _qk.push_back( std::vector<double>( _nq, 0. ) );   // quadratures start at zero
+    _dF.assign( _nf, 0. );                                           // the function accumulator
+    _eval_fct( 0, _dT[0], _dX0.data(), _qk.back().data() );          // the t0 contribution
 
     // The rows differ stage by stage exactly when an input is time-varying -- _mMASS then holds _ns
     // entries rather than one.  At such a boundary the BDF history describes a problem that no longer
@@ -627,10 +757,43 @@ DAESLV_IDAS::solve
           ++stats.numIC;
         }
       }
+      // The quadrature is reset to ZERO at every stage, as ODESLV's _IC_D_QUAD does, so a quadrature is a
+      // PER-STAGE increment and the accumulation across stages is the FUNCTION's job: extraction puts one
+      // term per stage time in _mFCT, and _eval_fct adds them.  Carrying the accumulator across instead
+      // double-counts every earlier stage -- measured as exactly Q(tau) too much on a two-stage model.
+      // Gated on the stage index ALONE, not on whether the rows change: a stage boundary exists wherever
+      // a POINT capture put one, and the quadrature must restart there too.  Gating it on `restarts` left
+      // the accumulator running on a model whose stages come from an interior tau rather than an input.
+      if( ok && _nq && sg ){
+        for( size_t i = 0; i < _nq; ++i ) N_VGetArrayPointer( Nq )[i] = 0.;
+        if( IDAQuadReInit( mem, Nq ) != IDA_SUCCESS ){ ok = false; why = "IDAQuadReInit"; break; }
+      }
+
+      // Stop AT the boundary rather than stepping past it and interpolating back, as ODESLV does with
+      // CVodeSetStopTime.  Without it IDAS leaves its internal time beyond tb, so zeroing the quadrature
+      // at the next stage zeroes it at that later instant and the interval [tb, tn] is lost from the
+      // stage increment -- measured as 4.6e-03 on a two-stage model, i.e. as if stage 2 began at 0.4069
+      // rather than 0.4.  The state was unaffected, being interpolated back to tb, which is why only the
+      // quadrature showed it.
       sunrealtype tret = ta;
-      if( ok && tret < tb )
-        if( IDASolve( mem, tb, &tret, yy, yp, IDA_NORMAL ) != IDA_SUCCESS ){ ok = false; why = "IDASolve to the stage boundary"; }
+      if( ok && tret < tb ){
+        if( IDASetStopTime( mem, tb ) != IDA_SUCCESS ){ ok = false; why = "IDASetStopTime"; }
+        else{
+          // IDA_TSTOP_RETURN, not IDA_SUCCESS, is what a solve that lands ON the stop time returns.
+          int const fl = IDASolve( mem, tb, &tret, yy, yp, IDA_NORMAL );
+          if( fl != IDA_SUCCESS && fl != IDA_TSTOP_RETURN ){ ok = false; why = "IDASolve to the stage boundary"; }
+        }
+      }
       if( ok ) _xk.push_back( std::vector<double>( N_VGetArrayPointer( yy ), N_VGetArrayPointer( yy ) + _nx ) );
+      if( ok && _nq ){
+        // Dky rather than IDAGetQuad, as ODESLV uses CVodeGetQuadDky: with the stop time set the two
+        // agree, but Dky asks for the value AT tret instead of at whatever the last internal step was,
+        // which is what the caller means.
+        if( IDAGetQuadDky( mem, tret, 0, Nq ) != IDA_SUCCESS ){ ok = false; why = "IDAGetQuadDky"; break; }
+        _qk.push_back( std::vector<double>( N_VGetArrayPointer( Nq ), N_VGetArrayPointer( Nq ) + _nq ) );
+      }
+      else if( ok ) _qk.push_back( std::vector<double>( _nq, 0. ) );
+      if( ok ) _eval_fct( sg+1, tret, N_VGetArrayPointer( yy ), _qk.back().data() );
     }
     if( !ok ) break;
     for( size_t i = 0; i < _nx; ++i ) _dX[i] = N_VGetArrayPointer( yy )[i];

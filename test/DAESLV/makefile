@@ -5,7 +5,7 @@ include $(PATH_CRONOS)/src/makeoptions.mk
 
 #####
 
-all: DAESLV_test1 DAESLV_test2 DAESLV_switched DAESLV_jacobian DAESLV_inputs DAESLV_outputs DAESLV_restart
+all: DAESLV_test1 DAESLV_test2 DAESLV_switched DAESLV_jacobian DAESLV_inputs DAESLV_outputs DAESLV_restart DAESLV_hidden DAESLV_icseed
 
 DAESLV_test1 : DAESLV_test1.o
 	$(LINK) $(FLAG_LINK) -o $@ $< $(LIB_CRONOS) $(LIB_DEP)
@@ -28,11 +28,17 @@ DAESLV_outputs : DAESLV_outputs.o
 DAESLV_restart : DAESLV_restart.o
 	$(LINK) $(FLAG_LINK) -o $@ $< $(LIB_CRONOS) $(LIB_DEP)
 
+DAESLV_hidden : DAESLV_hidden.o
+	$(LINK) $(FLAG_LINK) -o $@ $< $(LIB_CRONOS) $(LIB_DEP)
+
+DAESLV_icseed : DAESLV_icseed.o
+	$(LINK) $(FLAG_LINK) -o $@ $< $(LIB_CRONOS) $(LIB_DEP)
+
 %.o : %.cpp
 	$(CPP) -c $(FLAG_CPP) $(FLAG_CRONOS) $(INC_CRONOS) $(INC_DEP) $< -o $@
 
 #####
 
 clean :
-	rm -f DAESLV_test1 DAESLV_test2 DAESLV_switched DAESLV_jacobian DAESLV_inputs DAESLV_outputs DAESLV_restart
+	rm -f DAESLV_test1 DAESLV_test2 DAESLV_switched DAESLV_jacobian DAESLV_inputs DAESLV_outputs DAESLV_restart DAESLV_hidden DAESLV_icseed
 	rm -f *.o *.out *.dat *.eps *.dot *.png *.lp *.gp *.log *~

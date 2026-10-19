@@ -441,6 +441,21 @@ class BASE_DYNAMIC
       _icLeft.clear();
       return R; }
 
+  //! @brief The initial-condition system AT ITS SEED, for diagnosing a singular or failing solve:
+  //! the seed @p z0, the residual @p F there, and the dense Jacobian @p J, COLUMN-major (J[r + n*c]),
+  //! n = ic_unknowns().size().  It drives the very callbacks KINSOL drives, so what comes back is what
+  //! the solver sees rather than a reconstruction of it.  False if no system was built.
+  bool ic_probe
+    ( std::vector<double>& z0, std::vector<double>& F, std::vector<double>& J,
+      std::vector<double> const& par = std::vector<double>() );
+
+  //! @brief State index of each derivative unknown of the start system, i.e. which state the unknown
+  //! after the first ic_unknowns().size() - nx entries differentiates.
+  std::vector<size_t> const& ic_dot_of
+    ()
+    const
+    { return _icStart.dotOf; }
+
   //! @brief Solve the consistent-initialisation system, leaving the result in @p x and @p dx.  The ONE
   //! entry point both solvers take at t0: ODESLV through _IC_D_STA, DAESLV through its setup, so the
   //! initial state and its derivative come from the same system on both sides rather than from two.
@@ -526,9 +541,14 @@ class BASE_DYNAMIC
   std::vector<double> _ic_seed
     ()
     const
-    { std::vector<double> sref, iref, cref, dref;
-      const_cast<BASE_DYNAMIC*>(this)->_classification_reference( sref, iref, cref, dref );
-      sref.resize( _nx, 0. );
+    { // ref() is the EFFECTIVE reference -- the reference function at the domains' reference
+      // coordinates, else the scalar reference, else 0 -- and it resolves against the working model and
+      // the declared one alike.  _classification_reference() does not: it returned 0 for every state on a
+      // model whose ref() returned exactly what update_ref() had set, which left every IC solve starting
+      // at the ORIGIN.  Invisible while the INITIAL rows were linear, since Newton reaches the root from
+      // anywhere; fatal once they are not (plan §3.16).
+      std::vector<double> sref( _nx, 0. );
+      for( size_t i = 0; i < _nx && i < _mX.size(); ++i ) sref[i] = ref( _mX[i] );
       return sref; }
 
   //! @brief The element-local Lagrange interpolant of @p nodal at @p sc, with @p sn the node positions
@@ -580,6 +600,10 @@ class BASE_DYNAMIC
   //! @brief Assemble one of them: @p at_stop picks continuity rows over the INITIAL rows.
   bool _assemble_ic
     ( t_ICSys& S, bool const at_stop );
+
+  //! @brief Bind @p S's parameters, constants, input placeholders and seed for an evaluation at @p tau.
+  void _ic_bind
+    ( t_ICSys& S, double const tau, std::vector<double> const& par );
 
   //! @brief Solve @p S at @p tau, with the time-varying inputs bound to their values there.
   BASE_KINSOL::Report _ic_solve
@@ -1306,6 +1330,27 @@ const
 }
 
 inline
+bool
+BASE_DYNAMIC::ic_probe
+( std::vector<double>& z0, std::vector<double>& F, std::vector<double>& J,
+  std::vector<double> const& par )
+{
+  t_ICSys& S = _icStart;
+  if( S.row.empty() ) return false;
+  _ic_bind( S, _dT.empty()? 0.: _dT[0], par );
+  size_t const n = S.unk.size(), dot0 = 1 + _nx + _np + _nc + _mUpVar.size();
+  z0.assign( n, 0. );
+  for( size_t i = 0; i < _nx && i < n; ++i ) z0[i] = S.dVar[1+i];
+  for( size_t d = 0; d < S.dotOf.size(); ++d ) z0[_nx+d] = S.dVar[ dot0 + d ];
+  F.assign( n, 0. );  J.assign( n*n, 0. );
+  _icCur = &S;
+  _ic_res( (int)n, z0.data(), F.data(), this );
+  _ic_jac( (int)n, z0.data(), J.data(), this );
+  _icCur = nullptr;
+  return true;
+}
+
+inline
 BASE_KINSOL::Report
 BASE_DYNAMIC::solve_ic
 ( std::vector<double>& x, std::vector<double>& dx, BASE_KINSOL::Knobs const& k,
@@ -1316,16 +1361,10 @@ BASE_DYNAMIC::solve_ic
 }
 
 inline
-BASE_KINSOL::Report
-BASE_DYNAMIC::_ic_solve
-( t_ICSys& S, double const tau, std::vector<double>& x, std::vector<double>& dx,
-  BASE_KINSOL::Knobs const& k, std::vector<double> const& par )
+void
+BASE_DYNAMIC::_ic_bind
+( t_ICSys& S, double const tau, std::vector<double> const& par )
 {
-  BASE_KINSOL::Report R;
-  if( S.row.empty() ){
-    R.message = _extractError.empty()? "no consistent-initialisation system was built": _extractError;
-    return R;
-  }
   size_t const nU = _mUpVar.size();
   S.dVar[0] = tau;                      // the instant this system is being solved at, NOT always t0
   for( size_t j = 0; j < _np && j < par.size(); ++j ) S.dVar[ 1 + _nx + j ] = par[j];
@@ -1357,6 +1396,22 @@ BASE_DYNAMIC::_ic_solve
     for( size_t i = 0; i < S.nLft && i < _icLeft.size(); ++i )
       S.dVar[ dot0 + S.dotOf.size() + i ] = _icLeft[i]; }
 
+}
+
+inline
+BASE_KINSOL::Report
+BASE_DYNAMIC::_ic_solve
+( t_ICSys& S, double const tau, std::vector<double>& x, std::vector<double>& dx,
+  BASE_KINSOL::Knobs const& k, std::vector<double> const& par )
+{
+  BASE_KINSOL::Report R;
+  if( S.row.empty() ){
+    R.message = _extractError.empty()? "no consistent-initialisation system was built": _extractError;
+    return R;
+  }
+  _ic_bind( S, tau, par );
+
+  size_t const dot0 = 1 + _nx + _np + _nc + _mUpVar.size();
   std::vector<double> z( S.unk.size() );
   for( size_t i = 0; i < _nx; ++i ) z[i] = S.dVar[1+i];
   for( size_t d = 0; d < S.dotOf.size(); ++d ) z[_nx+d] = S.dVar[ dot0 + d ];

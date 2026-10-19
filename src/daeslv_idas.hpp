@@ -121,6 +121,51 @@ public:
       for( size_t j = 0; j < _np && 1 + 2*_nx + j < _dVAR.size(); ++j ) par[j] = _dVAR[ 1 + 2*_nx + j ];
       return BASE_DYNAMIC::solve_ic( y, yp, options.INITIAL.KIN, par ); }
 
+  //! @brief DAESLV implements transitions: a jump is a ROW of the stop system, replacing the continuity
+  //! of the state it determines.  Not lifted -- the stop IS where it is applied -- so the times must
+  //! still be validated, or a tau between two stage boundaries would be silently ignored (WORKPLAN 1.6).
+  bool _transitions_supported
+    ()
+    const
+    override
+    { return true; }
+
+  bool _validate_transition_tau_unlifted
+    ()
+    const
+    override
+    { return true; }
+
+  bool _transitions_in_ic_system
+    ()
+    const
+    override
+    { return true; }
+
+  bool _transition_derivatives_supported
+    ()
+    const
+    override
+    { return true; }
+
+  //! @brief A tau must coincide with an ELEMENT BOUNDARY, which is where a stop already exists.  Same
+  //! policy and the same words as OCFESLV, so the two solvers refuse the same models for the same reason.
+  bool _accept_transition_tau
+    ( double const tau, std::string& why )
+    const
+    override
+    {
+      auto const it = _issetup? _mDom.find( _evolution_dom_var )
+                              : _usr._mDomUsr.find( _usr._evolution_dom_varUsr );
+      auto const& M = _issetup? _mDom: _usr._mDomUsr;
+      if( it == M.end() ){ why = "no evolution domain"; return false; }
+      for( size_t k = 1; k < it->second.n_elem; ++k )
+        if( std::fabs( it->second.elem_bnd[k] - tau ) <= 64.*DBL_EPSILON*std::max( 1., std::fabs( tau ) ) )
+          return true;
+      why = "tau must be an ELEMENT BOUNDARY of the evolution direction (add one there)";
+      return false;
+    }
+
   //! @brief The IC knobs, from this solver's INITIAL group.
   BASE_KINSOL::Knobs _ic_knobs
     ()
@@ -718,7 +763,9 @@ DAESLV_IDAS::solve
     // IDA_YA_YDP_INIT, which holds the differential components and re-solves the algebraic ones and the
     // derivatives -- the split the id vector already carries.  Merely re-initialising would resume from
     // an inconsistent point, and with SUPPRESSALG on that first step can look plausible rather than fail.
-    bool const restarts = ( _mMASS.size() > 1 );
+    // A stop exists wherever the rows change OR a transition was declared: without the second clause a
+    // jump on a model with no time-varying input was never applied, the loop never restarting there.
+    bool const restarts = ( _mMASS.size() > 1 ) || !var_transition().empty();
     for( size_t sg = 0; sg < _ns && ok; ++sg ){
       double const ta = _dT[sg], tb = _dT[sg+1];
       if( sg && restarts ){
@@ -739,7 +786,8 @@ DAESLV_IDAS::solve
           std::vector<double> const xL( N_VGetArrayPointer( yy ), N_VGetArrayPointer( yy ) + _nx );
           std::vector<double> xp, dxp, par( _np, 0. );
           for( size_t j = 0; j < _np; ++j ) par[j] = _dVAR[ 1 + 2*_nx + j ];
-          BASE_KINSOL::Report const R = restart_ic( ta, xL, xp, dxp, options.INITIAL.KIN, par );
+          std::vector<double> const dxL( N_VGetArrayPointer( yp ), N_VGetArrayPointer( yp ) + _nx );
+          BASE_KINSOL::Report const R = restart_ic( ta, xL, xp, dxp, options.INITIAL.KIN, par, dxL );
           if( R.status == BASE_KINSOL::FAILED ){ ok = false; why = "restart_ic: " + R.message; break; }
           if( R.status == BASE_KINSOL::RANK_DEFICIENT )
             os << "DAESLV_IDAS ** at the stage boundary: " << R.message << std::endl;

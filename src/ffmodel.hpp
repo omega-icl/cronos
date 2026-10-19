@@ -903,6 +903,13 @@ public:
     double             tau = 0.;
     bool               evaluated = false;  //!< declared with EVALUATIONS (add_transition( left, right )): dom and tau
                                            //!< are read from them at setup, and each is replaced by its operand
+    //! @brief OPTIONAL: the post-jump state each component determines, in component order.  Empty means
+    //! "infer it", which is what every declaration did before and still the common case.  When given it
+    //! CHECKS the structural matching rather than replacing it: the named state must be one the component
+    //! actually depends on, and no two components may name the same one.  Worth giving where the matching
+    //! is legal but ambiguous -- two components each depending on x and y match SOME way, and which way
+    //! is then the matcher's choice rather than the modeller's.
+    std::vector<FFVar> states;
   };
   typedef std::vector< t_Transition > t_Transitions;
 
@@ -1125,6 +1132,12 @@ protected:
   //! @brief Output functions in declaration order (working copy).
   t_Fcts                             _mFct;
   t_Transitions                      _mTrn;   //!< transitions, on the working DAG (see add_transition)
+
+  //! @brief The HIDDEN constraint levels the reduction implied, on the working DAG: every level below the
+  //! one it pinned with.  Materialised as INITIAL rows (REDUCE.HIDDEN_IC) and so imposed at t0, but NOT
+  //! rows of the model, so nothing imposes them anywhere else.  Kept because a consumer that breaks a
+  //! state's continuity at a stop has no other way to tell whether its jump left the manifold.
+  std::vector<FFVar>                 _mHidLvl;
 
 public:
 
@@ -1550,10 +1563,29 @@ public:
       _usr._mTrnUsr.push_back( t_Transition{ left, right, dom, tau } );
       _on_model_changed( ModelChange::DERIVATIVES );
     }
+  //! @brief As above, naming the post-jump state each component determines (see t_Transition::states).
+  void add_transition
+    ( std::vector<FFVar> const& left, std::vector<FFVar> const& right, FFVar const& dom, double const tau,
+      std::vector<FFVar> const& states )
+    {
+      if( left.empty() || left.size() != right.size() ) throw Exceptions( Exceptions::INDEX );
+      if( !states.empty() && states.size() != right.size() ) throw Exceptions( Exceptions::INDEX );
+      if( _usr._mDomUsr.find( dom ) == _usr._mDomUsr.end() ) throw Exceptions( Exceptions::INDEX );
+      t_Transition tr{ left, right, dom, tau };  tr.states = states;
+      _usr._mTrnUsr.push_back( tr );
+      _on_model_changed( ModelChange::DERIVATIVES );
+    }
+
   //! @brief Scalar form of add_transition
   void add_transition
     ( FFVar const& left, FFVar const& right, FFVar const& dom, double const tau )
     { add_transition( std::vector<FFVar>{ left }, std::vector<FFVar>{ right }, dom, tau ); }
+
+  //! @brief Scalar form naming the post-jump state
+  void add_transition
+    ( FFVar const& left, FFVar const& right, FFVar const& dom, double const tau, FFVar const& state )
+    { add_transition( std::vector<FFVar>{ left }, std::vector<FFVar>{ right }, dom, tau,
+                      std::vector<FFVar>{ state } ); }
 
   //! @brief Declare a TRANSITION through EVALUATIONS, with no domain or time given: every state in @p left and @p right
   //! appears inside an FFEval on the evolution direction, all at one point tau -- at tau^- (FFDom::MINUS, the default)
@@ -1695,8 +1727,25 @@ public:
             FFSubgraph sg = ex.dag()->subgraph( 1, &ex );
             for( auto const* op : sg.l_op ){
               if( !op ) continue;
-              if( !tr.evaluated && ( mc::type_cast<FFPartial const>( op ) || mc::type_cast<FFIntegral const>( op ) || mc::type_cast<FFEval const>( op ) ) )
-                return fail( "a transition expression must be POINTWISE -- no derivative, integral or evaluation operator" );
+              // A DERIVATIVE along the evolution direction is admissible: dx/dt(tau^-) and dx/dt(tau^+) are
+              // one-sided limits at the stop, as pointwise as the state itself, and a jump law may well
+              // involve them (a velocity reversal, an impulse balance).  A derivative along any OTHER
+              // direction is not: it would read a neighbourhood the stop does not have.  Integrals and
+              // evaluations remain refused -- an integral is not pointwise at all.
+              if( !tr.evaluated ){
+                if( mc::type_cast<FFIntegral const>( op ) || mc::type_cast<FFEval const>( op ) )
+                  return fail( "a transition expression must be POINTWISE -- no integral or evaluation operator" );
+                if( auto const* pp = mc::type_cast<FFPartial const>( op ) ){
+                  if( !_transition_derivatives_supported() )
+                    return fail( "this solver does not accept a DERIVATIVE in a transition expression -- its"
+                                 " transitions are lifted into auxiliaries, and the lifted row is not pointwise" );
+                  bool along = false;
+                  for( auto const& [dv, ord] : pp->Indep().expr ){ (void)ord; if( dv.id() == tr.dom.id() ) along = true; }
+                  if( !along )
+                    return fail( "a transition may only differentiate along the EVOLUTION direction -- a derivative"
+                                 " in another direction is not a one-sided limit at tau" );
+                }
+              }
               if( op->type != FFOp::VAR || !op->varout[0] ) continue;
               FFVar const& v = *op->varout[0];
               bool const known = _usr._mVarUsr.count( v ) || _usr._mInpUsr.count( v ) || v.id() == tr.dom.id() || _usr._mDomUsr.count( v )
@@ -1789,13 +1838,40 @@ public:
                 " -- a jump must determine exactly the states it breaks (one component per state read at tau^+)";
           why = os.str();  return false;
         }
-        // maximum bipartite matching, components -> S+ (augmenting paths)
+        // A DECLARED state pins its component's match; the rest are matched structurally around it.
         std::vector<long> matchS( Splus.size(), -1 );
+        std::vector<bool> pinned( Splus.size(), false ), done( adj.size(), false );
+        { size_t ci = 0;
+          for( size_t q = 0; q < order.size(); ++q ){ (void)q; }
+          for( size_t k = 0; k < J.comp.size(); ++k ){
+            size_t const it2 = J.comp[k] >> 16, ic2 = J.comp[k] & 0xffff;
+            auto const& trk = trn[it2];
+            if( trk.states.empty() || ic2 >= trk.states.size() ){ ++ci; continue; }
+            FFVar const& want = trk.states[ic2];
+            long sidx = -1;
+            for( size_t t2 = 0; t2 < Splus.size(); ++t2 ) if( Splus[t2].id() == want.id() ) sidx = (long)t2;
+            if( sidx < 0 ){
+              os << "component " << k << " names " << want.name() << " as its post-jump state, but the"
+                    " right-hand side does not depend on it at tau^+";
+              why = os.str();  return false;
+            }
+            if( std::find( adj[k].begin(), adj[k].end(), (size_t)sidx ) == adj[k].end() ){
+              os << "component " << k << " names " << want.name() << ", which it does not depend on";
+              why = os.str();  return false;
+            }
+            if( pinned[sidx] ){
+              os << "two components both name " << want.name() << " as their post-jump state";
+              why = os.str();  return false;
+            }
+            matchS[sidx] = (long)k;  pinned[sidx] = true;  done[k] = true;  ++ci;
+          }
+        }
         std::function<bool( size_t, std::vector<bool>& )> augment = [&]( size_t c, std::vector<bool>& vis ) -> bool {
-          for( size_t s : adj[c] ){ if( vis[s] ) continue; vis[s] = true;
+          for( size_t s : adj[c] ){ if( vis[s] || pinned[s] ) continue; vis[s] = true;
             if( matchS[s] < 0 || augment( (size_t)matchS[s], vis ) ){ matchS[s] = (long)c; return true; } }
           return false; };
         for( size_t c = 0; c < adj.size(); ++c ){
+          if( done[c] ) continue;
           std::vector<bool> vis( Splus.size(), false );
           if( !augment( c, vis ) ){
             os << "the components cannot each be matched to a distinct post-jump state they depend on -- the jump is"
@@ -1826,6 +1902,15 @@ public:
     ( double const tau, std::string& why )
     const
     { (void)tau; (void)why; return true; }
+  //! @brief May a transition expression READ dx/dt at tau?  True where the jump becomes a ROW of a stop
+  //! system solved at that instant, so the one-sided derivative is an unknown already there (DAESLV).
+  //! False where transitions are LIFTED into auxiliaries (OCFESLV): the lifted link row would carry a
+  //! derivative operator its interface audit cannot square, and it aborts rather than refuses.
+  virtual bool _transition_derivatives_supported
+    ()
+    const
+    { return false; }
+
   //! @brief Does the consumer validate the transition times even when it does NOT lift the transitions (marching: a
   //! transfer map applies them at the window seams, so a tau between two seams is never met and was silently
   //! ignored -- WORKPLAN 1.6, 2026-10-06)?  Default: no (ODESLV, a bare FFModel).
@@ -1997,6 +2082,12 @@ public:
     { return typeid( *this ) == typeid( FFModel ); }
 
   //! @brief The declared transitions
+  //! @brief The hidden constraint levels implied by the high-index reduction (empty for index 0/1).
+  std::vector<FFVar> const& hidden_levels
+    ()
+    const
+    { return _mHidLvl; }
+
   t_Transitions const& var_transition
     ()
     const
@@ -8913,6 +9004,7 @@ FFModel::_build_reduction_plan()
 inline bool
 FFModel::_reduce_high_index()
 {
+  _mHidLvl.clear();
   if( _reductionPlan.empty() ) return true;
   FFVar const* tdom = _evolution_dom_set ? &_evolution_dom_var : nullptr;
   if( !tdom ){
@@ -9001,9 +9093,11 @@ FFModel::_reduce_high_index()
     if( options.REDUCE.HIDDEN_IC && !hidden_levels.empty() ){
       t_EqnDom ic_dom = eos_eqn->dom;
       ic_dom[ *tdom ] = FFDom::LB;
-      for( auto const& g : hidden_levels )
+      for( auto const& g : hidden_levels ){
         new_ics.push_back( t_Eqn{ g, ic_dom,
                                   _make_equation_options( EqnOptions( EqnRole::INITIAL, a.block_id ) ) } );
+        _mHidLvl.push_back( g );          // kept: a jump at a stop must be checked against these
+      }
       if( options.DISPLAY_LEVEL >= 1 )
         std::cerr << "FFModel::setup ** high-index reduction: " << hidden_levels.size()
                   << " hidden constraint level(s) materialised at the initial point (block " << a.block_id

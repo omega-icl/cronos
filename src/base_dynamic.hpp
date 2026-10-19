@@ -110,11 +110,19 @@ class BASE_DYNAMIC
     size_t                             nnz = 0;  //!< structural nonzeros of the Jacobian
     std::vector<size_t>                jrow, jcol, at;   //!< at[e]: CSC slot of SFAD entry e
     BASE_KINSOL::Sparsity              sp;
+    std::vector<FFVar>                 hid;      //!< hidden levels, for DIAGNOSIS only -- never rows of the system
+    std::vector<double>                dHid;
     size_t                             nLft = 0; //!< left-state placeholders in dVar, after the derivatives
     bool                               ok = false;
     ~t_ICSys(){ delete dag; }
   };
   t_ICSys                              _icStart, _icStop;
+
+  //! @brief Stop systems for the taus that carry a TRANSITION.  A transition replaces the continuity of
+  //! exactly the post-jump states S+ that _transition_jumps() matched, so those stops have different
+  //! ROWS from a plain stage boundary and cannot share _icStop.  One system per tau, each built once at
+  //! extraction -- the parameterisation over inputs is unchanged, only the closing block differs.
+  std::vector< std::pair<double,t_ICSys*> > _icStopAt;
 
   //! @brief The system the KINSOL callbacks are currently evaluating.  Set by _ic_solve() before the call;
   //! the callbacks are static trampolines and have nothing else to go on.
@@ -130,6 +138,18 @@ class BASE_DYNAMIC
   //! instant the system is being solved at -- u(tau^+) at a stop, u(t0) at the start.  A jump row needing
   //! u(tau^-) as well gets a second set when transitions land; nothing reads one yet, so none is minted.
   std::vector<FFVar>                   _mTVInp, _mUpVar;
+
+  //! @brief The LEFT-limit placeholders a transition may read: u(tau^-) per time-varying input, and
+  //! dx/dt(tau^-) per differential state.  Same mechanism as _mLftVar, differing only in where the number
+  //! comes from: u^- is the same Lagrange evaluation as u^+ on the element ENDING at tau, where x^- and
+  //! dx^- are DATA the solver carries into the stop.  Only a jump reads them; a plain restart does not.
+  std::vector<FFVar>                   _mUmVar, _mDotLftVar;
+
+  //! @brief Worst |hidden level| at the last stop that carried a declared jump; 0 where none applies.
+  double                               _icHidRes = 0.;
+
+  //! @brief Left-limit derivative values at a stop, alongside _icLeft.
+  std::vector<double>                  _icLeftDot;
 
   //! @brief Element boundaries of the evolution domain, to find the element a stop falls in.
   std::vector<double>                  _mElemBnd;
@@ -199,6 +219,15 @@ class BASE_DYNAMIC
     const
     { return true; }
 
+  //! @brief Where the DERIVATIVE unknowns start in an IC system's value array: after t, the states, the
+  //! parameters, the constants and BOTH input placeholder blocks.  One accessor because this offset was
+  //! recomputed in five places, and adding the u(tau^-) block shifted it in two of them only -- the
+  //! symptom being a solve that silently read the derivatives one block early.
+  size_t _ic_dot0
+    ()
+    const
+    { return 1 + _nx + _np + _nc + _mUpVar.size() + _mUmVar.size(); }
+
   //! @brief The knobs of the IC solve, from the consumer's own INITIAL group.  A hook rather than a
   //! member: the knobs belong to the solver's one `options` object, as everywhere else, and BASE_DYNAMIC
   //! has none.  The default is the plain KINSOL defaults, which is what a consumer with no INITIAL group
@@ -207,6 +236,14 @@ class BASE_DYNAMIC
     ()
     const
     { return BASE_KINSOL::Knobs(); }
+
+  //! @brief Does the consumer apply transitions as ROWS of its stop system (DAESLV) rather than through
+  //! the divided per-stage map _mIC (ODESLV)?  The divided form can only express an EXPLICIT map, so it
+  //! refuses an implicit one -- a refusal that must not reach a consumer which has no use for _mIC.
+  virtual bool _transitions_in_ic_system
+    ()
+    const
+    { return false; }
 
   //! @brief Whether to take the explicit fast path where every INITIAL row pins one state linearly with
   //! no derivative.  There the divided form is exact and a Newton iteration buys nothing, so this is on
@@ -433,12 +470,17 @@ class BASE_DYNAMIC
   //! fall on a stage boundary.
   BASE_KINSOL::Report restart_ic
     ( double const tau, std::vector<double> const& xleft, std::vector<double>& x, std::vector<double>& dx,
-      BASE_KINSOL::Knobs const& k, std::vector<double> const& par = std::vector<double>() )
-    { if( !_icStop.ok ){ BASE_KINSOL::Report R;
+      BASE_KINSOL::Knobs const& k, std::vector<double> const& par = std::vector<double>(),
+      std::vector<double> const& dxleft = std::vector<double>() )
+    { _icLeftDot = dxleft;
+      t_ICSys* S = &_icStop;                      // a stop that carries a TRANSITION has its own rows
+      for( auto const& [t0,Sj] : _icStopAt )
+        if( std::fabs( t0 - tau ) <= options.TTOL ){ S = Sj; break; }
+      if( !S->ok ){ BASE_KINSOL::Report R;
         R.message = _extractError.empty()? "no restart system was built": _extractError; return R; }
       _icLeft = xleft;
-      BASE_KINSOL::Report const R = _ic_solve( _icStop, tau, x, dx, k, par );
-      _icLeft.clear();
+      BASE_KINSOL::Report const R = _ic_solve( *S, tau, x, dx, k, par );
+      _icLeft.clear();  _icLeftDot.clear();
       return R; }
 
   //! @brief The initial-condition system AT ITS SEED, for diagnosing a singular or failing solve:
@@ -448,6 +490,14 @@ class BASE_DYNAMIC
   bool ic_probe
     ( std::vector<double>& z0, std::vector<double>& F, std::vector<double>& J,
       std::vector<double> const& par = std::vector<double>() );
+
+  //! @brief Worst |hidden constraint level| at the last stop that carried a DECLARED JUMP, 0 if none.
+  //! Zero on a reduced model whose jump respects the manifold, and on any index-0/1 model, which has no
+  //! hidden levels at all.
+  double ic_hidden_residual
+    ()
+    const
+    { return _icHidRes; }
 
   //! @brief State index of each derivative unknown of the start system, i.e. which state the unknown
   //! after the first ic_unknowns().size() - nx entries differentiates.
@@ -597,9 +647,10 @@ class BASE_DYNAMIC
   bool _build_ic_system
     ();
 
-  //! @brief Assemble one of them: @p at_stop picks continuity rows over the INITIAL rows.
+  //! @brief Assemble one of them: @p at_stop picks continuity rows over the INITIAL rows; @p G, when given,
+  //! replaces the continuity of its post-jump states with that transition's rows.
   bool _assemble_ic
-    ( t_ICSys& S, bool const at_stop );
+    ( t_ICSys& S, bool const at_stop, FFModel::t_TransitionJump const* G = nullptr );
 
   //! @brief Bind @p S's parameters, constants, input placeholders and seed for an evaluation at @p tau.
   void _ic_bind
@@ -956,7 +1007,7 @@ BASE_DYNAMIC::_extract_from_model
   // x_i itself), identity elsewhere.  ODESLV evaluates entry k with the state reached at the end of stage k-1, i.e.
   // x(tau^-), and reinitialises the integrator with the result.  Implicit maps are refused (DAESLV's business).
   std::vector< std::pair< double, std::map<size_t,FFVar> > > jumps;   // (tau, state index -> x_i(tau^+)) for PLUS evaluations
-  if( !var_transition().empty() ){
+  if( !var_transition().empty() && !_transitions_in_ic_system() ){
     _mIC.assign( _ns, std::vector<FFVar>( _nx ) );
     _mIC[0] = ic;
     for( size_t k = 1; k < _ns; ++k ) for( size_t i = 0; i < _nx; ++i ) _mIC[k][i] = _mX[i];
@@ -1148,6 +1199,16 @@ BASE_DYNAMIC::_extract_from_model
       _mUpVar.push_back( FFModel::_dag->add_var( "ic_u" + std::to_string(j) ) );
       _mInpParNdx.push_back( parameter_index( _mTVInp[j] ) );
     }
+    // The left-limit set a jump may read: u(tau^-) and dx/dt(tau^-).  Minted only where a transition
+    // exists, since a plain restart reads neither.  The right-limit counterparts need no new variables:
+    // u(tau^+) is _mUpVar and dx/dt(tau^+) is the derivative UNKNOWN the stop already solves for.
+    if( !var_transition().empty() ){
+      for( size_t j = 0; j < _mTVInp.size(); ++j )
+        _mUmVar.push_back( FFModel::_dag->add_var( "ic_um" + std::to_string(j) ) );
+      _mDotLftVar.resize( _nx );
+      for( size_t i = 0; i < _nx; ++i )
+        _mDotLftVar[i] = FFModel::_dag->add_var( "ic_dlft" + std::to_string(i) );
+    }
   }
   if( !_build_ic_system() ) return false;
   return true;
@@ -1191,15 +1252,28 @@ BASE_DYNAMIC::_build_ic_system
   // takes CONTINUITY on the differential states with the left state as data.  Built from the RAW rows, so
   // the time-varying inputs are still present to be replaced by _mUpVar and bound per stop -- that, and
   // nothing else, is what made this per-stage before.
+  for( auto& [tau,S] : _icStopAt ){ (void)tau; delete S; }
+  _icStopAt.clear();
   bool ok = _assemble_ic( _icStart, false );
   if( ok && _wants_initial_rows() ) ok = _assemble_ic( _icStop, true );
+  if( ok && _wants_initial_rows() && !var_transition().empty() ){
+    FFModel::t_TransitionJumps J;  std::string why;
+    auto is_state = [&]( FFVar const& v ){ for( auto const& x : _mX ) if( x.id() == v.id() ) return true; return false; };
+    if( !FFModel::_transition_jumps( var_transition(), is_state, J, why ) ){
+      _extractError = "transition jumps: " + why;  return false; }
+    for( auto const& G : J ){
+      t_ICSys* S = new t_ICSys;
+      if( !_assemble_ic( *S, true, &G ) ){ delete S; return false; }
+      _icStopAt.emplace_back( G.tau, S );
+    }
+  }
   return ok;
 }
 
 inline
 bool
 BASE_DYNAMIC::_assemble_ic
-( t_ICSys& S, bool const at_stop )
+( t_ICSys& S, bool const at_stop, FFModel::t_TransitionJump const* G )
 {
   delete S.dag;  S.dag = new FFGraph;
   S.row.clear(); S.unk.clear(); S.dotOf.clear(); S.eval.clear();
@@ -1214,9 +1288,36 @@ BASE_DYNAMIC::_assemble_ic
   }
   size_t const nDyn = rows.size();
   if( !at_stop ) rows.insert( rows.end(), _mICRES.begin(), _mICRES.end() );
-  else
+  else{
+    // Which states does this stop JUMP?  Their continuity is replaced, one row for one row, by the
+    // transition's own -- that is what makes the count work out without a separate audit.
+    std::set<long> jumped;
+    if( G ) for( auto const& x : G->jump ) jumped.insert( x.id().second );
     for( size_t i = 0; i < _nx; ++i )
-      if( _differential_state( i ) ) rows.push_back( _mX[i] - _mLftVar[i] );
+      if( _differential_state( i ) && !jumped.count( _mX[i].id().second ) )
+        rows.push_back( _mX[i] - _mLftVar[i] );
+    if( G ){
+      // left is read at tau^-, right at tau^+: substitute the states of LEFT for the left-state
+      // placeholders and leave RIGHT on the states themselves.  No restriction to an explicit map --
+      // an implicit one is just a row, which is the whole reason this lives in DAESLV and not in _mIC.
+      for( size_t k = 0; k < G->comp.size(); ++k ){
+        size_t const it = G->comp[k] >> 16, ic = G->comp[k] & 0xffff;
+        auto const& tr = var_transition().at( it );
+        if( ic >= tr.left.size() || ic >= tr.right.size() ) continue;
+        // LEFT is at tau^-: states, inputs and derivatives all take their left-limit placeholders, and
+        // they are swapped HERE so the global passes below find nothing raw left in this row to rebind
+        // to the tau^+ set.  RIGHT is at tau^+ and is left to those passes.
+        std::vector<FFVar> lhs{ _in_model_dag( tr.left[ic] ) };
+        try{
+          if( !_mDotLftVar.empty() ) lhs = FFModel::_dag->substitute( lhs, _mDOT, _mDotLftVar );
+          if( !_mUmVar.empty() )     lhs = FFModel::_dag->compose( lhs, _mTVInp, _mUmVar );
+          lhs = FFModel::_dag->compose( lhs, _mX, _mLftVar );
+        }
+        catch( ... ){ _extractError = "substituting the left limits of a transition failed"; return false; }
+        rows.push_back( lhs[0] - _in_model_dag( tr.right[ic] ) );
+      }
+    }
+  }
 
   // 2. the time-varying inputs become the placeholders u(tau), bound per stop.  compose(), not
   //    substitute(): an input is a plain VARIABLE, where a derivative is an auxiliary node.
@@ -1248,19 +1349,22 @@ BASE_DYNAMIC::_assemble_ic
   for( size_t j = 0; j < _np; ++j ) srcV.push_back( _mP[j] );
   for( size_t j = 0; j < _nc; ++j ) srcV.push_back( _mC[j] );
   for( auto const& v : _mUpVar ) srcV.push_back( v );
+  for( auto const& v : _mUmVar ) srcV.push_back( v );
   for( size_t i = 0; i < _nx; ++i ) if( used[i] ) srcV.push_back( _mDotVar[i] );
-  if( at_stop ) for( size_t i = 0; i < _nx; ++i ) srcV.push_back( _mLftVar[i] );
+  if( at_stop ){
+    for( size_t i = 0; i < _nx; ++i ) srcV.push_back( _mLftVar[i] );
+    for( auto const& v : _mDotLftVar ) srcV.push_back( v );
+  }
   dstV.assign( srcV.size(), FFVar() );
   S.dag->insert( FFModel::_dag, srcV.size(), srcV.data(), dstV.data() );
   S.all = dstV;
   S.row.assign( plain.size(), FFVar() );
   S.dag->insert( FFModel::_dag, plain.size(), plain.data(), S.row.data() );
 
-  size_t const nU = _mUpVar.size();
   for( size_t i = 0; i < _nx; ++i ) S.unk.push_back( dstV[ 1 + i ] );
-  { size_t at = 1 + _nx + _np + _nc + nU;
+  { size_t at = _ic_dot0();
     for( size_t i = 0; i < _nx; ++i ) if( used[i] ){ S.unk.push_back( dstV[at++] ); S.dotOf.push_back( i ); } }
-  S.nLft = at_stop? _nx: 0;
+  S.nLft = at_stop? _nx + _mDotLftVar.size(): 0;
 
   if( S.row.size() != S.unk.size() ){
     _extractError = "the consistent-initialisation system is not square: " + std::to_string( S.row.size() )
@@ -1301,8 +1405,26 @@ BASE_DYNAMIC::_assemble_ic
     }
     for( size_t c = 0; c < n; ++c ) S.sp.colptr[c+1] += S.sp.colptr[c];
     S.sp.jac = &BASE_DYNAMIC::_ic_spjac; }
+  // A declared JUMP breaks a state's continuity on purpose, so the inheritance argument that makes the
+  // hidden levels safe at an ordinary stop -- the left state satisfied them, continuity carries them --
+  // does not apply.  They are NOT imposed here: that would over-determine the stop unless the model
+  // declared fewer jumps, which is a change to the degrees-of-freedom contract.  They are EVALUATED
+  // after the solve instead, so a jump that leaves the manifold is reported rather than integrated from.
+  if( G && !FFModel::hidden_levels().empty() ){
+    std::vector<FFVar> h = FFModel::hidden_levels();
+    try{
+      if( !_mUpVar.empty() ) h = FFModel::_dag->compose( h, _mTVInp, _mUpVar );
+      h = FFModel::_dag->substitute( h, _mDOT, _mDotVar );
+    }
+    catch( ... ){ h.clear(); }
+    if( !h.empty() ){
+      S.hid.assign( h.size(), FFVar() );
+      S.dag->insert( FFModel::_dag, h.size(), h.data(), S.hid.data() );
+      S.dHid.assign( h.size(), 0. );
+    }
+  }
   S.dEval.assign( S.eval.size(), 0. );
-  S.dVar.assign( 1 + _nx + _np + _nc + nU + S.dotOf.size() + S.nLft, 0. );
+  S.dVar.assign( _ic_dot0() + S.dotOf.size() + S.nLft, 0. );
   S.ok = true;
   return true;
 }
@@ -1338,7 +1460,7 @@ BASE_DYNAMIC::ic_probe
   t_ICSys& S = _icStart;
   if( S.row.empty() ) return false;
   _ic_bind( S, _dT.empty()? 0.: _dT[0], par );
-  size_t const n = S.unk.size(), dot0 = 1 + _nx + _np + _nc + _mUpVar.size();
+  size_t const n = S.unk.size(), dot0 = _ic_dot0();
   z0.assign( n, 0. );
   for( size_t i = 0; i < _nx && i < n; ++i ) z0[i] = S.dVar[1+i];
   for( size_t d = 0; d < S.dotOf.size(); ++d ) z0[_nx+d] = S.dVar[ dot0 + d ];
@@ -1365,7 +1487,7 @@ void
 BASE_DYNAMIC::_ic_bind
 ( t_ICSys& S, double const tau, std::vector<double> const& par )
 {
-  size_t const nU = _mUpVar.size();
+  size_t const nUp = _mUpVar.size();
   S.dVar[0] = tau;                      // the instant this system is being solved at, NOT always t0
   for( size_t j = 0; j < _np && j < par.size(); ++j ) S.dVar[ 1 + _nx + j ] = par[j];
   for( size_t j = 0; j < _nc && j < _dIcCst.size(); ++j ) S.dVar[ 1 + _nx + _np + j ] = _dIcCst[j];
@@ -1373,28 +1495,35 @@ BASE_DYNAMIC::_ic_bind
   // Bind each time-varying input to its value AT tau.  This is the whole of what used to require a system
   // per stage: the geometry lives in computing these numbers, never in the rows.  u(tau^+) -- the element
   // STARTING at tau -- because the rows being solved are those in force after the stop.
-  if( nU ){
-    size_t const e = _elem_of( tau, FFDom::PLUS );
+  // u(tau^-) sits at the same offset pattern, one block later: the element ENDING at tau, same basis.
+  for( int side = 0; side < 2; ++side ){
+    size_t const nThis = side? _mUmVar.size(): nUp;
+    if( !nThis ) continue;
+    size_t const e = _elem_of( tau, side? FFDom::MINUS: FFDom::PLUS );
     double const te = _mElemBnd.at( e ), he = _mElemBnd.at( e+1 ) - te;
     double const sc = he > 0.? ( tau - te ) / he: 0.;
-    for( size_t j = 0; j < nU; ++j ){
+    size_t const base = 1 + _nx + _np + _nc + ( side? nUp: 0 );
+    for( size_t j = 0; j < nThis; ++j ){
       auto const& sn  = _mInpNodes[ _mTVInp[j].name() ];
       auto const& ndx = _mInpParNdx[j];
       size_t const nn = sn.size();
       std::vector<double> nodal;
       if( nn < 2 ){ if( e < ndx.size() ) nodal.push_back( par.at( ndx[e] ) ); }
       else for( size_t q = 0; q < nn && e*nn+q < ndx.size(); ++q ) nodal.push_back( par.at( ndx[e*nn+q] ) );
-      S.dVar[ 1 + _nx + _np + _nc + j ] = nodal.empty()? 0.: _interp_level( sn, nodal, sc );
+      S.dVar[ base + j ] = nodal.empty()? 0.: _interp_level( sn, nodal, sc );
     }
   }
 
-  size_t const dot0 = 1 + _nx + _np + _nc + nU;
+  size_t const dot0 = _ic_dot0();
   { std::vector<double> const ref = _ic_seed();
     for( size_t i = 0; i < _nx; ++i ) S.dVar[1+i] = _icLeft.size() == _nx? _icLeft[i]: ref[i];
     for( size_t d = 0; d < S.dotOf.size(); ++d ) S.dVar[ dot0 + d ] = 0.;
     // the continuity rows read the LEFT state as data; seeding from it too is the best start there is
-    for( size_t i = 0; i < S.nLft && i < _icLeft.size(); ++i )
-      S.dVar[ dot0 + S.dotOf.size() + i ] = _icLeft[i]; }
+    size_t const lft0 = dot0 + S.dotOf.size();
+    for( size_t i = 0; i < _nx && i < _icLeft.size() && i < S.nLft; ++i ) S.dVar[ lft0 + i ] = _icLeft[i];
+    // and the left-limit DERIVATIVES, which arrive as data exactly as the left state does
+    for( size_t i = 0; i < _mDotLftVar.size() && i < _icLeftDot.size(); ++i )
+      S.dVar[ lft0 + _nx + i ] = _icLeftDot[i]; }
 
 }
 
@@ -1411,7 +1540,7 @@ BASE_DYNAMIC::_ic_solve
   }
   _ic_bind( S, tau, par );
 
-  size_t const dot0 = 1 + _nx + _np + _nc + _mUpVar.size();
+  size_t const dot0 = _ic_dot0();
   std::vector<double> z( S.unk.size() );
   for( size_t i = 0; i < _nx; ++i ) z[i] = S.dVar[1+i];
   for( size_t d = 0; d < S.dotOf.size(); ++d ) z[_nx+d] = S.dVar[ dot0 + d ];
@@ -1423,6 +1552,20 @@ BASE_DYNAMIC::_ic_solve
   x.assign( _nx, 0. ); dx.assign( _nx, 0. );
   for( size_t i = 0; i < _nx; ++i ) x[i] = z[i];
   for( size_t d = 0; d < S.dotOf.size(); ++d ) dx[ S.dotOf[d] ] = z[_nx+d];
+
+  _icHidRes = 0.;
+  if( !S.hid.empty() && R.status != BASE_KINSOL::FAILED ){
+    _icCur = &S;  _ic_scatter( this, (int)z.size(), z.data() );  _icCur = nullptr;
+    S.dag->eval( S.wrk, S.hid.size(), S.hid.data(), S.dHid.data(),
+                 S.all.size(), S.all.data(), S.dVar.data() );
+    for( double const v : S.dHid ) _icHidRes = std::max( _icHidRes, std::fabs( v ) );
+    if( _icHidRes > options.TTOL )
+      std::cerr << "** the declared jump at t = " << tau << " leaves the HIDDEN constraint manifold:"
+                   " worst |level| = " << _icHidRes << ".  The reduced model's lower differentiation"
+                   " levels are invariants of its flow, not rows of it, so nothing restores them -- the"
+                   " integration from here is off the manifold.  Make the jump law consistent with them,"
+                   " or declare fewer jumps and let them supply the rest." << std::endl;
+  }
   return R;
 }
 
@@ -1434,7 +1577,7 @@ BASE_DYNAMIC::_ic_scatter
 ( BASE_DYNAMIC* M, int const n, double const* z )
 {
   t_ICSys& S = *M->_icCur;
-  size_t const dot0 = 1 + M->_nx + M->_np + M->_nc + M->_mUpVar.size();
+  size_t const dot0 = M->_ic_dot0();
   for( int i = 0; i < n; ++i ) S.dVar[ i < (int)M->_nx? 1+i: dot0 + ( i - M->_nx ) ] = z[i];
 }
 

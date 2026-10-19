@@ -178,6 +178,49 @@ int main()
     }
   }
 
+  // ------------------------------------------------------------------ C: a DECLARED JUMP
+  // Continuity carries the hidden levels across a stop; a declared jump does not, because it moves the
+  // state deliberately.  Whether the manifold survives is then a property of the JUMP LAW, and nothing
+  // restores it -- so it is diagnosed.  Same index-2 model: the hidden level is x - 1 = 0.
+  { std::cout << "\n--- C. a DECLARED JUMP, checked against the hidden level x - 1 = 0\n";
+    auto run = [&]( bool consistent, double& resid, double& xend ) -> bool {
+      FFGraph G; DAESLV_IDAS M; M.set_dag( &G );
+      FFVar t = G.add_var("t"), x = G.add_var("x(t)"), z = G.add_var("z(t)"), u = G.add_var("u");
+      M.add_domain( t, FFDom( 0., 2., 2, FFDom::LGR, 4 ) );
+      M.add_state( x, {t} ); M.add_state( z, {t} );
+      M.add_input( u, {t}, FFDom::LGR, 1 );
+      M.set_evolution_domain( t );
+      M.update_ref( x, 1. ); M.update_ref( z, 0. );
+      M.add_equation( OpP( x, t ) - z - u, {t}, {TI}, io );
+      M.add_equation( x - 1.,              {t}, {FFDom::ALL}, io );     // INDEX 2
+      // consistent: x(1+) = x(1-), which IS on the manifold.  inconsistent: x(1+) = 2 x(1-), which is not.
+      M.add_transition( consistent? x: 2.*x, x, t, 1. );
+      M.options.SOLVE.RTOL = M.options.SOLVE.ATOL = 1e-10;
+      M.options.DISPLAY_LEVEL = 0;
+      if( !M.setup() ){ std::cout << "    setup failed: " << M.extract_error() << "\n"; return false; }
+      M.solve( std::vector<double>{ 1., 2. } );
+      resid = M.ic_hidden_residual();
+      xend = M.val_state().back()[0];
+      return true; };
+
+    double r1 = -1., x1 = 0., r2 = -1., x2 = 0.;
+    std::cout << "    (a) the jump x(1+) = x(1-), ON the manifold\n";
+    if( !run( true, r1, x1 ) ) ++n_fail;
+    else{
+      std::cout << "        worst |hidden level| = " << std::scientific << std::setprecision(2) << r1 << "\n";
+      check( "a consistent jump leaves the manifold intact", r1, 0., 1e-8 );
+      check( "  and x stays on x = 1", x1, 1., 1e-8 );
+    }
+    std::cout << "    (b) the jump x(1+) = 2 x(1-), OFF the manifold -- the diagnosis must fire\n";
+    if( !run( false, r2, x2 ) ) ++n_fail;
+    else{
+      std::cout << "        worst |hidden level| = " << std::scientific << std::setprecision(2) << r2
+                << "   x(2) = " << x2 << "\n";
+      check_bool( "an inconsistent jump is DIAGNOSED, not integrated silently", r2 > 1e-6 );
+      check( "  and the residual is the amount it left by", r2, 1., 1e-6 );
+    }
+  }
+
   std::cout << "\n==========  DAESLV_hidden: " << n_pass << " passed, " << n_fail << " failed -- "
             << ( n_fail? "FAILURES": "ALL PASS" ) << "  ==========\n\n";
   return n_fail? 1: 0;

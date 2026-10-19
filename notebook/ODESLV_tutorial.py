@@ -107,19 +107,30 @@ IVP.report()
 values = {tau: [600.], T: [750.], cA0: [2.], cB0: [0.], cC0: [0.],
           kr1: [6.66e-3], Ea1: [2.52e3], kr2: [1.03], Ea2: [5e3]}
 
-IVP.options.DISPLAY = 1      # displays numerical integration results
-IVP.options.RESRECORD = 200  # record 200 points along time horizon
+IVP.options.DISPLAY_LEVEL = 1       # displays numerical integration results
+IVP.options.OUTPUT.RESRECORD = 200  # record 200 points along time horizon
 
 IVP.solve(values)
 IVP.solve_fsens(values)
 IVP.solve_asens(values)
 
 # %% [markdown]
-# The options of `ODESLV` combine the model options (`FFModel.Options`) and the CVODES options; each is documented (e.g. `help(ODESLV.Options.RTOL)`, or `help(IVP.options)` for all of them):
+# The options of `ODESLV` combine the model options (`FFModel.Options`) and the CVODES options. They are
+# grouped: `SOLVE` holds what the integration does, `OUTPUT` what is recorded from it, and `INITIAL` how the
+# initial conditions are resolved; a few model-wide settings such as `DISPLAY_LEVEL` sit at the top level.
+# Each is documented (e.g. `help(ODESLV.Options.t_Solve.RTOL)`, or `help(IVP.options)` for all of them):
 
 # %%
-for name in ("INTMETH", "NLINSOL", "LINSOL", "RTOL", "ATOL", "NMAX", "RESRECORD", "DISPLAY"):
-    print("%-10s = %-24s %s" % (name, getattr(IVP.options, name), getattr(ODESLV.Options, name).__doc__.split(".")[0]))
+for group, name in (("SOLVE", "INTMETH"), ("SOLVE", "NLINSOL"), ("SOLVE", "LINSOL"),
+                    ("SOLVE", "RTOL"), ("SOLVE", "ATOL"), ("SOLVE", "NMAX"),
+                    ("OUTPUT", "RESRECORD"), ("INITIAL", "BYPASS_EXPLICIT"), (None, "DISPLAY_LEVEL")):
+    holder = IVP.options if group is None else getattr(IVP.options, group)
+    owner = ODESLV.Options if group is None else getattr(ODESLV.Options, "t_" + group.capitalize())
+    label = name if group is None else group + "." + name
+    doc = (getattr(owner, name).__doc__ or "").split(".")[0]
+    if "Enumeration" in doc:       # the binding generator prepends the nearby enum docs; keep the tail
+        doc = doc.rsplit(")", 1)[-1].strip()
+    print("%-22s = %-24s %s" % (label, getattr(holder, name), doc))
 
 # %% [markdown]
 # The gradients of the batch-end concentrations, one row per parameter and one column per output, agree between forward and adjoint sensitivity analysis:
@@ -128,7 +139,7 @@ for name in ("INTMETH", "NLINSOL", "LINSOL", "RTOL", "ATOL", "NMAX", "RESRECORD"
 import numpy as np
 import matplotlib.pyplot as plt
 
-IVP.options.DISPLAY = 0
+IVP.options.DISPLAY_LEVEL = 0
 
 IVP.solve_fsens(values)
 G_fwd = np.array(IVP.val_function_gradient())
@@ -231,8 +242,8 @@ plt.show()
 # %%
 DAG = FFGraph()
 OpIVP = FFODESLV()
-IVP.options.DISPLAY = 0    # turn off display during numerical simulation
-IVP.options.RESRECORD = 0  # turn off trajectory record
+IVP.options.SOLVE.VERBOSE    = 0  # turn off display during numerical simulation
+IVP.options.OUTPUT.RESRECORD = 0  # turn off trajectory record
 
 # %%
 # reactor #1 initial concentrations

@@ -213,6 +213,11 @@ protected:
   FFGraph* _dag;
 
   //! @brief local copy of initial value functions
+  //! @brief Sensitivities of the consistent initial state, d x_i(0) / d p_j, from the SHARED system --
+  //! filled only where the initial condition was SOLVED rather than divided.  Empty on the explicit
+  //! fast path, where the divided form IS the initial condition and differentiating it is exact.
+  std::vector<std::vector<double>> _dICSens, _dICSensDot;
+
   std::vector<std::vector<FFVar>> _vIC;
 
   //! @brief local copy of right-hand-side functions
@@ -684,7 +689,11 @@ ODESLV_BASE::_IC_D_STA
   // solve buys nothing there, and it is the common one.
   if( !( _ic_bypass_explicit() && explicit_initial_conditions() ) && !ic_rows().empty() ){
     std::vector<double> xv, dxv, par( _np, 0. );
-    for( size_t j = 0; j < _np; ++j ) par[j] = _DVAR[ _nx + 1 + j ];
+    // _Dp, not an offset of my own: _INI_D_STA lays _DVAR out as [ x, p, t, q ], so the parameters
+    // start at _nx and NOT at _nx+1.  Reading them one slot late gave the IC solve zeros for every
+    // parameter -- a wrong ANSWER, not a failure.  Unreachable from the corpus until now, since the
+    // only driver with implicit initial rows declares no parameters.
+    for( size_t j = 0; j < _np; ++j ) par[j] = _Dp[j];
     BASE_KINSOL::Report const R = BASE_DYNAMIC::solve_ic( xv, dxv, _ic_knobs(), par );
     if( R.status == BASE_KINSOL::FAILED ) return false;
     // A rank-deficient root is a DIAGNOSIS, not a failure: the iterate is accurate only to sqrt(FTOL)
@@ -693,8 +702,13 @@ ODESLV_BASE::_IC_D_STA
     if( R.status == BASE_KINSOL::RANK_DEFICIENT )
       std::cerr << "ODESLV ** at the initial time: " << R.message << std::endl;
     for( size_t i = 0; i < _nx; ++i ) ((double*)x)[i] = xv[i];
+    // and the SENSITIVITY initial conditions from the same system, by the linear solve against the
+    // Jacobian just factorised.  The divided form _vIC does not represent these rows, so differentiating
+    // it -- which is what _IC_SET_FSA does -- gives a wrong answer here rather than a refusal.
+    if( !BASE_DYNAMIC::ic_sens( _dICSens, _dICSensDot ) ){ _dICSens.clear(); _dICSensDot.clear(); }
     return true;
   }
+  _dICSens.clear();  _dICSensDot.clear();       // explicit: the divided form is exact, leave FSA alone
   _dag->eval( _nx, _pIC, (double*)x, _np+1, _pVAR+_nx, _DVAR+_nx );
   return true;
 }

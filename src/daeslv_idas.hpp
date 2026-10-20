@@ -195,6 +195,19 @@ public:
     const
     { return _dF; }
 
+  //! @brief Forward sensitivities at every stage time: [time][direction][state].  Empty unless the last
+  //! call was solve_fsens().
+  std::vector< std::vector< std::vector<double> > > const& val_state_sens
+    ()
+    const
+    { return _sk; }
+
+  //! @brief Integrate WITH forward sensitivities w.r.t. every parameter.  The sensitivity initial data
+  //! comes from ic_sens() -- the same system the state's did -- so the two cannot disagree.
+  STATUS solve_fsens
+    ( std::vector<double> const& p, std::vector<double> const& c = std::vector<double>() )
+    { _fsa = true;  STATUS const st = solve( p, c );  _fsa = false;  return st; }
+
   //! @brief Quadratures at every stage time, one row per time, _nq wide.  Each row is that STAGE's
   //! increment, not a running total: a quadrature restarts at zero on every stage, and summing them is
   //! val_function()'s job.  Row 0 is zero.
@@ -233,6 +246,12 @@ protected:
   std::vector<FFVar> _pT, _pX, _pP, _pC, _pYP;    //!< the inserted variables, and dy/dt, all local
   struct StagePlan {
     std::vector<FFVar> Q;                    //!< this stage's _nq quadrature integrands, in _dag
+    size_t             nFp = 0, offFp = 0;   //!< dF/dp: SFAD entries, and where they start in eval
+    std::vector<int>   rFp, cFp;             //!< their (row, parameter) indices
+    std::vector<int>   rJy, cJy, rJyp, cJyp; //!< (row, state) of each dF/dy and dF/dy' entry.  ixJy/ixJyp
+                                             //!< give where they land in the CSC value array, which the
+                                             //!< Jacobian needs; the SENSITIVITY residual needs the
+                                             //!< indices themselves, to contract against s and s'.
     std::vector<FFVar> F;                    //!< the residual rows of this stage
     std::vector<FFVar> eval;                 //!< [ F, dF/dy entries, dF/dy' entries ]
     std::vector<int>   ixJy, ixJyp;          //!< where each entry lands in the CSC value array
@@ -264,8 +283,14 @@ protected:
   std::vector< std::vector<FFVar> > _vFCT;   //!< function terms, one entry per stage time
   std::vector<double> _dF;                   //!< the accumulated function values, val_function() order
 
+  size_t              _nFp = 0, _offFp = 0;  //!< this stage's dF/dp block within _vEVAL
+  std::vector<int>    _rFp, _cFp, _rJy, _cJy, _rJyp, _cJyp;
+
   std::vector<FFVar>  _vQUAD;                //!< this stage's quadrature integrands, in _dag
   std::vector<double> _dQUAD;                //!< their values
+  bool                _fsa = false;          //!< this solve carries forward sensitivities
+  std::vector< std::vector< std::vector<double> > > _sk;   //!< sensitivities at every stage time
+
   std::vector< std::vector<double> > _qk;    //!< quadratures at every stage time, val_quad() order
   std::vector< std::vector<double> > _fk;    //!< function values, per stage, val_function() order
 
@@ -326,11 +351,29 @@ protected:
     { return -1; }
 
   //! @brief Forward sensitivity is phase 5.
+  //! @brief The FORWARD SENSITIVITY residual, one per direction:
+  //!     F_s,j = dF/dy . s_j  +  dF/dy' . s'_j  +  dF/dp_j
+  //! All three blocks are SFAD entries of the SAME stage plan the state residual uses, evaluated in one
+  //! pass -- so the sensitivity equations cannot drift from the equations they differentiate, which is
+  //! the failure mode this module has already paid for once on the initial conditions.
   int IDRESF__
-    ( int, sunrealtype, N_Vector, N_Vector, N_Vector, N_Vector*, N_Vector*, N_Vector*, void*, N_Vector,
-      N_Vector, N_Vector )
+    ( int Ns, sunrealtype tt, N_Vector yy, N_Vector yp, N_Vector, N_Vector* yyS,
+      N_Vector* ypS, N_Vector* resvalS, void*, N_Vector, N_Vector, N_Vector )
     override
-    { return -1; }
+    {
+      _eval_rows( tt, N_VGetArrayPointer( yy ), N_VGetArrayPointer( yp ) );
+      size_t const nr = _nx;
+      for( int j = 0; j < Ns; ++j ){
+        double const* sj  = N_VGetArrayPointer( yyS[j] );
+        double const* spj = N_VGetArrayPointer( ypS[j] );
+        double* rj = N_VGetArrayPointer( resvalS[j] );
+        for( size_t i = 0; i < nr; ++i ) rj[i] = 0.;
+        for( size_t e = 0; e < _nJy;  ++e ) rj[ _rJy[e]  ] += _dEVAL[ _offJy  + e ] * sj [ _cJy[e]  ];
+        for( size_t e = 0; e < _nJyp; ++e ) rj[ _rJyp[e] ] += _dEVAL[ _offJyp + e ] * spj[ _cJyp[e] ];
+        for( size_t e = 0; e < _nFp;  ++e ) if( _cFp[e] == j ) rj[ _rFp[e] ] += _dEVAL[ _offFp + e ];
+      }
+      return 0;
+    }
   int IDQUADF__
     ( int, sunrealtype, N_Vector, N_Vector, N_Vector*, N_Vector*, N_Vector, N_Vector*, void*, N_Vector,
       N_Vector, N_Vector )
@@ -360,6 +403,17 @@ protected:
     const
     { size_t n = 0; for( auto const& row : _mMASS[s] ) n += row.size(); return n; }
 };
+
+//! @brief C trampoline for the forward-sensitivity residual, reaching the solver's IDRESF__.
+inline
+int
+MC_IDRESF__
+( int Ns, sunrealtype tt, N_Vector yy, N_Vector yp, N_Vector resval, N_Vector* yyS,
+  N_Vector* ypS, N_Vector* resvalS, void* user_data, N_Vector t1, N_Vector t2, N_Vector t3 )
+{
+  return ( BASE_IDAS::PTR_BASE_IDAS->*PTR_IDRESF )( Ns, tt, yy, yp, resval, yyS, ypS, resvalS,
+                                                    user_data, t1, t2, t3 );
+}
 
 //! @brief C trampoline for the quadrature integrands, reaching the registered solver's IDQUAD__.
 inline
@@ -460,10 +514,16 @@ DAESLV_IDAS::_build_plans
     P.F = R;
     for( size_t c = 0; c < at.size(); ++c ) P.F[ at[c].first ] += M[c] * _pYP[ at[c].second ];
 
-    std::tuple<unsigned,unsigned*,unsigned*,FFVar*> Jy, Jyp;
+    std::tuple<unsigned,unsigned*,unsigned*,FFVar*> Jy, Jyp, Fp;
+    bool haveFp = false;
     try{
       Jy  = _dag->SFAD( P.F.size(), P.F.data(), _nx, _pX.data()  );
       Jyp = _dag->SFAD( P.F.size(), P.F.data(), _nx, _pYP.data() );
+      // dF/dp, the inhomogeneous term of the sensitivity residual
+      //     F_s,j = dF/dy . s_j + dF/dy' . s'_j + dF/dp_j
+      // SFAD like the other two: a parameter touches few rows, and the dense form would build
+      // rows x np expressions to find that out.
+      if( _np ){ Fp = _dag->SFAD( P.F.size(), P.F.data(), _np, _pP.data() ); haveFp = true; }
     }
     catch( ... ){ _extractError = "SFAD failed on the DAE residual"; return false; }
 
@@ -477,14 +537,28 @@ DAESLV_IDAS::_build_plans
     for( auto const& [ c, r ] : pat ){ where[{c,r}] = (int)P.rowidx.size(); P.rowidx.push_back( (sunindextype)r ); }
     for( auto const& [ c, r ] : pat ) ++P.colptr[ c + 1 ];
     for( size_t c = 0; c < _nx; ++c ) P.colptr[c+1] += P.colptr[c];
-    P.nJy = std::get<0>(Jy);   P.ixJy.resize( P.nJy );
-    for( unsigned e = 0; e < P.nJy;  ++e ) P.ixJy[e]  = where[{ std::get<2>(Jy)[e],  std::get<1>(Jy)[e]  }];
-    P.nJyp = std::get<0>(Jyp); P.ixJyp.resize( P.nJyp );
-    for( unsigned e = 0; e < P.nJyp; ++e ) P.ixJyp[e] = where[{ std::get<2>(Jyp)[e], std::get<1>(Jyp)[e] }];
+    P.nJy = std::get<0>(Jy);   P.ixJy.resize( P.nJy );  P.rJy.resize( P.nJy );  P.cJy.resize( P.nJy );
+    for( unsigned e = 0; e < P.nJy;  ++e ){
+      P.ixJy[e] = where[{ std::get<2>(Jy)[e], std::get<1>(Jy)[e] }];
+      P.rJy[e]  = (int)std::get<1>(Jy)[e];  P.cJy[e] = (int)std::get<2>(Jy)[e];
+    }
+    P.nJyp = std::get<0>(Jyp); P.ixJyp.resize( P.nJyp ); P.rJyp.resize( P.nJyp ); P.cJyp.resize( P.nJyp );
+    for( unsigned e = 0; e < P.nJyp; ++e ){
+      P.ixJyp[e] = where[{ std::get<2>(Jyp)[e], std::get<1>(Jyp)[e] }];
+      P.rJyp[e]  = (int)std::get<1>(Jyp)[e]; P.cJyp[e] = (int)std::get<2>(Jyp)[e];
+    }
 
     P.eval = P.F;
     P.offJy  = P.eval.size();  P.eval.insert( P.eval.end(), std::get<3>(Jy),  std::get<3>(Jy)  + P.nJy  );
     P.offJyp = P.eval.size();  P.eval.insert( P.eval.end(), std::get<3>(Jyp), std::get<3>(Jyp) + P.nJyp );
+    if( haveFp ){
+      P.nFp = std::get<0>(Fp);
+      P.rFp.resize( P.nFp ); P.cFp.resize( P.nFp );
+      for( unsigned e = 0; e < P.nFp; ++e ){ P.rFp[e] = (int)std::get<1>(Fp)[e]; P.cFp[e] = (int)std::get<2>(Fp)[e]; }
+      P.offFp = P.eval.size();
+      P.eval.insert( P.eval.end(), std::get<3>(Fp), std::get<3>(Fp) + P.nFp );
+      delete[] std::get<1>(Fp); delete[] std::get<2>(Fp); delete[] std::get<3>(Fp);
+    }
     for( auto* t : { &Jy, &Jyp } ){ delete[] std::get<1>(*t); delete[] std::get<2>(*t); delete[] std::get<3>(*t); }
     if( P.nnz > _nnzjacmax ) _nnzjacmax = P.nnz;
   }
@@ -501,6 +575,8 @@ DAESLV_IDAS::_build_rows
   StagePlan const& P = _plan[ss];
   _vEVAL = P.eval;
   _vQUAD = P.Q;  _dQUAD.assign( _nq, 0. );
+  _nFp = P.nFp;  _offFp = P.offFp;  _rFp = P.rFp;  _cFp = P.cFp;
+  _rJy = P.rJy;  _cJy = P.cJy;  _rJyp = P.rJyp;  _cJyp = P.cJyp;
   _offJy = P.offJy;  _offJyp = P.offJyp;
   _nJy = P.nJy;      _nJyp = P.nJyp;
   _ixJy = P.ixJy;    _ixJyp = P.ixJyp;
@@ -680,13 +756,18 @@ DAESLV_IDAS::solve
   bool ok = true;
   std::string why;
   N_Vector Nq = nullptr;                       // the quadrature vector, null when the model has none
+  N_Vector* yS = nullptr; N_Vector* ypS = nullptr;   // the sensitivity vectors, null without FSA
   void* mem = IDACreate( ctx );
   // mirrors ODESLV_CVODES's switch, minus DIAG, which IDAS does not have
 #if !defined( CRONOS__WITH_KLU )
   if( options.SOLVE.LINSOL == BASE_IDAS::Options::SPARSE ){
     std::cerr << "DAESLV_IDAS ** LINSOL = SPARSE requires KLU, which this build does not include"
               << "; choose DENSE or DENSEDQ, or use a build with KLU" << std::endl;
-    N_VDestroy( yy ); N_VDestroy( yp ); N_VDestroy( id ); if( Nq ) N_VDestroy( Nq ); if( Nq ) N_VDestroy( Nq );
+    N_VDestroy( yy ); N_VDestroy( yp ); N_VDestroy( id ); if( Nq ) N_VDestroy( Nq );
+  if( yS ) N_VDestroyVectorArray( yS, (int)_np );
+  if( ypS ) N_VDestroyVectorArray( ypS, (int)_np );
+    if( yS ) N_VDestroyVectorArray( yS, (int)_np );
+    if( ypS ) N_VDestroyVectorArray( ypS, (int)_np ); if( Nq ) N_VDestroy( Nq );
     IDAFree( &mem ); SUNContext_Free( &ctx );
     _extractError = "LINSOL = SPARSE without KLU";
     return FATAL;
@@ -710,6 +791,28 @@ DAESLV_IDAS::solve
   do{
     if( IDAInit( mem, MC_IDRES__, _dT[0], yy, yp ) != IDA_SUCCESS ){ ok = false; why = "IDAInit"; break; }
     IDASStolerances( mem, options.SOLVE.RTOL, options.SOLVE.ATOL );
+
+    // Forward sensitivities.  yS0/ypS0 come from ic_sens(), which solved
+    //     ( dF/dz ) . ( dz/dp ) = - dF/dp
+    // against the Jacobian the state IC solve had just factorised -- so the sensitivity initial data
+    // is the derivative OF the initial data, not of some other object that resembles it.
+    if( _fsa && _np ){
+      std::vector< std::vector<double> > dxdp, ddxdp;
+      if( !ic_sens( dxdp, ddxdp ) ){ ok = false; why = "ic_sens for the sensitivity initial data"; break; }
+      yS  = N_VCloneVectorArray( (int)_np, yy );
+      ypS = N_VCloneVectorArray( (int)_np, yp );
+      if( !yS || !ypS ){ ok = false; why = "N_VCloneVectorArray"; break; }
+      for( size_t j = 0; j < _np; ++j )
+        for( size_t i = 0; i < _nx; ++i ){
+          N_VGetArrayPointer( yS[j]  )[i] = j < dxdp.size()?  dxdp[j][i]:  0.;
+          N_VGetArrayPointer( ypS[j] )[i] = j < ddxdp.size()? ddxdp[j][i]: 0.;
+        }
+      int const ism = ( options.SOLVE.FSACORR == BASE_IDAS::Options::SIMULTANEOUS )? IDA_SIMULTANEOUS: IDA_STAGGERED;
+      if( IDASensInit( mem, (int)_np, ism, MC_IDRESF__, yS, ypS ) != IDA_SUCCESS ){
+        ok = false; why = "IDASensInit"; break; }
+      if( IDASensEEtolerances( mem ) != IDA_SUCCESS ){ ok = false; why = "IDASensEEtolerances"; break; }
+      IDASetSensErrCon( mem, options.SOLVE.FSAERR );
+    }
 
     // Quadratures, mirroring ODESLV's CVodeQuad* block.  Ordering is deliberate and was measured, not
     // assumed: IDAQuadInit AFTER IDAInit and the tolerances, and the ReInit at a restart AFTER
@@ -752,6 +855,13 @@ DAESLV_IDAS::solve
     }
     _xk.push_back( _dX0 );                       // the initial point, as ODESLV_CVODES records it
     _qk.clear();  _qk.push_back( std::vector<double>( _nq, 0. ) );   // quadratures start at zero
+    _sk.clear();
+    if( _fsa && yS ){
+      std::vector< std::vector<double> > s0( _np, std::vector<double>( _nx, 0. ) );
+      for( size_t j = 0; j < _np; ++j )
+        for( size_t i = 0; i < _nx; ++i ) s0[j][i] = N_VGetArrayPointer( yS[j] )[i];
+      _sk.push_back( s0 );
+    }
     _dF.assign( _nf, 0. );                                           // the function accumulator
     _eval_fct( 0, _dT[0], _dX0.data(), _qk.back().data() );          // the t0 contribution
 
@@ -787,6 +897,16 @@ DAESLV_IDAS::solve
           std::vector<double> xp, dxp, par( _np, 0. );
           for( size_t j = 0; j < _np; ++j ) par[j] = _dVAR[ 1 + 2*_nx + j ];
           std::vector<double> const dxL( N_VGetArrayPointer( yp ), N_VGetArrayPointer( yp ) + _nx );
+          if( _fsa && yS ){        // (s^-, s'^-): the jump law reads x^-, so its sensitivity reads s^-
+            std::vector< std::vector<double> > sL( _np, std::vector<double>( _nx, 0. ) ),
+                                               sdL( _np, std::vector<double>( _nx, 0. ) );
+            for( size_t j = 0; j < _np; ++j )
+              for( size_t i = 0; i < _nx; ++i ){
+                sL[j][i]  = N_VGetArrayPointer( yS[j]  )[i];
+                sdL[j][i] = N_VGetArrayPointer( ypS[j] )[i];
+              }
+            set_ic_left_sens( sL, sdL );
+          }
           BASE_KINSOL::Report const R = restart_ic( ta, xL, xp, dxp, options.INITIAL.KIN, par, dxL );
           if( R.status == BASE_KINSOL::FAILED ){ ok = false; why = "restart_ic: " + R.message; break; }
           if( R.status == BASE_KINSOL::RANK_DEFICIENT )
@@ -797,6 +917,22 @@ DAESLV_IDAS::solve
           }
           if( IDAReInit( mem, ta, yy, yp ) != IDA_SUCCESS ){ ok = false; why = "IDAReInit after restart_ic"; break; }
           ++stats.numIC;
+          // The sensitivities are reinitialised from the SAME stop system the state just used, by the
+          // same linear solve: ic_sens() linearises about whatever restart_ic() converged to, so the
+          // closing rows that applied there -- continuity, or a declared jump -- apply to s and s'
+          // too, with no separate derivation of the jump law.  Carrying BOTH s^- and s'^- is what
+          // plan 3.13 requires, and the stop system has both because dx/dt is one of its unknowns.
+          if( _fsa && yS ){
+            std::vector< std::vector<double> > dxdp, ddxdp;
+            if( !ic_sens( dxdp, ddxdp ) ){ ok = false; why = "ic_sens at the stop"; break; }
+            for( size_t j = 0; j < _np; ++j )
+              for( size_t i = 0; i < _nx; ++i ){
+                N_VGetArrayPointer( yS[j]  )[i] = j < dxdp.size()?  dxdp[j][i]:  0.;
+                N_VGetArrayPointer( ypS[j] )[i] = j < ddxdp.size()? ddxdp[j][i]: 0.;
+              }
+            int const ism2 = ( options.SOLVE.FSACORR == BASE_IDAS::Options::SIMULTANEOUS )? IDA_SIMULTANEOUS: IDA_STAGGERED;
+            if( IDASensReInit( mem, ism2, yS, ypS ) != IDA_SUCCESS ){ ok = false; why = "IDASensReInit"; break; }
+          }
         }
         else if( options.INITIAL.CALCIC != BASE_IDAS::Options::NONE ){
           int const icopt = ( options.INITIAL.CALCIC == BASE_IDAS::Options::YA_YDP )? IDA_YA_YDP_INIT: IDA_Y_INIT;
@@ -841,6 +977,13 @@ DAESLV_IDAS::solve
         _qk.push_back( std::vector<double>( N_VGetArrayPointer( Nq ), N_VGetArrayPointer( Nq ) + _nq ) );
       }
       else if( ok ) _qk.push_back( std::vector<double>( _nq, 0. ) );
+      if( ok && _fsa && yS ){
+        if( IDAGetSens( mem, &tret, yS ) != IDA_SUCCESS ){ ok = false; why = "IDAGetSens"; break; }
+        std::vector< std::vector<double> > sk( _np, std::vector<double>( _nx, 0. ) );
+        for( size_t j = 0; j < _np; ++j )
+          for( size_t i = 0; i < _nx; ++i ) sk[j][i] = N_VGetArrayPointer( yS[j] )[i];
+        _sk.push_back( sk );
+      }
       if( ok ) _eval_fct( sg+1, tret, N_VGetArrayPointer( yy ), _qk.back().data() );
     }
     if( !ok ) break;

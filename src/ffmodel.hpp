@@ -6374,32 +6374,43 @@ FFModel::_probe_reference_robustness
   // -- assemble the sample set -----------------------------------------------
   // Each user sample is a partial map {state FFVar -> value}; resolve each key to
   // its _vVar index and override that entry of a copy of the base reference.
-  std::vector<std::vector<double>> samples;
+  // The samples are PAIRS: a state vector and an input vector, kept in step throughout.  A symbol's
+  // coefficients may depend on the inputs exactly as on the states -- a kinetic constant, a feed
+  // composition, a switched valve level -- so a classification checked only across state samples
+  // would miss a coefficient that changes sign with an input.  The inputs are sampled by the SAME
+  // rule as the states: a user sample may key either, and the default multiplicative sweep scales
+  // both.
+  std::vector<std::vector<double>> samples, isamples;
   std::vector<std::string>         labels;
-  samples.push_back( state_ref );  labels.push_back( "base" );
+  samples.push_back( state_ref );  isamples.push_back( input_ref );  labels.push_back( "base" );
   size_t n_user = 0;
   for( auto const& m : _classRefSamples ){
-    std::vector<double> s = state_ref;
+    std::vector<double> s = state_ref, is = input_ref;
     size_t n_resolved = 0;
     for( auto const& kv : m ){
       size_t idx = _vVar.size();
       for( size_t j = 0; j < _vVar.size(); ++j )
         if( _vVar[j].id() == kv.first.id() ){ idx = j; break; }
-      if( idx < s.size() ){ s[idx] = kv.second; ++n_resolved; }
-      else std::cerr << "  WARN: sample key '" << kv.first.name()
-                     << "' is not a state -- ignored\n";
+      if( idx < s.size() ){ s[idx] = kv.second; ++n_resolved; continue; }
+      size_t jdx = _vInp.size();
+      for( size_t j = 0; j < _vInp.size(); ++j )
+        if( _vInp[j].id() == kv.first.id() ){ jdx = j; break; }
+      if( jdx < is.size() ){ is[jdx] = kv.second; ++n_resolved; continue; }
+      std::cerr << "  WARN: sample key '" << kv.first.name()
+                << "' is neither a state nor an input -- ignored\n";
     }
     if( n_resolved ){
-      samples.push_back( s );
+      samples.push_back( s );  isamples.push_back( is );
       labels.push_back( "user#" + std::to_string( n_user++ ) );
     }
   }
   if( n_user == 0 ){
     static double const facs[] = { 0.75, 0.90, 1.10, 1.25 };
     for( double f : facs ){
-      std::vector<double> s = state_ref;
-      for( auto& x : s ) x *= f;
-      samples.push_back( s );
+      std::vector<double> s = state_ref, is = input_ref;
+      for( auto& x : s )  x *= f;
+      for( auto& x : is ) x *= f;
+      samples.push_back( s );  isamples.push_back( is );
       std::ostringstream os; os << "scale" << std::setprecision(2) << f;
       labels.push_back( os.str() );
     }
@@ -6408,14 +6419,16 @@ FFModel::_probe_reference_robustness
   // the symbol degenerate for a reason that has nothing to do with the model.  Drop it and say so.
   {
     std::vector<std::vector<double>> keep;  std::vector<std::string> keep_lab;
+    std::vector<std::vector<double>> keep_is;
     for( size_t s = 0; s < samples.size(); ++s ){
       size_t bad = 0;
-      for( double x : samples[s] ) if( !std::isfinite( x ) ) ++bad;
-      if( !bad ){ keep.push_back( samples[s] ); keep_lab.push_back( labels[s] ); continue; }
+      for( double x : samples[s] )  if( !std::isfinite( x ) ) ++bad;
+      for( double x : isamples[s] ) if( !std::isfinite( x ) ) ++bad;
+      if( !bad ){ keep.push_back( samples[s] ); keep_is.push_back( isamples[s] ); keep_lab.push_back( labels[s] ); continue; }
       std::cerr << "  DROPPED sample '" << labels[s] << "': " << bad
                 << " non-finite state value(s); not classified on\n";
     }
-    samples.swap( keep );  labels.swap( keep_lab );
+    samples.swap( keep );  isamples.swap( keep_is );  labels.swap( keep_lab );
     if( samples.empty() ){
       std::cerr << "  NOTE: every sample was dropped as non-finite -- the classification cannot be checked"
                    " against any reference point.\n";
@@ -6492,7 +6505,7 @@ FFModel::_probe_reference_robustness
     std::ostringstream type_detail, sign_detail;
 
     for( size_t s = 1; s < nS; ++s ){               // sample 0 == base (cached)
-      auto Ai = _eval_symbol( sym, samples[s], cst_ref, dom_ref, input_ref );
+      auto Ai = _eval_symbol( sym, samples[s], cst_ref, dom_ref, isamples[s] );
       t_Classify cls = classify( Ai, sym.vDom, time_dom, n_sample, imag_tol,
                                  !sym.vAlgEqn.empty() );
       EqnType const t = eff_type( cls );
@@ -9968,10 +9981,18 @@ FFModel::_copy_usr_to_local
   _vCst = _copy( _usr._vCstUsr, vAllVarsLoc, ndxAllVars );
   _mDom = _copy( _usr._mDomUsr, vAllVarsLoc, ndxAllVars );
 
-  _mInp.clear();
-  for( auto const& [var, dom] : _usr._mInpUsr )
-    _mInp.insert( { _local( var, vAllVarsLoc, ndxAllVars ),
-                    _copy( dom, vAllVarsLoc, ndxAllVars ) } );
+  _mInp.clear();  _vInp.clear();
+  for( auto const& [var, dom] : _usr._mInpUsr ){
+    FFVar const loc = _local( var, vAllVarsLoc, ndxAllVars );
+    _mInp.insert( { loc, _copy( dom, vAllVarsLoc, ndxAllVars ) } );
+    // _vInp is the INPUT counterpart of _vVar: the list the classification provisions a symbol's
+    // coefficients from (_eval_symbol), and _classification_reference() reads reference values for.
+    // It was declared, looped over in both places, and never filled -- so a coefficient carrying an
+    // input failed to evaluate at classification with "missing variable", lumped or distributed
+    // alike, while the same quantity declared as a CONSTANT went through, _vCst being built just
+    // above.  Insertion order rather than map order, so it matches the declaration order of _vVar.
+    _vInp.push_back( loc );
+  }
   // The working model now exists on the new DAG; a derived solver rebuilds what it derives from it.
   _on_model_imported( vAllVarsLoc, ndxAllVars );
   _mInpCont = _copy_inp_cont( _usr._mInpContUsr, vAllVarsLoc, ndxAllVars );

@@ -42,7 +42,11 @@ int main()
   auto io = FFModel::EqnOptions( FFModel::EqnRole::INTERIOR, 0 );
   auto ii = FFModel::EqnOptions( FFModel::EqnRole::INITIAL,  0 );
   M.add_equation( OpP( y, t ) + y - u, {t}, {TI}, io );
-  M.add_equation( z - u * y,           {t}, {TI}, io );
+  // FFDom::ALL, not TI: the ALGEBRAIC row must hold at t0 as well.  Declared on (0,T] it left z(0)
+  // determined by nothing, and setup() said so -- "DOF: the model is NOT balanced -- rows - unknowns
+  // = -1".  Every check here is about y, which IS determined, so the driver passed anyway: a gate
+  // weaker than it looked, on a model the framework considered ill-posed.
+  M.add_equation( z - u * y,           {t}, {FFDom::ALL}, io );
   M.add_equation( y - 1.,              {t}, {FFDom::LB}, ii );
 
   M.options.SOLVE.RTOL = M.options.SOLVE.ATOL = 1e-10;
@@ -72,6 +76,11 @@ int main()
                 << "   y=" << std::setprecision(10) << ys << "   exact=" << ye
                 << "   d=" << std::scientific << std::setprecision(2) << std::fabs(ys-ye) << "\n";
     } }
+  // GATE the balance, rather than leave it to a setup() warning that scrolls past under "all pass".
+  // This driver ran for a week with rows - unknowns = -1 and every check still green, because every
+  // check was about y and the deficit was in z.
+  check( "the model is DOF-balanced", M.dof_balance().balanced? 1.: 0., 1., 0. );
+
   check( "the solve restarted at every boundary", (double)M.stats.numIC, (double)NE, 0. );
   check( "the model dag did NOT grow across the stops", (double)nv_after, (double)nv_before, 0. );
 

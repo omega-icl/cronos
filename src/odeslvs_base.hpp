@@ -40,6 +40,9 @@ protected:
   using ODESLV_BASE::_nx0;
   using ODESLV_BASE::_np;
   using ODESLV_BASE::_ndxSEN;
+
+  //! @brief The sensitivity direction _IC_SET_FSA last prepared, for _IC_D_SEN to index ic_sens() by.
+  unsigned _isenIC = 0;
   using ODESLV_BASE::_nsen;
   using ODESLV_BASE::_nq;
   using ODESLV_BASE::_nf;
@@ -423,6 +426,7 @@ ODESLVS_BASE::_IC_SET_FSA
   {std::cout << "Enter <1> to continue"; int dum; std::cin >> dum;}
 #endif
 
+  _isenIC = isen;                               // which direction _IC_D_SEN is about to be asked for
   delete[] _pSACFCT; _pSACFCT = _dag->FAD( _nx, pIC, 1, _pVAR+_ny+_nx+_ndxSEN[isen] );
   pIC = _pSACFCT;
   return true;
@@ -708,6 +712,15 @@ ODESLVS_BASE::_IC_D_SEN
 #endif
 
   *_Dt = t; // current time
+  // Where the initial condition was SOLVED, its sensitivities came from the same system (ic_sens) and
+  // _pSACFCT -- the FAD of the divided form -- is not the derivative of it.  Prefer the solved pair.
+  if( !_dICSens.empty() ){
+    size_t const j = _ndxSEN[_isenIC];
+    if( j < _dICSens.size() && _dICSens[j].size() >= _nx ){
+      for( unsigned i = 0; i < _nx; ++i ) ((double*)y)[i] = _dICSens[j][i];
+      return true;
+    }
+  }
   _dag->eval( _nx, _pSACFCT, (double*)y, _np+1, _pVAR+_ny+_nx, _DVAR+_ny+_nx );
   return true;
 }

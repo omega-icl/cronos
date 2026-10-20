@@ -110,6 +110,14 @@ class BASE_DYNAMIC
     size_t                             nnz = 0;  //!< structural nonzeros of the Jacobian
     std::vector<size_t>                jrow, jcol, at;   //!< at[e]: CSC slot of SFAD entry e
     BASE_KINSOL::Sparsity              sp;
+    std::vector<FFVar>                 evalL;    //!< the SFAD entries of dF/d(left state), and of
+    std::vector<double>                dEvalL;   //!< dF/d(left derivative) after them
+    std::vector<size_t>                jrowL, jcolL;
+    size_t                             nnzL = 0, nLftCol = 0;
+    std::vector<FFVar>                 evalP;    //!< the SFAD entries of dF/dp
+    std::vector<double>                dEvalP;
+    std::vector<size_t>                jrowP, jcolP;
+    size_t                             nnzP = 0;
     std::vector<FFVar>                 hid;      //!< hidden levels, for DIAGNOSIS only -- never rows of the system
     std::vector<double>                dHid;
     size_t                             nLft = 0; //!< left-state placeholders in dVar, after the derivatives
@@ -145,8 +153,16 @@ class BASE_DYNAMIC
   //! dx^- are DATA the solver carries into the stop.  Only a jump reads them; a plain restart does not.
   std::vector<FFVar>                   _mUmVar, _mDotLftVar;
 
+  //! @brief The system the last solve_ic()/restart_ic() used, for ic_sens() to linearise about.
+  t_ICSys*                             _icLast = nullptr;
+
   //! @brief Worst |hidden level| at the last stop that carried a declared jump; 0 where none applies.
   double                               _icHidRes = 0.;
+
+  //! @brief Sensitivities of the LEFT state and its derivative at a stop, (s^-, s'^-) by parameter.
+  //! Set by the consumer before restart_ic(); without them ic_sens() treats the left state as constant,
+  //! which is wrong wherever a jump law reads it.
+  std::vector< std::vector<double> > _icLeftSens, _icLeftSensDot;
 
   //! @brief Left-limit derivative values at a stop, alongside _icLeft.
   std::vector<double>                  _icLeftDot;
@@ -481,7 +497,26 @@ class BASE_DYNAMIC
       _icLeft = xleft;
       BASE_KINSOL::Report const R = _ic_solve( *S, tau, x, dx, k, par );
       _icLeft.clear();  _icLeftDot.clear();
+      // _icLeftSens is NOT cleared here: ic_sens() runs after this returns and needs it.  The consumer
+      // sets it afresh at every stop, and solve_ic() clears it so t0 cannot inherit a stale one.
       return R; }
+
+  //! @brief Hand ic_sens() the left-state sensitivities (s^-, s'^-) that a stop needs.  Cleared by
+  //! restart_ic() once used, as _icLeft is.
+  void set_ic_left_sens
+    ( std::vector< std::vector<double> > const& s, std::vector< std::vector<double> > const& sd )
+    { _icLeftSens = s;  _icLeftSensDot = sd; }
+
+  //! @brief Sensitivities of the consistent initial data w.r.t. the parameters, from the system LAST
+  //! solved: @p dxdp[j][i] = d x_i / d p_j and @p ddxdp[j][i] = d (dx_i/dt) / d p_j.  Call it directly
+  //! after solve_ic() or restart_ic(), whose solution it linearises about.
+  //!
+  //! It solves ( dF/dz ) . ( dz/dp ) = - dF/dp.  LINEAR, in the SAME Jacobian the state solve just
+  //! used, with one right-hand side per parameter -- so no Newton, and no second derivation of the
+  //! initial condition to drift from the first.  t0, a plain restart and a transition are the same
+  //! system with different closing rows, so this is ONE routine for all three.
+  bool ic_sens
+    ( std::vector< std::vector<double> >& dxdp, std::vector< std::vector<double> >& ddxdp );
 
   //! @brief The initial-condition system AT ITS SEED, for diagnosing a singular or failing solve:
   //! the seed @p z0, the residual @p F there, and the dense Jacobian @p J, COLUMN-major (J[r + n*c]),
@@ -1423,6 +1458,48 @@ BASE_DYNAMIC::_assemble_ic
       S.dHid.assign( h.size(), 0. );
     }
   }
+  // dF/dp, for the SENSITIVITY initial conditions.  Differentiating F( z; p ) = 0 gives
+  //     ( dF/dz ) . ( dz/dp ) = - dF/dp
+  // a LINEAR system in the SAME Jacobian the state solve factorises, with one right-hand side per
+  // parameter.  Built here so it shares this system's graph and its parameters, which are already
+  // variables of it -- nothing is re-derived, which is the whole point: a separately derived
+  // sensitivity IC is how the state IC and the sensitivity IC come to disagree silently.
+  if( _np ){
+    std::vector<FFVar> pv;
+    for( size_t j = 0; j < _np; ++j ) pv.push_back( S.all[ 1 + _nx + j ] );
+    auto const Jp = S.dag->SFAD( S.row.size(), S.row.data(), pv.size(), pv.data() );
+    S.nnzP = std::get<0>( Jp );
+    S.jrowP.assign( S.nnzP, 0 ); S.jcolP.assign( S.nnzP, 0 );
+    for( unsigned e = 0; e < S.nnzP; ++e ){
+      S.jrowP[e] = std::get<1>( Jp )[e];
+      S.jcolP[e] = std::get<2>( Jp )[e];
+    }
+    S.evalP.assign( std::get<3>( Jp ), std::get<3>( Jp ) + S.nnzP );
+    S.dEvalP.assign( S.nnzP, 0. );
+    delete[] std::get<1>( Jp ); delete[] std::get<2>( Jp ); delete[] std::get<3>( Jp );
+  }
+  // dF/d(x^-, dx^-).  At a stop the system is F( z ; p, x^-, dx^- ) = 0 and the LEFT state depends on
+  // the parameters as well, so the chain rule has a second term:
+  //     ( dF/dz ) . ( dz/dp ) = - dF/dp - ( dF/dx^- ) . s^-  - ( dF/ddx^- ) . s'^-
+  // Dropping it treats the left state as a constant, which silently halves the sensitivity through a
+  // jump whose law carries the pre-jump value -- plan 3.13's "carry (s^-, s'^-), not s^- alone".
+  if( at_stop && !_mLftVar.empty() ){
+    size_t const lft0 = _ic_dot0() + S.dotOf.size();
+    std::vector<FFVar> lv;
+    for( size_t i = 0; i < _nx; ++i ) lv.push_back( S.all[ lft0 + i ] );
+    for( size_t i = 0; i < _mDotLftVar.size(); ++i ) lv.push_back( S.all[ lft0 + _nx + i ] );
+    S.nLftCol = lv.size();
+    auto const Jl = S.dag->SFAD( S.row.size(), S.row.data(), lv.size(), lv.data() );
+    S.nnzL = std::get<0>( Jl );
+    S.jrowL.assign( S.nnzL, 0 ); S.jcolL.assign( S.nnzL, 0 );
+    for( unsigned e = 0; e < S.nnzL; ++e ){
+      S.jrowL[e] = std::get<1>( Jl )[e];
+      S.jcolL[e] = std::get<2>( Jl )[e];
+    }
+    S.evalL.assign( std::get<3>( Jl ), std::get<3>( Jl ) + S.nnzL );
+    S.dEvalL.assign( S.nnzL, 0. );
+    delete[] std::get<1>( Jl ); delete[] std::get<2>( Jl ); delete[] std::get<3>( Jl );
+  }
   S.dEval.assign( S.eval.size(), 0. );
   S.dVar.assign( _ic_dot0() + S.dotOf.size() + S.nLft, 0. );
   S.ok = true;
@@ -1473,12 +1550,84 @@ BASE_DYNAMIC::ic_probe
 }
 
 inline
+bool
+BASE_DYNAMIC::ic_sens
+( std::vector< std::vector<double> >& dxdp, std::vector< std::vector<double> >& ddxdp )
+{
+  dxdp.assign( _np, std::vector<double>( _nx, 0. ) );
+  ddxdp.assign( _np, std::vector<double>( _nx, 0. ) );
+  if( !_icLast || _icLast->row.empty() ) return false;
+  if( !_np ) return true;
+  t_ICSys& S = *_icLast;
+  size_t const n = S.unk.size(), dot0 = _ic_dot0();
+
+  // - dF/dp at the solved point.  S.dVar still holds it: the state solve scattered its last iterate,
+  // and the caller is expected to come straight here.
+  std::vector<double> rhs( n * _np, 0. );
+  if( S.nnzP ){
+    S.dag->eval( S.wrk, S.evalP.size(), S.evalP.data(), S.dEvalP.data(),
+                 S.all.size(), S.all.data(), S.dVar.data() );
+    for( size_t e = 0; e < S.nnzP; ++e )
+      if( S.jcolP[e] < _np && S.jrowP[e] < n ) rhs[ S.jcolP[e]*n + S.jrowP[e] ] = -S.dEvalP[e];
+  }
+  // ... and the LEFT-state term, where this is a stop and the caller carried (s^-, s'^-) in
+  if( S.nnzL && !_icLeftSens.empty() ){
+    S.dag->eval( S.wrk, S.evalL.size(), S.evalL.data(), S.dEvalL.data(),
+                 S.all.size(), S.all.data(), S.dVar.data() );
+    for( size_t j = 0; j < _np; ++j )
+      for( size_t e = 0; e < S.nnzL; ++e ){
+        size_t const c = S.jcolL[e], r = S.jrowL[e];
+        if( r >= n ) continue;
+        double sv = 0.;
+        if( c < _nx ){ if( j < _icLeftSens.size() && c < _icLeftSens[j].size() ) sv = _icLeftSens[j][c]; }
+        else { size_t const d = c - _nx;
+               if( j < _icLeftSensDot.size() && d < _icLeftSensDot[j].size() ) sv = _icLeftSensDot[j][d]; }
+        rhs[ j*n + r ] -= S.dEvalL[e] * sv;
+      }
+  }
+
+  // dF/dz at the same point, through the SAME callback KINSOL drove
+  std::vector<double> z( n, 0. ), J( n*n, 0. );
+  for( size_t i = 0; i < _nx && i < n; ++i ) z[i] = S.dVar[1+i];
+  for( size_t d = 0; d < S.dotOf.size(); ++d ) z[_nx+d] = S.dVar[ dot0 + d ];
+  _icCur = &S;
+  _ic_jac( (int)n, z.data(), J.data(), this );
+  _icCur = nullptr;
+
+  // one factorisation, _np back-substitutions
+  SUNContext ctx = nullptr;
+  if( SUNContext_Create( SUN_COMM_NULL, &ctx ) < 0 ) return false;
+  SUNMatrix A = SUNDenseMatrix( (sunindextype)n, (sunindextype)n, ctx );
+  N_Vector b = N_VNew_Serial( (sunindextype)n, ctx );
+  SUNLinearSolver LS = SUNLinSol_Dense( b, A, ctx );
+  bool ok = ( A && b && LS );
+  if( ok ){
+    for( size_t c = 0; c < n; ++c )
+      for( size_t r = 0; r < n; ++r ) SM_ELEMENT_D( A, r, c ) = J[ r + n*c ];
+    ok = ( SUNLinSolSetup( LS, A ) == 0 );
+  }
+  for( size_t j = 0; ok && j < _np; ++j ){
+    double* bd = N_VGetArrayPointer( b );
+    for( size_t r = 0; r < n; ++r ) bd[r] = rhs[ j*n + r ];
+    ok = ( SUNLinSolSolve( LS, A, b, b, 0. ) == 0 );
+    if( !ok ) break;
+    for( size_t i = 0; i < _nx && i < n; ++i ) dxdp[j][i] = bd[i];
+    for( size_t d = 0; d < S.dotOf.size(); ++d ) ddxdp[j][ S.dotOf[d] ] = bd[_nx+d];
+  }
+  if( LS ) SUNLinSolFree( LS );
+  if( A ) SUNMatDestroy( A );
+  if( b ) N_VDestroy( b );
+  SUNContext_Free( &ctx );
+  return ok;
+}
+
+inline
 BASE_KINSOL::Report
 BASE_DYNAMIC::solve_ic
 ( std::vector<double>& x, std::vector<double>& dx, BASE_KINSOL::Knobs const& k,
   std::vector<double> const& par )
 {
-  _icLeft.clear();
+  _icLeft.clear();  _icLeftSens.clear();  _icLeftSensDot.clear();
   return _ic_solve( _icStart, _dT.empty()? 0.: _dT[0], x, dx, k, par );
 }
 
@@ -1545,6 +1694,7 @@ BASE_DYNAMIC::_ic_solve
   for( size_t i = 0; i < _nx; ++i ) z[i] = S.dVar[1+i];
   for( size_t d = 0; d < S.dotOf.size(); ++d ) z[_nx+d] = S.dVar[ dot0 + d ];
 
+  _icLast = &S;
   _icCur = &S;
   R = BASE_KINSOL::solve( (int)z.size(), &BASE_DYNAMIC::_ic_res, &BASE_DYNAMIC::_ic_jac, this, z, k, &S.sp );
   _icCur = nullptr;

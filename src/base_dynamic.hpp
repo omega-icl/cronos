@@ -518,6 +518,20 @@ class BASE_DYNAMIC
   bool ic_sens
     ( std::vector< std::vector<double> >& dxdp, std::vector< std::vector<double> >& ddxdp );
 
+  //! @brief The ADJOINT of a stop: carry the co-state across it, backward.  Given v^+ = dG/dx^+ on the
+  //! right of the stop at @p tau, with the stop's solution (@p xplus, @p dxplus) and its data (@p xleft,
+  //! @p dxleft), it solves the TRANSPOSE of the system ic_sens() differentiates forward:
+  //!     ( dF/dz )^T mu = [ v^+ ; 0 ]
+  //!     v^-  = - ( dF/dx^- )^T mu        (and the dx^- block into @p dvminus)
+  //!     dG/dp += - ( dF/dp )^T mu        (the stop's OWN contribution, as -dF/dp is forward)
+  //! For a plain continuity stop this reduces to v^- = v^+ on the differential states.  The same
+  //! Jacobian, the same dF/dx^- and dF/dp blocks: nothing is derived a second time.
+  bool ic_adjoint
+    ( double const tau, std::vector<double> const& xleft, std::vector<double> const& dxleft,
+      std::vector<double> const& xplus, std::vector<double> const& dxplus,
+      std::vector<double> const& vplus, std::vector<double> const& par,
+      std::vector<double>& vminus, std::vector<double>& dvminus, std::vector<double>& dGdp );
+
   //! @brief The initial-condition system AT ITS SEED, for diagnosing a singular or failing solve:
   //! the seed @p z0, the residual @p F there, and the dense Jacobian @p J, COLUMN-major (J[r + n*c]),
   //! n = ic_unknowns().size().  It drives the very callbacks KINSOL drives, so what comes back is what
@@ -1613,6 +1627,75 @@ BASE_DYNAMIC::ic_sens
     if( !ok ) break;
     for( size_t i = 0; i < _nx && i < n; ++i ) dxdp[j][i] = bd[i];
     for( size_t d = 0; d < S.dotOf.size(); ++d ) ddxdp[j][ S.dotOf[d] ] = bd[_nx+d];
+  }
+  if( LS ) SUNLinSolFree( LS );
+  if( A ) SUNMatDestroy( A );
+  if( b ) N_VDestroy( b );
+  SUNContext_Free( &ctx );
+  return ok;
+}
+
+inline
+bool
+BASE_DYNAMIC::ic_adjoint
+( double const tau, std::vector<double> const& xleft, std::vector<double> const& dxleft,
+  std::vector<double> const& xplus, std::vector<double> const& dxplus,
+  std::vector<double> const& vplus, std::vector<double> const& par,
+  std::vector<double>& vminus, std::vector<double>& dvminus, std::vector<double>& dGdp )
+{
+  vminus.assign( _nx, 0. );  dvminus.assign( _nx, 0. );
+  if( dGdp.size() < _np ) dGdp.assign( _np, 0. );
+  // the stop system at this tau, exactly as restart_ic() picks it
+  t_ICSys* S = &_icStop;
+  for( auto const& [t0,Sj] : _icStopAt ) if( std::fabs( t0 - tau ) <= options.TTOL ){ S = Sj; break; }
+  if( !S->ok || S->row.empty() ) return false;
+  size_t const n = S->unk.size();
+
+  // bind it as the forward solve was: parameters, inputs at tau, the LEFT data, then the solution
+  _icLeft = xleft;  _icLeftDot = dxleft;
+  _ic_bind( *S, tau, par );
+  _icLeft.clear();  _icLeftDot.clear();
+  std::vector<double> z( n, 0. );
+  for( size_t i = 0; i < _nx && i < xplus.size(); ++i ) z[i] = xplus[i];
+  for( size_t d = 0; d < S->dotOf.size(); ++d ) z[_nx+d] = S->dotOf[d] < dxplus.size()? dxplus[ S->dotOf[d] ]: 0.;
+  _icCur = S;  _ic_scatter( this, (int)n, z.data() );
+
+  // dF/dz at the solution, transposed, against [ v^+ ; 0 ]
+  std::vector<double> J( n*n, 0. );
+  _ic_jac( (int)n, z.data(), J.data(), this );
+  _icCur = nullptr;
+  SUNContext ctx = nullptr;
+  if( SUNContext_Create( SUN_COMM_NULL, &ctx ) < 0 ) return false;
+  SUNMatrix A = SUNDenseMatrix( (sunindextype)n, (sunindextype)n, ctx );
+  N_Vector b = N_VNew_Serial( (sunindextype)n, ctx );
+  SUNLinearSolver LS = SUNLinSol_Dense( b, A, ctx );
+  bool ok = ( A && b && LS );
+  if( ok ){
+    for( size_t c = 0; c < n; ++c )
+      for( size_t r = 0; r < n; ++r ) SM_ELEMENT_D( A, r, c ) = J[ c + n*r ];     // TRANSPOSED
+    for( size_t r = 0; r < n; ++r ) N_VGetArrayPointer( b )[r] = r < _nx && r < vplus.size()? vplus[r]: 0.;
+    ok = ( SUNLinSolSetup( LS, A ) == 0 ) && ( SUNLinSolSolve( LS, A, b, b, 0. ) == 0 );
+  }
+  if( ok ){
+    double const* mu = N_VGetArrayPointer( b );
+    // v^- = -( dF/dx^- )^T mu, the dx^- block likewise
+    if( S->nnzL ){
+      S->dag->eval( S->wrk, S->evalL.size(), S->evalL.data(), S->dEvalL.data(),
+                    S->all.size(), S->all.data(), S->dVar.data() );
+      for( size_t e = 0; e < S->nnzL; ++e ){
+        size_t const c = S->jcolL[e], r = S->jrowL[e];
+        if( r >= n ) continue;
+        if( c < _nx ) vminus[c] -= S->dEvalL[e] * mu[r];
+        else if( c - _nx < _nx ) dvminus[ c - _nx ] -= S->dEvalL[e] * mu[r];
+      }
+    }
+    // dG/dp += -( dF/dp )^T mu
+    if( S->nnzP ){
+      S->dag->eval( S->wrk, S->evalP.size(), S->evalP.data(), S->dEvalP.data(),
+                    S->all.size(), S->all.data(), S->dVar.data() );
+      for( size_t e = 0; e < S->nnzP; ++e )
+        if( S->jcolP[e] < _np && S->jrowP[e] < n ) dGdp[ S->jcolP[e] ] -= S->dEvalP[e] * mu[ S->jrowP[e] ];
+    }
   }
   if( LS ) SUNLinSolFree( LS );
   if( A ) SUNMatDestroy( A );

@@ -1,4 +1,4 @@
-// DAESLV_fsens -- forward sensitivities through IDAS.
+// DAESLV_fsens -- FORWARD sensitivities through IDAS.  The adjoint lives in DAESLV_asens.
 // =====================================================================================================
 // The sensitivity residual is  F_s,j = dF/dy . s_j + dF/dy' . s'_j + dF/dp_j,  all three blocks SFAD
 // entries of the SAME stage plan the state residual uses.  The initial data comes from ic_sens(), the
@@ -122,7 +122,95 @@ int main()
     check( "d x(1-) / da = 0",      S.at(1).at(ja).at(0), 0.,        1e-8 );
     check( "d x(1-) / dk = -e^-k",  S.at(1).at(jk).at(0), -e1,       1e-7 );
     check( "d x(2) / da = e^-2k",   S.back().at(ja).at(0), e2,       1e-7 );
-    check( "d x(2) / dk = -2a e^-2k", S.back().at(jk).at(0), -2.*A*e2, 1e-7 ); }
+    check( "d x(2) / dk = -2a e^-2k", S.back().at(jk).at(0), -2.*A*e2, 1e-7 );
+
+    // The adjoint across this same jump is DAESLV_asens case D.
+  }
+
+
+  // ------------------------------------------------------------------ D: QUADRATURE and OUTPUT gradients
+  //   x' = -k x , x(0) = a , on [0,1]
+  //   f0 = x(1)                   = a e^-k        df0/da = e^-k ,  df0/dk = -a e^-k
+  //   f1 = int_0^1 x dt           = a(1-e^-k)/k   df1/da = (1-e^-k)/k
+  //                                               df1/dk = a[ k e^-k - (1-e^-k) ]/k^2
+  //   f2 = x(1) + int_0^1 x dt    -- MIXED, so the chain rule must pick up both the state
+  //                                  sensitivity and the QUADRATURE sensitivity
+  { std::cout << "\n--- D. gradients of a POINT output, a QUADRATURE, and their sum\n";
+    FFGraph G; DAESLV_IDAS M; M.set_dag( &G );
+    FFEval OpE;  FFIntegral OpI;
+    FFVar t = G.add_var("t"), x = G.add_var("x(t)"), k = G.add_var("k"), a = G.add_var("a");
+    M.add_domain( t, FFDom( 0., 1., 1, FFDom::LGR, 5 ) );
+    M.add_state( x, {t} ); M.add_input( k ); M.add_input( a );
+    M.set_evolution_domain( t ); M.update_ref( x, 1. );
+    M.add_equation( OpP( x, t ) + k*x, {t}, {TI}, io );
+    M.add_equation( x - a,             {t}, {FFDom::LB}, ii );
+    M.add_output( OpE( x, t, 1. ) );
+    M.add_output( OpI( std::vector<FFVar>{ x }, { t } )[0] );
+    M.add_output( OpE( x, t, 1. ) + OpI( std::vector<FFVar>{ x }, { t } )[0] );
+    M.options.SOLVE.RTOL = M.options.SOLVE.ATOL = 1e-11;
+    M.options.DISPLAY_LEVEL = 0;
+    if( !M.setup() ){ std::cout << "    setup failed: " << M.extract_error() << "\n"; return 1; }
+    double const K = 1.3, A = 2.1;
+    size_t const jk = M.parameter_index( k )[0], ja = M.parameter_index( a )[0];
+    std::vector<double> P( M.np(), 0. ); P[jk] = K; P[ja] = A;
+    if( M.solve_fsens( P ) != DAESLV_IDAS::NORMAL ){ std::cout << "    solve_fsens failed\n"; return 1; }
+    double const e = std::exp(-K), I = A*(1.-e)/K;
+    auto const& F = M.val_function();
+    auto const& Gd = M.val_function_gradient();
+    std::cout << "    nf=" << M.nf() << " nq=" << M.nq() << "  gradient entries=" << Gd.size() << "\n";
+    size_t const b0 = M.blk_fct(0).first, b1 = M.blk_fct(1).first, b2 = M.blk_fct(2).first;
+    check( "f0 = x(1)",            F.at(b0), A*e,     1e-8 );
+    check( "f1 = int x dt",        F.at(b1), I,       1e-7 );
+    check( "f2 = f0 + f1",         F.at(b2), A*e + I, 1e-7 );
+    check( "d f0 / da = e^-k",     Gd.at( b0*M.np()+ja ), e,        1e-7 );
+    check( "d f0 / dk = -a e^-k",  Gd.at( b0*M.np()+jk ), -A*e,     1e-7 );
+    check( "d f1 / da = (1-e^-k)/k", Gd.at( b1*M.np()+ja ), (1.-e)/K, 1e-7 );
+    check( "d f1 / dk", Gd.at( b1*M.np()+jk ), A*( K*e - (1.-e) )/(K*K), 1e-7 );
+    check( "d f2 / da = sum",      Gd.at( b2*M.np()+ja ), e + (1.-e)/K, 1e-7 );
+    check( "d f2 / dk = sum",      Gd.at( b2*M.np()+jk ), -A*e + A*( K*e - (1.-e) )/(K*K), 1e-7 ); }
+
+  // ------------------------------------------------------------------ H: INTERMEDIATE point terms
+  // Parameter estimation reads the states at measurement times, not just at the end.  Three point
+  // outputs at tau = 0.3, 0.6 and 1.0, plus their sum -- the shape of a least-squares residual.
+  //   x(tau) = a e^{-k tau} ,  dx/da = e^{-k tau} ,  dx/dk = -tau a e^{-k tau}
+  { std::cout << "\n--- H. FORWARD gradients of point outputs at INTERMEDIATE times\n";
+    FFGraph G; DAESLV_IDAS M; M.set_dag( &G );
+    FFEval OpE;
+    FFVar t = G.add_var("t"), x = G.add_var("x(t)"), k = G.add_var("k"), a = G.add_var("a");
+    M.add_domain( t, FFDom( 0., 1., 1, FFDom::LGR, 5 ) );
+    M.add_state( x, {t} ); M.add_input( k ); M.add_input( a );
+    M.set_evolution_domain( t ); M.update_ref( x, 1. );
+    M.add_equation( OpP( x, t ) + k*x, {t}, {TI}, io );
+    M.add_equation( x - a,             {t}, {FFDom::LB}, ii );
+    double const TAU[3] = { 0.3, 0.6, 1.0 };
+    for( double tv : TAU ) M.add_output( OpE( x, t, tv ) );
+    M.add_output( OpE( x, t, TAU[0] ) + OpE( x, t, TAU[1] ) + OpE( x, t, TAU[2] ) );
+    M.options.SOLVE.RTOL  = M.options.SOLVE.ATOL  = 1e-11;
+    M.options.SOLVE.RTOLB = M.options.SOLVE.ATOLB = 1e-11;   // the backward pass has its OWN; left at
+    M.options.DISPLAY_LEVEL = 0;                               // default it sat at 1e-07 and looked like a
+                                                               // defect in the per-stage sweep -- twice now
+    if( !M.setup() ){ std::cout << "    setup failed: " << M.extract_error() << "\n"; return 1; }
+    std::cout << "    stages=" << M.ns() << " nf=" << M.nf() << "\n";
+    check( "each measurement time made a stage", (double)M.ns(), 3., 0. );
+    double const K = 1.3, A = 2.1;
+    size_t const jk = M.parameter_index( k )[0], ja = M.parameter_index( a )[0];
+    std::vector<double> P( M.np(), 0. ); P[jk] = K; P[ja] = A;
+    if( M.solve_fsens( P ) != DAESLV_IDAS::NORMAL ){ std::cout << "    solve_fsens failed\n"; ++n_fail; }
+    else{
+      auto const& Gd = M.val_function_gradient();
+      double sa = 0., sk = 0.;
+      for( int m = 0; m < 3; ++m ){
+        double const ex = std::exp( -K*TAU[m] );
+        size_t const b = M.blk_fct( m ).first;
+        check( "d x(" + std::to_string(TAU[m]).substr(0,3) + ") / da", Gd.at( b*M.np()+ja ), ex, 1e-7 );
+        check( "d x(" + std::to_string(TAU[m]).substr(0,3) + ") / dk", Gd.at( b*M.np()+jk ), -TAU[m]*A*ex, 1e-7 );
+        sa += ex;  sk += -TAU[m]*A*ex;
+      }
+      size_t const b3 = M.blk_fct( 3 ).first;
+      check( "d (sum of the three) / da", Gd.at( b3*M.np()+ja ), sa, 1e-7 );
+      check( "d (sum of the three) / dk", Gd.at( b3*M.np()+jk ), sk, 1e-7 );
+
+    } }
 
   std::cout << "\n==========  DAESLV_fsens: " << n_pass << " passed, " << n_fail << " failed -- "
             << ( n_fail? "FAILURES": "ALL PASS" ) << "  ==========\n\n";

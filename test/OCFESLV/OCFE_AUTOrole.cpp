@@ -7,7 +7,7 @@
 #include <cstdio>
 #include <sstream>
 #include <string>
-#include "odeslvs_cvodes.hpp"
+#include "odeslv_cvodes.hpp"
 #include "ocfeslv.hpp"
 using namespace mc;
 static int npass = 0, nfail = 0;

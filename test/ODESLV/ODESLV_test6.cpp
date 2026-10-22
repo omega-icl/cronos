@@ -19,7 +19,7 @@
 #include <string>
 #include <cmath>
 
-#include "odeslvs_cvodes.hpp"
+#include "odeslv_cvodes.hpp"
 #include "ocbase.hpp"
 
 static double const A_DECAY = 0.7;

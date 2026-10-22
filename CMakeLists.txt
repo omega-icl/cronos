@@ -894,7 +894,7 @@ message(STATUS "--------------------------------------------------------")
 # Install headers
 set(CRONOS_HEADERS
     base_cvodes.hpp
-    base_dynamic.hpp
+    base_de.hpp
     base_kinsol.hpp
     base_idas.hpp
     base_sundials.hpp
@@ -906,9 +906,7 @@ set(CRONOS_HEADERS
     ocfeslv.hpp
     ocplan.hpp
     odeslv_base.hpp
-    odeslv_cvodes.hpp
-    odeslvs_base.hpp
-    odeslvs_cvodes.hpp)
+    odeslv_cvodes.hpp)
 
 set(CRONOS_HEADERS_FULL "")
 foreach(HEADER ${CRONOS_HEADERS})

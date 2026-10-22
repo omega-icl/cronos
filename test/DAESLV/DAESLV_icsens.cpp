@@ -60,7 +60,7 @@ static void run( char const* label, bool implicit )
   double const P = 1.7;
   std::vector<double> xv, dxv;
   BASE_KINSOL::Knobs k;  k.FTOL = 1e-12;
-  auto const R = M.BASE_DYNAMIC::solve_ic( xv, dxv, k, std::vector<double>{ P } );
+  auto const R = M.BASE_DE::solve_ic( xv, dxv, k, std::vector<double>{ P } );
   if( R.status == BASE_KINSOL::FAILED ){ std::cout << "    solve_ic failed: " << R.message << "\n"; ++n_fail; return; }
   check( "x0(0) = 2p", xv.at(0), 2.*P, 1e-9 );
   check( "x1(0) =  p", xv.at(1),    P, 1e-9 );
@@ -117,7 +117,7 @@ int main()
       double const U = 0.3, PV = 2.4;
       std::vector<double> xv, dxv;
       BASE_KINSOL::Knobs k;  k.FTOL = 1e-12;
-      auto const R = M.BASE_DYNAMIC::solve_ic( xv, dxv, k, std::vector<double>{ U, PV } );
+      auto const R = M.BASE_DE::solve_ic( xv, dxv, k, std::vector<double>{ U, PV } );
       if( R.status == BASE_KINSOL::FAILED ){ std::cout << "    solve_ic failed: " << R.message << "\n"; ++n_fail; }
       else{
         check( "x(0) = p (from the hidden level)", xv.at(0), PV, 1e-9 );

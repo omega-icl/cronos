@@ -116,7 +116,7 @@ int main()
     //
     // x'(tau^-) is NOT exercised: _check_transitions refuses a derivative operator in a transition
     // expression ("must be POINTWISE"), so no jump can read it today.  The placeholders are not minted
-    // for that reason -- see base_dynamic.hpp.
+    // for that reason -- see base_de.hpp.
     M.add_transition( x + u, x, t, 1. );
     M.options.SOLVE.RTOL = M.options.SOLVE.ATOL = 1e-10;
     M.options.DISPLAY_LEVEL = 0;

@@ -165,7 +165,7 @@ check(close(G2.eval([y1], [P0, P1], [2.96, 3.]), [F_REF[1]], 2e-6), "single-outp
 
 # %% [markdown]
 # A ONE-map operation of the same solver over the same variables is a DIFFERENT
-# operation (FFBaseODESLV::lt compares the differentiated set), with its own
+# operation (FFBaseDE::lt compares the differentiated set), with its own
 # derivatives; calls differing only by `idep` share one operation.
 
 # %%

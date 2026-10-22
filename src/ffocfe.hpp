@@ -110,7 +110,7 @@ public:
   //! @brief Ordering of the operation in the DAG (2026-10-01).  lt_FFOp has already compared the type, info and
   //! operands; then: (1) the solver (data), (2) whether the op owns a copy of it (COPY) or refers to it (SHALLOW),
   //! (3) the input layout (_layout_key), so that a one-map and a two-map embedding of the same solver over the same
-  //! variables are two operations (their derivatives differ) -- as FFBaseODESLV::lt.
+  //! variables are two operations (their derivatives differ) -- as FFBaseDE::lt.
   bool lt
     ( FFOp const* op )
     const

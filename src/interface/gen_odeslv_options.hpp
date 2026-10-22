@@ -39,9 +39,9 @@ bind_odeslv_options(PyOpt& c)
       "How the initial conditions are resolved. An ODE consumer has one too, "
       "because the INITIAL rows can be implicit in each other or carry a "
       "derivative, and then one evaluation of the divided form is not a "
-      "solution of them: the rows go to the SHARED system in BASE_DYNAMIC, "
-      "posed jointly with the dynamics residual at t0 over (x, dx/dt). Same "
-      "group, same knobs as DAESLV's.");
+      "solution of them: the rows go to the SHARED system in BASE_DE, posed "
+      "jointly with the dynamics residual at t0 over (x, dx/dt). Same group, "
+      "same knobs as DAESLV's.");
   c_INITIAL.def(py::init<>());
   c_INITIAL.def_readwrite("KIN", &mc::ODESLV_CVODES::Options::t_Initial::KIN,
                           "the KINSOL corrector's own knobs, embedded rather "
@@ -57,7 +57,7 @@ bind_odeslv_options(PyOpt& c)
       "How the initial conditions are resolved. An ODE consumer has one too, "
       "because the INITIAL rows can be implicit in each other or carry a "
       "derivative, and then one evaluation of the divided form is not a "
-      "solution of them: the rows go to the SHARED system in BASE_DYNAMIC, "
-      "posed jointly with the dynamics residual at t0 over (x, dx/dt). Same "
-      "group, same knobs as DAESLV's.");
+      "solution of them: the rows go to the SHARED system in BASE_DE, posed "
+      "jointly with the dynamics residual at t0 over (x, dx/dt). Same group, "
+      "same knobs as DAESLV's.");
 }

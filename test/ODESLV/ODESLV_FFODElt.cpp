@@ -1,4 +1,4 @@
-// FFODE_lt.cpp -- identity of FFODESLV operations in the DAG (FFBaseODESLV::lt, 2026-10-01).
+// FFODE_lt.cpp -- identity of FFODESLV operations in the DAG (FFBaseDE::lt, 2026-10-01).
 // Calls that differ only by the OUTPUT INDEX (idep) must share ONE operation; embeddings of the same solver over the
 // same variables that differ by the MAP SPLIT (one-map vs two-map) or the POLICY (COPY vs SHALLOW) must be distinct
 // operations, each with its own derivatives.  Before 2026-10-01 FFODESLV defined no lt: the DAG compared only the

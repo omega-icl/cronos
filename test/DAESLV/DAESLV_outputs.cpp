@@ -44,8 +44,8 @@ int main()
     std::cout << "    nq=" << M.nq() << " nf=" << M.nf() << "\n";
     check( "the INTEGRAL became a quadrature", (double)M.nq(), 1., 0. );
     M.solve( {} );
-    check( "Q(1) = 1 - e^-1", M.val_quad().back()[0], 1. - std::exp(-1.), 1e-8 );
-    check( "Q(0) = 0",        M.val_quad().front()[0], 0.,                0. ); }
+    check( "Q(1) = 1 - e^-1", M.val_quadrature().back()[0], 1. - std::exp(-1.), 1e-8 );
+    check( "Q(0) = 0",        M.val_quadrature().front()[0], 0.,                0. ); }
 
   { std::cout << "\n--- B. (2+t) x' + x = 0, x(0) = 1;  Q = int_0^2 x dt = 2 ln 2\n";
     FFGraph G; DAESLV_IDAS M; M.set_dag( &G );
@@ -62,7 +62,7 @@ int main()
     if( !M.setup() ){ std::cout << "    setup failed: " << M.extract_error() << "\n"; return 1; }
     M.solve( {} );
     check( "x(2) = 1/2",        M.val_state().back()[0], 0.5,                1e-8 );
-    check( "Q(2) = 2 ln 2",     M.val_quad().back()[0],  2.*std::log(2.),    1e-7 ); }
+    check( "Q(2) = 2 ln 2",     M.val_quadrature().back()[0],  2.*std::log(2.),    1e-7 ); }
 
   { std::cout << "\n--- C. u piecewise constant over 4 elements;  Q = int_0^2 u dt, across 3 restarts\n";
     size_t const NE = 4;
@@ -82,13 +82,13 @@ int main()
     std::vector<double> P;  double exact = 0.;
     for( size_t e = 0; e < NE; ++e ){ P.push_back( 1. + (double)e ); exact += P.back() * 2./(double)NE; }
     M.solve( P );
-    std::cout << "    numIC=" << M.stats.numIC << "  rows of val_quad()=" << M.val_quad().size() << "\n";
-    // The OUTPUT is the sum over stages, which is val_function()'s job; val_quad() holds the per-stage
+    std::cout << "    numIC=" << M.stats.numIC << "  rows of val_quadrature()=" << M.val_quadrature().size() << "\n";
+    // The OUTPUT is the sum over stages, which is val_function()'s job; val_quadrature() holds the per-stage
     // increments it is summed from.  Checking both pins the division of labour, not just the total.
     check( "the output integral over 4 stages", M.val_function()[ M.blk_fct(0).first ], exact, 1e-7 );
     for( size_t e = 0; e < NE; ++e )
       check( "  stage " + std::to_string(e+1) + " increment = u_e h",
-             M.val_quad().at(e+1)[0], P[e] * 2./(double)NE, 1e-7 );
+             M.val_quadrature().at(e+1)[0], P[e] * 2./(double)NE, 1e-7 );
     M.solve( P );
     check( "solve() idempotent on the output", M.val_function()[ M.blk_fct(0).first ], exact, 1e-7 ); }
 
@@ -120,9 +120,9 @@ int main()
              std::exp(-1.) + 1. - std::exp(-1.), 1e-7 );
       check( "f3 = int_0^1 x dt alone",     F[ M.blk_fct(3).first ], 1. - std::exp(-1.), 1e-7 );
       std::cout << "    stage times / per-stage quadrature increments:\n";
-      for( size_t k = 0; k < M.val_quad().size(); ++k )
+      for( size_t k = 0; k < M.val_quadrature().size(); ++k )
         std::cout << "      k=" << k << "  q=" << std::scientific << std::setprecision(10)
-                  << M.val_quad()[k][0] << "\n";
+                  << M.val_quadrature()[k][0] << "\n";
       std::cout << "      exact stage 1 int_0^0.4 = " << 1.-std::exp(-0.4)
                 << "   stage 2 int_0.4^1 = " << std::exp(-0.4)-std::exp(-1.) << "\n";
     }

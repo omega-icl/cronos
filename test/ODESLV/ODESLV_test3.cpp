@@ -32,7 +32,7 @@
 #include <string>
 #include <cmath>
 
-#include "odeslvs_cvodes.hpp"
+#include "odeslv_cvodes.hpp"
 
 size_t const NS = 3;
 double const t0 = 0., tf = 1.;

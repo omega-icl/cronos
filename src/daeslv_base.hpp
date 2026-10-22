@@ -9,19 +9,19 @@
 #include <string>
 #include <vector>
 
-#include "base_dynamic.hpp"
+#include "base_de.hpp"
 
 namespace mc
 {
 //! @brief C++ base class for the DAE form of a model, as an IDAS integrator reads it
 ////////////////////////////////////////////////////////////////////////
 //! mc::DAESLV_BASE is the DAE counterpart of mc::ODESLV_BASE, and is deliberately THIN: the model
-//! description, the extraction and its shared machinery all live in mc::BASE_DYNAMIC.  What is here is
+//! description, the extraction and its shared machinery all live in mc::BASE_DE.  What is here is
 //! only what the two consumers genuinely disagree about.
 //!
 //! ODESLV reads the rows PER STATE -- row i supplies d/dt of state i, divided through so the integrator
 //! gets x' = f.  IDAS reads them PER ROW: the residual is the stacked equation list, and nothing has to
-//! belong to a particular state.  So this class takes BASE_DYNAMIC's general mass-matrix form,
+//! belong to a particular state.  So this class takes BASE_DE's general mass-matrix form,
 //!
 //!     sum over _mMASS[s][k] of ( coefficient * d _mX[index] / dt )  +  _mRES[s][k]  =  0
 //!
@@ -30,7 +30,7 @@ namespace mc
 //! exactly why ODESLV refuses it and points at IDAS.
 ////////////////////////////////////////////////////////////////////////
 class DAESLV_BASE
-: public virtual BASE_DYNAMIC
+: public virtual BASE_DE
 {
 public:
 

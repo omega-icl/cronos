@@ -113,13 +113,13 @@ public:
     }
 
   //! @brief Solve the consistent-initialisation system.  A thin forward to the SHARED solve in
-  //! BASE_DYNAMIC -- the system is the same for an ODE and a DAE, so it is built and solved there; this
+  //! BASE_DE -- the system is the same for an ODE and a DAE, so it is built and solved there; this
   //! only supplies the knobs from INITIAL.KIN and the current parameter values.
   BASE_KINSOL::Report solve_ic
     ( std::vector<double>& y, std::vector<double>& yp )
     { std::vector<double> par( _np, 0. );
       for( size_t j = 0; j < _np && 1 + 2*_nx + j < _dVAR.size(); ++j ) par[j] = _dVAR[ 1 + 2*_nx + j ];
-      return BASE_DYNAMIC::solve_ic( y, yp, options.INITIAL.KIN, par ); }
+      return BASE_DE::solve_ic( y, yp, options.INITIAL.KIN, par ); }
 
   //! @brief DAESLV implements transitions: a jump is a ROW of the stop system, replacing the continuity
   //! of the state it determines.  Not lifted -- the stop IS where it is applied -- so the times must
@@ -173,7 +173,7 @@ public:
     override
     { return options.INITIAL.KIN; }
 
-  //! @brief Whether the explicit fast path may be taken; see BASE_DYNAMIC's hook.
+  //! @brief Whether the explicit fast path may be taken; see BASE_DE's hook.
   bool _ic_bypass_explicit
     ()
     const
@@ -195,6 +195,63 @@ public:
     const
     { return _dF; }
 
+  //! @brief Write the recorded STATE trajectory: one row per stage time, [ state, quadrature ].
+  //! One writer per results_* container, named for it -- record_solve/record_fsens/record_asens.
+  void record_solve
+    ( std::ofstream& ores, unsigned const iprec=5 )
+    const
+    { _record( ores, results_solve, iprec ); }
+
+  //! @brief Write the recorded SENSITIVITY trajectories, one stream per parameter.
+  void record_fsens
+    ( std::ofstream* osen, unsigned const iprec=5 )
+    const
+    { if( !osen ) return;
+      for( size_t j = 0; j < results_fsens.size(); ++j ) _record( osen[j], results_fsens[j], iprec ); }
+
+  //! @brief Write the recorded ADJOINT trajectories, one stream per output, in DESCENDING time.
+  void record_asens
+    ( std::ofstream* oadj, unsigned const iprec=5 )
+    const
+    { if( !oadj ) return;
+      for( size_t r = 0; r < results_asens.size(); ++r ){
+        // the container holds the order the BACKWARD sweep produced -- descending.  The FILE reads in
+        // increasing time, like every other recorded trajectory, so the writer reverses rather than the
+        // sweep storing against its own grain.
+        std::vector<Results> asc( results_asens[r].rbegin(), results_asens[r].rend() );
+        _record( oadj[r], asc, iprec );
+      } }
+
+
+  // ------------------------------------------------------------------------------------------
+  // fdiff: the solver as a DIRECTIONAL DERIVATIVE of itself.  Mirrored from ODESLV_CVODES on
+  // 2026-10-22, returning DAESLV_IDAS* as agreed.  The work is FFModel::fdiff's -- these forms
+  // map the caller's parameters back to the INPUTS they belong to, seed one direction per
+  // parameter, and carry constants through with their own seeds.  This is what FFDAESLV needs.
+  // ------------------------------------------------------------------------------------------
+  //! @brief The solver as a DIRECTIONAL DERIVATIVE of itself.  The six forms live in BASE_DE
+  //! (_fdiff); these supply the factory, which is all that differed between the two solvers.
+  DAESLV_IDAS* fdiff( std::vector<FFVar> const& vU, size_t const nDir,
+      std::vector<std::vector<FFVar>>& vDU, std::vector<std::vector<FFVar>>& vS, std::string& err ) const
+    { return _fdiff<DAESLV_IDAS>( [this]{ auto* s = new DAESLV_IDAS(); s->set_dag( _usr._dagUsr ); s->options = options; return s; }, vU, nDir, vDU, vS, err ); }
+  DAESLV_IDAS* fdiff( size_t const nPar, FFVar const* pPar, std::string& err ) const
+    { return _fdiff<DAESLV_IDAS>( [this]{ auto* s = new DAESLV_IDAS(); s->set_dag( _usr._dagUsr ); s->options = options; return s; }, nPar, pPar, err ); }
+  DAESLV_IDAS* fdiff( size_t const nPar, FFVar const* pPar ) const
+    { return _fdiff<DAESLV_IDAS>( [this]{ auto* s = new DAESLV_IDAS(); s->set_dag( _usr._dagUsr ); s->options = options; return s; }, nPar, pPar ); }
+  DAESLV_IDAS* fdiff( std::vector<FFVar> const& vPar ) const
+    { return _fdiff<DAESLV_IDAS>( [this]{ auto* s = new DAESLV_IDAS(); s->set_dag( _usr._dagUsr ); s->options = options; return s; }, vPar ); }
+  DAESLV_IDAS* fdiff( std::vector<FFVar> const& vU, std::string& err ) const
+    { return _fdiff<DAESLV_IDAS>( [this]{ auto* s = new DAESLV_IDAS(); s->set_dag( _usr._dagUsr ); s->options = options; return s; }, vU, err ); }
+  DAESLV_IDAS* fdiff( std::vector<std::vector<FFVar>>& vDU, std::vector<std::vector<FFVar>>& vS,
+                std::string& err ) const
+    { return _fdiff<DAESLV_IDAS>( [this]{ auto* s = new DAESLV_IDAS(); s->set_dag( _usr._dagUsr ); s->options = options; return s; }, vDU, vS, err ); }
+
+  //! @brief Adjoint values at every stage time, [stage][output][lambda], as ODESLV exposes them.
+  std::vector< std::vector< std::vector<double> > > const& val_state_adjoint
+    ()
+    const
+    { return _lk; }
+
   //! @brief Gradient of the outputs w.r.t. the parameters, _nf rows of _np, after solve_fsens().
   std::vector<double> const& val_function_gradient
     ()
@@ -203,7 +260,7 @@ public:
 
   //! @brief Forward sensitivities at every stage time: [time][direction][state].  Empty unless the last
   //! call was solve_fsens().
-  std::vector< std::vector< std::vector<double> > > const& val_state_sens
+  std::vector< std::vector< std::vector<double> > > const& val_state_sensitivity
     ()
     const
     { return _sk; }
@@ -227,7 +284,7 @@ public:
   //! @brief Quadratures at every stage time, one row per time, _nq wide.  Each row is that STAGE's
   //! increment, not a running total: a quadrature restarts at zero on every stage, and summing them is
   //! val_function()'s job.  Row 0 is zero.
-  std::vector< std::vector<double> > const& val_quad
+  std::vector< std::vector<double> > const& val_quadrature
     ()
     const
     { return _qk; }
@@ -324,9 +381,21 @@ protected:
   std::vector<double> _asaHx;                //!< (df/dx)(T) -- the terminal seed
   std::vector< std::vector< std::vector<double> > > _sk;   //!< sensitivities at every stage time
 
+  std::vector< std::vector< std::vector<double> > > _lk;   //!< [stage][output][lambda], as ODESLV's
   std::vector< std::vector<double> > _xpk;   //!< state derivatives at every stage time (LEFT limit)
   std::vector< std::vector<double> > _xplus, _xpplus;   //!< the stop solutions (x+, dx+) at each stage start
-  std::vector< std::vector<double> > _qk;    //!< quadratures at every stage time, val_quad() order
+  std::vector< std::vector<double> > _qk;    //!< quadratures at every stage time, val_quadrature() order
+
+ public:
+  //! @brief Recorded state trajectory of the last solve, for record().  Derivatives are NOT recorded:
+  //! the format matches ODESLV's exactly, [ state, quadrature ] per row.
+  std::vector< Results > results_solve;
+  //! @brief Recorded sensitivity trajectories, one vector per parameter, as ODESLV indexes by direction.
+  std::vector< std::vector< Results > > results_fsens;
+  //! @brief Recorded adjoint trajectories, one vector per OUTPUT, in DESCENDING time -- the order the
+  //! backward sweep produces them, which is what ODESLV stores too.
+  std::vector< std::vector< Results > > results_asens;
+ protected:
   std::vector< std::vector<double> > _fk;    //!< function values, per stage, val_function() order
 
   std::vector<FFVar>  _vEVAL;                //!< [ every coefficient, then every remainder ]
@@ -1043,7 +1112,12 @@ DAESLV_IDAS::solve
       _dX0[i]  = N_VGetArrayPointer( yy )[i];
       _dXP0[i] = N_VGetArrayPointer( yp )[i];
     }
+    if( options.OUTPUT.RESRECORD ){
+    }
     _xk.push_back( _dX0 );                       // the initial point, as ODESLV_CVODES records it
+    results_solve.clear();  results_fsens.clear();  results_asens.clear();
+    bool const rec = options.OUTPUT.RESRECORD;     // opt-in, as in ODESLV: recording costs a copy
+    if( rec && ( _fsa || _asa ) ){ results_fsens.resize( _np );  results_asens.resize( _nf ); }
     _xpk.clear();  _xpk.push_back( _dXP0 );
     _xplus.assign( _ns, std::vector<double>() );  _xpplus.assign( _ns, std::vector<double>() );
     _qk.clear();  _qk.push_back( std::vector<double>( _nq, 0. ) );   // quadratures start at zero
@@ -1053,7 +1127,11 @@ DAESLV_IDAS::solve
       for( size_t j = 0; j < _np; ++j )
         for( size_t i = 0; i < _nx; ++i ) s0[j][i] = N_VGetArrayPointer( yS[j] )[i];
       _sk.push_back( s0 );
+      if( rec ) for( size_t j = 0; j < _np; ++j )
+        results_fsens[j].push_back( Results( _dT[0], _nx, s0[j].data(),
+                                             _nq, yQS? N_VGetArrayPointer( yQS[j] ): nullptr ) );
     }
+    if( rec ) results_solve.push_back( Results( _dT[0], _nx, _dX0.data(), _nq, _qk.back().data() ) );
     _dF.assign( _nf, 0. );                                           // the function accumulator
     _dFGrad.assign( _nf * _np, 0. );
     { std::vector< std::vector<double> > s0, sq0;
@@ -1203,20 +1281,60 @@ DAESLV_IDAS::solve
       // stage increment -- measured as 4.6e-03 on a two-stage model, i.e. as if stage 2 began at 0.4069
       // rather than 0.4.  The state was unaffected, being interpolated back to tb, which is why only the
       // quadrature showed it.
+      // The STAGE-START row, at the same t as the previous stage's last: _record writes a blank line
+      // when it sees a repeated time, which separates the blocks -- and across a declared jump the two
+      // rows ARE the discontinuity, x(tau^-) then x(tau^+).  ODESLV pushes the same pair.
+      if( ok && rec && sg ){
+        results_solve.push_back( Results( ta, _nx, N_VGetArrayPointer( yy ),
+                                          _nq, _nq? N_VGetArrayPointer( Nq ): nullptr ) );
+        if( _fsa && yS ){
+          sunrealtype ts0 = ta;
+          if( IDAGetSens( mem, &ts0, yS ) == IDA_SUCCESS )
+            for( size_t j = 0; j < _np; ++j )
+              results_fsens[j].push_back( Results( ta, _nx, N_VGetArrayPointer( yS[j] ),
+                                                   _nq, yQS? N_VGetArrayPointer( yQS[j] ): nullptr ) );
+        }
+      }
+
+      // RESRECORD intermediate points: the solver is told to STOP at each of them, as ODESLV does with
+      // CVodeSetStopTime, rather than being run to the boundary and interpolated back afterwards -- so a
+      // recorded row is a point the integrator actually landed on.  The last stop is forced exactly onto
+      // tb, as ODESLV forces its own, so no accumulation of TSTEP can drift off the boundary.
       sunrealtype tret = ta;
       if( ok && tret < tb ){
-        if( IDASetStopTime( mem, tb ) != IDA_SUCCESS ){ ok = false; why = "IDASetStopTime"; }
-        else{
+        unsigned const NSTEP = ( rec && options.OUTPUT.RESRECORD )? options.OUTPUT.RESRECORD: 1;
+        double const TSTEP = ( tb - ta ) / (double)NSTEP;
+        double TSTOP = ta + TSTEP;
+        for( unsigned st = 0; st < NSTEP && ok; ++st, TSTOP += TSTEP ){
+          if( st+1 == NSTEP ) TSTOP = tb;
+          if( IDASetStopTime( mem, TSTOP ) != IDA_SUCCESS ){ ok = false; why = "IDASetStopTime"; break; }
           // IDA_TSTOP_RETURN, not IDA_SUCCESS, is what a solve that lands ON the stop time returns.
           int ncheck = 0;
-          int const fl = _asa? IDASolveF( mem, tb, &tret, yy, yp, IDA_NORMAL, &ncheck )
-                             : IDASolve ( mem, tb, &tret, yy, yp, IDA_NORMAL );
-          if( fl != IDA_SUCCESS && fl != IDA_TSTOP_RETURN ){ ok = false; why = "IDASolve to the stage boundary"; }
+          int const fl = _asa? IDASolveF( mem, TSTOP, &tret, yy, yp, IDA_NORMAL, &ncheck )
+                             : IDASolve ( mem, TSTOP, &tret, yy, yp, IDA_NORMAL );
+          if( fl != IDA_SUCCESS && fl != IDA_TSTOP_RETURN ){ ok = false; why = "IDASolve to the stage boundary"; break; }
+          if( !rec || st+1 == NSTEP ) continue;        // the boundary row is pushed below, beside _xk
+          if( _nq && IDAGetQuadDky( mem, TSTOP, 0, Nq ) != IDA_SUCCESS ){ ok = false; why = "IDAGetQuadDky"; break; }
+          results_solve.push_back( Results( TSTOP, _nx, N_VGetArrayPointer( yy ),
+                                            _nq, _nq? N_VGetArrayPointer( Nq ): nullptr ) );
+          if( _fsa && yS ){
+            sunrealtype ts2 = TSTOP;
+            if( IDAGetSens( mem, &ts2, yS ) != IDA_SUCCESS ){ ok = false; why = "IDAGetSens"; break; }
+            sunrealtype tq3 = TSTOP;
+            if( yQS && IDAGetQuadSens( mem, &tq3, yQS ) != IDA_SUCCESS ){ ok = false; why = "IDAGetQuadSens"; break; }
+            for( size_t j = 0; j < _np; ++j )
+              results_fsens[j].push_back( Results( TSTOP, _nx, N_VGetArrayPointer( yS[j] ),
+                                                   _nq, yQS? N_VGetArrayPointer( yQS[j] ): nullptr ) );
+          }
         }
       }
       if( ok ){
         _xk.push_back( std::vector<double>( N_VGetArrayPointer( yy ), N_VGetArrayPointer( yy ) + _nx ) );
         _xpk.push_back( std::vector<double>( N_VGetArrayPointer( yp ), N_VGetArrayPointer( yp ) + _nx ) );
+        // the recorded row, beside the vector it mirrors.  Hooking this to a neighbouring line
+        // instead is how the first attempt recorded only t0.
+        if( rec ) results_solve.push_back( Results( tret, _nx, N_VGetArrayPointer( yy ),
+                                                   _nq, _nq? _qk.back().data(): nullptr ) );
       }
       if( ok && _nq ){
         // Dky rather than IDAGetQuad, as ODESLV uses CVodeGetQuadDky: with the stop time set the two
@@ -1236,6 +1354,11 @@ DAESLV_IDAS::solve
         for( size_t j = 0; j < _np; ++j )
           for( size_t i = 0; i < _nx; ++i ) sk[j][i] = N_VGetArrayPointer( yS[j] )[i];
         _sk.push_back( sk );
+        // the BOUNDARY row; the RESRECORD loop above records only the intermediate ones
+        if( rec ) for( size_t j = 0; j < _np; ++j )
+          results_fsens[j].push_back( Results( tret, _nx, sk[j].data(),
+                                               _nq, yQS? N_VGetArrayPointer( yQS[j] ): nullptr ) );
+        // (the stale note below is what the loop does NOT cover)
       }
       if( ok ){
         std::vector< std::vector<double> > sf, sqf;
@@ -1357,6 +1480,9 @@ DAESLV_IDAS::solve
       // the two parts are taken separately -- this is the measurement part, which is what parameter
       // estimation against time-series data needs and which needs no restart machinery.
       sunrealtype tb2 = tBeg;
+      if( _lk.size() != _ns+1 ) _lk.assign( _ns+1, std::vector<std::vector<double>>( _nf ) );
+      if( _asaF < _nf )                       // lambda(T), at the TERMINAL -- as ODESLV fills _lk[_ns]
+        _lk[_ns][_asaF].assign( N_VGetArrayPointer( yB ), N_VGetArrayPointer( yB ) + _nx );
       for( size_t kk = _ns; kk > 0 && ok; --kk ){
         if( kk < _ns ){
           // the impulse at this stage time, from the output's own Jacobian evaluated THERE
@@ -1465,9 +1591,35 @@ DAESLV_IDAS::solve
               ok = false; why = "IDAQuadReInitB"; break; }
           }
         }
-        if( IDASolveB( mem, _dT[kk-1], IDA_NORMAL ) < 0 ){ ok = false; why = "IDASolveB"; break; }
-        if( IDAGetB( mem, indexB, &tb2, yB, ypB ) != IDA_SUCCESS ){ ok = false; why = "IDAGetB"; break; }
-        if( _np && IDAGetQuadB( mem, indexB, &tb2, qB ) != IDA_SUCCESS ){ ok = false; why = "IDAGetQuadB"; break; }
+        // The backward sweep sub-samples by RESRECORD exactly as the forward one does, stopping at
+        // each recorded time rather than interpolating, and pushes the STAGE-END row first so the
+        // repeated t separates the blocks -- the same pair that shows a discontinuity forward.
+        bool const brec = options.OUTPUT.RESRECORD && _asaF < results_asens.size();
+        if( brec ){
+          if( _np && IDAGetQuadB( mem, indexB, &tb2, qB ) != IDA_SUCCESS ){ ok = false; why = "IDAGetQuadB"; break; }
+          results_asens[_asaF].push_back( Results( _dT[kk], _nx, N_VGetArrayPointer( yB ),
+                                                   _np, _np? N_VGetArrayPointer( qB ): nullptr ) );
+        }
+        { unsigned const NB = options.OUTPUT.RESRECORD? options.OUTPUT.RESRECORD: 1;
+          double const TB = ( _dT[kk] - _dT[kk-1] ) / (double)NB;
+          double tgt = _dT[kk] - TB;
+          for( unsigned st = 0; st < NB && ok; ++st, tgt -= TB ){
+            if( st+1 == NB ) tgt = _dT[kk-1];           // land exactly on the stage start
+            if( IDASolveB( mem, tgt, IDA_NORMAL ) < 0 ){ ok = false; why = "IDASolveB"; break; }
+            if( IDAGetB( mem, indexB, &tb2, yB, ypB ) != IDA_SUCCESS ){ ok = false; why = "IDAGetB"; break; }
+            if( _np && IDAGetQuadB( mem, indexB, &tb2, qB ) != IDA_SUCCESS ){ ok = false; why = "IDAGetQuadB"; break; }
+            // the t0 row waits: qB there is only the RUNNING part of the gradient, and the
+            // initial-condition term is added below -- recording it early is what left ODESLV's
+            // d f/da = 0.5596 against a column of zeros here, for a parameter that acts only
+            // through x(0)
+            if( brec )
+              results_asens[_asaF].push_back( Results( tgt, _nx, N_VGetArrayPointer( yB ),
+                                                       _np, _np? N_VGetArrayPointer( qB ): nullptr ) );
+            if( st+1 == NB && _asaF < _nf )          // the stage boundary, as ODESLV records it
+              _lk[kk-1][_asaF].assign( N_VGetArrayPointer( yB ), N_VGetArrayPointer( yB ) + _nx );
+          }
+        }
+        if( !ok ) break;
       }
       if( !ok ) break;
       // the gradient of the adjoined output lands in the same place the forward one does, so the two
@@ -1511,10 +1663,19 @@ DAESLV_IDAS::solve
           }
         } }
       _dFGrad.assign( _nf * _np, 0. );
+      // qB becomes the WHOLE gradient, not just its running part, so the recorded lambda_q at t0 IS
+      // what val_function_gradient() reports rather than a piece of it
+      for( size_t j = 0; j < _np; ++j ) N_VGetArrayPointer( qB )[j] += ic[j] + dp[j];
+      // A SECOND row at t0, carrying the whole gradient.  It repeats t0, so _record gives it a block
+      // of its own at the head of the file -- ODESLV writes the same pair, the summary row then the
+      // trajectory's own t0 row with the running part alone.
+      if( options.OUTPUT.RESRECORD && _asaF < results_asens.size() )
+        results_asens[_asaF].push_back( Results( tBeg, _nx, N_VGetArrayPointer( yB ),
+                                                 _np, _np? N_VGetArrayPointer( qB ): nullptr ) );
       for( size_t j = 0; j < _np; ++j )
         for( size_t r = 0; r < _nf; ++r )
           if( blk_fct( r ).first == r )
-            _dFGrad[ r*_np + j ] = N_VGetArrayPointer( qB )[j] + ic[j] + dp[j];
+            _dFGrad[ r*_np + j ] = N_VGetArrayPointer( qB )[j];
     } while( false );
     if( LSB ) SUNLinSolFree( LSB );
     if( AB ) SUNMatDestroy( AB );

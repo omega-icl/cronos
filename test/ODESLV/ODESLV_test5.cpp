@@ -30,7 +30,7 @@
 #include <string>
 #include <cmath>
 
-#include "odeslvs_cvodes.hpp"
+#include "odeslv_cvodes.hpp"
 
 // --- OCFE_DAE3q's parameters, verbatim -------------------------------------------------------
 static double const a_decay = 1.0;

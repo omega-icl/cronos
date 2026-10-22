@@ -55,8 +55,8 @@ int main()
     if( M.solve_fsens( P ) != DAESLV_IDAS::NORMAL ){ std::cout << "    solve_fsens failed\n"; return 1; }
     double const xT = A*std::exp(-K);
     check( "x(1) = a e^-k", M.val_state().back()[0], xT, 1e-8 );
-    auto const& S = M.val_state_sens();
-    std::cout << "    val_state_sens(): " << S.size() << " time(s) x " << S[0].size() << " direction(s)\n";
+    auto const& S = M.val_state_sensitivity();
+    std::cout << "    val_state_sensitivity(): " << S.size() << " time(s) x " << S[0].size() << " direction(s)\n";
     check( "d x(0) / da = 1", S.front().at(ja).at(0), 1., 1e-9 );
     check( "d x(0) / dk = 0", S.front().at(jk).at(0), 0., 1e-9 );
     check( "d x(1) / da = e^-k",      S.back().at(ja).at(0),  std::exp(-K), 1e-7 );
@@ -83,7 +83,7 @@ int main()
     double const tau = 2.+PV, yT = std::exp( -1./tau ), dyT = yT/( tau*tau );
     check( "y(1) = exp(-1/(2+p))", M.val_state().back()[0], yT, 1e-8 );
     check( "z(1) = p y(1)",        M.val_state().back()[1], PV*yT, 1e-8 );
-    auto const& S = M.val_state_sens();
+    auto const& S = M.val_state_sensitivity();
     // at t = 0: y is pinned, so dy/dp = 0 and dz/dp = y(0) = 1
     check( "d y(0) / dp = 0", S.front().at(jp).at(0), 0., 1e-9 );
     check( "d z(0) / dp = 1", S.front().at(jp).at(1), 1., 1e-9 );
@@ -113,7 +113,7 @@ int main()
     size_t const jk = M.parameter_index( k )[0], ja = M.parameter_index( a )[0];
     std::vector<double> P( M.np(), 0. ); P[jk] = K; P[ja] = A;
     if( M.solve_fsens( P ) != DAESLV_IDAS::NORMAL ){ std::cout << "    solve_fsens failed\n"; return 1; }
-    auto const& S = M.val_state_sens();
+    auto const& S = M.val_state_sensitivity();
     std::cout << "    numIC=" << M.stats.numIC << "   sensitivity rows=" << S.size() << "\n";
     double const e1 = std::exp(-K), e2 = std::exp(-2.*K);
     check( "x(1-) = e^-k",          M.val_state().at(1)[0], e1,    1e-8 );

@@ -54,6 +54,7 @@ int main()
     M.options.SOLVE.RTOL  = M.options.SOLVE.ATOL  = 1e-11;
     M.options.SOLVE.RTOLB = M.options.SOLVE.ATOLB = 1e-11;   // the BACKWARD pass has its own
     M.options.DISPLAY_LEVEL = 0;
+    M.options.OUTPUT.RESRECORD = 10;
     if( !M.setup() ){ std::cout << "    setup failed: " << M.extract_error() << "\n"; return 1; }
     double const K = 1.3, A = 2.1, e = std::exp(-K);
     size_t const jk = M.parameter_index( k )[0], ja = M.parameter_index( a )[0];

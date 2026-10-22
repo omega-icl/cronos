@@ -11,7 +11,7 @@ all: ODESLV_revision ODESLV_test1_model_only ODESLV_test2_model_only ODESLV_test
      ODESLV_showsens ODESLV_nonuniform ODESLV_evalsum ODESLV_LVthreads ODESLV_NIFTE ODESLV_massmatrix \
      ODESLV_TRANSode ODESLV_TRANSmulti ODESLV_TRANSeval ODESLV_TRANSjumps ODESLV_EVALadjoint \
      ODESLV_stageout ODESLV_INPUTSgate ODESLV_OPSgate ODESLV_SIDESgate ODESLV_FFODElt \
-     ODESLV_icsens
+     ODESLV_icsens ODESLV_record
 
 
 ODESLV_revision : ODESLV_revision.o
@@ -21,9 +21,6 @@ ODESLV_test1_model_only : ODESLV_test1_model_only.o
 	$(LINK) $(FLAG_LINK) -o $@ $< $(LIB_CRONOS) $(LIB_DEP)
 
 ODESLV_test2_model_only : ODESLV_test2_model_only.o
-	$(LINK) $(FLAG_LINK) -o $@ $< $(LIB_CRONOS) $(LIB_DEP)
-
-ODESLV_icsens : ODESLV_icsens.o
 	$(LINK) $(FLAG_LINK) -o $@ $< $(LIB_CRONOS) $(LIB_DEP)
 
 ODESLV_test1 : ODESLV_test1.o
@@ -113,6 +110,12 @@ ODESLV_SIDESgate : ODESLV_SIDESgate.o
 ODESLV_FFODElt : ODESLV_FFODElt.o
 	$(LINK) $(FLAG_LINK) -o $@ $< $(LIB_CRONOS) $(LIB_DEP)
 
+ODESLV_icsens : ODESLV_icsens.o
+	$(LINK) $(FLAG_LINK) -o $@ $< $(LIB_CRONOS) $(LIB_DEP)
+
+ODESLV_record : ODESLV_record.o
+	$(LINK) $(FLAG_LINK) -o $@ $< $(LIB_CRONOS) $(LIB_DEP)
+
 
 %.o : %.cpp
 	$(CPP) -c $(FLAG_CPP) $(FLAG_CRONOS) $(INC_CRONOS) $(INC_DEP) $< -o $@
@@ -126,6 +129,6 @@ clean :
 	ODESLV_showsens ODESLV_nonuniform ODESLV_evalsum ODESLV_LVthreads ODESLV_NIFTE ODESLV_massmatrix \
 	ODESLV_TRANSode ODESLV_TRANSmulti ODESLV_TRANSeval ODESLV_TRANSjumps ODESLV_EVALadjoint \
 	ODESLV_stageout ODESLV_INPUTSgate ODESLV_OPSgate ODESLV_SIDESgate ODESLV_FFODElt \
-	ODESLV_icsens
+	ODESLV_icsens ODESLV_record
 	rm -f *.o *.out *.dat *.eps *.dot *.png *.lp *.gp *.log *~
 

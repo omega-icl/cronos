@@ -1,7 +1,7 @@
 // ODESLV_icsens -- the forward sensitivity initial condition on IMPLICIT initial rows.
 // STATE initial condition when the INITIAL rows are IMPLICIT?
 // =====================================================================================================
-// _IC_D_STA solves implicit INITIAL rows through the shared BASE_DYNAMIC system (KINSOL) -- it has done
+// _IC_D_STA solves implicit INITIAL rows through the shared BASE_DE system (KINSOL) -- it has done
 // since 2026-10-18.  _IC_SET_FSA instead takes
 //        _pSACFCT = _dag->FAD( _nx, pIC, 1, p_j )      with pIC = _vIC.at(0)
 // i.e. it differentiates the DIVIDED form _mIC, which can represent an INITIAL row only when that row
@@ -16,7 +16,7 @@
 #include <cmath>
 #include <iomanip>
 #include <iostream>
-#include "odeslvs_cvodes.hpp"
+#include "odeslv_cvodes.hpp"
 
 using namespace mc;
 

@@ -3,12 +3,13 @@
 // This code is published under the EPL-2.0 with GPL-2.0-or-later as a Secondary License; see the LICENSE file.
 // SPDX-License-Identifier: EPL-2.0 OR GPL-2.0-or-later
 
-#ifndef CRONOS__BASE_DYNAMIC_HPP
-#define CRONOS__BASE_DYNAMIC_HPP
+#ifndef CRONOS__BASE_DE_HPP
+#define CRONOS__BASE_DE_HPP
 
 #include <map>
 #include <string>
 #include <vector>
+#include <functional>
 
 #include "base_kinsol.hpp"
 #include "ffmodel.hpp"
@@ -17,7 +18,7 @@ namespace mc
 {
 //! @brief C++ base class holding the DYNAMIC MODEL DESCRIPTION an integrator extracts from an FFModel.
 ////////////////////////////////////////////////////////////////////////
-//! mc::BASE_DYNAMIC is a base class holding the working copy of a model as an integrator reads it:
+//! mc::BASE_DE is a base class holding the working copy of a model as an integrator reads it:
 //! the states, parameters, constants, quadratures, the (coefficient, remainder) pair of each
 //! evolution row, the initial values, the quadrature integrands and the functions.  It carries NO
 //! solver and NO extraction policy -- how a row is read into those members is the derived class's
@@ -25,7 +26,7 @@ namespace mc
 //! an explicit right-hand side, while a DAE consumer on IDAS wants the undivided pair as a residual.
 //! Hoisted out of ODESLV_BASE when that second consumer arrived, exactly as the note there said.
 ////////////////////////////////////////////////////////////////////////
-class BASE_DYNAMIC
+class BASE_DE
 : public virtual FFModel
 {
  protected:
@@ -245,7 +246,7 @@ class BASE_DYNAMIC
     { return 1 + _nx + _np + _nc + _mUpVar.size() + _mUmVar.size(); }
 
   //! @brief The knobs of the IC solve, from the consumer's own INITIAL group.  A hook rather than a
-  //! member: the knobs belong to the solver's one `options` object, as everywhere else, and BASE_DYNAMIC
+  //! member: the knobs belong to the solver's one `options` object, as everywhere else, and BASE_DE
   //! has none.  The default is the plain KINSOL defaults, which is what a consumer with no INITIAL group
   //! would have got anyway.
   virtual BASE_KINSOL::Knobs _ic_knobs
@@ -507,6 +508,16 @@ class BASE_DYNAMIC
     ( std::vector< std::vector<double> > const& s, std::vector< std::vector<double> > const& sd )
     { _icLeftSens = s;  _icLeftSensDot = sd; }
 
+  // Hoisted from ODESLV_BASE 2026-10-22: _mP is BASE_DE's, and the FF operations need this of
+  // EITHER solver -- DAESLV could not satisfy their contract without it.
+  //! @brief The parameter vector the solver actually integrates against: the time-invariant inputs and,
+  //! for each time-varying input, its minted per-element nodal values -- in _mP order, the order np()
+  //! counts and the sensitivity directions index.  Exposed because fdiff() needs FFVars to differentiate
+  //! against and the minted levels are reachable nowhere else.
+  std::vector<FFVar> const& var_parameter
+    () const
+    { return _mP; }
+
   //! @brief Sensitivities of the consistent initial data w.r.t. the parameters, from the system LAST
   //! solved: @p dxdp[j][i] = d x_i / d p_j and @p ddxdp[j][i] = d (dx_i/dt) / d p_j.  Call it directly
   //! after solve_ic() or restart_ic(), whose solution it linearises about.
@@ -621,7 +632,7 @@ class BASE_DYNAMIC
  protected:
 
   //! @brief Residual and dense Jacobian of the IC system, for BASE_KINSOL.
-  static void _ic_scatter( BASE_DYNAMIC* M, int const n, double const* z );
+  static void _ic_scatter( BASE_DE* M, int const n, double const* z );
 
   static int _ic_res
     ( int const n, double const* z, double* f, void* user );
@@ -730,11 +741,153 @@ class BASE_DYNAMIC
     const
     { return v.dag()? v: FFVar( FFModel::_dag, v.num().val() ); }
 
+
+  //! @brief One recorded point of a trajectory: a time and a flat value block.  Hoisted from
+  //! ODESLV_BASE on 2026-10-21 so DAESLV records the SAME way rather than in parallel -- both
+  //! solvers derive from this class, as they do for solve_ic/ic_sens/ic_adjoint.
+
+  struct Results
+  {
+    //! @brief Constructors
+    Results
+      ( double const& tk, unsigned const nx1, double const* x1,
+        unsigned const nx2=0, double const* x2=nullptr ):
+      t( tk )
+      { x.resize( nx1+nx2 );
+        unsigned int ix=0;
+        for( ; ix<nx1; ix++ )      x[ix] = x1[ix];
+        for( ; ix<nx1+nx2; ix++ )  x[ix] = x2[ix-nx1]; }
+    Results
+      ( Results const& res ):
+      t( res.t ), x( res.x )
+      {}
+    //! @brief Time point
+    double t;
+    //! @brief Solution point
+    std::vector<double> x;
+  };
+
+  //! @brief Record results in file <a>bndrec</a>, with accuracy of <a>iprec</a> digits
+  template <typename VRES>
+  static void _record
+    ( std::ofstream& ofile, VRES const& bnd, unsigned const iprec=5 );
+
+
+  // ------------------------------------------------------------------------------------------
+  // fdiff: the solver as a DIRECTIONAL DERIVATIVE of itself.  Hoisted here 2026-10-22: the six
+  // forms were identical in ODESLV_CVODES and DAESLV_IDAS but for the class name and how the
+  // dag arrives.  This class cannot construct either concrete type, so it takes a factory and
+  // each solver keeps a one-line public fdiff that constructs and delegates -- no virtual
+  // factory, and one body to maintain.
+  // ------------------------------------------------------------------------------------------
+  //! nullptr, with the reason in @p err, if the model cannot be differentiated.  The caller owns the result.
+  template <class SOLVER>
+  SOLVER* _fdiff
+    ( std::function<SOLVER*()> const& mk,  std::vector<FFVar> const& vU, size_t const nDir,
+      std::vector<std::vector<FFVar>>& vDU, std::vector<std::vector<FFVar>>& vS, std::string& err )
+    const
+    {
+      SOLVER* sens = mk();
+      // the solver's own Options are copied by the FACTORY: this class only sees FFModel::Options
+      if( FFModel::fdiff( *sens, vU, nDir, vDU, vS, err ) ) return sens;
+      delete sens;  return nullptr;
+    }
+
+  //! @brief LEGACY INTERFACE ON THE NEW ENGINE (2026-09-27).  Symbolic forward differentiation of this problem
+  //! w.r.t. the PARAMETERS @p pPar -- entries of var_parameter(), minted levels included.  The product is a new
+  //! solver on the same user DAG with EXACTLY this problem's parameters; its states are the originals plus one
+  //! sensitivity set per parameter, and its nPar*nf functions are the gradient components
+  //! f[i*nf+j] = d f_j / d p_i.  Built on FFModel::fdiff: each parameter is mapped back to its declared input
+  //! and DOF, one direction is declared per parameter, and every direction input is FIXED to its unit seed so
+  //! none survives extraction.  This is the form FFODESLV::deriv plugs into SYMDIFF.  Returns nullptr with the
+  //! reason in @p err on failure; the caller owns the result.
+  template <class SOLVER>
+  SOLVER* _fdiff
+    ( std::function<SOLVER*()> const& mk,  size_t const nPar, FFVar const* pPar, std::string& err )
+    const
+    {
+      err.clear();
+      // 1. each entry -> a parameter (declared input, DOF) or a CONSTANT; distinct inputs / constants in order
+      std::vector<FFVar> vIn( nPar );  std::vector<size_t> vDof( nPar );  std::vector<int> vCi( nPar, -1 );
+      std::vector<FFVar> vU, vC;
+      auto const& vCst = var_constant();
+      for( size_t i = 0; i < nPar; ++i ){
+        if( input_of_parameter( pPar[i], vIn[i], vDof[i] ) ){
+          bool seen = false; for( auto const& u : vU ) if( u.id().second == vIn[i].id().second ){ seen = true; break; }
+          if( !seen ) vU.push_back( vIn[i] );
+          continue;
+        }
+        int ic = -1;
+        for( size_t c = 0; c < vCst.size(); ++c ) if( vCst[c].id().second == pPar[i].id().second ){ ic = (int)c; break; }
+        if( ic < 0 ){ err = "fdiff: " + pPar[i].name() + " is neither a parameter nor a constant of the extracted model"; return nullptr; }
+        FFVar const& cst_decl = _usr._vCstUsr[ic];            // constants are extracted in declared order
+        int pos = -1; for( size_t c = 0; c < vC.size(); ++c ) if( vC[c].id().second == cst_decl.id().second ){ pos = (int)c; break; }
+        if( pos < 0 ){ pos = (int)vC.size(); vC.push_back( cst_decl ); }
+        vCi[i] = pos;
+      }
+      // 2. one direction per entry, legacy output layout; constant directions by literal seed
+      std::vector<std::vector<double>> seedC( nPar, std::vector<double>( vC.size(), 0. ) );
+      for( size_t i = 0; i < nPar; ++i ) if( vCi[i] >= 0 ) seedC[i][ vCi[i] ] = 1.;
+      std::vector<std::vector<FFVar>> vDU, vS;
+      SOLVER* sens = mk();
+      // the solver's own Options are copied by the FACTORY: this class only sees FFModel::Options
+      if( !FFModel::fdiff( *sens, vU, nPar, vDU, vS, err, /*keep_originals=*/false, vC, seedC ) ){ delete sens; return nullptr; }
+      // 3. direction i: unit seed at its DOF if it is along an input, zero in every input otherwise
+      for( size_t i = 0; i < nPar; ++i )
+        for( size_t c = 0; c < vU.size(); ++c ){
+          std::vector<double> e( sens->control_ndof( vDU[i][c] ), 0. );
+          if( vCi[i] < 0 && vU[c].id().second == vIn[i].id().second && vDof[i] < e.size() ) e[ vDof[i] ] = 1.;
+          if( !sens->fix_input( vDU[i][c], e ) ){ err = "fdiff: cannot fix the direction input " + vDU[i][c].name(); delete sens; return nullptr; }
+        }
+      return sens;
+    }
+  template <class SOLVER>
+  SOLVER* _fdiff
+    ( std::function<SOLVER*()> const& mk,  size_t const nPar, FFVar const* pPar )
+    const
+    { std::string err; SOLVER* p = _fdiff<SOLVER>( mk, nPar, pPar, err ); if( !p ) std::cerr << "  **ERROR: " << err << std::endl; return p; }
+  template <class SOLVER>
+  SOLVER* _fdiff
+    ( std::function<SOLVER*()> const& mk,  std::vector<FFVar> const& vPar )
+    const
+    { return _fdiff<SOLVER>( mk, vPar.size(), vPar.data() ); }
+
+  //! @brief The same, addressed by DECLARED INPUTS: every DOF of each input in @p vU, in order, resolved through
+  //! parameter_index().
+  template <class SOLVER>
+  SOLVER* _fdiff
+    ( std::function<SOLVER*()> const& mk,  std::vector<FFVar> const& vU, std::string& err )
+    const
+    {
+      std::vector<FFVar> vPar;
+      for( auto const& u : vU ){
+        auto const ndx = parameter_index( u );
+        if( ndx.empty() ){ err = "fdiff: " + u.name() + " is not an input of the extracted model (call setup() first)"; return nullptr; }
+        for( size_t i : ndx ) vPar.push_back( _mP[i] );
+      }
+      return _fdiff<SOLVER>( mk, vPar.size(), vPar.data(), err );
+    }
+
+  //! @brief Same, along the REGISTERED CONTROLS, one direction per DOF: the full Jacobian in one solve.
+  template <class SOLVER>
+  SOLVER* _fdiff
+    ( std::function<SOLVER*()> const& mk,  std::vector<std::vector<FFVar>>& vDU, std::vector<std::vector<FFVar>>& vS, std::string& err )
+    const
+    {
+      std::vector<FFVar> vU;
+      for( auto const& [u,spec] : controls() ) vU.push_back( u );
+      return _fdiff<SOLVER>( mk, vU, 0, vDU, vS, err );
+    }
+
+  //! @brief Write the recorded STATE trajectory.  One writer per results_* container, named for it,
+  //! as DAESLV does -- record_solve/record_fsens/record_asens.  The pair of record() overloads this
+  //! replaces had no way to write results_asens at all, though it was being filled.
+
 };
 
 inline
 bool
-BASE_DYNAMIC::_extract_from_model
+BASE_DE::_extract_from_model
 ()
 {
   _dT.clear(); _mT.clear(); _mX.clear(); _mP.clear(); _mC.clear(); _mQ.clear(); _mLHS.clear();
@@ -942,6 +1095,15 @@ BASE_DYNAMIC::_extract_from_model
         return false;
       }
   if( !fixed_scalar.empty() ) rhs = subst_fixed( rhs );        // fixed time-invariant inputs: substitute once
+  // ... and into the UNDIVIDED rows as well, which DAESLV reads where ODESLV reads rhs.  Substituting
+  // rhs alone -- as this did until 2026-10-22 -- left a fixed input a free variable of the mass matrix
+  // and residual, so a direction input pinned by fix_input() came out of DAESLV's fdiff as
+  // "missing variable d1[k]" at the first evaluation, while ODESLV's fdiff, on the divided form,
+  // never saw the gap.
+  if( !fixed_scalar.empty() ){
+    for( auto& row : mass_raw ) for( auto& [ix,co] : row ){ std::vector<FFVar> v{ co }; co = subst_fixed( v )[0]; }
+    res_raw = subst_fixed( res_raw );
+  }
   // Time-varying inputs, element by element (2026-09-28: shared by the dynamics, the OUTPUT evaluations and the
   // INTEGRANDS -- outputs and integrands used to keep the raw input variable, which failed at the first solve).
   auto elem_of_stage = [&]( size_t const k ){                // the element holding stage k
@@ -1102,7 +1264,7 @@ BASE_DYNAMIC::_extract_from_model
   std::vector<FFVar> quad;
   for( auto const& C : vDef ){
     if( !C.accumulate ) continue;
-    quad.push_back( _in_model_dag( C.source ) );  _mQ.push_back( C.input );
+    quad.push_back( subst1( _in_model_dag( C.source ) ) );  _mQ.push_back( C.input );   // fixed inputs substituted here too
   }
   // the stage whose END is tau; an evaluation at any other time cannot be represented by ODESLV (functions are
   // evaluated at stage times) and is REFUSED below -- it used to fall back to the last stage, i.e. silently to tf
@@ -1265,7 +1427,7 @@ BASE_DYNAMIC::_extract_from_model
 
 inline
 bool
-BASE_DYNAMIC::_split_in
+BASE_DE::_split_in
 ( FFVar const& res, FFVar const& tgt, FFVar& L, FFVar& R )
 {
   // Put a fresh LEAF where the target stands, then differentiate with respect to it for L and set it to zero for
@@ -1292,7 +1454,7 @@ BASE_DYNAMIC::_split_in
 
 inline
 bool
-BASE_DYNAMIC::_build_ic_system
+BASE_DE::_build_ic_system
 ()
 {
   _icStart.ok = _icStop.ok = false;
@@ -1321,7 +1483,7 @@ BASE_DYNAMIC::_build_ic_system
 
 inline
 bool
-BASE_DYNAMIC::_assemble_ic
+BASE_DE::_assemble_ic
 ( t_ICSys& S, bool const at_stop, FFModel::t_TransitionJump const* G )
 {
   delete S.dag;  S.dag = new FFGraph;
@@ -1453,7 +1615,7 @@ BASE_DYNAMIC::_assemble_ic
       ++S.sp.colptr[ S.jcol[e] + 1 ];
     }
     for( size_t c = 0; c < n; ++c ) S.sp.colptr[c+1] += S.sp.colptr[c];
-    S.sp.jac = &BASE_DYNAMIC::_ic_spjac; }
+    S.sp.jac = &BASE_DE::_ic_spjac; }
   // A declared JUMP breaks a state's continuity on purpose, so the inheritance argument that makes the
   // hidden levels safe at an ordinary stop -- the left state satisfied them, continuity carries them --
   // does not apply.  They are NOT imposed here: that would over-determine the stop unless the model
@@ -1522,7 +1684,7 @@ BASE_DYNAMIC::_assemble_ic
 
 inline
 bool
-BASE_DYNAMIC::explicit_initial_conditions
+BASE_DE::explicit_initial_conditions
 ()
 const
 {
@@ -1544,7 +1706,7 @@ const
 
 inline
 bool
-BASE_DYNAMIC::ic_probe
+BASE_DE::ic_probe
 ( std::vector<double>& z0, std::vector<double>& F, std::vector<double>& J,
   std::vector<double> const& par )
 {
@@ -1565,7 +1727,7 @@ BASE_DYNAMIC::ic_probe
 
 inline
 bool
-BASE_DYNAMIC::ic_sens
+BASE_DE::ic_sens
 ( std::vector< std::vector<double> >& dxdp, std::vector< std::vector<double> >& ddxdp )
 {
   dxdp.assign( _np, std::vector<double>( _nx, 0. ) );
@@ -1637,7 +1799,7 @@ BASE_DYNAMIC::ic_sens
 
 inline
 bool
-BASE_DYNAMIC::ic_adjoint
+BASE_DE::ic_adjoint
 ( double const tau, std::vector<double> const& xleft, std::vector<double> const& dxleft,
   std::vector<double> const& xplus, std::vector<double> const& dxplus,
   std::vector<double> const& vplus, std::vector<double> const& par,
@@ -1706,7 +1868,7 @@ BASE_DYNAMIC::ic_adjoint
 
 inline
 BASE_KINSOL::Report
-BASE_DYNAMIC::solve_ic
+BASE_DE::solve_ic
 ( std::vector<double>& x, std::vector<double>& dx, BASE_KINSOL::Knobs const& k,
   std::vector<double> const& par )
 {
@@ -1716,7 +1878,7 @@ BASE_DYNAMIC::solve_ic
 
 inline
 void
-BASE_DYNAMIC::_ic_bind
+BASE_DE::_ic_bind
 ( t_ICSys& S, double const tau, std::vector<double> const& par )
 {
   size_t const nUp = _mUpVar.size();
@@ -1761,7 +1923,7 @@ BASE_DYNAMIC::_ic_bind
 
 inline
 BASE_KINSOL::Report
-BASE_DYNAMIC::_ic_solve
+BASE_DE::_ic_solve
 ( t_ICSys& S, double const tau, std::vector<double>& x, std::vector<double>& dx,
   BASE_KINSOL::Knobs const& k, std::vector<double> const& par )
 {
@@ -1779,7 +1941,7 @@ BASE_DYNAMIC::_ic_solve
 
   _icLast = &S;
   _icCur = &S;
-  R = BASE_KINSOL::solve( (int)z.size(), &BASE_DYNAMIC::_ic_res, &BASE_DYNAMIC::_ic_jac, this, z, k, &S.sp );
+  R = BASE_KINSOL::solve( (int)z.size(), &BASE_DE::_ic_res, &BASE_DE::_ic_jac, this, z, k, &S.sp );
   _icCur = nullptr;
 
   x.assign( _nx, 0. ); dx.assign( _nx, 0. );
@@ -1806,8 +1968,8 @@ BASE_DYNAMIC::_ic_solve
 //! derivative unknowns, which sit after the parameters, constants and input placeholders.
 inline
 void
-BASE_DYNAMIC::_ic_scatter
-( BASE_DYNAMIC* M, int const n, double const* z )
+BASE_DE::_ic_scatter
+( BASE_DE* M, int const n, double const* z )
 {
   t_ICSys& S = *M->_icCur;
   size_t const dot0 = M->_ic_dot0();
@@ -1816,10 +1978,10 @@ BASE_DYNAMIC::_ic_scatter
 
 inline
 int
-BASE_DYNAMIC::_ic_res
+BASE_DE::_ic_res
 ( int const n, double const* z, double* f, void* user )
 {
-  BASE_DYNAMIC* M = static_cast<BASE_DYNAMIC*>( user );
+  BASE_DE* M = static_cast<BASE_DE*>( user );
   t_ICSys& S = *M->_icCur;
   _ic_scatter( M, n, z );
   S.dag->eval( S.wrk, S.row.size(), S.eval.data(), S.dEval.data(),
@@ -1830,10 +1992,10 @@ BASE_DYNAMIC::_ic_res
 
 inline
 int
-BASE_DYNAMIC::_ic_jac
+BASE_DE::_ic_jac
 ( int const n, double const* z, double* J, void* user )
 {
-  BASE_DYNAMIC* M = static_cast<BASE_DYNAMIC*>( user );
+  BASE_DE* M = static_cast<BASE_DE*>( user );
   t_ICSys& S = *M->_icCur;
   _ic_scatter( M, n, z );
   S.dag->eval( S.wrk, S.eval.size(), S.eval.data(), S.dEval.data(),
@@ -1847,10 +2009,10 @@ BASE_DYNAMIC::_ic_jac
 
 inline
 int
-BASE_DYNAMIC::_ic_spjac
+BASE_DE::_ic_spjac
 ( int const n, double const* z, double* val, void* user )
 {
-  BASE_DYNAMIC* M = static_cast<BASE_DYNAMIC*>( user );
+  BASE_DE* M = static_cast<BASE_DE*>( user );
   t_ICSys& S = *M->_icCur;
   _ic_scatter( M, n, z );
   S.dag->eval( S.wrk, S.eval.size(), S.eval.data(), S.dEval.data(),
@@ -1858,6 +2020,30 @@ BASE_DYNAMIC::_ic_spjac
   size_t const nr = S.row.size();
   for( size_t e = 0; e < S.nnz; ++e ) val[ S.at[e] ] = S.dEval[ nr + e ];
   return 0;
+}
+
+template <typename VRES> 
+inline
+void
+BASE_DE::_record
+( std::ofstream& ofile, VRES const& res, unsigned const iprec )
+{
+  if( !ofile ) return;
+
+  // Specify format
+  ofile << std::right << std::scientific << std::setprecision(iprec);
+
+  // Record computed states at stage times
+  auto it = res.begin(), it0 = it;
+  for( ; it != res.end(); ++it ){
+    if( it != res.begin() && it->t == it0->t )
+      ofile << std::endl;
+    ofile << std::setw(iprec+9) << it->t;
+    for( auto const& xi : it->x )
+      ofile << std::setw(iprec+9) << xi;
+    ofile << std::endl;
+    it0 = it;
+  }
 }
 
 } // end namespace mc

@@ -217,6 +217,14 @@ public:
       double STEPTOLIC = 0e0;
     } INITIAL;
 
+    //! @brief Output options, mirroring ODESLV_CVODES::Options::t_Output.
+    struct t_Output
+    {
+      //! @brief Whether or not to record results (default: 0).  Recording costs a copy of the state
+      //! at every recorded point, so it is OPT-IN in both solvers rather than always paid for.
+      unsigned RESRECORD = 0;
+    } OUTPUT;
+
     //! @brief Assignment operator
     template <typename U> Options& operator=
       ( U& options ){ SOLVE = options.SOLVE; INITIAL = options.INITIAL; return *this; }

@@ -939,13 +939,16 @@ INPUT                  = CRONOS.txt \
                          ../src/ocfeslv.hpp \
                          ../src/ocplan.hpp \
                          ../src/odeslv_base.hpp \
-                         ../src/odeslvs_base.hpp \
                          ../src/odeslv_cvodes.hpp \
-                         ../src/odeslvs_cvodes.hpp \
                          ../src/base_sundials.hpp \
                          ../src/base_cvodes.hpp \
                          ../src/ffode.hpp \
-                         ../src/ffocfe.hpp
+                         ../src/ffocfe.hpp \
+                         ../src/base_de.hpp \
+                         ../src/base_kinsol.hpp \
+                         ../src/base_idas.hpp \
+                         ../src/daeslv_base.hpp \
+                         ../src/daeslv_idas.hpp
 
 # This tag can be used to specify the character encoding of the source files
 # that doxygen parses. Internally doxygen uses the UTF-8 encoding. Doxygen uses

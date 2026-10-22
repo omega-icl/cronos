@@ -20,7 +20,7 @@
 // =============================================================================================================
 #define SAVE_RESULTS
 
-#include "odeslvs_cvodes.hpp"
+#include "odeslv_cvodes.hpp"
 
 int main()
 {
@@ -79,7 +79,7 @@ int main()
   IVP.solve( p0 );
 #if defined( SAVE_RESULTS )
   direcSTA.open( "test2_STA.dat", std::ios_base::out );
-  IVP.record( direcSTA );
+  IVP.record_solve( direcSTA );
 #endif
 
   std::cout << "\nCONTINUOUS-TIME INTEGRATION WITH FORWARD SENSITIVITY ANALYSIS:\n\n";

@@ -9,7 +9,7 @@
 #include "ffexpr.hpp"
 #include "ffdep.hpp"
 #include "slift.hpp"
-#include "odeslvs_cvodes.hpp"
+#include "odeslv_cvodes.hpp"
 
 namespace mc
 {
@@ -19,7 +19,7 @@ namespace mc
 //! mc::FFBASEODE is a C++ base class for defining the options in an
 //! IVP in parametric ODEs as external DAG operations in MC++.
 ////////////////////////////////////////////////////////////////////////
-class FFBaseODESLV
+class FFBaseDE
 : public FFOp
 {
 
@@ -68,7 +68,7 @@ public:
     const
     {
       if( data != op->data ) return data < op->data;
-      auto const* o = dynamic_cast<FFBaseODESLV const*>( op );
+      auto const* o = dynamic_cast<FFBaseDE const*>( op );
       if( !o ) return false;
       if( _ownODESLV != o->_ownODESLV ) return _ownODESLV < o->_ownODESLV;
       return _ndxRec < o->_ndxRec;
@@ -79,7 +79,7 @@ protected:
 public:
 
   //! @brief Default constructor
-  FFBaseODESLV
+  FFBaseDE
     ()
     : FFOp( EXTERN ),
       _pODESLV( nullptr ),
@@ -90,19 +90,19 @@ public:
     {}
 
   //! @brief Destructor
-  virtual ~FFBaseODESLV
+  virtual ~FFBaseDE
     ()
     {
 #ifdef CRONOS__FFODESLV_TRACE
-      std::cout << "FFBaseODESLV::destructor\n";
+      std::cout << "FFBaseDE::destructor\n";
 #endif
       if( _ownODESLV && _pODESLV )
         delete _pODESLV;
     }
 
   //! @brief Copy constructor
-  FFBaseODESLV
-    ( FFBaseODESLV const& Op )
+  FFBaseDE
+    ( FFBaseDE const& Op )
     : FFOp( Op ),
       _nPar( Op._nPar ),
       _nCst( Op._nCst ),
@@ -111,17 +111,17 @@ public:
       _ndxRest( Op._ndxRest )
     {
 #ifdef CRONOS__FFODESLV_TRACE
-      std::cout << "FFBaseODESLV::copy constructor\n";
+      std::cout << "FFBaseDE::copy constructor\n";
 #endif
       if( !Op._pODESLV )
-        throw std::runtime_error( "FFBaseODESLV::copy constructor ** Null pointer to ODE solver\n" );
+        throw std::runtime_error( "FFBaseDE::copy constructor ** Null pointer to ODE solver\n" );
 
       _ownODESLV = Op._ownODESLV;      
       if( _ownODESLV ){
         _pODESLV = new ODESLVS_CVODES;
         if( !_pODESLV->setup( *Op._pODESLV ) ){   // an independent copy: same description, full setup
           delete _pODESLV;  _pODESLV = nullptr;
-          throw std::runtime_error( "FFBaseODESLV::copy constructor ** Setup of the ODE solver copy failed\n" );
+          throw std::runtime_error( "FFBaseDE::copy constructor ** Setup of the ODE solver copy failed\n" );
         }
 #ifdef CRONOS__FFODESLV_TRACE
         std::cerr << "ODE address copied: " << _pODESLV << std::endl;
@@ -312,7 +312,7 @@ public:
     { return options.GRADIENT == ADJOINT || ( options.GRADIENT == AUTO && (double)np > options.NP2NF * (double)nf ); }
 };
 
-inline FFBaseODESLV::Options FFBaseODESLV::options;
+inline FFBaseDE::Options FFBaseDE::options;
 
 //! @brief C++ class defining IVP in parametric ODEs as external DAG operations in MC++.
 ////////////////////////////////////////////////////////////////////////
@@ -320,7 +320,7 @@ inline FFBaseODESLV::Options FFBaseODESLV::options;
 //! external DAG operations in MC++.
 ////////////////////////////////////////////////////////////////////////
 class FFODESLV
-: public FFBaseODESLV
+: public FFBaseDE
 {
 
 public:
@@ -335,7 +335,7 @@ public:
   // Default constructor
   FFODESLV
     ()
-    : FFBaseODESLV()
+    : FFBaseDE()
     {}
 
   // Destructor
@@ -453,7 +453,7 @@ public:
     ( unsigned const nRes, FFVar const* vRes, unsigned const nVar, FFVar const* vVar, FFVar** vDer )
     const;
 
-  // Ordering in the DAG: FFBaseODESLV::lt (solver, policy, differentiated set -- not the output index)
+  // Ordering in the DAG: FFBaseDE::lt (solver, policy, differentiated set -- not the output index)
 
   // Properties
   std::string name
@@ -525,7 +525,7 @@ protected:
 //! in parametric ODEs as external DAG operations in MC++.
 ////////////////////////////////////////////////////////////////////////
 class FFGradODESLV
-: public FFBaseODESLV
+: public FFBaseDE
 {
   friend class FFODESLV;
 
@@ -540,7 +540,7 @@ public:
   // Constructors
   FFGradODESLV
     ()
-    : FFBaseODESLV()
+    : FFBaseDE()
     {}
 
   // Destructor
@@ -591,7 +591,7 @@ public:
     ( unsigned const nRes, FFExpr* vRes, unsigned const nVar, FFExpr const* vVar, unsigned const* mVar )
     const;
 
-  // Ordering in the DAG: FFBaseODESLV::lt (solver, policy, differentiated set -- not the output index)
+  // Ordering in the DAG: FFBaseDE::lt (solver, policy, differentiated set -- not the output index)
 
   // Properties
   std::string name
@@ -684,7 +684,7 @@ const
   FFVar** ppRes = nullptr;
   if( _into_other_dag( nVar, vVar ) ){
     auto op = *this;                  // shares the solver ...
-    op._ownODESLV = true;             // ... so that the INSERTED copy deep-copies it (FFBaseODESLV copy constructor)
+    op._ownODESLV = true;             // ... so that the INSERTED copy deep-copies it (FFBaseDE copy constructor)
     ppRes = ( _nCst? insert_external_operation( op, nRes, _nPar, vVar, _nCst, vVar+_nPar ):
                      insert_external_operation( op, nRes, _nPar, vVar ) );
     op._ownODESLV = false;            // the temporary must not delete the shared solver
@@ -985,7 +985,7 @@ const
   FFVar** ppRes = nullptr;
   if( _into_other_dag( nVar, vVar ) ){
     auto op = *this;                  // shares the solver ...
-    op._ownODESLV = true;             // ... so that the INSERTED copy deep-copies it (FFBaseODESLV copy constructor)
+    op._ownODESLV = true;             // ... so that the INSERTED copy deep-copies it (FFBaseDE copy constructor)
     ppRes = ( _nCst? insert_external_operation( op, nRes, _nPar, vVar, _nCst, vVar+_nPar ):
                      insert_external_operation( op, nRes, _nPar, vVar ) );
     op._ownODESLV = false;            // the temporary must not delete the shared solver

@@ -33,7 +33,7 @@
 #include <cmath>
 #include <sstream>
 
-#include "ffode.hpp"
+#include "ffde.hpp"
 #include <algorithm>
 
 size_t const NS = 3;

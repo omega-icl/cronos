@@ -908,7 +908,7 @@ set(CRONOS_HEADERS
     daeslv_idas.hpp
     ffmodel.hpp
     ffocfe.hpp
-    ffode.hpp
+    ffde.hpp
     ocfeslv.hpp
     ocplan.hpp
     odeslv_base.hpp

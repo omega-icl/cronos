@@ -11,7 +11,7 @@
 #include <iostream>
 #include <string>
 #include <vector>
-#include "ffode.hpp"
+#include "ffde.hpp"
 #include "ocfeslv.hpp"
 using namespace mc;
 static int npass = 0, nfail = 0;

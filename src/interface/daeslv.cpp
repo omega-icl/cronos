@@ -82,7 +82,7 @@ records(std::vector<S::Results> const& R, size_t n1, t_Arr& t, t_Arr& a,
   {
     auto const& r = R[reverse ? n - 1 - k : k];
     if (r.x.size() != n1 + n2)
-      throw std::runtime_error("ODESLV: inconsistent record sizes");
+      throw std::runtime_error("DAESLV: inconsistent record sizes");
     T(k) = r.t;
     for (size_t i = 0; i < n1; ++i) A(k, i) = r.x[i];
     for (size_t i = 0; i < n2; ++i) B(k, i) = r.x[n1 + i];
@@ -106,7 +106,7 @@ records(std::vector<std::vector<S::Results>> const& RR, size_t n1, t_Arr& t,
   for (size_t j = 0; j < m; ++j)
   {
     if (RR[j].size() != n)
-      throw std::runtime_error("ODESLV: inconsistent record counts");
+      throw std::runtime_error("DAESLV: inconsistent record counts");
     t_Arr tj, aj, bj;
     records(RR[j], n1, tj, aj, bj, reverse);
     if (j == 0) t = tj;
@@ -138,9 +138,9 @@ mc_daeslv(py::module_& m)
   // pybind11 registers a type once; mc_odeslv(m) runs first and owns them.  Re-registering threw
   // "type STATUS is already registered" at the module's post-link import test.
 
-  // FFModel is a VIRTUAL base of ODESLVS_CVODES (at a non-zero offset):
+  // FFModel is a VIRTUAL base of DAESLV_IDAS (at a non-zero offset):
   // py::multiple_inheritance() makes pybind11 adjust the pointer when an
-  // FFModel method is called on an ODESLV. pybind11 >= 3.1 detects virtual
+  // FFModel method is called on a DAESLV. pybind11 >= 3.1 detects virtual
   // bases itself; older versions reinterpret the pointer, so FFModel methods
   // would run on the wrong address.
   py::class_<S, M> pyDAESLV(m, "DAESLV", py::multiple_inheritance(), R"doc(
@@ -153,20 +153,27 @@ equations, outputs, transitions); ``setup()`` analyses it and builds the
 integrator. Inputs are either passed positionally (the parameter vector of
 ``var_parameter``) or by name (a dict).
 
-Example -- x' = -p x, x(0) = 1, output x(1):
+Example -- an index-1 DAE in UNDIVIDED form, which is what DAESLV takes and
+ODESLV does not: a mass-matrix row and an algebraic row, solved together.
+
+    (2 + p) y' + y = 0 ,   0 = z - p y ,   y(0) = 1
+
+so y(t) = exp(-t/(2+p)) and z = p y, with z pinned by the algebraic row rather
+than integrated.  Output: y at t = 1.
 
 >>> from pymcpp import FFGraph, FFPartial, FFEval
->>> from cronos import FFDom, ODESLV
->>> G = FFGraph(); t, x, p = G.add_var("t"), G.add_var("x"), G.add_var("p")
+>>> from cronos import FFDom, DAESLV
+>>> G = FFGraph(); t, y, z, p = G.add_var("t"), G.add_var("y"), G.add_var("z"), G.add_var("p")
 >>> OpP, OpE = FFPartial(), FFEval()
->>> S = ODESLV(G)
+>>> S = DAESLV(G)
 >>> S.add_domain(t, FFDom(0., 1., 2)); S.set_evolution_domain(t)
->>> S.add_state(x, [t]); S.add_input(p)
->>> S.add_equation(OpP(x, t) + p*x, [t], [FFDom.ALL - FFDom.LB])
->>> S.add_equation(x - 1., [t], [FFDom.LB])
->>> S.add_output(OpE(x, t, 1.))
+>>> S.add_state(y, [t], ref=1.); S.add_state(z, [t], ref=0.); S.add_input(p)
+>>> S.add_equation((2. + p)*OpP(y, t) + y, [t], [FFDom.ALL - FFDom.LB])
+>>> S.add_equation(z - p*y, [t], [FFDom.ALL])     # algebraic: holds at t0 too
+>>> S.add_equation(y - 1., [t], [FFDom.LB])
+>>> S.add_output(OpE(y, t, 1.))
 >>> S.setup()
->>> S.solve({p: [0.7]}); S.val_function()        # [exp(-0.7)]
+>>> S.solve({p: [0.7]}); S.val_function()        # [exp(-1/2.7)]
 )doc");
 
   py::class_<t_ResSolve>(pyDAESLV, "ResultsSolve", R"doc(
@@ -206,12 +213,12 @@ Running gradient of each output with respect to the sensitivity directions,
 shape (nf, n, nsen); its value at t = 0 is the gradient.
 )doc");
 
-  // --- ODESLV enums ---
+  // --- DAESLV enums ---
 
-  // --- ODESLV Options ---
+  // --- DAESLV Options ---
   py::class_<mc::DAESLV_IDAS::Options, M::Options> pyOpt(pyDAESLV, "Options",
                                                            R"doc(
-Options of ODESLV: the model options (FFModel.Options) and the CVODES options
+Options of DAESLV: the model options (FFModel.Options) and the IDAS options
 (integration method, nonlinear and linear solvers, tolerances, sensitivity
 settings).
 )doc");
@@ -219,7 +226,7 @@ settings).
   bind_idas_options(pyOpt);
   bind_daeslv_options(pyOpt);
 
-  // --- ODESLV records ---
+  // --- DAESLV records ---
 
   py::class_<mc::BASE_IDAS::Stats>(pyDAESLV, "Stats", R"doc(
 Statistics of an integration.
@@ -235,9 +242,9 @@ Statistics of an integration.
       .def_readonly("numJAC", &mc::BASE_IDAS::Stats::numJAC,
                     "Number of Jacobian evaluations.");
 
-  // --- ODESLV Main Class ---
+  // --- DAESLV Main Class ---
   pyDAESLV.def_static("revision", []() { return std::string(S::revision()); },
-                      "The revision of the ODESLV headers (odeslv_base.hpp and the three that change with it), e.g.\n"
+                      "The revision of the DAESLV headers (daeslv_base.hpp and the three that change with it), e.g.\n"
                       "for a bug report; FFModel.revision() gives the model layer's.");
   pyDAESLV
       .def(py::init<mc::FFGraph*>(), py::arg("dag"), py::keep_alive<1, 2>(),
@@ -247,7 +254,7 @@ Statistics of an integration.
           [](S& self) -> mc::DAESLV_IDAS::Options& { return self.options; },
           [](S& self, mc::DAESLV_IDAS::Options const& o)
           { self.options = o; }, py::return_value_policy::reference_internal,
-          "Solver options (model and CVODES).")
+          "Solver options (model and IDAS).")
       .def(
           "setup", [](S& self) { return self.setup(); }, t_Redirect(),
           R"doc(
@@ -278,7 +285,7 @@ c : list of float, optional
 
 Returns
 -------
-ODESLV.STATUS
+DAESLV.STATUS
 )doc")
       .def(
           "solve", [](S& self, t_Inputs const& in)
@@ -330,7 +337,7 @@ the outputs with respect to the sensitivity directions. Arguments as
           {
             auto const b = self.blk_fct(ndx);
             if (b.first == std::numeric_limits<size_t>::max())
-              throw py::index_error("ODESLV.blk_fct: no output " +
+              throw py::index_error("DAESLV.blk_fct: no output " +
                                     std::to_string(ndx) +
                                     " (outputs are numbered in add_output() "
                                     "order, after setup())");
@@ -338,7 +345,7 @@ the outputs with respect to the sensitivity directions. Arguments as
           },
           py::arg("ndx"), R"doc(
 The block of output ``ndx`` (in add_output() order) in ``val_function()``:
-``(first, count)``.  An ODESLV integrates a lumped system and returns one value
+``(first, count)``.  A DAESLV integrates a lumped system and returns one value
 per output, so the block is ``(ndx, 1)``.  The same call exists on ``OCFESLV``,
 where a distributed output spans several values.
 )doc")
@@ -467,7 +474,7 @@ replaced by ``values``.
           "stats_asens", [](S const& self) { return self.stats_asens; },
           "Statistics of the last ``solve_asens``.");
 
-  // STATUS alone is BASE_DE's: ONE C++ type, registered under ODESLV.  The Results classes are
+  // STATUS alone is BASE_DE's: ONE C++ type, registered under DAESLV.  The Results classes are
   // binder-local wrappers, so each module scope registers its own, above.  Re-EXPORT
   // the same objects under DAESLV -- not a second registration -- so cronos.DAESLV.NORMAL resolves and
   // the two solvers read alike from Python.

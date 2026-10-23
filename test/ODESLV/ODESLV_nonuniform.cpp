@@ -6,7 +6,7 @@
 #include <cmath>
 #include <cstdio>
 #include <vector>
-#include "ffode.hpp"
+#include "ffde.hpp"
 
 static int npass = 0, nfail = 0;
 static void check( bool c, char const* w, double v ){ std::printf( "  %s  %-62s (%.3e)\n", c? "PASS": "FAIL", w, v ); c? ++npass: ++nfail; }

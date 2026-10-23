@@ -6,7 +6,7 @@
 #include <sstream>
 #include <iostream>
 #include <string>
-#include "ffode.hpp"
+#include "ffde.hpp"
 using namespace mc;
 static int npass = 0, nfail = 0;
 static void check( bool c, std::string const& w ){ std::printf( "  %s  %s\n", c? "PASS": "FAIL", w.c_str() ); c? ++npass: ++nfail; }

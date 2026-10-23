@@ -11,7 +11,7 @@
 #include <iostream>
 #include <sstream>
 #include <vector>
-#include "ffode.hpp"
+#include "ffde.hpp"
 using namespace mc;
 static int nfail = 0;
 static void check( char const* what, bool ok, double err = -1. ){

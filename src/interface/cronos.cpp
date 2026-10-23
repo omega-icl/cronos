@@ -20,7 +20,7 @@ void mc_ocfeslv(py::module_&);
 void mc_ffocfe(py::module_&);
 
 // What this binary was compiled with (the macros CMake sets on every source of the module).
-static constexpr char const* kVersion = "5.0.0";
+static constexpr char const* kVersion = "5.0.1";
 #if defined(CRONOS__WITH_KLU)
 static constexpr bool kKLU = true;
 #else

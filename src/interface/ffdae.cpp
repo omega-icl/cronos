@@ -4,9 +4,9 @@
 // SPDX-License-Identifier: EPL-2.0 OR GPL-2.0-or-later
 
 // Python binding of FFDAESLV: the DAESLV_IDAS solver embedded as a DAG operation.
-// FFDAESLV and FFODESLV are instantiations of ONE template (FFDE<SOLVER>), so this binder is
+// FFDAESLV and FFDAESLV are instantiations of ONE template (FFDE<SOLVER>), so this binder is
 // ffode.cpp with the solver type changed -- deliberately, so the two stay comparable line by line.
-#include "ffode.hpp"
+#include "ffde.hpp"
 
 #include <pybind11/functional.h>
 #include <pybind11/pybind11.h>
@@ -54,7 +54,7 @@ check_policy(int policy, S* solver, std::vector<M::InputArg> const& args,
 {
   if (policy == mc::FFDAESLV::TRANSFER)
     throw std::invalid_argument(
-        "FFODESLV: policy TRANSFER is not available from Python (the solver is "
+        "FFDAESLV: policy TRANSFER is not available from Python (the solver is "
         "owned by Python); use COPY (default) or SHALLOW");
   if (policy != mc::FFDAESLV::SHALLOW) return;
   mc::FFGraph* g = nullptr;
@@ -76,11 +76,11 @@ diff : dict
 rest : dict
     Map 2: every other declared input and every constant (one variable each),
     whose values pass through the DAG with zero numerical derivative.
-solver : ODESLV
+solver : DAESLV
     The solver (set up). Under COPY (default) the operation holds its own
     copy; under SHALLOW it refers to ``solver``, which is then kept alive as
     long as the DAG.
-policy : FFODESLV.POLICY_TYPE, optional
+policy : FFDAESLV.POLICY_TYPE, optional
     COPY (default) or SHALLOW.
 name : str, optional
     Name of the operation in the DAG.
@@ -91,21 +91,22 @@ void
 mc_ffdaeslv(py::module_& m)
 {
   py::class_<mc::FFDAESLV, mc::FFOp> pyFFDAESLV(m, "FFDAESLV", R"doc(
-An ODESLV solve embedded as an operation of the DAG: its outputs become DAG
+A DAESLV solve embedded as an operation of the DAG: its outputs become DAG
 variables, functions of the DAG variables given for the solver's inputs and
 constants. Evaluating them integrates the model; differentiating them (FFGraph
 ``fdiff`` / ``bdiff``) uses forward or adjoint sensitivities
-(``options.GRADIENT``), through FFGradODESLV.
+(``options.GRADIENT``), through FFGradDAESLV.
 
-Example -- x(1) for x' = -p x, x(0) = 1, as a DAG variable of P:
+Example -- y(1) of the index-1 DAE  (2+p) y' + y = 0,  0 = z - p y,  y(0) = 1,
+as a DAG variable of P:
 
->>> OpODE = FFODESLV()
+>>> OpDAE = FFDAESLV()
 >>> P = G.add_var("P")
->>> y = OpODE({p: [P]}, solver)      # every input differentiated, no constant
+>>> y = OpDAE({p: [P]}, solver)      # every input differentiated, no constant
 >>> G.eval(y, [P], [0.7])             # [exp(-0.7)]
 )doc");
 
-  // --- FFODESLV enums ---
+  // --- FFDAESLV enums ---
   py::enum_<mc::FFDAESLV::POLICY_TYPE>(pyFFDAESLV, "POLICY_TYPE",
                                        "Copy policy of the embedded solver.")
       .value("SHALLOW", mc::FFDAESLV::SHALLOW,
@@ -125,11 +126,11 @@ Example -- x(1) for x' = -p x, x(0) = 1, as a DAG variable of P:
              "ADJOINT when np > NP2NF * nf, else FORWARD (default)")
       .export_values();
 
-  // --- FFODESLV Options (static: shared by every FFODESLV and FFGradODESLV)
+  // --- FFDAESLV Options (static: shared by every FFDAESLV and FFGradDAESLV)
   // ---
   py::class_<mc::FFDAESLV::FFBaseDE_t::Options>(pyFFDAESLV, "Options", R"doc(
-Options of FFODESLV and FFGradODESLV, shared by all operations (class-level:
-``FFODESLV.options``).
+Options of FFDAESLV and FFGradDAESLV, shared by all operations (class-level:
+``FFDAESLV.options``).
 )doc")
       .def_readwrite("SYMDIFF", &mc::FFDAESLV::FFBaseDE_t::Options::SYMDIFF, R"doc(
 Inputs or constants of the operation differentiated SYMBOLICALLY; the others
@@ -139,16 +140,16 @@ numerically (sensitivities).
 Parameter-to-output ratio above which AUTO uses adjoint sensitivities.
 )doc")
       .def_readwrite("GRADIENT", &mc::FFDAESLV::FFBaseDE_t::Options::GRADIENT, R"doc(
-Sensitivity mode: FFODESLV.FORWARD, ADJOINT or AUTO.
+Sensitivity mode: FFDAESLV.FORWARD, ADJOINT or AUTO.
 )doc");
   pyFFDAESLV.def_property_static(
       "options", [](py::object) -> mc::FFDAESLV::FFBaseDE_t::Options&
       { return mc::FFDAESLV::FFBaseDE_t::options; },
       [](py::object, mc::FFDAESLV::FFBaseDE_t::Options const& o)
       { mc::FFDAESLV::FFBaseDE_t::options = o; }, py::return_value_policy::reference,
-      "Options shared by every FFODESLV and FFGradODESLV operation.");
+      "Options shared by every FFDAESLV and FFGradDAESLV operation.");
 
-  // --- FFODESLV Main Class ---
+  // --- FFDAESLV Main Class ---
   pyFFDAESLV.def(py::init<>(), "Default constructor.")
       .def(
           "__call__",
@@ -162,7 +163,7 @@ Sensitivity mode: FFODESLV.FORWARD, ADJOINT or AUTO.
             return self(a1, a2, solver, policy, name);
           },
           py::arg("diff"), py::arg("rest"), py::arg("solver"),
-          py::arg_v("policy", (int)mc::FFDAESLV::COPY, "FFODESLV.COPY"),
+          py::arg_v("policy", (int)mc::FFDAESLV::COPY, "FFDAESLV.COPY"),
           py::arg("name") = "",
           (std::string("TWO-MAP form: the outputs of the solve.\n") + DOC_MAPS)
               .c_str())
@@ -176,7 +177,7 @@ Sensitivity mode: FFODESLV.FORWARD, ADJOINT or AUTO.
             return self(a1, solver, policy, name);
           },
           py::arg("diff"), py::arg("solver"),
-          py::arg_v("policy", (int)mc::FFDAESLV::COPY, "FFODESLV.COPY"),
+          py::arg_v("policy", (int)mc::FFDAESLV::COPY, "FFDAESLV.COPY"),
           py::arg("name") = "", R"doc(
 ONE-MAP form: every declared input is differentiated and the model has no
 constant (refused, naming what is missing, otherwise). Arguments as the
@@ -194,7 +195,7 @@ two-map form.
             return self(idep, a1, a2, solver, policy, name);
           },
           py::arg("idep"), py::arg("diff"), py::arg("rest"), py::arg("solver"),
-          py::arg_v("policy", (int)mc::FFDAESLV::COPY, "FFODESLV.COPY"),
+          py::arg_v("policy", (int)mc::FFDAESLV::COPY, "FFDAESLV.COPY"),
           py::arg("name") = "", "TWO-MAP form, output ``idep`` only.")
       .def(
           "__call__",
@@ -206,12 +207,12 @@ two-map form.
             return self(idep, a1, solver, policy, name);
           },
           py::arg("idep"), py::arg("diff"), py::arg("solver"),
-          py::arg_v("policy", (int)mc::FFDAESLV::COPY, "FFODESLV.COPY"),
+          py::arg_v("policy", (int)mc::FFDAESLV::COPY, "FFDAESLV.COPY"),
           py::arg("name") = "", "ONE-MAP form, output ``idep`` only.");
 
-  // --- FFGradODESLV ---
+  // --- FFGradDAESLV ---
   py::class_<mc::FFGradDAESLV, mc::FFOp>(m, "FFGradDAESLV", R"doc(
-The derivative operation of FFODESLV, created when an FFODESLV output is
+The derivative operation of FFDAESLV, created when an FFDAESLV output is
 differentiated (FFGraph ``fdiff`` / ``bdiff``); not constructed directly.
 )doc");
 }

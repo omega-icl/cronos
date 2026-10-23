@@ -4,7 +4,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
-#include "ffode.hpp"
+#include "ffde.hpp"
 
 static std::string rev( char const* s ){                 // "odeslv  rev1  2026-10-07" -> "rev1"
   std::string t( s ); auto p = t.find( "rev" );

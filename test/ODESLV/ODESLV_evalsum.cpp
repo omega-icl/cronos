@@ -3,7 +3,7 @@
 #include <iostream>
 #include <iomanip>
 #include <functional>
-#include "ffode.hpp"
+#include "ffde.hpp"
 double const t0 = 0., tf = 10., T1 = 5., P = 3.;
 struct M { mc::FFGraph G; mc::ODESLVS_CVODES I{ &G }; mc::FFVar t, x0, x1, p; };
 template <class F> static bool build( M& m, F outputs, size_t nstage = 2 ){

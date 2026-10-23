@@ -8,7 +8,7 @@
 #include <cstdio>
 #include <string>
 #include <vector>
-#include "ffode.hpp"
+#include "ffde.hpp"
 using namespace mc;
 static int npass = 0, nfail = 0;
 static void check( bool c, std::string const& w, double v ){ std::printf( "  %s  %-62s (%.2e)\n", c? "PASS": "FAIL", w.c_str(), v ); c? ++npass: ++nfail; }

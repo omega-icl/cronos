@@ -3,8 +3,8 @@
 // This code is published under the EPL-2.0 with GPL-2.0-or-later as a Secondary License; see the LICENSE file.
 // SPDX-License-Identifier: EPL-2.0 OR GPL-2.0-or-later
 
-#ifndef CRONOS__FFODE_HPP
-#define CRONOS__FFODE_HPP
+#ifndef CRONOS__FFDE_HPP
+#define CRONOS__FFDE_HPP
 
 #include "ffexpr.hpp"
 #include "ffdep.hpp"
@@ -374,7 +374,7 @@ public:
     {}
 
   // Destructor
-  virtual ~FFDE<SOLVER>
+  virtual ~FFDE
     ()
     {}
 
@@ -611,7 +611,7 @@ public:
     {}
 
   // Destructor
-  virtual ~FFGradDE<SOLVER>
+  virtual ~FFGradDE
     ()
     {}
 

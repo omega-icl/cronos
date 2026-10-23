@@ -7,7 +7,7 @@
 // MC++ DAG, its outputs as DAG variables, with numerical derivatives through
 // forward or adjoint sensitivities (FFGradODESLV). Replaces the binding of the
 // retired FFODE and its positional operator().
-#include "ffode.hpp"
+#include "ffde.hpp"
 
 #include <pybind11/functional.h>
 #include <pybind11/pybind11.h>

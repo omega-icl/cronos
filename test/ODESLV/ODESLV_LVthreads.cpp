@@ -24,7 +24,7 @@
 #include <sstream>
 #include <thread>
 #include <vector>
-#include "ffode.hpp"
+#include "ffde.hpp"
 
 static int npass = 0, nfail = 0;
 static void check( bool c, std::string const& w ){ std::cout << "  " << ( c? "PASS  ": "FAIL  " ) << w << "\n"; c? ++npass: ++nfail; }

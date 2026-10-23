@@ -942,7 +942,7 @@ INPUT                  = CRONOS.txt \
                          ../src/odeslv_cvodes.hpp \
                          ../src/base_sundials.hpp \
                          ../src/base_cvodes.hpp \
-                         ../src/ffode.hpp \
+                         ../src/ffde.hpp \
                          ../src/ffocfe.hpp \
                          ../src/base_de.hpp \
                          ../src/base_kinsol.hpp \

@@ -11,7 +11,7 @@
 #include <iostream>
 #include <string>
 #include <vector>
-#include "ffode.hpp"
+#include "ffde.hpp"
 using namespace mc;
 static int npass = 0, nfail = 0;
 static void check( bool c, std::string const& w, double v = -1. ){ std::printf( "  %s  %-70s", c? "PASS": "FAIL", w.c_str() ); if( v >= 0. ) std::printf( " (%.2e)", v ); std::printf( "\n" ); c? ++npass: ++nfail; }

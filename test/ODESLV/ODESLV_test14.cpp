@@ -32,7 +32,7 @@
 #include <string>
 #include <cmath>
 
-#include "ffode.hpp"
+#include "ffde.hpp"
 #include <algorithm>
 #include <functional>
 

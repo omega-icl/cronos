@@ -767,11 +767,9 @@ if(ENABLE_PYTHON)
       check_odeslv.py
       check_ffodeslv.py
       check_ocfeslv.py
+      check_daeslv.py
+      check_ffdaeslv.py
       check_ffocfe.py)
-  # check_daeslv.py and check_ffdaeslv.py ship but are NOT in this list yet: they still fail two
-  # real defects (FFDAESLV's two-map call form, and the adjoint gradient on a multi-output model).
-  # Adding a failing script here would break `cmake --target check` for everyone; they join the
-  # list when they pass.
   set(_check_cmds "")
   set(_check_missing "")
   foreach(_chk IN LISTS CRONOS_PYCHECKS)

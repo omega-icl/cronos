@@ -1128,13 +1128,8 @@ DAESLV_IDAS::solve
   if( options.SOLVE.LINSOL == BASE_IDAS::Options::SPARSE ){
     std::cerr << "DAESLV_IDAS ** LINSOL = SPARSE requires KLU, which this build does not include"
               << "; choose DENSE or DENSEDQ, or use a build with KLU" << std::endl;
+    // this branch runs BEFORE the sensitivity arrays are cloned, so only the base vectors exist
     N_VDestroy( yy ); N_VDestroy( yp ); N_VDestroy( id ); if( Nq ) N_VDestroy( Nq );
-  if( yS ) N_VDestroyVectorArray( yS, (int)_np );
-  if( yQS ) N_VDestroyVectorArray( yQS, (int)_np );
-  if( ypS ) N_VDestroyVectorArray( ypS, (int)_np );
-    if( yS ) N_VDestroyVectorArray( yS, (int)_np );
-    if( yQS ) N_VDestroyVectorArray( yQS, (int)_np );
-    if( ypS ) N_VDestroyVectorArray( ypS, (int)_np ); if( Nq ) N_VDestroy( Nq );
     IDAFree( &mem ); SUNContext_Free( &ctx );
     _extractError = "LINSOL = SPARSE without KLU";
     return FATAL;
@@ -1760,21 +1755,45 @@ DAESLV_IDAS::solve
       //     dG/dp += ( Jyp^T lambda )( t0 ) . dx0/dp
       // Jyp^T rather than lambda alone because the mass matrix maps the adjoint onto the state, and
       // dx0/dp from the SAME system the state's initial condition came from.
-      // a point output may also mention the parameters DIRECTLY
+      // An output may mention the parameters DIRECTLY, and its value may sit at ANY stage time, not
+      // only the last: a distributed output contributes one value per stage time, and the one at t0
+      // has no trajectory behind it at all -- its whole gradient is this term.  Reading _vFJac at the
+      // final stage time alone, as this did, left d x(t0)/dk = 0 where the closed form says 2.
       std::vector<double> dp( _np, 0. );
-      if( !_vFJac.empty() ){
-        size_t const kT = _vFJac.size()-1;
-        if( !_vFJac[kT].empty() ){
-          std::vector<double> dj( _vFJac[kT].size(), 0. );
-          _dag->eval( _vFJac[kT].size(), _vFJac[kT].data(), dj.data(),
-                      _vFVAR.size(), _vFVAR.data(), _dFVAR.data() );
-          for( size_t e = 0; e < dj.size(); ++e ){
-            size_t const col = (size_t)_cFJ[kT][e];
-            if( (size_t)_rFJ[kT][e] == _asaF && col >= _nx + _nq && col - _nx - _nq < _np )
-              dp[ col - _nx - _nq ] += dj[e];
-          }
+      for( size_t k = 0; k < _vFJac.size(); ++k ){
+        if( _vFJac[k].empty() ) continue;
+        _dFVAR[0] = k < _dT.size()? _dT[k]: _dT.back();
+        for( size_t i = 0; i < _nx && k < _xk.size(); ++i ) _dFVAR[1+i] = _xk[k][i];
+        for( size_t m = 0; m < _nq && k < _qk.size(); ++m ) _dFVAR[1+_nx+m] = _qk[k][m];
+        std::vector<double> dj( _vFJac[k].size(), 0. );
+        _dag->eval( _vFJac[k].size(), _vFJac[k].data(), dj.data(),
+                    _vFVAR.size(), _vFVAR.data(), _dFVAR.data() );
+        for( size_t e = 0; e < dj.size(); ++e ){
+          size_t const col = (size_t)_cFJ[k][e];
+          if( (size_t)_rFJ[k][e] == _asaF && col >= _nx + _nq && col - _nx - _nq < _np )
+            dp[ col - _nx - _nq ] += dj[e];
         }
       }
+      // An output VALUE sitting at t0 has no backward sweep behind it -- the loop runs kk = _ns..1
+      // and never makes stage time 0 an impulse point -- so lambda(t0) must carry (df/dx)(t0) before
+      // the initial-condition term below multiplies it by dx0/dp.
+      if( !_vFJac.empty() && !_vFJac[0].empty() ){
+        _dFVAR[0] = _dT[0];
+        for( size_t i = 0; i < _nx && !_xk.empty(); ++i ) _dFVAR[1+i] = _xk[0][i];
+        for( size_t m = 0; m < _nq && !_qk.empty(); ++m ) _dFVAR[1+_nx+m] = _qk[0][m];
+        std::vector<double> dj( _vFJac[0].size(), 0. );
+        _dag->eval( _vFJac[0].size(), _vFJac[0].data(), dj.data(),
+                    _vFVAR.size(), _vFVAR.data(), _dFVAR.data() );
+        std::vector<double> h0( _nx, 0. );
+        bool any0 = false;
+        for( size_t e = 0; e < dj.size(); ++e )
+          if( (size_t)_rFJ[0][e] == _asaF && (size_t)_cFJ[0][e] < _nx ){
+            h0[ _cFJ[0][e] ] += dj[e];  any0 = true;
+          }
+        if( any0 )
+          for( size_t i = 0; i < _nx; ++i ) N_VGetArrayPointer( yB )[i] += h0[i];
+      }
+
       std::vector<double> ic( _np, 0. );   // one per PARAMETER -- sized by _nx it aliased across them
       { std::vector< std::vector<double> > dxdp, ddxdp;
         // the START system, explicitly: ic_sens() linearises whatever was solved LAST, which after a
@@ -1802,10 +1821,12 @@ DAESLV_IDAS::solve
       if( options.OUTPUT.RESRECORD && _asaF < results_asens.size() )
         results_asens[_asaF].push_back( Results( tBeg, _nx, N_VGetArrayPointer( yB ),
                                                  _np, _np? N_VGetArrayPointer( qB ): nullptr ) );
-      for( size_t j = 0; j < _np; ++j )
-        for( size_t r = 0; r < _nf; ++r )
-          if( blk_fct( r ).first == r )
-            _dFGrad[ r*_np + j ] = N_VGetArrayPointer( qB )[j];
+      // this sweep adjoined VALUE _asaF, so it writes that row.  The guard here was
+      // blk_fct(r).first == r, which reads r as an OUTPUT index where _nf counts VALUES: for a
+      // DISTRIBUTED output (blk_fct(0) = (0,5)) it holds only at r = 0, so rows 1..4 stayed zero and
+      // every adjoint gradient of such an output came back 0 while the forward one was exact.
+      if( _asaF < _nf )
+        for( size_t j = 0; j < _np; ++j ) _dFGrad[ _asaF*_np + j ] = N_VGetArrayPointer( qB )[j];
     } while( false );
     if( LSB ) SUNLinSolFree( LSB );
     if( AB ) SUNMatDestroy( AB );
@@ -1831,6 +1852,11 @@ DAESLV_IDAS::solve
   else            stats_solve = stats;
 
   N_VDestroy( yy ); N_VDestroy( yp ); N_VDestroy( id );
+  if( Nq ) N_VDestroy( Nq );
+  // the sensitivity vector arrays: cloned above, and freed on the ERROR paths only until now
+  if( yS )  N_VDestroyVectorArray( yS,  (int)_np );
+  if( ypS ) N_VDestroyVectorArray( ypS, (int)_np );
+  if( yQS ) N_VDestroyVectorArray( yQS, (int)_np );
   IDAFree( &mem );
   SUNContext_Free( &ctx );
   _final_stats( stats );

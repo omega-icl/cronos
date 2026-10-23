@@ -26,6 +26,12 @@ namespace py = pybind11;
 
 namespace
 {
+// These wrappers live in an ANONYMOUS namespace, as odeslv.cpp's do, and must not share their NAMES:
+// pybind11 falls back to comparing mangled type names where RTTI is unreliable across a -flto bundle,
+// and "(anonymous namespace)::t_ResSolve" is the same string in both translation units.  On Linux the
+// type_index comparison told them apart and the module loaded; the macOS wheel failed to import with
+// "type ResultsSolve is already registered".
+
 typedef mc::DAESLV_IDAS S;
 typedef mc::FFModel M;
 typedef std::function<double(M::DofIndex const&)> t_Gen;
@@ -53,15 +59,15 @@ input_vals(t_Inputs const& in)
 // whose x holds a first block of nx values (states, or adjoint states) followed
 // by a second block (quadratures, or the running gradient)
 typedef py::array_t<double> t_Arr;
-struct t_ResSolve
+struct t_DaeResSolve
 {
   t_Arr t, x, q;
 };
-struct t_ResFsens
+struct t_DaeResFsens
 {
   t_Arr t, xp, qp;
 };
-struct t_ResAsens
+struct t_DaeResAsens
 {
   t_Arr t, l, qp;
 };
@@ -176,39 +182,39 @@ than integrated.  Output: y at t = 1.
 >>> S.solve({p: [0.7]}); S.val_function()        # [exp(-1/2.7)]
 )doc");
 
-  py::class_<t_ResSolve>(pyDAESLV, "ResultsSolve", R"doc(
+  py::class_<t_DaeResSolve>(pyDAESLV, "ResultsSolve", R"doc(
 Trajectories recorded by the last ``solve`` (``options.OUTPUT.RESRECORD`` points), as
 NumPy arrays.
 )doc")
-      .def_readonly("t", &t_ResSolve::t,
+      .def_readonly("t", &t_DaeResSolve::t,
                     "Time points, shape (n,); a stage boundary appears twice "
                     "(values on either side).")
-      .def_readonly("x", &t_ResSolve::x,
+      .def_readonly("x", &t_DaeResSolve::x,
                     "States, shape (n, nx), in the order of ``var_state``.")
-      .def_readonly("q", &t_ResSolve::q, "Quadratures, shape (n, nq).");
+      .def_readonly("q", &t_DaeResSolve::q, "Quadratures, shape (n, nq).");
 
-  py::class_<t_ResFsens>(pyDAESLV, "ResultsFsens", R"doc(
+  py::class_<t_DaeResFsens>(pyDAESLV, "ResultsFsens", R"doc(
 Trajectories recorded by the last ``solve_fsens``, as NumPy arrays: one block
 per sensitivity direction (``sensitivity_index``).
 )doc")
-      .def_readonly("t", &t_ResFsens::t,
+      .def_readonly("t", &t_DaeResFsens::t,
                     "Time points, shape (n,); a stage boundary appears twice "
                     "(values on either side).")
-      .def_readonly("xp", &t_ResFsens::xp,
+      .def_readonly("xp", &t_DaeResFsens::xp,
                     "State sensitivities, shape (nsen, n, nx).")
-      .def_readonly("qp", &t_ResFsens::qp,
+      .def_readonly("qp", &t_DaeResFsens::qp,
                     "Quadrature sensitivities, shape (nsen, n, nq).");
 
-  py::class_<t_ResAsens>(pyDAESLV, "ResultsAsens", R"doc(
+  py::class_<t_DaeResAsens>(pyDAESLV, "ResultsAsens", R"doc(
 Trajectories recorded by the last ``solve_asens``, as NumPy arrays: one block
 per output function, in ASCENDING time (the adjoint integration runs
 backward).
 )doc")
       .def_readonly(
-          "t", &t_ResAsens::t,
+          "t", &t_DaeResAsens::t,
           "Time points, ascending, shape (n,); a stage boundary appears twice.")
-      .def_readonly("l", &t_ResAsens::l, "Adjoint states, shape (nf, n, nx).")
-      .def_readonly("qp", &t_ResAsens::qp, R"doc(
+      .def_readonly("l", &t_DaeResAsens::l, "Adjoint states, shape (nf, n, nx).")
+      .def_readonly("qp", &t_DaeResAsens::qp, R"doc(
 Running gradient of each output with respect to the sensitivity directions,
 shape (nf, n, nsen); its value at t = 0 is the gradient.
 )doc");
@@ -439,7 +445,7 @@ replaced by ``values``.
           "results_solve",
           [](S const& self)
           {
-            t_ResSolve r;
+            t_DaeResSolve r;
             records(self.results_solve, self.nx(), r.t, r.x, r.q, false);
             return r;
           },
@@ -449,7 +455,7 @@ replaced by ``values``.
           "results_fsens",
           [](S const& self)
           {
-            t_ResFsens r;
+            t_DaeResFsens r;
             records(self.results_fsens, self.nx(), r.t, r.xp, r.qp, false);
             return r;
           },
@@ -458,7 +464,7 @@ replaced by ``values``.
           "results_asens",
           [](S const& self)
           {
-            t_ResAsens r;
+            t_DaeResAsens r;
             records(self.results_asens, self.nx(), r.t, r.l, r.qp, true);
             return r;
           },

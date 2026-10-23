@@ -57,6 +57,7 @@ t = G.add_var("t")
 x0, x1 = G.add_var("x0(t)"), G.add_var("x1(t)")
 p0, p1 = G.add_var("p0"), G.add_var("p1")
 A = ODESLV(G)
+A.options.SOLVE.VERBOSE = 0
 A.add_domain(t, FFDom(0., 10., 4, FFDom.LGR, 4))
 A.add_state(x0, [t])
 A.add_state(x1, [t])
@@ -121,6 +122,7 @@ check(st.numSteps > 0 and A.stats_fsens.numSteps > 0 and A.stats_asens.numSteps 
 G2 = FFGraph()
 t, x, p = G2.add_var("t"), G2.add_var("x(t)"), G2.add_var("p")
 B = ODESLV(G2)
+B.options.SOLVE.VERBOSE = 0
 B.add_domain(t, FFDom(0., 1., 2, FFDom.LGR, 3))
 B.set_evolution_domain(t)
 B.add_state(x, [t], ref=1.)
@@ -172,6 +174,7 @@ except ValueError as e:
 G3 = FFGraph()
 t, x = G3.add_var("t"), G3.add_var("x(t)")
 C = ODESLV(G3)
+C.options.SOLVE.VERBOSE = 0
 C.add_domain(t, FFDom(0., 1., 4, FFDom.LGR, 3))
 C.set_evolution_domain(t)
 C.add_state(x, [t], ref=1.)
@@ -195,6 +198,7 @@ check(C.solve([]) == ODESLV.NORMAL and close(C.val_function(), [math.exp(-1.) + 
 G4 = FFGraph()
 t, x, u = G4.add_var("t"), G4.add_var("x(t)"), G4.add_var("u(t)")
 D = ODESLV(G4)
+D.options.SOLVE.VERBOSE = 0
 D.add_domain(t, FFDom(0., 1., 4, FFDom.LGR, 3))
 D.set_evolution_domain(t)
 D.add_state(x, [t], ref=0.)
@@ -236,6 +240,7 @@ except IndexError:
     check(True, "blk_fct beyond the last output raises IndexError")
 _G6 = FFGraph(); _t6, _x6, _k6 = _G6.add_var("t"), _G6.add_var("x"), _G6.add_var("k")
 _S6 = ODESLV(_G6)
+_S6.options.SOLVE.VERBOSE = 0
 _i0 = _S6.add_output(OpE(_x6, _t6, 1.)); _i1 = _S6.add_output(OpI(_x6, _t6))
 check((_i0, _i1) == (0, 1), "add_output returns the output's index on an ODESLV too (%s)" % str((_i0, _i1)))
 

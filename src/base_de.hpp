@@ -177,6 +177,16 @@ class BASE_DE
   //! -> 0.._np-1, i.e. every parameter, which is the behaviour before controls were honoured.
   std::vector<size_t> _ndxSEN;
   size_t _nsen = 0;      //!< number of sensitivity DIRECTIONS (_ndxSEN.size()); _np counts PARAMETERS
+  // Hoisted from ODESLV_BASE 2026-10-23, with the resolver it calls: without it DAESLV never
+  // re-resolves after register_control(), so sensitivity_index() stays as setup() left it and the
+  // FF operations' nsen == n_control_dof() check fails on any map after the first.
+  //! @brief The control registry changed.  If the model is already extracted, re-resolve the sensitivity
+  //! directions: that reads only extraction outputs (_mP, _mInpLevels), and CVODES sizes its sensitivity memory
+  //! per solve, so no re-extraction is needed.  Lets a DAG operation reset the registry after setup().
+  void _on_controls_changed
+    () override
+    { if( _dag ) _resolve_sensitivity_index(); }
+
   bool _resolve_sensitivity_index();
 
   //! @brief Worst |hidden level| at the last stop that carried a declared jump; 0 where none applies.

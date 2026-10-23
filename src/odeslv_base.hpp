@@ -144,12 +144,6 @@ class ODESLV_BASE
 protected:
   // ---- what the old base class provided, now this class's own --------------------------------------------
 
-  //! @brief The control registry changed.  If the model is already extracted, re-resolve the sensitivity
-  //! directions: that reads only extraction outputs (_mP, _mInpLevels), and CVODES sizes its sensitivity memory
-  //! per solve, so no re-extraction is needed.  Lets a DAG operation reset the registry after setup().
-  void _on_controls_changed
-    () override
-    { if( _dag ) _resolve_sensitivity_index(); }
 
   double _t = 0.;        //!< current time
   size_t _istg = 0;      //!< current stage

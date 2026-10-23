@@ -1236,7 +1236,12 @@ DAESLV_IDAS::solve
     if( options.OUTPUT.RESRECORD ){
     }
     _xk.push_back( _dX0 );                       // the initial point, as ODESLV_CVODES records it
-    results_solve.clear();  results_fsens.clear();  results_asens.clear();
+    // clear only what THIS solve refills: ODESLV keeps the three records separate, so a solve_asens
+    // does not discard what solve_fsens recorded.  Clearing all three on every call is what
+    // check_daeslv caught -- no C++ driver reads two kinds from one solver.
+    results_solve.clear();
+    if( _fsa ) results_fsens.clear();
+    if( _asa ) results_asens.clear();
     bool const rec = options.OUTPUT.RESRECORD;     // opt-in, as in ODESLV: recording costs a copy
     if( rec && ( _fsa || _asa ) ){ results_fsens.resize( _np );  results_asens.resize( _nf ); }
     _xpk.clear();  _xpk.push_back( _dXP0 );

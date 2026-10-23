@@ -181,6 +181,10 @@ public:
       ASA_STRATEGY ASAINTERP = HERMITE;
       //! @brief Number of steps between each check point for ASA
       int ASACHKPT = 2000;
+      //! @brief per-step trace to stdout, as BASE_CVODES::Options::t_Solve::VERBOSE.  The only
+      //! SOLVE option CVODES had and IDAS did not, so the two option surfaces now agree.
+      bool VERBOSE = true;
+
     } SOLVE;
 
     //! @brief Consistent initialisation: the IDACalcIC controls, and where a KINSOL initial-condition solve's

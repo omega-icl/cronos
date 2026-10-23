@@ -135,7 +135,9 @@ def generate( hdr, line, cxx, func ):
 SPECS = [ ('ffmodel.hpp',       'mc::FFModel::Options',        'bind_ffmodel_options', 'gen_ffmodel_options.hpp'),
           ('ocfeslv.hpp',       'mc::OCFESLV::Options',        'bind_ocfeslv_options', 'gen_ocfeslv_options.hpp'),
           ('odeslv_cvodes.hpp', 'mc::ODESLV_CVODES::Options',  'bind_odeslv_options',  'gen_odeslv_options.hpp'),
-          ('base_cvodes.hpp',   'mc::BASE_CVODES::Options',    'bind_cvodes_options',  'gen_cvodes_options.hpp') ]
+          ('base_cvodes.hpp',   'mc::BASE_CVODES::Options',    'bind_cvodes_options',  'gen_cvodes_options.hpp'),
+          ('daeslv_idas.hpp',   'mc::DAESLV_IDAS::Options',    'bind_daeslv_options',  'gen_daeslv_options.hpp'),
+          ('base_idas.hpp',     'mc::BASE_IDAS::Options',      'bind_idas_options',    'gen_idas_options.hpp') ]
 
 def clang_format( text ):
     import shutil, subprocess

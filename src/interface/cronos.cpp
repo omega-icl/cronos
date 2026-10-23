@@ -14,6 +14,8 @@ void mc_base_kinsol(py::module_&);
 void mc_ffmodel(py::module_&);
 void mc_odeslv(py::module_&);
 void mc_ffodeslv(py::module_&);
+void mc_daeslv(py::module_&);
+void mc_ffdaeslv(py::module_&);
 void mc_ocfeslv(py::module_&);
 void mc_ffocfe(py::module_&);
 
@@ -76,7 +78,9 @@ from ``pymcpp``, which this module imports.
   mc_base_kinsol(m);   // the IC-solve types both solvers' INITIAL groups hold by value
   mc_ffmodel(m);
   mc_odeslv(m);    // after mc_ffmodel: ODESLV derives from FFModel
-  mc_ffodeslv(m);  // after mc_odeslv: FFODESLV takes an ODESLV
+  mc_ffodeslv(m);
+  mc_daeslv(m);
+  mc_ffdaeslv(m);  // after mc_odeslv: FFODESLV takes an ODESLV
   mc_ocfeslv(m);   // after mc_ffmodel: OCFESLV derives from FFModel
   mc_ffocfe(m);    // after mc_ocfeslv: FFOCFESLV / FFOCFERES take an OCFESLV
   

@@ -116,37 +116,37 @@ Example -- x(1) for x' = -p x, x(0) = 1, as a DAG variable of P:
       .value("TRANSFER", mc::FFODESLV::TRANSFER,
              "Not available from Python (ownership transfer)")
       .export_values();
-  py::enum_<mc::FFBaseDE::GRADIENT_TYPE>(pyFFODESLV, "GRADIENT_TYPE",
+  py::enum_<mc::FFODESLV::FFBaseDE_t::GRADIENT_TYPE>(pyFFODESLV, "GRADIENT_TYPE",
                                              "Sensitivity mode of derivatives.")
-      .value("FORWARD", mc::FFBaseDE::FORWARD,
+      .value("FORWARD", mc::FFODESLV::FFBaseDE_t::FORWARD,
              "Forward sensitivities (one direction per parameter)")
-      .value("ADJOINT", mc::FFBaseDE::ADJOINT,
+      .value("ADJOINT", mc::FFODESLV::FFBaseDE_t::ADJOINT,
              "Adjoint sensitivities (one backward sweep per output)")
-      .value("AUTO", mc::FFBaseDE::AUTO,
+      .value("AUTO", mc::FFODESLV::FFBaseDE_t::AUTO,
              "ADJOINT when np > NP2NF * nf, else FORWARD (default)")
       .export_values();
 
   // --- FFODESLV Options (static: shared by every FFODESLV and FFGradODESLV)
   // ---
-  py::class_<mc::FFBaseDE::Options>(pyFFODESLV, "Options", R"doc(
+  py::class_<mc::FFODESLV::FFBaseDE_t::Options>(pyFFODESLV, "Options", R"doc(
 Options of FFODESLV and FFGradODESLV, shared by all operations (class-level:
 ``FFODESLV.options``).
 )doc")
-      .def_readwrite("SYMDIFF", &mc::FFBaseDE::Options::SYMDIFF, R"doc(
+      .def_readwrite("SYMDIFF", &mc::FFODESLV::FFBaseDE_t::Options::SYMDIFF, R"doc(
 Inputs or constants of the operation differentiated SYMBOLICALLY; the others
 numerically (sensitivities).
 )doc")
-      .def_readwrite("NP2NF", &mc::FFBaseDE::Options::NP2NF, R"doc(
+      .def_readwrite("NP2NF", &mc::FFODESLV::FFBaseDE_t::Options::NP2NF, R"doc(
 Parameter-to-output ratio above which AUTO uses adjoint sensitivities.
 )doc")
-      .def_readwrite("GRADIENT", &mc::FFBaseDE::Options::GRADIENT, R"doc(
+      .def_readwrite("GRADIENT", &mc::FFODESLV::FFBaseDE_t::Options::GRADIENT, R"doc(
 Sensitivity mode: FFODESLV.FORWARD, ADJOINT or AUTO.
 )doc");
   pyFFODESLV.def_property_static(
-      "options", [](py::object) -> mc::FFBaseDE::Options&
-      { return mc::FFBaseDE::options; },
-      [](py::object, mc::FFBaseDE::Options const& o)
-      { mc::FFBaseDE::options = o; }, py::return_value_policy::reference,
+      "options", [](py::object) -> mc::FFODESLV::FFBaseDE_t::Options&
+      { return mc::FFODESLV::FFBaseDE_t::options; },
+      [](py::object, mc::FFODESLV::FFBaseDE_t::Options const& o)
+      { mc::FFODESLV::FFBaseDE_t::options = o; }, py::return_value_policy::reference,
       "Options shared by every FFODESLV and FFGradODESLV operation.");
 
   // --- FFODESLV Main Class ---

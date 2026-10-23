@@ -107,7 +107,7 @@ int main()
 
   // ------------------------------------------------------------------ C: the ADJOINT trajectory
   { std::cout << "\n--- C. results_asens, in DESCENDING time as ODESLV stores it\n";
-    M.solve_asens( P, 0 );
+    M._solve_asens_one( P, 0 );
     auto const& A_ = M.results_asens;
     check( "one vector per output", (double)A_.size(), (double)M.nf(), 0. );
     check_bool( "the adjoint sweep recorded rows", !A_[0].empty() );
@@ -134,13 +134,13 @@ int main()
       // the recorded lambda_q at t0 must BE the gradient the solver reports -- tying the trajectory
       // to the number, so the two cannot drift apart again
       { auto const& Gd = M.val_function_gradient();
-        check( "recorded lambda_q(t0) = d f/dk", A_[0].back().x.at(1+jk), Gd.at(jk), 1e-9 );
-        check( "recorded lambda_q(t0) = d f/da", A_[0].back().x.at(1+ja), Gd.at(ja), 1e-9 ); }
+        check( "recorded lambda_q(t0) = d f/dk", A_[0].back().x.at(1+jk), Gd[jk][0], 1e-9 );
+        check( "recorded lambda_q(t0) = d f/da", A_[0].back().x.at(1+ja), Gd[ja][0], 1e-9 ); }
       // val_state_adjoint(): [stage][output][lambda], as ODESLV exposes it
       { auto const& L = M.val_state_adjoint();
         check( "val_state_adjoint: one entry per stage+1", (double)L.size(), (double)(M.ns()+1), 0. );
         check( "  one per output",      (double)L.front().size(), (double)M.nf(), 0. );
-        check( "  lambda(t0) = d f/da", L.front().at(0).at(0), M.val_function_gradient().at(ja), 1e-9 );
+        check( "  lambda(t0) = d f/da", L.front().at(0).at(0), M.val_function_gradient()[ja][0], 1e-9 );
         check( "  lambda(T)  = 0",      L.back().at(0).at(0), 0., 1e-9 ); }
       check( "record_asens() wrote one line per row",
              (double)count_lines( "DAESLV_record_adj.dat" ), (double)A_[0].size(), 0. );

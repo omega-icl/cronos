@@ -10,6 +10,7 @@
 #include "ffdep.hpp"
 #include "slift.hpp"
 #include "odeslv_cvodes.hpp"
+#include "daeslv_idas.hpp"
 
 namespace mc
 {
@@ -19,6 +20,7 @@ namespace mc
 //! mc::FFBASEODE is a C++ base class for defining the options in an
 //! IVP in parametric ODEs as external DAG operations in MC++.
 ////////////////////////////////////////////////////////////////////////
+template <class SOLVER>
 class FFBaseDE
 : public FFOp
 {
@@ -26,7 +28,7 @@ class FFBaseDE
 protected:
 
   //! @brief Pointer to ODE solver
-  ODESLVS_CVODES*     _pODESLV;
+  SOLVER*     _pODESLV;
   //! @brief Whether this class owns _pODESLV
   bool                _ownODESLV;
   //! @brief Number of parameters
@@ -50,7 +52,7 @@ public:
   //! variables are two operations (their derivatives differ).
   //! @brief Is an FFVar evaluation re-inserting this operation into ANOTHER DAG (FFGraph::insert -- e.g. the
   //! per-thread copies of FFGraph::veval)?  Then the copy must own a deep copy of the solver, or threads would share
-  //! one ODESLVS_CVODES and integrate concurrently (2026-10-03, as FFBaseOCFE::_into_other_dag).
+  //! one SOLVER and integrate concurrently (2026-10-03, as FFBaseOCFE::_into_other_dag).
   bool _into_other_dag
     ( unsigned const nVar, FFVar const* vVar )
     const
@@ -118,7 +120,7 @@ public:
 
       _ownODESLV = Op._ownODESLV;      
       if( _ownODESLV ){
-        _pODESLV = new ODESLVS_CVODES;
+        _pODESLV = new SOLVER;
         if( !_pODESLV->setup( *Op._pODESLV ) ){   // an independent copy: same description, full setup
           delete _pODESLV;  _pODESLV = nullptr;
           throw std::runtime_error( "FFBaseDE::copy constructor ** Setup of the ODE solver copy failed\n" );
@@ -145,7 +147,7 @@ public:
 
   //! @brief Record the op's contract on the solver it is built on: its directions and the rest.
   void _record
-    ( ODESLVS_CVODES const* pODESLV )
+    ( SOLVER const* pODESLV )
     {
       _ndxRec = pODESLV->sensitivity_index();
       _ndxRest.clear();
@@ -191,7 +193,7 @@ public:
   //! (other than a fixed one) or constant missing from both maps.  @p saved receives the previous registry.
   static void _bind_maps
     ( std::vector<FFModel::InputArg> const& vDiff, std::vector<FFModel::InputArg> const& vRest,
-      ODESLVS_CVODES* pODESLV, std::vector<FFVar>& saved, std::vector<FFVar>& vPar, std::vector<FFVar>& vCst )
+      SOLVER* pODESLV, std::vector<FFVar>& saved, std::vector<FFVar>& vPar, std::vector<FFVar>& vCst )
     {
       if( !pODESLV ) throw std::runtime_error( "FFODESLV ** Null pointer to ODE solver\n" );
       auto const& vC = pODESLV->var_constant();
@@ -275,14 +277,14 @@ public:
     }
 
   static void _restore_controls
-    ( ODESLVS_CVODES* pODESLV, std::vector<FFVar> const& saved )
+    ( SOLVER* pODESLV, std::vector<FFVar> const& saved )
     { pODESLV->clear_controls();  for( auto const& u : saved ) pODESLV->register_control( u ); }
 
-  //! @brief Sensitivity mode for FFODESLV / FFGradODESLV (as FFBaseOCFE::GRADIENT_TYPE): FORWARD uses forward
+  //! @brief Sensitivity mode for FFDE<SOLVER> / FFGradDE<SOLVER> (as FFBaseOCFE::GRADIENT_TYPE): FORWARD uses forward
   //! sensitivities (one direction per parameter); ADJOINT uses adjoint sensitivities (one backward sweep per output
-  //! function); AUTO picks adjoint when np > NP2NF * nf -- the rule FFODESLV always applied.
+  //! function); AUTO picks adjoint when np > NP2NF * nf -- the rule FFDE<SOLVER> always applied.
   enum GRADIENT_TYPE{ FORWARD=0, ADJOINT=1, AUTO=2 };
-  //! @brief FFODESLV options - static so that can still be accessed/modified after setup
+  //! @brief FFDE<SOLVER> options - static so that can still be accessed/modified after setup
   static struct Options
   {
     //! @brief Constructor
@@ -302,26 +304,59 @@ public:
     std::vector<FFVar>        SYMDIFF;
     //! @brief parameter-to-function-size ratio above which the AUTO gradient uses adjoint instead of forward sensitivity
     double                    NP2NF;
-    //! @brief sensitivity mode (FORWARD / ADJOINT / AUTO) for FFODESLV / FFGradODESLV
+    //! @brief sensitivity mode (FORWARD / ADJOINT / AUTO) for FFDE<SOLVER> / FFGradDE<SOLVER>
     int                       GRADIENT;
   } options;
   //! @brief Whether a derivative with @p np parameters and @p nf functions uses ADJOINT sensitivities (options.GRADIENT;
-  //! AUTO: np > NP2NF * nf).  The single rule of both FFODESLV and FFGradODESLV.
+  //! AUTO: np > NP2NF * nf).  The single rule of both FFDE<SOLVER> and FFGradDE<SOLVER>.
   static bool _use_adjoint
     ( size_t const np, size_t const nf )
     { return options.GRADIENT == ADJOINT || ( options.GRADIENT == AUTO && (double)np > options.NP2NF * (double)nf ); }
 };
 
-inline FFBaseDE::Options FFBaseDE::options;
+template <class SOLVER>
+inline typename FFBaseDE<SOLVER>::Options FFBaseDE<SOLVER>::options;
 
 //! @brief C++ class defining IVP in parametric ODEs as external DAG operations in MC++.
 ////////////////////////////////////////////////////////////////////////
-//! mc::FFODESLV is a C++ class for defining an IVP in parametric ODEs as
+//! mc::FFDE<SOLVER> is a C++ class for defining an IVP in parametric ODEs as
 //! external DAG operations in MC++.
 ////////////////////////////////////////////////////////////////////////
-class FFODESLV
-: public FFBaseDE
+template <class SOLVER>
+class FFDE
+: public FFBaseDE<SOLVER>
 {
+
+ public:
+  //! @brief This instantiation's base, so a consumer can name it without the template argument.
+  using FFBaseDE_t = FFBaseDE<SOLVER>;
+
+ protected:
+  // dependent base: these are not visible unqualified in a derived TEMPLATE
+ public:
+  using FFOp::data;       // FFOp's, PUBLIC there -- a using in a protected block would narrow it,
+  using FFOp::owndata;    // and MC++ reads Op.data from outside
+  using FFBaseDE<SOLVER>::options;   // public static there; drivers set FFODESLV::options.GRADIENT
+ protected:
+  using FFBaseDE<SOLVER>::_bind_maps;
+  using FFBaseDE<SOLVER>::_check_directions;
+  using FFBaseDE<SOLVER>::_dfdp;
+  using FFBaseDE<SOLVER>::_into_other_dag;
+  using FFBaseDE<SOLVER>::_nDir;
+  using FFBaseDE<SOLVER>::_param_of_input;
+  using FFBaseDE<SOLVER>::_params;
+  using FFBaseDE<SOLVER>::_record;
+  using FFBaseDE<SOLVER>::_restore_controls;
+  using FFBaseDE<SOLVER>::_use_adjoint;
+  using FFBaseDE<SOLVER>::_nCst;
+  using FFBaseDE<SOLVER>::_nPar;
+  using FFBaseDE<SOLVER>::_name;
+  using FFBaseDE<SOLVER>::_ndxRec;
+  using FFBaseDE<SOLVER>::_ndxRest;
+  using FFBaseDE<SOLVER>::_ownODESLV;
+  using FFBaseDE<SOLVER>::_pODESLV;
+
+ public:
 
 public:
 
@@ -333,20 +368,20 @@ public:
   };
 
   // Default constructor
-  FFODESLV
+  FFDE
     ()
-    : FFBaseDE()
+    : FFBaseDE<SOLVER>()
     {}
 
   // Destructor
-  virtual ~FFODESLV
+  virtual ~FFDE<SOLVER>
     ()
     {}
 
   //! @brief Bind the two maps, insert the op (via _set), and -- for COPY -- restore the caller's registry.
   FFVar** _embed
     ( std::vector<FFModel::InputArg> const& vDiff, std::vector<FFModel::InputArg> const& vRest,
-      ODESLVS_CVODES* pODESLV, int policy, std::string const& name );
+      SOLVER* pODESLV, int policy, std::string const& name );
 
   //! @brief TWO-MAP form.  @p vDiff (map 1) lists the inputs the NUMERICAL gradient is taken w.r.t.: it RESETS the
   //! solver's control registry to exactly these.  @p vRest (map 2) lists every other declared input and every
@@ -357,7 +392,7 @@ public:
   //! SHALLOW and TRANSFER keep the new one.  Returns the nf outputs.
   std::vector<FFVar> operator()
     ( std::vector<FFModel::InputArg> const& vDiff, std::vector<FFModel::InputArg> const& vRest,
-      ODESLVS_CVODES* pODESLV, int policy=COPY, std::string const& name="" )
+      SOLVER* pODESLV, int policy=COPY, std::string const& name="" )
     {
       FFVar** ppRes = _embed( vDiff, vRest, pODESLV, policy, name );
       std::vector<FFVar> vRes( pODESLV->nf() );
@@ -368,7 +403,7 @@ public:
   //! @brief TWO-MAP form, output @p idep only.
   FFVar& operator()
     ( unsigned const idep, std::vector<FFModel::InputArg> const& vDiff, std::vector<FFModel::InputArg> const& vRest,
-      ODESLVS_CVODES* pODESLV, int policy=COPY, std::string const& name="" )
+      SOLVER* pODESLV, int policy=COPY, std::string const& name="" )
     {
       FFVar** ppRes = _embed( vDiff, vRest, pODESLV, policy, name );
       if( idep >= pODESLV->nf() ) throw std::runtime_error( "FFODESLV ** output index out of range\n" );
@@ -378,17 +413,17 @@ public:
   //! @brief ONE-MAP form: every declared input is differentiated and the model has no constant -- the two-map
   //! form with an empty map 2, refused (naming what is missing) otherwise.
   std::vector<FFVar> operator()
-    ( std::vector<FFModel::InputArg> const& vDiff, ODESLVS_CVODES* pODESLV, int policy=COPY,
+    ( std::vector<FFModel::InputArg> const& vDiff, SOLVER* pODESLV, int policy=COPY,
       std::string const& name="" )
     { return (*this)( vDiff, std::vector<FFModel::InputArg>(), pODESLV, policy, name ); }
 
   //! @brief ONE-MAP form, output @p idep only.
   FFVar& operator()
-    ( unsigned const idep, std::vector<FFModel::InputArg> const& vDiff, ODESLVS_CVODES* pODESLV,
+    ( unsigned const idep, std::vector<FFModel::InputArg> const& vDiff, SOLVER* pODESLV,
       int policy=COPY, std::string const& name="" )
     { return (*this)( idep, vDiff, std::vector<FFModel::InputArg>(), pODESLV, policy, name ); }
 
-  ODESLVS_CVODES* pODESLV
+  SOLVER* pODESLV
     ()
     const
     { //std::cerr << "ODE address retreived: " << _pODESLV << std::endl;
@@ -462,7 +497,7 @@ public:
     { std::ostringstream oss;
       if( !_name.empty() ) oss << _name;
       else                  oss << _pODESLV;
-      return "ODE[" + oss.str() + "]"; }
+      return std::string( SOLVER::FFTAG ) + "[" + oss.str() + "]"; }
 
   //! @brief Return whether or not operation is commutative
   bool commutative
@@ -474,7 +509,7 @@ protected:
 
   FFVar** _set
     ( unsigned const nPar, FFVar const* pPar, unsigned const nCst, FFVar const* pCst,
-      ODESLVS_CVODES* pODESLV, int policy, std::string const& name,
+      SOLVER* pODESLV, int policy, std::string const& name,
       bool const named=false )
 //    const
     {
@@ -499,18 +534,18 @@ protected:
       _name = name;
       _record( pODESLV );
 
-      data = pODESLV;
-      owndata = false;
+      this->data = pODESLV;
+      this->owndata = false;
       size_t const nFun = pODESLV->nf();
-      FFVar** ppRes = ( pCst? insert_external_operation( *this, nFun, nPar, pPar, nCst, pCst ):
-                              insert_external_operation( *this, nFun, nPar, pPar ) );
+      FFVar** ppRes = ( pCst? this->insert_external_operation( *this, nFun, nPar, pPar, nCst, pCst ):
+                              this->insert_external_operation( *this, nFun, nPar, pPar ) );
 
       _ownODESLV = false;
       FFOp* pOp = (*ppRes)->opdef().first;
       if( policy > 0 )
-        _pODESLV = dynamic_cast<FFODESLV*>(pOp)->_pODESLV; // set pointer to DAG copy
+        _pODESLV = dynamic_cast<FFDE<SOLVER>*>(pOp)->_pODESLV; // set pointer to DAG copy
       else if( policy < 0 )
-        dynamic_cast<FFODESLV*>(pOp)->_ownODESLV = true;   // transfer ownership
+        dynamic_cast<FFDE<SOLVER>*>(pOp)->_ownODESLV = true;   // transfer ownership
 #ifdef CRONOS__FFODESLV_TRACE
       std::cerr << "ODE operation address: " << this << std::endl;
       std::cerr << "ODE address in DAG: " << _pODESLV << std::endl;
@@ -521,13 +556,45 @@ protected:
 
 //! @brief C++ class defining gradient of IVP in parametric ODEs as external DAG operations in MC++.
 ////////////////////////////////////////////////////////////////////////
-//! mc::FFGradODESLV is a C++ class for defining the gradient of an IVP
+//! mc::FFGradDE<SOLVER> is a C++ class for defining the gradient of an IVP
 //! in parametric ODEs as external DAG operations in MC++.
 ////////////////////////////////////////////////////////////////////////
-class FFGradODESLV
-: public FFBaseDE
+template <class SOLVER>
+class FFGradDE
+: public FFBaseDE<SOLVER>
 {
-  friend class FFODESLV;
+
+ public:
+  //! @brief This instantiation's base, so a consumer can name it without the template argument.
+  using FFBaseDE_t = FFBaseDE<SOLVER>;
+
+ protected:
+  // dependent base: these are not visible unqualified in a derived TEMPLATE
+ public:
+  using FFOp::data;       // FFOp's, PUBLIC there -- a using in a protected block would narrow it,
+  using FFOp::owndata;    // and MC++ reads Op.data from outside
+  using FFBaseDE<SOLVER>::options;   // public static there; drivers set FFODESLV::options.GRADIENT
+ protected:
+  using FFBaseDE<SOLVER>::_bind_maps;
+  using FFBaseDE<SOLVER>::_check_directions;
+  using FFBaseDE<SOLVER>::_dfdp;
+  using FFBaseDE<SOLVER>::_into_other_dag;
+  using FFBaseDE<SOLVER>::_nDir;
+  using FFBaseDE<SOLVER>::_param_of_input;
+  using FFBaseDE<SOLVER>::_params;
+  using FFBaseDE<SOLVER>::_record;
+  using FFBaseDE<SOLVER>::_restore_controls;
+  using FFBaseDE<SOLVER>::_use_adjoint;
+  using FFBaseDE<SOLVER>::_nCst;
+  using FFBaseDE<SOLVER>::_nPar;
+  using FFBaseDE<SOLVER>::_name;
+  using FFBaseDE<SOLVER>::_ndxRec;
+  using FFBaseDE<SOLVER>::_ndxRest;
+  using FFBaseDE<SOLVER>::_ownODESLV;
+  using FFBaseDE<SOLVER>::_pODESLV;
+
+ public:
+  friend class FFDE<SOLVER>;
 
 public:
 
@@ -538,18 +605,18 @@ public:
   };
 
   // Constructors
-  FFGradODESLV
+  FFGradDE
     ()
-    : FFBaseDE()
+    : FFBaseDE<SOLVER>()
     {}
 
   // Destructor
-  virtual ~FFGradODESLV
+  virtual ~FFGradDE<SOLVER>
     ()
     {}
 
-  // No public call operator: FFGradODESLV is built by FFODESLV::deriv / eval( FADType<FFVar> ) through _set(),
-  // with the same op-input layout as the FFODESLV it differentiates.
+  // No public call operator: FFGradDE<SOLVER> is built by FFDE<SOLVER>::deriv / eval( FADType<FFVar> ) through _set(),
+  // with the same op-input layout as the FFDE<SOLVER> it differentiates.
 
   // Evaluation overloads
   virtual void feval
@@ -568,7 +635,7 @@ public:
       else if( mc::same_type( idU, typeid( FFExpr ) ) )
         return eval( nRes, static_cast<FFExpr*>(vRes), nVar, static_cast<FFExpr const*>(vVar), mVar );
 
-      throw std::runtime_error( "FFGradODESLV::feval ** No evaluation method for type"+std::string(idU.name())+"\n" );
+      throw std::runtime_error( "FFGradDE<SOLVER>::feval ** No evaluation method for type"+std::string(idU.name())+"\n" );
     }
 
   void eval
@@ -600,7 +667,7 @@ public:
     { std::ostringstream oss;
       if( !_name.empty() ) oss << _name;
       else                  oss << _pODESLV;
-      return "GRAD_ODE[" + oss.str() + "]"; }
+      return "GRAD_" + std::string( SOLVER::FFTAG ) + "[" + oss.str() + "]"; }
 
   //! @brief Return whether or not operation is commutative
   bool commutative
@@ -612,7 +679,7 @@ protected:
 
   FFVar** _set
     ( unsigned const nPar, FFVar const* pPar, unsigned const nCst, FFVar const* pCst,
-      ODESLVS_CVODES* pODESLV, int policy, std::string const& name="",
+      SOLVER* pODESLV, int policy, std::string const& name="",
       bool const named=false )
     {
 #ifdef CRONOS__FFODESLV_CHECK
@@ -636,27 +703,28 @@ protected:
       _name = name;
       _record( pODESLV );
 
-      data = pODESLV;
-      owndata = false;
+      this->data = pODESLV;
+      this->owndata = false;
       size_t const nFun = pODESLV->nf(), nDir = _nDir();   // the gradient w.r.t. map 1 only
-      FFVar** ppRes = ( pCst? insert_external_operation( *this, nFun*nDir, nPar, pPar, nCst, pCst ):
-                              insert_external_operation( *this, nFun*nDir, nPar, pPar ) );
+      FFVar** ppRes = ( pCst? this->insert_external_operation( *this, nFun*nDir, nPar, pPar, nCst, pCst ):
+                              this->insert_external_operation( *this, nFun*nDir, nPar, pPar ) );
 
       _ownODESLV = false;
       FFOp* pOp = (*ppRes)->opdef().first;
       if( policy > 0 )
-        _pODESLV = dynamic_cast<FFGradODESLV*>(pOp)->_pODESLV; // set pointer to DAG copy
+        _pODESLV = dynamic_cast<FFGradDE<SOLVER>*>(pOp)->_pODESLV; // set pointer to DAG copy
 #ifdef CRONOS__FFODESLV_TRACE
-      std::cerr << "FFGradODESLV address in DAG: " << _pODESLV << std::endl;
+      std::cerr << "FFGradDE<SOLVER> address in DAG: " << _pODESLV << std::endl;
 #endif
       return ppRes;
     }
 };
 
+template <class SOLVER>
 inline FFVar**
-FFODESLV::_embed
+FFDE<SOLVER>::_embed
 ( std::vector<FFModel::InputArg> const& vDiff, std::vector<FFModel::InputArg> const& vRest,
-  ODESLVS_CVODES* pODESLV, int policy, std::string const& name )
+  SOLVER* pODESLV, int policy, std::string const& name )
 {
   std::vector<FFVar> saved, vPar, vCst;
   _bind_maps( vDiff, vRest, pODESLV, saved, vPar, vCst );
@@ -666,8 +734,9 @@ FFODESLV::_embed
   return ppRes;
 }
 
+template <class SOLVER>
 inline void
-FFODESLV::eval
+FFDE<SOLVER>::eval
 ( unsigned const nRes, FFVar* vRes, unsigned const nVar, FFVar const* vVar,
   unsigned const* mVar )
 const
@@ -685,20 +754,21 @@ const
   if( _into_other_dag( nVar, vVar ) ){
     auto op = *this;                  // shares the solver ...
     op._ownODESLV = true;             // ... so that the INSERTED copy deep-copies it (FFBaseDE copy constructor)
-    ppRes = ( _nCst? insert_external_operation( op, nRes, _nPar, vVar, _nCst, vVar+_nPar ):
-                     insert_external_operation( op, nRes, _nPar, vVar ) );
+    ppRes = ( _nCst? this->insert_external_operation( op, nRes, _nPar, vVar, _nCst, vVar+_nPar ):
+                     this->insert_external_operation( op, nRes, _nPar, vVar ) );
     op._ownODESLV = false;            // the temporary must not delete the shared solver
   }
   else
-    ppRes = ( _nCst? insert_external_operation( *this, nRes, _nPar, vVar, _nCst, vVar+_nPar ):
-                     insert_external_operation( *this, nRes, _nPar, vVar ) );
-  //FFVar** ppRes = _set( _nPar, vVar, _nCst, vVar+_nPar, static_cast<ODESLVS_CVODES*>(data), _ownODESLV );
+    ppRes = ( _nCst? this->insert_external_operation( *this, nRes, _nPar, vVar, _nCst, vVar+_nPar ):
+                     this->insert_external_operation( *this, nRes, _nPar, vVar ) );
+  //FFVar** ppRes = _set( _nPar, vVar, _nCst, vVar+_nPar, static_cast<SOLVER*>(data), _ownODESLV );
   for( unsigned j=0; j<nRes; ++j )
     vRes[j] = *(ppRes[j]);
 }
 
+template <class SOLVER>
 inline void
-FFODESLV::eval
+FFDE<SOLVER>::eval
 ( unsigned const nRes, FFDep* vRes, unsigned const nVar, FFDep const* vVar,
   unsigned const* mVar )
 const
@@ -716,8 +786,9 @@ const
   for( unsigned j=1; j<nRes; ++j ) vRes[j] = vRes[0];
 }
 
+template <class SOLVER>
 inline void
-FFODESLV::eval
+FFDE<SOLVER>::eval
 ( unsigned const nRes, FFExpr* vRes, unsigned const nVar, FFExpr const* vVar,
   unsigned const* mVar )
 const
@@ -742,8 +813,9 @@ const
   }
 }
 
+template <class SOLVER>
 inline void
-FFODESLV::eval
+FFDE<SOLVER>::eval
 ( unsigned const nRes, double* vRes, unsigned const nVar, double const* vVar,
   unsigned const* mVar )
 const
@@ -758,7 +830,7 @@ const
 
   _check_directions();
   std::vector<double> P;  _params( vVar, P );
-  if( _pODESLV->solve( P.data(), _nCst? vVar+_nPar: nullptr ) != ODESLVS_CVODES::NORMAL ){
+  if( _pODESLV->solve( P.data(), _nCst? vVar+_nPar: nullptr ) != SOLVER::NORMAL ){
     //for( unsigned i=0; i<nVar; ++i ) std::cout << "vVar[" << i << "] = " << vVar[i] << std::endl;
     throw std::runtime_error( "FFODESLV::eval double ** State integration failure\n" );
   }
@@ -767,8 +839,9 @@ const
     vRes[i] = _pODESLV->val_function()[i];
 }
 
+template <class SOLVER>
 inline void
-FFODESLV::eval
+FFDE<SOLVER>::eval
 ( unsigned const nRes, FADType<double>* vRes, unsigned const nVar, FADType<double> const* vVar,
   unsigned const* mVar )
 const
@@ -785,11 +858,11 @@ const
   _check_directions();
   std::vector<double> P;  _params( vVarVal.data(), P );
   if( !_use_adjoint( _nPar, nRes ) ){
-    if( _pODESLV->solve_fsens( P.data(), _nCst? vVarVal.data()+_nPar: nullptr ) != ODESLVS_CVODES::NORMAL )
+    if( _pODESLV->solve_fsens( P.data(), _nCst? vVarVal.data()+_nPar: nullptr ) != SOLVER::NORMAL )
       throw std::runtime_error( "FFODESLV::eval FADType<double> ** Forward sensitivity integration failure\n" );
   }
   else{
-    if( _pODESLV->solve_asens( P.data(), _nCst? vVarVal.data()+_nPar: nullptr ) != ODESLVS_CVODES::NORMAL )
+    if( _pODESLV->solve_asens( P.data(), _nCst? vVarVal.data()+_nPar: nullptr ) != SOLVER::NORMAL )
       throw std::runtime_error( "FFODESLV::eval FADType<double> ** Adjoint sensitivity integration failure\n" );
   }
 
@@ -807,8 +880,9 @@ const
   }
 }
 
+template <class SOLVER>
 inline void
-FFODESLV::eval
+FFDE<SOLVER>::eval
 ( unsigned const nRes, FADType<FFVar>* vRes, unsigned const nVar, FADType<FFVar> const* vVar,
   unsigned const* mVar )
 const
@@ -823,15 +897,15 @@ const
   std::vector<FFVar> vVarVal( nVar );
   for( unsigned i=0; i<nVar; ++i )
     vVarVal[i] = vVar[i].val();
-  FFVar const*const* vResVal = ( _nCst? insert_external_operation( *this, nRes, _nPar, vVarVal.data(), _nCst, vVarVal.data()+_nPar ):
-                                        insert_external_operation( *this, nRes, _nPar, vVarVal.data() ) );
+  FFVar const*const* vResVal = ( _nCst? this->insert_external_operation( *this, nRes, _nPar, vVarVal.data(), _nCst, vVarVal.data()+_nPar ):
+                                        this->insert_external_operation( *this, nRes, _nPar, vVarVal.data() ) );
 
   if( options.SYMDIFF.empty() ){
-    FFGradODESLV ResDer;
-    // No DAG copy of ODE - reuse FFODESLV DAG copy
+    FFGradDE<SOLVER> ResDer;
+    // No DAG copy of ODE - reuse FFDE<SOLVER> DAG copy
     // Caveat is that passing a pointer to the orginal ODESLV object will create a separate object
     // FFVar const*const* vResDer = ResDer( nVar, vVarVal.data(), _pODESLV, false );
-    // DAG copy of ODE - no resuse of FFODESLV DAG copy
+    // DAG copy of ODE - no resuse of FFDE<SOLVER> DAG copy
     // Caveat is external data pointer may change
     FFVar const*const* vResDer = ResDer._set( _nPar, vVarVal.data(), _nCst, vVarVal.data()+_nPar, _pODESLV, _ownODESLV, _name, true );   // the op's OWN solver: a COPY's registry is not the caller's
     for( unsigned k=0; k<nRes; ++k ){
@@ -866,7 +940,7 @@ const
       }
     }
 
-    FFODESLV ResDer;
+    FFDE<SOLVER> ResDer;
     auto pODESLVSEN = _pODESLV->fdiff( vPar );
     if( !pODESLVSEN->setup() ){
       std::string const why = pODESLVSEN->extract_error();  delete pODESLVSEN;
@@ -891,8 +965,9 @@ const
   }
 }
 
+template <class SOLVER>
 inline void
-FFODESLV::deriv
+FFDE<SOLVER>::deriv
 ( unsigned const nRes, FFVar const* vRes, unsigned const nVar, FFVar const* vVar, FFVar** vDer )
 const
 {
@@ -904,11 +979,11 @@ const
 #endif
 
   if( options.SYMDIFF.empty() ){
-    FFGradODESLV ResDer;
-    // No DAG copy of ODE - reuse FFODESLV DAG copy
+    FFGradDE<SOLVER> ResDer;
+    // No DAG copy of ODE - reuse FFDE<SOLVER> DAG copy
     // Caveat is that passing a pointer to the orginal ODESLV object will create a separate object
     // FFVar const*const* vResDer = ResDer( nVar, vVar, _pODESLV, false ); // no copy of ODE data
-    // DAG copy of ODE - no resuse of FFODESLV DAG copy
+    // DAG copy of ODE - no resuse of FFDE<SOLVER> DAG copy
     // Caveat is external data pointer may change
     FFVar const*const* vResDer = ResDer._set( _nPar, vVar, _nCst, vVar+_nPar, _pODESLV, _ownODESLV, _name, true );   // the op's OWN solver: a COPY's registry is not the caller's
     for( unsigned k=0; k<nRes; ++k )
@@ -934,7 +1009,7 @@ const
       }
     }
 
-    FFODESLV ResDer;
+    FFDE<SOLVER> ResDer;
     auto pODESLVSEN = _pODESLV->fdiff( vPar );
     if( !pODESLVSEN->setup() ){
       std::string const why = pODESLVSEN->extract_error();  delete pODESLVSEN;
@@ -953,8 +1028,9 @@ const
   }
 }
 
+template <class SOLVER>
 inline void
-FFODESLV::eval
+FFDE<SOLVER>::eval
 ( unsigned const nRes, SLiftVar* vRes, unsigned const nVar, SLiftVar const* vVar,
   unsigned const* mVar )
 const
@@ -969,14 +1045,15 @@ const
   vVar->env()->lift( nRes, vRes, nVar, vVar );
 }
 
+template <class SOLVER>
 inline void
-FFGradODESLV::eval
+FFGradDE<SOLVER>::eval
 ( unsigned const nRes, FFVar* vRes, unsigned const nVar, FFVar const* vVar,
   unsigned const* mVar )
 const
 {
 #ifdef CRONOS__FFODESLV_TRACE
-  std::cout << "FFGradODESLV::eval: FFVar\n";
+  std::cout << "FFGradDE<SOLVER>::eval: FFVar\n";
 #endif
 #ifdef CRONOS__FFODESLV_CHECK
   assert( _pODESLV && nVar == _nPar+_nCst && nRes == _pODESLV->nf()*_nDir() );
@@ -986,25 +1063,26 @@ const
   if( _into_other_dag( nVar, vVar ) ){
     auto op = *this;                  // shares the solver ...
     op._ownODESLV = true;             // ... so that the INSERTED copy deep-copies it (FFBaseDE copy constructor)
-    ppRes = ( _nCst? insert_external_operation( op, nRes, _nPar, vVar, _nCst, vVar+_nPar ):
-                     insert_external_operation( op, nRes, _nPar, vVar ) );
+    ppRes = ( _nCst? this->insert_external_operation( op, nRes, _nPar, vVar, _nCst, vVar+_nPar ):
+                     this->insert_external_operation( op, nRes, _nPar, vVar ) );
     op._ownODESLV = false;            // the temporary must not delete the shared solver
   }
   else
-    ppRes = ( _nCst? insert_external_operation( *this, nRes, _nPar, vVar, _nCst, vVar+_nPar ):
-                     insert_external_operation( *this, nRes, _nPar, vVar ) );
-  //FFVar** ppRes = _set( _nPar, vVar, _nCst, vVar+_nPar, static_cast<ODESLVS_CVODES*>(data), _ownODESLV );
+    ppRes = ( _nCst? this->insert_external_operation( *this, nRes, _nPar, vVar, _nCst, vVar+_nPar ):
+                     this->insert_external_operation( *this, nRes, _nPar, vVar ) );
+  //FFVar** ppRes = _set( _nPar, vVar, _nCst, vVar+_nPar, static_cast<SOLVER*>(data), _ownODESLV );
   for( unsigned j=0; j<nRes; ++j ) vRes[j] = *(ppRes[j]);
 }
 
+template <class SOLVER>
 inline void
-FFGradODESLV::eval
+FFGradDE<SOLVER>::eval
 ( unsigned const nRes, FFDep* vRes, unsigned const nVar, FFDep const* vVar,
   unsigned const* mVar )
 const
 {
 #ifdef CRONOS__FFODESLV_TRACE
-  std::cout << "FFGradODESLV::eval: FFDep\n";
+  std::cout << "FFGradDE<SOLVER>::eval: FFDep\n";
 #endif
 #ifdef CRONOS__FFODESLV_CHECK
   assert( _pODESLV && nVar == _nPar+_nCst && nRes == _pODESLV->nf()*_nDir() );
@@ -1016,14 +1094,15 @@ const
   for( unsigned j=1; j<nRes; ++j ) vRes[j] = vRes[0];
 }
 
+template <class SOLVER>
 inline void
-FFGradODESLV::eval
+FFGradDE<SOLVER>::eval
 ( unsigned const nRes, FFExpr* vRes, unsigned const nVar, FFExpr const* vVar,
   unsigned const* mVar )
 const
 {
 #ifdef CRONOS__FFODESLV_TRACE
-  std::cout << "FFGradODESLV::eval: FFExpr\n";
+  std::cout << "FFGradDE<SOLVER>::eval: FFExpr\n";
 #endif
 #ifdef CRONOS__FFODESLV_CHECK
   assert( _pODESLV && nVar == _nPar+_nCst && nRes == _pODESLV->nf()*_nDir() );
@@ -1042,14 +1121,15 @@ const
   }
 }
 
+template <class SOLVER>
 inline void
-FFGradODESLV::eval
+FFGradDE<SOLVER>::eval
 ( unsigned const nRes, double* vRes, unsigned const nVar, double const* vVar,
   unsigned const* mVar )
 const
 {
 #ifdef CRONOS__FFODESLV_TRACE
-  std::cout << "FFGradODESLV::eval: double\n";
+  std::cout << "FFGradDE<SOLVER>::eval: double\n";
 #endif
 #ifdef CRONOS__FFODESLV_CHECK
   assert( _pODESLV && nVar == _nPar+_nCst && nRes == _pODESLV->nf()*_nDir() );
@@ -1058,12 +1138,12 @@ const
   _check_directions();
   std::vector<double> P;  _params( vVar, P );
   if( !_use_adjoint( _nPar, _pODESLV->nf() ) ){
-    if( _pODESLV->solve_fsens( P.data(), _nCst? vVar+_nPar: nullptr ) != ODESLVS_CVODES::NORMAL )
-      throw std::runtime_error( "FFGradODESLV::eval double ** Forward sensitivity integration failure\n" );
+    if( _pODESLV->solve_fsens( P.data(), _nCst? vVar+_nPar: nullptr ) != SOLVER::NORMAL )
+      throw std::runtime_error( "FFGradDE<SOLVER>::eval double ** Forward sensitivity integration failure\n" );
   }
   else{
-    if( _pODESLV->solve_asens( P.data(), _nCst? vVar+_nPar: nullptr ) != ODESLVS_CVODES::NORMAL )
-      throw std::runtime_error( "FFGradODESLV::eval double ** Adjoint sensitivity integration failure\n" );
+    if( _pODESLV->solve_asens( P.data(), _nCst? vVar+_nPar: nullptr ) != SOLVER::NORMAL )
+      throw std::runtime_error( "FFGradDE<SOLVER>::eval double ** Adjoint sensitivity integration failure\n" );
   }
 
   for( unsigned i=0, k=0; i<_nDir(); ++i )
@@ -1071,14 +1151,15 @@ const
       vRes[k] = _dfdp( i, j );
 }
 
+template <class SOLVER>
 inline void
-FFGradODESLV::eval
+FFGradDE<SOLVER>::eval
 ( unsigned const nRes, SLiftVar* vRes, unsigned const nVar, SLiftVar const* vVar,
   unsigned const* mVar )
 const
 {
 #ifdef CRONOS__FFODESLV_TRACE
-  std::cout << "FFGradODESLV::eval: SLiftVar\n";
+  std::cout << "FFGradDE<SOLVER>::eval: SLiftVar\n";
 #endif
 #ifdef CRONOS__FFODESLV_CHECK
   assert( _pODESLV && nVar == _nPar+_nCst && nRes == _pODESLV->nf()*_nDir() );
@@ -1086,6 +1167,13 @@ const
 
   vVar->env()->lift( nRes, vRes, nVar, vVar );
 }
+
+//! @brief The DAG operations, one instantiation per solver.  Everything above is shared; only the
+//! solver type and its FFTAG differ, which is why FFDAESLV costs an alias rather than a file.
+using FFODESLV     = FFDE<ODESLV_CVODES>;
+using FFGradODESLV = FFGradDE<ODESLV_CVODES>;
+using FFDAESLV     = FFDE<DAESLV_IDAS>;
+using FFGradDAESLV = FFGradDE<DAESLV_IDAS>;
 
 } // end namescape mc
 

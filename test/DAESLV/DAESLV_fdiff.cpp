@@ -55,11 +55,11 @@ int main()
 
   // the reference: forward sensitivities of the ORIGINAL solver, already gated elsewhere
   M.solve_fsens( P );
-  std::vector<double> const Gref = M.val_function_gradient();
+  auto const Gref = M.val_function_gradient();
   size_t const b = M.blk_fct(0).first;
   std::cout << "\n--- reference: solve_fsens on the original model\n";
-  check( "d f/da = (1-e^-k)/k", Gref.at( b*M.np()+ja ), ( 1.-e )/K, 1e-7 );
-  check( "d f/dk",              Gref.at( b*M.np()+jk ), A*( K*e - (1.-e) )/(K*K), 1e-7 );
+  check( "d f/da = (1-e^-k)/k", Gref[ja][b], ( 1.-e )/K, 1e-7 );
+  check( "d f/dk",              Gref[jk][b], A*( K*e - (1.-e) )/(K*K), 1e-7 );
 
   // ------------------------------------------------------------------ A: fdiff over both parameters
   { std::cout << "\n--- A. fdiff( {k,a} ): a NEW solver whose model is the derivative\n";

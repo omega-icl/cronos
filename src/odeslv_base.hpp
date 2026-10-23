@@ -123,26 +123,9 @@ class ODESLV_BASE
   //! @brief ODESLV implements EXPLICIT transitions (add_transition): x_i(tau^+) = g(x(tau^-), p)
   bool _transitions_supported() const override { return true; }
 
-  //! @brief Take the model declaration of @p IVP (_usr and the control flags, shallow on the same user DAG, which
-  //! is not owned) so that a following setup() yields an independent solver.  Everything extraction derives --
-  //! dimensions, _ndxSEN, minted levels, the stage partition -- is recomputed by that setup(), not copied.
-  //! (2026-09-29: the legacy description path -- set_dag/set_time/set_state/set_parameter/set_constant/
-  //! set_differential/set_initial/set_quadrature/set_function -- is retired: a model is declared through FFModel.)
-  void _copy_description
-    ( ODESLV_BASE const& IVP )
-    {
-      FFModel::set( IVP._usr._dagUsr );
-      _usr = IVP._usr;
-      _decisionFlag = IVP._decisionFlag;
-    }
 
   //! @brief Number of parameters (was BASE_DE::np)
 
-  //! @brief The parameter indices the sensitivity runs over -- FFModel's canonical control order, so
-  //! direction j is DOF j of the control vector.  Every parameter when no control is registered.
-  std::vector<size_t> const& sensitivity_index
-    () const override
-    { return _ndxSEN; }
 
   //! @brief ODESLV substitutes fixed-input values at extraction (setup), not per call.
   bool _fixed_inputs_applied_per_call
@@ -160,12 +143,6 @@ class ODESLV_BASE
 
 protected:
   // ---- what the old base class provided, now this class's own --------------------------------------------
-  //! @brief The parameter indices the sensitivity runs over, in FFModel's CANONICAL CONTROL ORDER, so
-  //! direction j is DOF j of the control vector and control_columns() slices the gradient.  Empty registry
-  //! -> 0.._np-1, i.e. every parameter, which is the behaviour before controls were honoured.
-  std::vector<size_t> _ndxSEN;
-  size_t _nsen = 0;      //!< number of sensitivity DIRECTIONS (_ndxSEN.size()); _np counts PARAMETERS
-  bool _resolve_sensitivity_index();
 
   //! @brief The control registry changed.  If the model is already extracted, re-resolve the sensitivity
   //! directions: that reads only extraction outputs (_mP, _mInpLevels), and CVODES sizes its sensitivity memory
@@ -1081,45 +1058,6 @@ ODESLV_BASE::_FCT_D_STA
 }
 
 
-//! @brief Resolve FFModel's control registry into parameter indices of _mP.  A control that is distributed
-//! over the evolution variable contributes one parameter per element (_mInpLevels), in element order, which
-//! is the same block FFModel::control_ndof() counts -- the two are cross-checked here rather than assumed.
-inline bool
-ODESLV_BASE::_resolve_sensitivity_index
-()
-{
-  _ndxSEN.clear();
-  if( controls().empty() ){                       // nothing registered: differentiate w.r.t. everything
-    _ndxSEN.resize( _np );
-    for( size_t i=0; i<_np; ++i ) _ndxSEN[i] = i;
-    _nsen = _np;
-    return true;
-  }
-  for( auto const& [u,spec] : controls() ){       // canonical control order: offsets ascending
-    std::vector<FFVar> dofs;
-    auto const itl = _mInpLevels.find( u.name() );
-    if( itl != _mInpLevels.cend() ) dofs = itl->second;
-    else                            dofs.assign( 1, u );
-    if( dofs.size() != spec.ndof ){
-      _extractError = "the control " + u.name() + " has " + std::to_string( spec.ndof )
-                    + " DOFs in its declared function space but " + std::to_string( dofs.size() )
-                    + " parameters in the extracted model";
-      return false;
-    }
-    for( auto const& d : dofs ){
-      bool found = false;
-      for( size_t i=0; i<_np; ++i )
-        if( _mP[i].id().second == d.id().second ){ _ndxSEN.push_back( i ); found = true; break; }
-      if( !found ){
-        _extractError = "the registered control " + u.name()
-                      + " is not a parameter of the extracted model";
-        return false;
-      }
-    }
-  }
-  _nsen = _ndxSEN.size();
-  return true;
-}
 
 
 

@@ -157,6 +157,28 @@ class BASE_DE
   //! @brief The system the last solve_ic()/restart_ic() used, for ic_sens() to linearise about.
   t_ICSys*                             _icLast = nullptr;
 
+  // Hoisted from ODESLV_BASE 2026-10-22: it touches FFModel state only, and setup( IVP ) -- the
+  // independent-copy form the FF operations use -- needs it of EITHER solver.
+  //! @brief Take the model declaration of @p IVP (_usr and the control flags, shallow on the same user DAG, which
+  //! is not owned) so that a following setup() yields an independent solver.  Everything extraction derives --
+  //! dimensions, _ndxSEN, minted levels, the stage partition -- is recomputed by that setup(), not copied.
+  //! (2026-09-29: the legacy description path -- set_dag/set_time/set_state/set_parameter/set_constant/
+  //! set_differential/set_initial/set_quadrature/set_function -- is retired: a model is declared through FFModel.)
+  void _copy_description
+    ( BASE_DE const& IVP )
+    {
+      FFModel::set( IVP._usr._dagUsr );
+      _usr = IVP._usr;
+      _decisionFlag = IVP._decisionFlag;
+    }
+
+  //! @brief The parameter indices the sensitivity runs over, in FFModel's CANONICAL CONTROL ORDER, so
+  //! direction j is DOF j of the control vector and control_columns() slices the gradient.  Empty registry
+  //! -> 0.._np-1, i.e. every parameter, which is the behaviour before controls were honoured.
+  std::vector<size_t> _ndxSEN;
+  size_t _nsen = 0;      //!< number of sensitivity DIRECTIONS (_ndxSEN.size()); _np counts PARAMETERS
+  bool _resolve_sensitivity_index();
+
   //! @brief Worst |hidden level| at the last stop that carried a declared jump; 0 where none applies.
   double                               _icHidRes = 0.;
 
@@ -518,6 +540,40 @@ class BASE_DE
     () const
     { return _mP; }
 
+  // Hoisted from ODESLV_BASE 2026-10-22: the FF operations check sensitivity_index().size() against
+  // n_control_dof() for EITHER solver, and FFModel's default returns none -- so DAESLV's first map
+  // could never resolve.
+  //! @brief The parameter indices the sensitivity runs over -- FFModel's canonical control order, so
+  //! direction j is DOF j of the control vector.  Every parameter when no control is registered.
+  std::vector<size_t> const& sensitivity_index
+    () const override
+    { return _ndxSEN; }
+
+  //! @brief One recorded point of a trajectory: a time and a flat value block.  Hoisted from
+  //! ODESLV_BASE on 2026-10-21 so DAESLV records the SAME way rather than in parallel -- both
+  //! solvers derive from this class, as they do for solve_ic/ic_sens/ic_adjoint.
+
+  struct Results
+  {
+    //! @brief Constructors
+    Results
+      ( double const& tk, unsigned const nx1, double const* x1,
+        unsigned const nx2=0, double const* x2=nullptr ):
+      t( tk )
+      { x.resize( nx1+nx2 );
+        unsigned int ix=0;
+        for( ; ix<nx1; ix++ )      x[ix] = x1[ix];
+        for( ; ix<nx1+nx2; ix++ )  x[ix] = x2[ix-nx1]; }
+    Results
+      ( Results const& res ):
+      t( res.t ), x( res.x )
+      {}
+    //! @brief Time point
+    double t;
+    //! @brief Solution point
+    std::vector<double> x;
+  };
+
   //! @brief Sensitivities of the consistent initial data w.r.t. the parameters, from the system LAST
   //! solved: @p dxdp[j][i] = d x_i / d p_j and @p ddxdp[j][i] = d (dx_i/dt) / d p_j.  Call it directly
   //! after solve_ic() or restart_ic(), whose solution it linearises about.
@@ -742,30 +798,6 @@ class BASE_DE
     { return v.dag()? v: FFVar( FFModel::_dag, v.num().val() ); }
 
 
-  //! @brief One recorded point of a trajectory: a time and a flat value block.  Hoisted from
-  //! ODESLV_BASE on 2026-10-21 so DAESLV records the SAME way rather than in parallel -- both
-  //! solvers derive from this class, as they do for solve_ic/ic_sens/ic_adjoint.
-
-  struct Results
-  {
-    //! @brief Constructors
-    Results
-      ( double const& tk, unsigned const nx1, double const* x1,
-        unsigned const nx2=0, double const* x2=nullptr ):
-      t( tk )
-      { x.resize( nx1+nx2 );
-        unsigned int ix=0;
-        for( ; ix<nx1; ix++ )      x[ix] = x1[ix];
-        for( ; ix<nx1+nx2; ix++ )  x[ix] = x2[ix-nx1]; }
-    Results
-      ( Results const& res ):
-      t( res.t ), x( res.x )
-      {}
-    //! @brief Time point
-    double t;
-    //! @brief Solution point
-    std::vector<double> x;
-  };
 
   //! @brief Record results in file <a>bndrec</a>, with accuracy of <a>iprec</a> digits
   template <typename VRES>
@@ -2044,6 +2076,46 @@ BASE_DE::_record
     ofile << std::endl;
     it0 = it;
   }
+}
+
+//! @brief Resolve FFModel's control registry into parameter indices of _mP.  A control that is distributed
+//! over the evolution variable contributes one parameter per element (_mInpLevels), in element order, which
+//! is the same block FFModel::control_ndof() counts -- the two are cross-checked here rather than assumed.
+inline bool
+BASE_DE::_resolve_sensitivity_index
+()
+{
+  _ndxSEN.clear();
+  if( controls().empty() ){                       // nothing registered: differentiate w.r.t. everything
+    _ndxSEN.resize( _np );
+    for( size_t i=0; i<_np; ++i ) _ndxSEN[i] = i;
+    _nsen = _np;
+    return true;
+  }
+  for( auto const& [u,spec] : controls() ){       // canonical control order: offsets ascending
+    std::vector<FFVar> dofs;
+    auto const itl = _mInpLevels.find( u.name() );
+    if( itl != _mInpLevels.cend() ) dofs = itl->second;
+    else                            dofs.assign( 1, u );
+    if( dofs.size() != spec.ndof ){
+      _extractError = "the control " + u.name() + " has " + std::to_string( spec.ndof )
+                    + " DOFs in its declared function space but " + std::to_string( dofs.size() )
+                    + " parameters in the extracted model";
+      return false;
+    }
+    for( auto const& d : dofs ){
+      bool found = false;
+      for( size_t i=0; i<_np; ++i )
+        if( _mP[i].id().second == d.id().second ){ _ndxSEN.push_back( i ); found = true; break; }
+      if( !found ){
+        _extractError = "the registered control " + u.name()
+                      + " is not a parameter of the extracted model";
+        return false;
+      }
+    }
+  }
+  _nsen = _ndxSEN.size();
+  return true;
 }
 
 } // end namespace mc

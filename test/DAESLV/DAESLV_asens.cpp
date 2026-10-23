@@ -61,19 +61,19 @@ int main()
     std::vector<double> P( M.np(), 0. ); P[jk] = K; P[ja] = A;
 
     if( M.solve_fsens( P ) != DAESLV_IDAS::NORMAL ){ std::cout << "    solve_fsens failed\n"; return 1; }
-    std::vector<double> const Gf = M.val_function_gradient();
+    auto const Gf = M.val_function_gradient();
 
-    if( M.solve_asens( P, 0 ) != DAESLV_IDAS::NORMAL ){
+    if( M._solve_asens_one( P, 0 ) != DAESLV_IDAS::NORMAL ){
       std::cout << "    solve_asens failed: " << M.extract_error() << "\n"; ++n_fail; }
     else{
       auto const& Ga = M.val_function_gradient();
       size_t const b = M.blk_fct(0).first;
-      std::cout << "    adjoint  d/da=" << std::scientific << std::setprecision(10) << Ga.at(b*M.np()+ja)
-                << "   d/dk=" << Ga.at(b*M.np()+jk) << "\n";
-      check( "adjoint d f/da = (1-e^-k)/k", Ga.at( b*M.np()+ja ), (1.-e)/K, 1e-7 );
-      check( "adjoint d f/dk",              Ga.at( b*M.np()+jk ), A*( K*e - (1.-e) )/(K*K), 1e-7 );
-      check( "adjoint == forward on d/da",  Ga.at( b*M.np()+ja ), Gf.at( b*M.np()+ja ), 1e-7 );
-      check( "adjoint == forward on d/dk",  Ga.at( b*M.np()+jk ), Gf.at( b*M.np()+jk ), 1e-7 );
+      std::cout << "    adjoint  d/da=" << std::scientific << std::setprecision(10) << Ga[ja][b]
+                << "   d/dk=" << Ga[jk][b] << "\n";
+      check( "adjoint d f/da = (1-e^-k)/k", Ga[ja][b], (1.-e)/K, 1e-7 );
+      check( "adjoint d f/dk",              Ga[jk][b], A*( K*e - (1.-e) )/(K*K), 1e-7 );
+      check( "adjoint == forward on d/da",  Ga[ja][b], Gf[ja][b], 1e-7 );
+      check( "adjoint == forward on d/dk",  Ga[jk][b], Gf[jk][b], 1e-7 );
     } }
 
   // ------------------------------------------------------------------ E: ADJOINT vs FORWARD
@@ -100,19 +100,19 @@ int main()
     std::vector<double> P( M.np(), 0. ); P[jk] = K; P[ja] = A;
 
     if( M.solve_fsens( P ) != DAESLV_IDAS::NORMAL ){ std::cout << "    solve_fsens failed\n"; return 1; }
-    std::vector<double> const Gf = M.val_function_gradient();
+    auto const Gf = M.val_function_gradient();
 
-    if( M.solve_asens( P, 0 ) != DAESLV_IDAS::NORMAL ){
+    if( M._solve_asens_one( P, 0 ) != DAESLV_IDAS::NORMAL ){
       std::cout << "    solve_asens failed: " << M.extract_error() << "\n"; ++n_fail; }
     else{
       auto const& Ga = M.val_function_gradient();
       size_t const b = M.blk_fct(0).first;
-      std::cout << "    adjoint  d/da=" << std::scientific << std::setprecision(10) << Ga.at(b*M.np()+ja)
-                << "   d/dk=" << Ga.at(b*M.np()+jk) << "\n";
-      check( "adjoint d f/da = (1-e^-k)/k", Ga.at( b*M.np()+ja ), (1.-e)/K, 1e-7 );
-      check( "adjoint d f/dk",              Ga.at( b*M.np()+jk ), A*( K*e - (1.-e) )/(K*K), 1e-7 );
-      check( "adjoint == forward on d/da",  Ga.at( b*M.np()+ja ), Gf.at( b*M.np()+ja ), 1e-7 );
-      check( "adjoint == forward on d/dk",  Ga.at( b*M.np()+jk ), Gf.at( b*M.np()+jk ), 1e-7 );
+      std::cout << "    adjoint  d/da=" << std::scientific << std::setprecision(10) << Ga[ja][b]
+                << "   d/dk=" << Ga[jk][b] << "\n";
+      check( "adjoint d f/da = (1-e^-k)/k", Ga[ja][b], (1.-e)/K, 1e-7 );
+      check( "adjoint d f/dk",              Ga[jk][b], A*( K*e - (1.-e) )/(K*K), 1e-7 );
+      check( "adjoint == forward on d/da",  Ga[ja][b], Gf[ja][b], 1e-7 );
+      check( "adjoint == forward on d/dk",  Ga[jk][b], Gf[jk][b], 1e-7 );
     } }
 
   // ------------------------------------------------------------------ G: adjoint of a POINT output
@@ -137,27 +137,27 @@ int main()
     size_t const jk = M.parameter_index( k )[0], ja = M.parameter_index( a )[0];
     std::vector<double> P( M.np(), 0. ); P[jk] = K; P[ja] = A;
     M.solve_fsens( P );
-    std::vector<double> const Gf = M.val_function_gradient();
-    if( M.solve_asens( P, 0 ) != DAESLV_IDAS::NORMAL ){
+    auto const Gf = M.val_function_gradient();
+    if( M._solve_asens_one( P, 0 ) != DAESLV_IDAS::NORMAL ){
       std::cout << "    solve_asens failed: " << M.extract_error() << "\n"; ++n_fail; }
     else{
       auto const& Ga = M.val_function_gradient();
       size_t const b = M.blk_fct(0).first;
-      check( "point-output adjoint d f/da = e^-k",    Ga.at( b*M.np()+ja ), e,    1e-7 );
-      check( "point-output adjoint d f/dk = -a e^-k", Ga.at( b*M.np()+jk ), -A*e, 1e-7 );
-      check( "  == forward on d/da", Ga.at( b*M.np()+ja ), Gf.at( b*M.np()+ja ), 1e-7 );
-      check( "  == forward on d/dk", Ga.at( b*M.np()+jk ), Gf.at( b*M.np()+jk ), 1e-7 );
+      check( "point-output adjoint d f/da = e^-k",    Ga[ja][b], e,    1e-7 );
+      check( "point-output adjoint d f/dk = -a e^-k", Ga[jk][b], -A*e, 1e-7 );
+      check( "  == forward on d/da", Ga[ja][b], Gf[ja][b], 1e-7 );
+      check( "  == forward on d/dk", Ga[jk][b], Gf[jk][b], 1e-7 );
     }
     // the MIXED output: a terminal seed AND a running term, superposed
-    if( M.solve_asens( P, 1 ) != DAESLV_IDAS::NORMAL ){
+    if( M._solve_asens_one( P, 1 ) != DAESLV_IDAS::NORMAL ){
       std::cout << "    mixed solve_asens failed: " << M.extract_error() << "\n"; ++n_fail; }
     else{
       auto const& Gm = M.val_function_gradient();
       size_t const b1 = M.blk_fct(1).first;
-      check( "MIXED adjoint d f/da", Gm.at( b1*M.np()+ja ), e + (1.-e)/K, 1e-7 );
-      check( "MIXED adjoint d f/dk", Gm.at( b1*M.np()+jk ), -A*e + A*( K*e - (1.-e) )/(K*K), 1e-7 );
-      check( "  == forward on d/da", Gm.at( b1*M.np()+ja ), Gf.at( b1*M.np()+ja ), 1e-7 );
-      check( "  == forward on d/dk", Gm.at( b1*M.np()+jk ), Gf.at( b1*M.np()+jk ), 1e-7 );
+      check( "MIXED adjoint d f/da", Gm[ja][b1], e + (1.-e)/K, 1e-7 );
+      check( "MIXED adjoint d f/dk", Gm[jk][b1], -A*e + A*( K*e - (1.-e) )/(K*K), 1e-7 );
+      check( "  == forward on d/da", Gm[ja][b1], Gf[ja][b1], 1e-7 );
+      check( "  == forward on d/dk", Gm[jk][b1], Gf[jk][b1], 1e-7 );
     } }
 
   // ------------------------------------------------------------------ D: across a DECLARED JUMP
@@ -182,15 +182,15 @@ int main()
     size_t const jk = M.parameter_index( k )[0], ja = M.parameter_index( a )[0];
     std::vector<double> P( M.np(), 0. ); P[jk] = K; P[ja] = A;
     M.solve_fsens( P );
-    std::vector<double> const Gf = M.val_function_gradient();
-    if( M.solve_asens( P, 0 ) != DAESLV_IDAS::NORMAL ){
+    auto const Gf = M.val_function_gradient();
+    if( M._solve_asens_one( P, 0 ) != DAESLV_IDAS::NORMAL ){
       std::cout << "    solve_asens failed: " << M.extract_error() << "\n"; ++n_fail; }
     else{
       auto const& Ga = M.val_function_gradient();  size_t const b = M.blk_fct(0).first;
-      check( "d x(2) / da = e^-2k",     Ga.at( b*M.np()+ja ), e2,       1e-7 );
-      check( "d x(2) / dk = -2a e^-2k", Ga.at( b*M.np()+jk ), -2.*A*e2, 1e-7 );
-      check( "  == forward on d/da",    Ga.at( b*M.np()+ja ), Gf.at( b*M.np()+ja ), 1e-7 );
-      check( "  == forward on d/dk",    Ga.at( b*M.np()+jk ), Gf.at( b*M.np()+jk ), 1e-7 );
+      check( "d x(2) / da = e^-2k",     Ga[ja][b], e2,       1e-7 );
+      check( "d x(2) / dk = -2a e^-2k", Ga[jk][b], -2.*A*e2, 1e-7 );
+      check( "  == forward on d/da",    Ga[ja][b], Gf[ja][b], 1e-7 );
+      check( "  == forward on d/dk",    Ga[jk][b], Gf[jk][b], 1e-7 );
     } }
 
   // ------------------------------------------------------------------ E: INTERIOR measurement times
@@ -216,25 +216,25 @@ int main()
     size_t const jk = M.parameter_index( k )[0], ja = M.parameter_index( a )[0];
     std::vector<double> P( M.np(), 0. ); P[jk] = K; P[ja] = A;
     M.solve_fsens( P );
-    std::vector<double> const Gf = M.val_function_gradient();
+    auto const Gf = M.val_function_gradient();
     double sa = 0., sk = 0.;
     for( int m = 0; m < 3; ++m ){
       double const ex = std::exp( -K*TAU[m] );
       sa += ex;  sk += -TAU[m]*A*ex;
-      if( M.solve_asens( P, (size_t)m ) != DAESLV_IDAS::NORMAL ){
+      if( M._solve_asens_one( P, (size_t)m ) != DAESLV_IDAS::NORMAL ){
         std::cout << "    adjoint at tau=" << TAU[m] << " failed\n"; ++n_fail; continue; }
       auto const& Ga = M.val_function_gradient();  size_t const b = M.blk_fct( m ).first;
-      check( "d x(" + std::to_string(TAU[m]).substr(0,3) + ") / da", Ga.at( b*M.np()+ja ), ex, 1e-7 );
-      check( "d x(" + std::to_string(TAU[m]).substr(0,3) + ") / dk", Ga.at( b*M.np()+jk ), -TAU[m]*A*ex, 1e-7 );
+      check( "d x(" + std::to_string(TAU[m]).substr(0,3) + ") / da", Ga[ja][b], ex, 1e-7 );
+      check( "d x(" + std::to_string(TAU[m]).substr(0,3) + ") / dk", Ga[jk][b], -TAU[m]*A*ex, 1e-7 );
     }
-    if( M.solve_asens( P, 3 ) != DAESLV_IDAS::NORMAL ){
+    if( M._solve_asens_one( P, 3 ) != DAESLV_IDAS::NORMAL ){
       std::cout << "    adjoint of the sum failed\n"; ++n_fail; }
     else{
       auto const& Ga = M.val_function_gradient();  size_t const b3 = M.blk_fct(3).first;
-      check( "d (sum of the three) / da", Ga.at( b3*M.np()+ja ), sa, 1e-7 );
-      check( "d (sum of the three) / dk", Ga.at( b3*M.np()+jk ), sk, 1e-7 );
-      check( "  == forward on d/da", Ga.at( b3*M.np()+ja ), Gf.at( b3*M.np()+ja ), 1e-7 );
-      check( "  == forward on d/dk", Ga.at( b3*M.np()+jk ), Gf.at( b3*M.np()+jk ), 1e-7 );
+      check( "d (sum of the three) / da", Ga[ja][b3], sa, 1e-7 );
+      check( "d (sum of the three) / dk", Ga[jk][b3], sk, 1e-7 );
+      check( "  == forward on d/da", Ga[ja][b3], Gf[ja][b3], 1e-7 );
+      check( "  == forward on d/dk", Ga[jk][b3], Gf[jk][b3], 1e-7 );
     } }
 
   std::cout << "\n==========  DAESLV_asens: " << n_pass << " passed, " << n_fail << " failed -- "

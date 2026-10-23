@@ -162,12 +162,12 @@ int main()
     check( "f0 = x(1)",            F.at(b0), A*e,     1e-8 );
     check( "f1 = int x dt",        F.at(b1), I,       1e-7 );
     check( "f2 = f0 + f1",         F.at(b2), A*e + I, 1e-7 );
-    check( "d f0 / da = e^-k",     Gd.at( b0*M.np()+ja ), e,        1e-7 );
-    check( "d f0 / dk = -a e^-k",  Gd.at( b0*M.np()+jk ), -A*e,     1e-7 );
-    check( "d f1 / da = (1-e^-k)/k", Gd.at( b1*M.np()+ja ), (1.-e)/K, 1e-7 );
-    check( "d f1 / dk", Gd.at( b1*M.np()+jk ), A*( K*e - (1.-e) )/(K*K), 1e-7 );
-    check( "d f2 / da = sum",      Gd.at( b2*M.np()+ja ), e + (1.-e)/K, 1e-7 );
-    check( "d f2 / dk = sum",      Gd.at( b2*M.np()+jk ), -A*e + A*( K*e - (1.-e) )/(K*K), 1e-7 ); }
+    check( "d f0 / da = e^-k",     Gd[ja][b0], e,        1e-7 );
+    check( "d f0 / dk = -a e^-k",  Gd[jk][b0], -A*e,     1e-7 );
+    check( "d f1 / da = (1-e^-k)/k", Gd[ja][b1], (1.-e)/K, 1e-7 );
+    check( "d f1 / dk", Gd[jk][b1], A*( K*e - (1.-e) )/(K*K), 1e-7 );
+    check( "d f2 / da = sum",      Gd[ja][b2], e + (1.-e)/K, 1e-7 );
+    check( "d f2 / dk = sum",      Gd[jk][b2], -A*e + A*( K*e - (1.-e) )/(K*K), 1e-7 ); }
 
   // ------------------------------------------------------------------ H: INTERMEDIATE point terms
   // Parameter estimation reads the states at measurement times, not just at the end.  Three point
@@ -202,13 +202,13 @@ int main()
       for( int m = 0; m < 3; ++m ){
         double const ex = std::exp( -K*TAU[m] );
         size_t const b = M.blk_fct( m ).first;
-        check( "d x(" + std::to_string(TAU[m]).substr(0,3) + ") / da", Gd.at( b*M.np()+ja ), ex, 1e-7 );
-        check( "d x(" + std::to_string(TAU[m]).substr(0,3) + ") / dk", Gd.at( b*M.np()+jk ), -TAU[m]*A*ex, 1e-7 );
+        check( "d x(" + std::to_string(TAU[m]).substr(0,3) + ") / da", Gd[ja][b], ex, 1e-7 );
+        check( "d x(" + std::to_string(TAU[m]).substr(0,3) + ") / dk", Gd[jk][b], -TAU[m]*A*ex, 1e-7 );
         sa += ex;  sk += -TAU[m]*A*ex;
       }
       size_t const b3 = M.blk_fct( 3 ).first;
-      check( "d (sum of the three) / da", Gd.at( b3*M.np()+ja ), sa, 1e-7 );
-      check( "d (sum of the three) / dk", Gd.at( b3*M.np()+jk ), sk, 1e-7 );
+      check( "d (sum of the three) / da", Gd[ja][b3], sa, 1e-7 );
+      check( "d (sum of the three) / dk", Gd[jk][b3], sk, 1e-7 );
 
     } }
 

@@ -47,9 +47,20 @@ class DAESLV_IDAS
 , public virtual BASE_IDAS
 {
 public:
+  //! @brief Tag the DAG operation prints: "DAE[...]" and "GRAD_DAE[...]".
+  static constexpr char const* FFTAG = "DAE";
+
   DAESLV_IDAS()
     : _nres(0), _ncoef(0)
     {}
+
+  //! @brief Construct on the user DAG @p dag, as ODESLV_CVODES does.  Equivalent to the default
+  //! constructor followed by set_dag(); it exists because consumers -- the Python binder, fdiff's
+  //! factory -- construct a solver from a dag and should not have to know which solver they hold.
+  DAESLV_IDAS
+    ( FFGraph* dag )
+    : DAESLV_IDAS()
+    { set_dag( dag ); }
   virtual ~DAESLV_IDAS()
     { unregistration(); delete _dag; }
 
@@ -64,7 +75,13 @@ public:
 
 
   //! @brief Statistics of the last solve
-  Stats stats;
+  Stats stats;          //!< the LIVE counters, incremented by the callbacks during a solve
+
+  //! @brief Statistics of the last plain solve / solve_fsens / solve_asens, as ODESLV keeps them:
+  //! one per solve KIND, so a forward run does not overwrite what the adjoint reported.
+  Stats stats_solve;
+  Stats stats_fsens;
+  Stats stats_asens;
 
   //! @brief Apply the caller's options to the model before setup() reads any of them (ocfeslv.hpp:1383).
   void _apply_options
@@ -233,18 +250,18 @@ public:
   //! (_fdiff); these supply the factory, which is all that differed between the two solvers.
   DAESLV_IDAS* fdiff( std::vector<FFVar> const& vU, size_t const nDir,
       std::vector<std::vector<FFVar>>& vDU, std::vector<std::vector<FFVar>>& vS, std::string& err ) const
-    { return _fdiff<DAESLV_IDAS>( [this]{ auto* s = new DAESLV_IDAS(); s->set_dag( _usr._dagUsr ); s->options = options; return s; }, vU, nDir, vDU, vS, err ); }
+    { return _fdiff<DAESLV_IDAS>( [this]{ auto* s = new DAESLV_IDAS( _usr._dagUsr ); s->options = options; return s; }, vU, nDir, vDU, vS, err ); }
   DAESLV_IDAS* fdiff( size_t const nPar, FFVar const* pPar, std::string& err ) const
-    { return _fdiff<DAESLV_IDAS>( [this]{ auto* s = new DAESLV_IDAS(); s->set_dag( _usr._dagUsr ); s->options = options; return s; }, nPar, pPar, err ); }
+    { return _fdiff<DAESLV_IDAS>( [this]{ auto* s = new DAESLV_IDAS( _usr._dagUsr ); s->options = options; return s; }, nPar, pPar, err ); }
   DAESLV_IDAS* fdiff( size_t const nPar, FFVar const* pPar ) const
-    { return _fdiff<DAESLV_IDAS>( [this]{ auto* s = new DAESLV_IDAS(); s->set_dag( _usr._dagUsr ); s->options = options; return s; }, nPar, pPar ); }
+    { return _fdiff<DAESLV_IDAS>( [this]{ auto* s = new DAESLV_IDAS( _usr._dagUsr ); s->options = options; return s; }, nPar, pPar ); }
   DAESLV_IDAS* fdiff( std::vector<FFVar> const& vPar ) const
-    { return _fdiff<DAESLV_IDAS>( [this]{ auto* s = new DAESLV_IDAS(); s->set_dag( _usr._dagUsr ); s->options = options; return s; }, vPar ); }
+    { return _fdiff<DAESLV_IDAS>( [this]{ auto* s = new DAESLV_IDAS( _usr._dagUsr ); s->options = options; return s; }, vPar ); }
   DAESLV_IDAS* fdiff( std::vector<FFVar> const& vU, std::string& err ) const
-    { return _fdiff<DAESLV_IDAS>( [this]{ auto* s = new DAESLV_IDAS(); s->set_dag( _usr._dagUsr ); s->options = options; return s; }, vU, err ); }
+    { return _fdiff<DAESLV_IDAS>( [this]{ auto* s = new DAESLV_IDAS( _usr._dagUsr ); s->options = options; return s; }, vU, err ); }
   DAESLV_IDAS* fdiff( std::vector<std::vector<FFVar>>& vDU, std::vector<std::vector<FFVar>>& vS,
                 std::string& err ) const
-    { return _fdiff<DAESLV_IDAS>( [this]{ auto* s = new DAESLV_IDAS(); s->set_dag( _usr._dagUsr ); s->options = options; return s; }, vDU, vS, err ); }
+    { return _fdiff<DAESLV_IDAS>( [this]{ auto* s = new DAESLV_IDAS( _usr._dagUsr ); s->options = options; return s; }, vDU, vS, err ); }
 
   //! @brief Adjoint values at every stage time, [stage][output][lambda], as ODESLV exposes them.
   std::vector< std::vector< std::vector<double> > > const& val_state_adjoint
@@ -252,11 +269,66 @@ public:
     const
     { return _lk; }
 
-  //! @brief Gradient of the outputs w.r.t. the parameters, _nf rows of _np, after solve_fsens().
-  std::vector<double> const& val_function_gradient
+  //! @brief Quadrature sensitivities at every stage time, [ time ][ direction ][ quadrature ], as
+  //! ODESLV_CVODES exposes them.  Filled by solve_fsens where the state sensitivities are.
+  std::vector< std::vector< std::vector<double> > > const& val_quadrature_sensitivity
     ()
     const
-    { return _dFGrad; }
+    { return _qpk; }
+
+  //! @brief Gradient of the outputs w.r.t. the parameters, _nf rows of _np, after solve_fsens().
+  std::vector< std::vector<double> > const& val_function_gradient
+    ()
+    const
+    { return _fp; }
+
+  //! @brief Forward sensitivities with the inputs given BY NAME, as ODESLV_CVODES has it.
+  STATUS solve_fsens
+    ( std::vector<FFModel::InputVal> const& vIn, std::ostream& os=std::cout )
+    { std::vector<double> P, C;  std::string err;
+      if( !assemble_values( vIn, P, C, err ) )
+        throw std::invalid_argument( "DAESLV::solve_fsens ** " + err );
+      return solve_fsens( P, C, os ); }
+
+  //! @brief ... and the adjoint likewise.
+  STATUS solve_asens
+    ( std::vector<FFModel::InputVal> const& vIn, std::ostream& os=std::cout )
+    { std::vector<double> P, C;  std::string err;
+      if( !assemble_values( vIn, P, C, err ) )
+        throw std::invalid_argument( "DAESLV::solve_asens ** " + err );
+      return solve_asens( P, C, os ); }
+
+  //! @brief The gradient rows of control @p var: [dof][function], its DOFs in control_dofs() order, from the last
+  //! solve_fsens() or solve_asens().  Throws if @p var is not a registered control (it then has no
+  //! sensitivity direction) or no sensitivity solve has been run.
+  std::vector< std::vector< double > > val_function_gradient
+    ( FFVar const& var )
+    const
+    {
+      auto const b = control_block( var );
+      auto const& G = val_function_gradient();
+      if( !b.ndof )
+        throw std::invalid_argument( "DAESLV::val_function_gradient ** " + var.name() + " is not a registered control\n" );
+      if( G.size() < b.offset + b.ndof )
+        throw std::invalid_argument( "DAESLV::val_function_gradient ** no sensitivity solve over the current controls\n" );
+      return std::vector< std::vector< double > >( G.begin()+b.offset, G.begin()+b.offset+b.ndof );
+    }
+
+  //! @brief The gradient rows of control @p var on ONE element: [node][function], the n_node DOFs of element
+  //! @p ndx_el (keyed by the evolution domain, as pos_input takes it).  A time-invariant control ignores @p ndx_el.
+  std::vector< std::vector< double > > val_function_gradient
+    ( FFVar const& var, std::map<FFVar,size_t,lt_FFVar> const& ndx_el )
+    const
+    {
+      auto const all = val_function_gradient( var );
+      size_t const nn = size_input( var );
+      if( all.size() == 1 ) return all;                                   // time-invariant
+      size_t e = 0;
+      if( !_mT.empty() ){ auto const it = ndx_el.find( _mT[0] ); if( it != ndx_el.cend() ) e = it->second; }
+      if( (e+1)*nn > all.size() )
+        throw std::invalid_argument( "DAESLV::val_function_gradient ** element out of range for " + var.name() + "\n" );
+      return std::vector< std::vector< double > >( all.begin()+e*nn, all.begin()+(e+1)*nn );
+    }
 
   //! @brief Forward sensitivities at every stage time: [time][direction][state].  Empty unless the last
   //! call was solve_fsens().
@@ -265,21 +337,64 @@ public:
     const
     { return _sk; }
 
+  //! @brief Setup as an INDEPENDENT COPY of @p IVP: the same description, this solver's options, then
+  //! a full setup().  The user DAG @p IVP was declared on must outlive this solver.  As ODESLV's.
+  bool setup
+    ( DAESLV_IDAS const& IVP )
+    { std::lock_guard<std::recursive_mutex> dag_lock_( dag_mutex() );  _copy_description( IVP );
+      options = IVP.options;  return setup(); }
+
+  //! @brief Pointer forms of the sensitivity solves, which the FF operations call.  They forward to
+  //! the vector forms; the sizes are np() and the number of constants.
+  STATUS solve_fsens
+    ( double const* p, double const* c = nullptr, std::ostream& os = std::cout )
+    { return solve_fsens( std::vector<double>( p, p + np() ),
+                          c? std::vector<double>( c, c + var_constant().size() ): std::vector<double>(), os ); }
+  STATUS solve_asens
+    ( double const* p, double const* c = nullptr, std::ostream& os = std::cout )
+    { return solve_asens( std::vector<double>( p, p + np() ),
+                          c? std::vector<double>( c, c + var_constant().size() ): std::vector<double>(), os ); }
+
   //! @brief Integrate WITH forward sensitivities w.r.t. every parameter.  The sensitivity initial data
   //! comes from ic_sens() -- the same system the state's did -- so the two cannot disagree.
   STATUS solve_fsens
-    ( std::vector<double> const& p, std::vector<double> const& c = std::vector<double>() )
-    { _fsa = true;  STATUS const st = solve( p, c );  _fsa = false;  return st; }
+    ( std::vector<double> const& p, std::vector<double> const& c = std::vector<double>(),
+      std::ostream& os = std::cout )
+    { _fsa = true;  STATUS const st = solve( p, c, os );  _fsa = false;  return st; }
 
   //! @brief Integrate and obtain the gradient of INTEGRAL output @p ifct by ADJOINT sensitivity.
   //! The result lands in val_function_gradient(), where solve_fsens() puts the forward one, so the
   //! two are directly comparable.
-  STATUS solve_asens
-    ( std::vector<double> const& p, size_t const ifct = 0,
-      std::vector<double> const& c = std::vector<double>() )
+  //! @brief The adjoint of ONE output.  solve_asens() repeats it over every output; call it directly
+  //! when only one gradient is wanted and nf is large.
+  STATUS _solve_asens_one
+    ( std::vector<double> const& p, size_t const ifct,
+      std::vector<double> const& c = std::vector<double>(), std::ostream& os = std::cout )
     { _asa = true;  _asaF = ifct;  _asaQ = (size_t)-1;
-      STATUS const st = solve( p, c );
+      STATUS const st = solve( p, c, os );
       _asa = false;  _asaF = (size_t)-1;  _asaQ = (size_t)-1;  return st; }
+
+  //! @brief The adjoint of EVERY output, in one call -- ODESLV_CVODES's signature and behaviour.
+  //! One backward sweep serves one output, so this runs nf of them and accumulates their gradients
+  //! into val_function_gradient(); _solve_asens_one is the single-output step it repeats.
+  STATUS solve_asens
+    ( std::vector<double> const& p, std::vector<double> const& c = std::vector<double>(),
+      std::ostream& os = std::cout )
+    { std::vector< std::vector<double> > acc;
+      std::vector< std::vector< std::vector<double> > > lk;
+      STATUS st = NORMAL;
+      for( size_t r = 0; r < ( _nf? _nf: 1 ); ++r ){
+        st = _solve_asens_one( p, r, c, os );
+        if( st != NORMAL ) return st;
+        if( acc.empty() ) acc.assign( _np, std::vector<double>( _nf, 0. ) );
+        for( size_t j = 0; j < _np && j < _fp.size(); ++j )
+          if( r < _fp[j].size() ) acc[j][r] = _fp[j][r];     // keep this output's column
+        if( lk.empty() ) lk = _lk; else for( size_t k = 0; k < lk.size() && k < _lk.size(); ++k )
+          for( size_t f = 0; f < lk[k].size() && f < _lk[k].size(); ++f )
+            if( f == r ) lk[k][f] = _lk[k][f];
+      }
+      _fp.swap( acc );  _lk.swap( lk );
+      return st; }
 
   //! @brief Quadratures at every stage time, one row per time, _nq wide.  Each row is that STAGE's
   //! increment, not a running total: a quadrature restarts at zero on every stage, and summing them is
@@ -361,7 +476,9 @@ protected:
   std::vector<double> _dF;                   //!< the accumulated function values, val_function() order
   std::vector< std::vector<FFVar> > _vFJac;  //!< df/d(x,q,p) per stage time, and its index pairs
   std::vector< std::vector<int> >   _rFJ, _cFJ;
-  std::vector<double> _dFGrad;               //!< the accumulated gradient, _nf x _np row-major
+  std::vector<double> _dFGrad;               //!< the accumulated gradient, _nf x _np row-major (internal)
+  std::vector< std::vector<double> > _fp;    //!< the same as [ parameter ][ function ], the shape
+                                             //!< ODESLV exposes and the FF operations index
 
   size_t              _nFp = 0, _offFp = 0;  //!< this stage's dF/dp block within _vEVAL
   std::vector<int>    _rFp, _cFp, _rJy, _cJy, _rJyp, _cJyp;
@@ -381,6 +498,7 @@ protected:
   std::vector<double> _asaHx;                //!< (df/dx)(T) -- the terminal seed
   std::vector< std::vector< std::vector<double> > > _sk;   //!< sensitivities at every stage time
 
+  std::vector< std::vector< std::vector<double> > > _qpk;  //!< quadrature sensitivities per stage time
   std::vector< std::vector< std::vector<double> > > _lk;   //!< [stage][output][lambda], as ODESLV's
   std::vector< std::vector<double> > _xpk;   //!< state derivatives at every stage time (LEFT limit)
   std::vector< std::vector<double> > _xplus, _xpplus;   //!< the stop solutions (x+, dx+) at each stage start
@@ -845,6 +963,9 @@ DAESLV_IDAS::setup
   if( !FFModel::setup() ){ _extractError = "FFModel::setup() failed"; return false; }
   if( !_extract_dae() ) return false;
   _nres = n_residual();
+  // the sensitivity directions, from the registered controls -- as ODESLV resolves them after its own
+  // extraction.  The FF operations check sensitivity_index().size() against n_control_dof().
+  if( !_resolve_sensitivity_index() ) return false;
 
   if( !_build_plans() ) return false;
   _vInpLvl.clear();
@@ -1121,7 +1242,7 @@ DAESLV_IDAS::solve
     _xpk.clear();  _xpk.push_back( _dXP0 );
     _xplus.assign( _ns, std::vector<double>() );  _xpplus.assign( _ns, std::vector<double>() );
     _qk.clear();  _qk.push_back( std::vector<double>( _nq, 0. ) );   // quadratures start at zero
-    _sk.clear();
+    _sk.clear();  _qpk.clear();
     if( _fsa && yS ){
       std::vector< std::vector<double> > s0( _np, std::vector<double>( _nx, 0. ) );
       for( size_t j = 0; j < _np; ++j )
@@ -1354,6 +1475,10 @@ DAESLV_IDAS::solve
         for( size_t j = 0; j < _np; ++j )
           for( size_t i = 0; i < _nx; ++i ) sk[j][i] = N_VGetArrayPointer( yS[j] )[i];
         _sk.push_back( sk );
+        { std::vector< std::vector<double> > qk( _np, std::vector<double>( _nq, 0. ) );
+          if( yQS ) for( size_t j = 0; j < _np; ++j )
+            for( size_t m = 0; m < _nq; ++m ) qk[j][m] = N_VGetArrayPointer( yQS[j] )[m];
+          _qpk.push_back( qk ); }
         // the BOUNDARY row; the RESRECORD loop above records only the intermediate ones
         if( rec ) for( size_t j = 0; j < _np; ++j )
           results_fsens[j].push_back( Results( tret, _nx, sk[j].data(),
@@ -1689,6 +1814,17 @@ DAESLV_IDAS::solve
   // x(1^-) itself.  Found by tracing _sun_mat->ops, not by reading.
   SUNLinSolFree( LS );
   SUNMatDestroy( A );
+  // val_function_gradient() is [ parameter ][ function ], ODESLV's shape -- the FF operations read
+  // gradient()[ op input i ][ output k ] and both solvers must agree on which index is which
+  _fp.assign( _np, std::vector<double>( _nf, 0. ) );
+  if( _dFGrad.size() == _nf*_np )
+    for( size_t r = 0; r < _nf; ++r ) for( size_t j = 0; j < _np; ++j ) _fp[j][r] = _dFGrad[ r*_np + j ];
+
+  // file the counters under the kind of solve this was
+  if     ( _asa ) stats_asens = stats;
+  else if( _fsa ) stats_fsens = stats;
+  else            stats_solve = stats;
+
   N_VDestroy( yy ); N_VDestroy( yp ); N_VDestroy( id );
   IDAFree( &mem );
   SUNContext_Free( &ctx );

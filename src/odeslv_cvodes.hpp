@@ -138,6 +138,9 @@ class ODESLV_CVODES
   std::vector< double > _f;
 
 public:
+  //! @brief Tag the DAG operation prints: "ODE[...]" and "GRAD_ODE[...]".
+  static constexpr char const* FFTAG = "ODE";
+
 
   using FFModel::set_model;
 

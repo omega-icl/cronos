@@ -9,14 +9,14 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "cronos-mcpp"                    # "cronos" is taken on PyPI; the module still imports as `cronos`
-version = "5.0.0"                       # keep equal to cronos.__version__ (src/interface/cronos.cpp)
+version = "5.0.1"                       # keep equal to cronos.__version__ (src/interface/cronos.cpp)
 description = "Simulation and sensitivity analysis of ODE, DAE and PDE models on MC++ factorable-function DAGs"
 readme = "README.md"
 license = "EPL-2.0"                     # GPL-2.0-or-later is a Secondary License (see LICENSE): the GPL build
 license-files = ["LICENSE", "THIRD_PARTY_NOTICES.txt"]
 requires-python = ">=3.10"
 authors = [{ name = "Benoit C. Chachuat", email = "b.chachuat@imperial.ac.uk" }]
-keywords = ["ODE", "DAE", "PDE", "orthogonal collocation", "sensitivity analysis", "optimal control", "MC++"]
+keywords = ["ODE", "DAE", "PDE", "orthogonal collocation", "sensitivity analysis", "MC++"]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Intended Audience :: Science/Research",

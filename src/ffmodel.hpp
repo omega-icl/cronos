@@ -245,19 +245,43 @@ public:
 
 protected:
 
+
+  //! @brief Jacobian of @p deps w.r.t. @p indeps in the DENSE row-major layout FFGraph::FAD returns --
+  //! but computed by SFAD, so only the structural nonzeros become DAG nodes.  FAD creates one derivative
+  //! node per (dep, indep) PAIR whether or not the dependency exists; on a discretised PDE with ~1600
+  //! equations that is ~2 million symbolic zeros built into the user DAG per call, and _principal_symbol
+  //! made six such calls: the super-quadratic classify_pde cost in DAESLV_scaling (2026-10-25).
+  //! The off-pattern entries here are FFVar( 0. ) constants -- cheap objects, no DAG growth.  The
+  //! layout is kept so every consumer indexing jac[ k * nInd + j ] is unchanged; a later step can make
+  //! the symbol's coefficient tables sparse too.
+  std::vector<FFVar> _sparse_jacobian_dense_layout
+    ( std::vector<FFVar> const& deps, std::vector<FFVar> const& indeps ) const
+  {
+    size_t const nD = deps.size(), nI = indeps.size();
+    std::vector<FFVar> jac( nD * nI, FFVar( 0. ) );
+    if( !nD || !nI ) return jac;
+    auto J = _dag->SFAD( nD, deps.data(), nI, indeps.data() );
+    unsigned const nnz = std::get<0>( J );
+    unsigned* r = std::get<1>( J );  unsigned* c = std::get<2>( J );  FFVar* v = std::get<3>( J );
+    for( unsigned k = 0; k < nnz; ++k ) jac[ (size_t)r[k] * nI + c[k] ] = v[k];
+    delete[] r;  delete[] c;  delete[] v;
+    return jac;
+  }
+
   //! @brief Wall-clock marks for the setup phase timing (DISPLAY_LEVEL >= 2).  Members rather than locals
   //! because setup() is a skeleton and the phases run partly in a derived solver's hooks.
-  std::chrono::steady_clock::time_point _t_phase{};
+  mutable std::chrono::steady_clock::time_point _t_phase{};
   std::chrono::steady_clock::time_point _t_setup0{};
 
   //! @brief Report the time since the previous mark under DISPLAY_LEVEL >= 2, and re-mark.
   void _phase
     ( char const* name )
+    const
     {
       if( options.DISPLAY_LEVEL >= 2 ){
         auto const now = std::chrono::steady_clock::now();
         double const ms = std::chrono::duration<double,std::milli>( now - _t_phase ).count();
-        _disp( 2 ) << "OCFESLV::setup [timing] " << std::left << std::setw(30) << name
+        _disp( 2 ) << "FFModel::setup [timing] " << std::left << std::setw(30) << name
                   << std::right << std::fixed << std::setprecision(2)
                   << std::setw(11) << ms << " ms" << std::defaultfloat << "\n";
         _t_phase = now;
@@ -511,6 +535,8 @@ public:
     //! is what covers every report.
     static void _force_display_from_env( int& level )
     {
+      if( level != UNSET_DISPLAY_LEVEL ) return;              // the driver set it: it stands
+      level = 0;                                               // else the default, unless the environment says
       char const* v = std::getenv( "CRONOS_DISPLAY_LEVEL" );
       if( !v ) return;
       char* end = nullptr;
@@ -520,7 +546,7 @@ public:
                      " leaving DISPLAY_LEVEL as the driver set it." << std::endl;
         return;
       }
-      if( static_cast<int>( n ) > level ) level = static_cast<int>( n );
+      level = static_cast<int>( n );
     }
     static void _force_verbose_from_env( bool& flag )
     {
@@ -573,10 +599,11 @@ public:
     void reset
       ()
       {
-        DISPLAY_LEVEL       = 0;
+        DISPLAY_LEVEL       = UNSET_DISPLAY_LEVEL;   // -1: not set by the driver; CRONOS_DISPLAY_LEVEL or 0 applies
         REDUCE.ORDER        = RED_FULL;
         REDUCE.NONLINEAR_PARTIALS = false;
         REDUCE.HIDDEN_IC    = true;
+        REDUCE.DUMMY_DERIV  = false;
         TTOL                = 1e-9;
         CLASSIFY.MODE            = CLASS_AUTO;
         CLASSIFY.NSAMPLE    = 32;    // rev284: default on (sweep H)
@@ -601,6 +628,7 @@ public:
         REDUCE.ORDER        = opt.REDUCE.ORDER;
         REDUCE.NONLINEAR_PARTIALS = opt.REDUCE.NONLINEAR_PARTIALS;
         REDUCE.HIDDEN_IC    = opt.REDUCE.HIDDEN_IC;
+        REDUCE.DUMMY_DERIV  = opt.REDUCE.DUMMY_DERIV;
         TTOL                = opt.TTOL;
         CLASSIFY.MODE            = opt.CLASSIFY.MODE;
         CLASSIFY.NSAMPLE    = opt.CLASSIFY.NSAMPLE;
@@ -622,6 +650,11 @@ public:
     //!       per-predicate timing accumulators, verbose detection and edge
     //!       breakdowns.
     //! Errors and warnings are NEVER gated by this level.
+    //! @brief -1 until the driver sets it; resolved at setup to CRONOS_DISPLAY_LEVEL if that is set in the
+    //! environment, else 0.  The variable is a DEFAULT, not a floor: a driver that sets DISPLAY_LEVEL --
+    //! to 0 included -- is not overridden by it (it was, until 2026-10-25, and the one routine level-1
+    //! line added that week surfaced a forgotten export as output nobody had asked for).
+    static int constexpr UNSET_DISPLAY_LEVEL = -1;
     int DISPLAY_LEVEL;
     //! @brief Order reduction at setup -- the values of REDUCE.ORDER: whether derivatives above first order are
     //! replaced by auxiliary states, and whether rows processed before an auxiliary existed are rewritten to use it.
@@ -703,6 +736,18 @@ public:
       //! alone makes the system square, and a full declaration is reported as a surplus by the DOF audit.
       //! Which data is free is a modelling choice -- for the index-3 pendulum {x,u} works, {x,y} does not.
       bool HIDDEN_IC;
+      //! @brief Reduce a high-index block by the METHOD OF DUMMY DERIVATIVES (Mattsson & Soderlind) rather
+      //! than by substitution.  Substitution differentiates the consumed constraint and overwrites its row
+      //! with the derivative, keeping the constraint itself only at the initial point: on the interior it
+      //! then holds only as well as its derivative is integrated -- exactly for a linear constraint, since
+      //! BDF conserves linear invariants, but to integration tolerance for a nonlinear one
+      //! (DAESLV_drift: |x^2+y^2-1| of 1.9e-4 at rtol 1e-4).  Dummy derivatives KEEP the constraint as an
+      //! interior row, ADD its derivative as another, and mint one algebraic state per differentiation
+      //! to stand for the derivative of a chosen state, substituted wherever that derivative appears; the
+      //! system stays square, the chosen state becomes algebraic, and the constraint holds to solver
+      //! tolerance at every step.  Index 2 (one differentiation) is implemented; higher index falls back
+      //! to substitution with a message until the cascade is (default false, 2026-10-25).
+      bool DUMMY_DERIV;
     } REDUCE;
 
     //! @brief Classification of each block's principal symbol.
@@ -1373,6 +1418,21 @@ public:
     const
     { return _issetup ? _mVar : _usr._mVarUsr; }
 
+  //! @brief Declare an equation (residual = 0) over the domains @p vDom, with the ROLE given directly --
+  //! the common case: the block id defaults to 0 and the rest of EqnOptions to what EqnOptions( role )
+  //! resolves.  EqnOptions( EqnRole, int ) is not explicit, so a bare role already converts where nothing
+  //! else competes; this overload is for the call sites where it does -- a braced argument, or a binder
+  //! that must name the type.
+  //! @param Eqn     residual expression
+  //! @param vDom    domain variables
+  //! @param vLim    domain mask per variable, as for the EqnOptions overload
+  //! @param role    the equation's role (INTERIOR, INITIAL, BOUNDARY, ...)
+  //! @param blk     the block id (default 0)
+  virtual void add_equation
+    ( FFVar const& Eqn, std::vector<FFVar> const& vDom,
+      std::vector<int> const& vLim, EqnRole const role, int const blk=0 )
+    { add_equation( Eqn, vDom, vLim, EqnOptions( role, blk ) ); }
+
   //! @brief Declare an equation (residual = 0) over the domains @p vDom.
   //! @param Eqn     residual expression
   //! @param vDom    domain variables
@@ -1406,6 +1466,12 @@ public:
     }
 
   //! @brief Declare several equations over the same domains and masks, with the same options.
+  //! @brief ... and the same for a vector of equations sharing one role.
+  virtual void add_equation
+    ( std::vector<FFVar> const& vEqn, std::vector<FFVar> const& vDom,
+      std::vector<int> const& vLim, EqnRole const role, int const blk=0 )
+    { add_equation( vEqn, vDom, vLim, EqnOptions( role, blk ) ); }
+
   virtual void add_equation
     ( std::vector<FFVar> const& vEqn, std::vector<FFVar> const& vDom,
       std::vector<int> const& vLim, EqnOptions const& opt )
@@ -2082,6 +2148,14 @@ public:
     { return typeid( *this ) == typeid( FFModel ); }
 
   //! @brief The declared transitions
+  //! @brief The algebraic states minted by dummy-derivative reduction (REDUCE.DUMMY_DERIV); empty otherwise.
+  std::vector<FFVar> const& dummy_derivatives() const { return _dummyDerivs; }
+  //! @brief The pivot matrix of the dummy selection, n x n row-major as expressions over the states, and its
+  //! determinant at the reference.  The reduced system is index 1 only while this determinant is nonzero
+  //! -- a STATIC pivot, chosen at the reference -- so a solver evaluates it along the trajectory to say
+  //! where a failure comes from (2026-10-25).
+  std::vector<FFVar> const& dummy_pivot() const { return _dummyPivot; }
+  double dummy_pivot_ref() const { return _dummyPivotRef; }
   //! @brief The hidden constraint levels implied by the high-index reduction (empty for index 0/1).
   std::vector<FFVar> const& hidden_levels
     ()
@@ -2468,6 +2542,9 @@ protected:
   t_Symbol                                  _symbol;
 
   //! @brief Block-level principal symbols, classifications and face data.
+  std::vector<FFVar>                        _dummyDerivs;    //!< the algebraic states minted by REDUCE.DUMMY_DERIV
+  std::vector<FFVar>                        _dummyPivot;     //!< the n x n coefficient matrix of the chosen dummies, row-major
+  double                                    _dummyPivotRef = 0.;   //!< its determinant at the reference values
   std::map<int,t_Symbol>                    _blockSymbol;
 
   //! @brief Strip lower-order nonlocal terms before principal-symbol FAD.
@@ -2499,7 +2576,7 @@ protected:
 
   //! @brief Build principal symbol for a specific equation block.
   t_Symbol _principal_symbol
-    ( int const block_id )
+    ( int const block_id, bool const structure_only = false )
     const;
 
   //! @brief Evaluate the coefficient matrices of the principal symbol at a
@@ -4606,7 +4683,7 @@ const
 
 inline FFModel::t_Symbol
 FFModel::_principal_symbol
-( int const block_id )
+( int const block_id, bool const structure_only )
 const
 {
   t_Symbol sym;
@@ -4968,6 +5045,9 @@ const
   size_t const nState = sym.vState.size();
   size_t const nEqn   = sym.vEqn.size();
   if( !nEqn || !nState || !nDom ) return sym;
+  // STRUCTURE ONLY: the equations, states and domains are known; the coefficient tables -- the
+  // Jacobians -- are what cost O(n^2) and what a time-only block never reads (2026-10-25).
+  if( structure_only ) return sym;
   // rev283: the rows as the SYMBOL reads them (chain-inlined where flagged); sym.vEqn keeps the original vars.
   std::vector<FFVar> vEqnSym = sym.vEqn;
   for( size_t k = 0; k < vEqnSym.size(); ++k ){
@@ -5057,7 +5137,7 @@ const
 
     if( !nl_targ.empty() ){
       auto probe_eqns = _dag->substitute( sub_eqns, nl_targ, nl_repl );
-      auto probe_jac  = _dag->FAD( probe_eqns, all_proxies );
+      auto probe_jac  = _sparse_jacobian_dense_layout( probe_eqns, all_proxies );
 
       std::set< FFVar::pt_idVar > nl_var_id;
       for( auto const& z : nl_repl ) nl_var_id.insert( z.id() );
@@ -5089,7 +5169,7 @@ const
   }
 
   // 7. Differentiate w.r.t. all proxy VARs to obtain the Jacobian.
-  auto jac = _dag->FAD( sub_eqns, all_proxies );
+  auto jac = _sparse_jacobian_dense_layout( sub_eqns, all_proxies );
 
   // 7. Distribute into per-domain coefficient matrices
   sym.vCoeff.assign( nDom, std::vector<FFVar>( nEqn * nState ) );
@@ -5106,7 +5186,8 @@ const
   // advective Dz_Cl*(...) term), which the principal symbol omits.  Used by
   // _compute_interface_reads() for the symbol-AUTO magnitude balance.
   {
-    auto jac0 = _dag->FAD( sub_eqns, sym.vState );
+    auto jac0 = _sparse_jacobian_dense_layout( sub_eqns, sym.vState );
+    _phase( "      J0" );
     sym.vCoeff0.assign( nEqn * nState, FFVar( 0. ) );
     for( size_t k = 0; k < nEqn; ++k )
       for( size_t j = 0; j < nState; ++j )
@@ -5119,7 +5200,8 @@ const
   try{
     std::vector<FFVar> all_states;
     for( auto const& vv : _mVar ) all_states.push_back( vv.first );
-    auto jacAll = _dag->FAD( sub_eqns, all_states );
+    auto jacAll = _sparse_jacobian_dense_layout( sub_eqns, all_states );
+    _phase( "      J0 all" );
     size_t const nS = all_states.size();
     sym.vAllState = all_states;
     sym.vCoeff0All.assign( nEqn * nS, FFVar( 0. ) );
@@ -5152,7 +5234,7 @@ const
       auto c2_sub = c2_targ.empty() ? c2_rows : _dag->substitute( c2_rows, c2_targ, c2_repl );
       std::vector<FFVar> all_states;
       for( auto const& vv : _mVar ) all_states.push_back( vv.first );
-      auto jacC2 = _dag->FAD( c2_sub, all_states );
+      auto jacC2 = _sparse_jacobian_dense_layout( c2_sub, all_states );
       size_t const nR = c2_rows.size(), nS2 = all_states.size();
       sym.vC2Eqn = c2_rows; sym.vC2State = all_states;
       sym.vC2Coef0.assign( nR * nS2, FFVar( 0. ) );
@@ -5212,7 +5294,7 @@ const
       }
       auto alg_sub = _dag->substitute( sym.vAlgEqn, alg_targ, alg_repl );
       alg_sub = _strip_nonlocal_terms_for_symbol( alg_sub );
-      auto jacA = _dag->FAD( alg_sub, all_states );
+      auto jacA = _sparse_jacobian_dense_layout( alg_sub, all_states );
       size_t const nA = sym.vAlgEqn.size(), nS = all_states.size();
       sym.vAlgState = all_states;
       sym.vAlgCoeff0.assign( nA * nS, FFVar( 0. ) );
@@ -5231,7 +5313,6 @@ const
         std::cerr << "OCFESLV::_principal_symbol ** vAlgCoeff0 not computed (non-std exception)" << std::endl;
     }
   }
-
   return sym;
 }
 
@@ -6736,9 +6817,52 @@ FFModel::_classify_pde
 
   bool first_valid = true;
   for( int bid : block_ids ){
+    // TIME-ONLY SHORT-CIRCUIT.  A block whose equations hold on the evolution direction alone -- an
+    // ODE or DAE model, every ODESLV and DAESLV case -- has no characteristic directions, no spatial
+    // closure, no A+/A- ranks: nothing the principal symbol is built for.  Its verdict comes from
+    // _structural_index_analysis(), a subgraph incidence scan and a bipartite matching with no
+    // differentiation.  The full path computed the O(n^2) symbol and its evaluation, handed them to
+    // classify(), which bailed to UNDETERMINED at the squareness gate, and took the verdict from the
+    // structural index anyway (DAESLV_scaling, 2026-10-25: 3.5 s of a 5 s classify_pde at 2400
+    // states, for a result that never used them).  Decide time-only from the equations' own domains.
+    bool time_only_block = ( time_dom != nullptr );
+    if( time_only_block )
+      for( auto const& eqn : _mEqn ){
+        if( !eqn.opt || eqn.opt->block_id != bid || !eqn.opt->participate_in_classification ) continue;
+        for( auto const& [dv, mask] : eqn.dom )
+          if( dv.id() != time_dom->id() ){ time_only_block = false; break; }
+        if( !time_only_block ) break;
+      }
+    if( time_only_block ){
+      t_Symbol sym_b = _principal_symbol( bid, /*structure_only=*/ true );
+      _phase( "  classify: time-only structure" );
+      t_Classify cls_b;
+      t_IndexResult const ir  = _structural_index_analysis( bid );
+      cls_b.differential_index   = ir.index;
+      cls_b.structural_parabolic = ir.parabolic_character;
+      cls_b.type                 = ( ir.index != 0 )? DIFFERENTIAL_ALGEBRAIC: DIFFERENTIAL_ORDINARY;
+      cls_b.structural_dae       = ( ir.index != 0 );
+      cls_b.At_singular          = ( ir.index != 0 );
+      for( size_t i = 0; i < sym_b.vDom.size(); ++i )
+        if( sym_b.vDom[i].id() == time_dom->id() ){ cls_b.evolution_dom_idx = i; break; }
+      _phase( "  classify: time-only index" );
+      _blockSymbol[bid]         = sym_b;
+      _blockClassification[bid] = cls_b;
+      _blockFaceData[bid]       = _build_face_data( _blockSymbol[bid], cls_b );
+      if( bid == 0 || first_valid ){
+        _symbol         = _blockSymbol[bid];
+        _classification = cls_b;
+        _face_data      = _build_face_data( _symbol, _classification );
+        first_valid     = false;
+      }
+      continue;
+    }
+    _phase( "  classify: pre-symbol" );
     t_Symbol sym_b = _principal_symbol( bid );
+    _phase( "  classify: _principal_symbol" );
     arma::mat A0_b;
     auto Ai_b = _eval_symbol( sym_b, state_ref, cst_ref, dom_ref, input_ref, time_dom? nullptr: &A0_b );
+    _phase( "  classify: _eval_symbol" );
     // The Douglis-Nirenberg weighted symbol of an order-reduced block (weights: 1 for a reduced primitive, 0 for
     // the other columns; 0 for a LINK row, 1 for the other rows): a non-LINK row keeps only its first-order
     // entries in the non-primitive columns; a LINK row keeps its first-order entries in the primitive columns
@@ -6855,7 +6979,8 @@ FFModel::_classify_pde
     // principal symbol (squareness-gate bail) vs a square-but-inconclusive
     // eigenanalysis (A_e nonsingular, complex-small eigenvalues) vs a singular-A_e
     // descriptor that failed the parabolic upgrade.  Pure diagnostic, no logic.
-    if( options.DISPLAY_LEVEL >= 1 ){
+    _phase( "  classify: rest of block loop" );
+  if( options.DISPLAY_LEVEL >= 1 ){
       size_t const sR = sym_b.vEqn.size(), sC = sym_b.vState.size();
       size_t zero_rows = 0;
       if( !Ai_b.empty() ){
@@ -7213,6 +7338,7 @@ FFModel::_classify_pde
 #endif
 
   // The classification is determined but not yet published: a derived solver may derive from it now.
+  _phase( "  classify: second block loop" );
   _on_classify_ready( state_ref, input_ref, cst_ref, dom_ref );
 
   _classified = true;
@@ -9017,7 +9143,7 @@ FFModel::_build_reduction_plan()
 inline bool
 FFModel::_reduce_high_index()
 {
-  _mHidLvl.clear();
+  _mHidLvl.clear();  _dummyDerivs.clear();  _dummyPivot.clear();  _dummyPivotRef = 0.;
   if( _reductionPlan.empty() ) return true;
   FFVar const* tdom = _evolution_dom_set ? &_evolution_dom_var : nullptr;
   if( !tdom ){
@@ -9099,6 +9225,215 @@ FFModel::_reduce_high_index()
         std::cerr << "OCFESLV::setup ** high-index reduction: interior constraint not found (block "
                   << a.block_id << ")\n";
       continue;
+    }
+
+    // ------------------------------------------------------------------ DUMMY DERIVATIVES (REDUCE.DUMMY_DERIV)
+    // Mattsson & Soderlind: keep the constraint as an interior row, add its derivative as another, and
+    // mint one ALGEBRAIC state per differentiation to stand for the derivative of a chosen state, which
+    // is substituted wherever that derivative appears.  +1 row, +1 unknown: square, and the constraint
+    // holds to solver tolerance on the interior rather than drifting with its integrated derivative.
+    // The differentiated level is formed with the derivative NODES kept (total_ddt substitutes the ODE
+    // right-hand sides for them, which is what makes the SUBSTITUTION form algebraic -- the opposite
+    // of what is wanted here).  Index 2 only for now; the cascade for n_diff > 1 -- the next level
+    // differentiates a row that now contains the dummy, whose own derivative needs a dummy -- is the
+    // follow-on, and until then higher index falls back to substitution with a message (2026-10-25).
+    if( options.REDUCE.DUMMY_DERIV ){
+      // the derivative of an expression with every d/dt kept as a NODE, over its bare states
+      std::function<std::vector<FFVar>(FFVar const&)> states_of_fn;    // bound below, once the dummies exist
+      auto ddt_nodes = [&]( FFVar const& E ) -> FFVar {
+        std::vector<FFVar> sts = states_of_fn( E );
+        std::vector<FFVar> wrt;  wrt.push_back( *tdom );
+        for( auto const& st : sts ) wrt.push_back( st );
+        auto dfd = _dag->FAD( std::vector<FFVar>{ E }, wrt );
+        FFVar out = dfd[0];
+        for( size_t k = 0; k < sts.size(); ++k )
+          if( !( dfd[1+k].cst() && dfd[1+k].num().val() == 0. ) ) out += dfd[1+k] * OpPt( sts[k], *tdom );
+        return out;
+      };
+      std::vector<FFVar> dummies, dummy_src;                      // D_r, and the state s_r with s_r' -> D_r
+      // the states of an expression -- bare_states() sees none in a bare variable, which is exactly the
+      // chain case (y' = v: the rhs IS v) -- excluding the dummies, which have no derivative of their own
+      auto states_of = [&]( FFVar const& E ) -> std::vector<FFVar> {
+        std::vector<FFVar> out;
+        auto is_dummy = [&]( FFVar const& v ){ for( auto const& d : dummies ) if( d.id() == v.id() ) return true; return false; };
+        if( _mVar.count( E ) && !is_dummy( E ) ) out.push_back( E );
+        for( auto const& st : bare_states( E ) ) if( !is_dummy( st ) ) out.push_back( st );
+        return out;
+      };
+      states_of_fn = states_of;
+      auto has_deriv_node = [&]( FFVar const& E ) -> bool {
+        for( auto const* op : _dag->subgraph( 1, &E ).l_op )
+          if( op && op->type >= FFOp::EXTERN && mc::type_cast<FFPartial const>( op ) ) return true;
+        return false;
+      };
+      // The CASCADE, one dummy per differentiation.  Level r is the derivative of level r-1 with every
+      // remaining non-dummied state derivative first written through its row (x' -> u), or the next
+      // level would hold x''; a dummy D_k of an earlier level stands for s_k', so its own derivative is
+      // the node-kept derivative of s_k's ORIGINAL right-hand side (dy1 = y' = v  =>  dy1' = v').  The
+      // level's dummy is then chosen among the derivative nodes it holds, preferring the chain -- the
+      // derivative of the state the previous dummy's source was equal to -- which is what makes the
+      // pendulum come out as y' -> dy1, v' -> dv with x, u differential.  Rows + n_diff, unknowns
+      // + n_diff: square at every level.
+      std::map<FFVar,FFVar,lt_FFVar> rhs_orig = pure_rhs;        // before any row is rewritten
+      std::vector<FFVar> levels;                                  // L_r with the chosen derivatives -> dummies
+      bool ok = true;  std::string why;
+      size_t n_diff_states = 0;
+      for( auto const& sr : ode_res ) if( _mVar.count( sr.first ) ) ++n_diff_states;
+      // A block with transitions is NOT declined: the reduced system is index 1 and the stop system applies
+      // its ordinary rule -- continuity rows for the differential states, a declared jump replacing one --
+      // so a jump declared on a state the reduction has made ALGEBRAIC is over-determination, exactly as
+      // on any index-1 DAE, and is reported by the stop system as such.  (Until 2026-10-25 such a block
+      // fell back to substitution, which keeps the state differential and checks the jump against the
+      // hidden levels after the fact; the two readings of the same jump are both consistent with their
+      // reduction.)  The pivot prefers a state that no transition jumps, for the same reason it prefers
+      // one that no output reads.
+      if( ok && n_diff_states <= (size_t)a.n_diff ){ ok = false; why = "the dummies would consume every differential state"; }
+
+      // ---------------------------------------------------------------- PHASE 1: every hidden level
+      // L_r is the derivative of L_{r-1} with every d/dt kept as a node; before the NEXT differentiation
+      // the derivatives of states that carry a row are written through the row (x' -> u), or L_{r+1}
+      // would hold x''.  No dummy enters here, so the only derivatives that ever appear are first
+      // derivatives of ORIGINAL states -- the formulation of Mattsson & Soderlind, the hidden levels
+      // formed first and the dummies chosen afterwards (2026-10-25).
+      std::vector<FFVar> Lpre;                                    // the levels as formed, derivatives as nodes
+      { FFVar Lrw = a.constraint;
+        for( int r = 1; ok && r <= a.n_diff; ++r ){
+          FFVar const Lr = ddt_nodes( Lrw );
+          Lpre.push_back( Lr );
+          Lrw = Lr;
+          for( auto const& [st, rhs] : rhs_orig ){
+            auto sub = _dag->substitute( std::vector<FFVar>{ Lrw }, std::vector<FFVar>{ OpPt( st, *tdom ) }, std::vector<FFVar>{ rhs } );
+            if( !sub.empty() ) Lrw = sub[0];
+          }
+          if( r < a.n_diff && has_deriv_node( Lrw ) ){    // a derivative with no row to write it through
+            ok = false; why = "level " + std::to_string(r) + " holds the derivative of a state with no d/dt row,"
+                                 " which the next level would differentiate again";
+          }
+        }
+      }
+      // ---------------------------------------------------------------- PHASE 2: the dummies, all at once
+      // Candidates: the states whose derivative appears in some L_r.  D[r][k] = coefficient of x_k' in
+      // L_r = dL_{r-1}^{rw}/dx_k, evaluated at the reference values.  Choose n_diff columns making D
+      // nonsingular -- Gaussian elimination with COLUMN pivoting, one column per level, the largest
+      // pivot first -- which rejects (x', y') for the pendulum released from rest (its 2x2 determinant
+      // 4(xv - yu) is 0 there) and admits it for a bob in motion.  Among pivots of equal size a state no
+      // output reads is preferred: a dummied state becomes algebraic, and a point output on an
+      // algebraic state cannot be seeded by the adjoint.
+      if( ok ){
+        std::vector<FFVar> cands;                                 // distinct states, differentiated somewhere
+        std::vector<FFVar> levelsrw;  levelsrw.push_back( a.constraint );
+        { FFVar Lrw = a.constraint;
+          for( int r = 1; r <= a.n_diff; ++r ){
+            Lrw = Lpre[r-1];
+            for( auto const& [st, rhs] : rhs_orig ){
+              auto sub = _dag->substitute( std::vector<FFVar>{ Lrw }, std::vector<FFVar>{ OpPt( st, *tdom ) }, std::vector<FFVar>{ rhs } );
+              if( !sub.empty() ) Lrw = sub[0];
+            }
+            levelsrw.push_back( Lrw );
+          } }
+        for( int r = 0; r < a.n_diff; ++r )
+          for( auto const& st : states_of( levelsrw[r] ) ){        // the states L_{r+1} differentiates
+            bool seen = false;  for( auto const& c : cands ) if( c.id() == st.id() ) seen = true;
+            if( !seen ) cands.push_back( st );
+          }
+        size_t const nr = a.n_diff, nc = cands.size();
+        // D at the reference: row r, column k = d L_r^{rw-1} / d cands[k]
+        std::vector<double> D( nr * nc, 0. );
+        { std::vector<FFVar> allv;  std::vector<double> allval;
+          for( auto const& [v, dom] : _mVar ){ allv.push_back( v ); auto it = _usr._classVarRefUsr.find( v ); allval.push_back( it != _usr._classVarRefUsr.end()? it->second: 0. ); }
+          allv.push_back( *tdom );  allval.push_back( 0. );
+          for( auto const& [v, dom] : _mInp ){ allv.push_back( v ); auto it = _usr._classVarRefUsr.find( v ); allval.push_back( it != _usr._classVarRefUsr.end()? it->second: 0. ); }
+          for( size_t r = 0; r < nr && nc; ++r ){
+            auto coef = _dag->FAD( std::vector<FFVar>{ levelsrw[r] }, cands );
+            std::vector<double> cval( nc, 0. );
+            try{ _dag->eval( nc, coef.data(), cval.data(), allv.size(), allv.data(), allval.data() ); }
+            catch( ... ){ for( auto& c : cval ) c = 1.; }
+            for( size_t k = 0; k < nc; ++k ) D[ r*nc + k ] = cval[k];
+          } }
+        std::set<FFVar,lt_FFVar> outStates;
+        { auto note = [&]( FFVar const& E ){
+            if( _mVar.count( E ) ) outStates.insert( E );
+            for( auto const* op : _dag->subgraph( 1, &E ).l_op )
+              for( auto const* operand : op->varin ) if( operand && _mVar.count( *operand ) ) outStates.insert( *operand ); };
+          for( auto const& fct : _mFct ) note( fct.var );
+          for( auto const& C : _deferredValue ) note( C.source ); }
+        // a state a TRANSITION jumps must stay differential: its jump row replaces its continuity row at the
+        // stop, and a jump on an algebraic state -- fixed by the algebraic rows already -- over-determines
+        // the stop system (the reactor with nA jumped and nA dummied: 6 rows for 5 unknowns).  Stronger than
+        // the output preference, so it ranks first.
+        std::set<FFVar,lt_FFVar> jumpStates;
+        { // from the jump groups S+ of the WORKING transitions (var_transition() is the user's until setup
+          // completes, and the working copy carries no `states`): the states the right sides make jump
+          t_TransitionJumps J;  std::string jwhy;
+          auto is_state = [&]( FFVar const& v ){ return _mVar.count( v ) > 0; };
+          if( _transition_jumps( _mTrn, is_state, J, jwhy ) )
+            for( auto const& g : J ) for( auto const& st : g.jump ) jumpStates.insert( st );
+        }
+        std::vector<bool> used( nc, false );  double detref = 1.;
+        std::vector<double> W = D;                                  // eliminated in place
+        for( size_t r = 0; r < nr && ok; ++r ){
+          size_t best = (size_t)-1;  double bestv = 0.;
+          for( int pass = 0; pass < 3 && best == (size_t)-1; ++pass )   // 0: no jump, no output; 1: no jump; 2: any
+            for( size_t k = 0; k < nc; ++k ){
+              if( used[k] ) continue;
+              if( pass <= 1 && jumpStates.count( cands[k] ) ) continue;
+              if( pass == 0 && outStates.count( cands[k] ) ) continue;
+              double const v = std::fabs( W[ r*nc + k ] );
+              if( v > 1e-12 && v > bestv ){ bestv = v; best = k; }
+            }
+          if( best == (size_t)-1 ){ ok = false; why = "no nonsingular choice of dummies at level " + std::to_string(r+1) + " (at the reference values)"; break; }
+          used[best] = true;  dummy_src.push_back( cands[best] );
+          detref *= W[ r*nc + best ];                              // the determinant is the product of the pivots
+          for( size_t rr = r + 1; rr < nr; ++rr ){                // eliminate the chosen column below
+            double const f = W[ rr*nc + best ] / W[ r*nc + best ];
+            for( size_t k = 0; k < nc; ++k ) W[ rr*nc + k ] -= f * W[ r*nc + k ];
+          }
+        }
+        if( ok ){                                                 // the pivot matrix, as expressions, for the solvers
+          for( size_t r = 0; r < nr; ++r ){
+            auto row = _dag->FAD( std::vector<FFVar>{ levelsrw[r] }, dummy_src );
+            for( size_t k = 0; k < nr; ++k ) _dummyPivot.push_back( row[k] );
+          }
+          _dummyPivotRef = detref;
+        }
+      }
+      // ---------------------------------------------------------------- PHASE 3: mint and substitute
+      if( ok ){
+        for( size_t m = 0; m < dummy_src.size(); ++m ){
+          FFVar const& src = dummy_src[m];
+          FFVar const dvar = _dag->add_var( "d" + src.name() + "_dt" );
+          _add_working_state( dvar, { *tdom } );
+          dummies.push_back( dvar );  _dummyDerivs.push_back( dvar );
+          std::vector<FFVar> const targ{ OpPt( src, *tdom ) }, repl{ dvar };
+          for( auto& eqn : _mEqn ){
+            if( eqn.opt->block_id != a.block_id ) continue;
+            auto sub = _dag->substitute( std::vector<FFVar>{ eqn.var }, targ, repl );
+            if( sub.empty() || sub[0].id() == eqn.var.id() ) continue;
+            eqn.var = sub[0];
+            if( !has_deriv_node( eqn.var ) ){
+              auto it = eqn.dom.find( *tdom );
+              if( it != eqn.dom.end() && it->second != (int)FFDom::ALL ) it->second = FFDom::ALL;
+            }
+          }
+          for( auto& lv : Lpre ){ auto sub = _dag->substitute( std::vector<FFVar>{ lv }, targ, repl ); if( !sub.empty() ) lv = sub[0]; }
+          if( options.DISPLAY_LEVEL >= 1 )
+            std::cerr << "FFModel::setup ** high-index reduction: block " << a.block_id << " by DUMMY DERIVATIVES --"
+                         " d(" << src.name() << ")/dt -> " << dvar.name() << " (algebraic; the pivot is static --"
+                         " it is singular wherever the coefficient of " << src.name() << " in its level vanishes)\n";
+        }
+        levels = Lpre;
+      }
+      if( ok ){
+        for( auto const& lv : levels )
+          _mEqn.push_back( t_Eqn{ lv, eos_eqn->dom, _make_equation_options( EqnOptions( EqnRole::INTERIOR, a.block_id ) ) } );
+        continue;        // the constraint stays a row; no hidden-IC materialisation, no in-place replacement
+      }
+      if( options.DISPLAY_LEVEL >= 1 )
+        std::cerr << "FFModel::setup ** high-index reduction: DUMMY_DERIV declined for block " << a.block_id
+                  << " (" << why << "), using substitution\n";
+      // NOTE: a declined cascade may already have minted dummies and rewritten rows at earlier levels;
+      // the guards above are meant to decide BEFORE level 1, and the per-level failure only arises
+      // when no derivative row is left to pick from, which the count guard rules out.
     }
 
     // The hidden constraints: every level below the one the reduction pins with.  They hold at the initial point,
@@ -11052,6 +11387,7 @@ inline bool
 FFModel::setup
 ()
 {
+  _t_phase = std::chrono::steady_clock::now();   // bisection: the clock starts HERE
   std::lock_guard<std::recursive_mutex> dag_lock_( dag_mutex() );   // see dag_mutex()
   // rev142b: cap the numerical backends for the duration of setup() (MAXTHREAD, 0 = no
   // cap).  RAII because setup() has many early returns AND the w-decide restore
@@ -11059,8 +11395,11 @@ FFModel::setup
   // rev308: the caller's configuration lands here, BEFORE the thread cap reads MAXTHREAD and before any
   // phase reads an option.
   _apply_options();
-  Options::_force_display_from_env( options.DISPLAY_LEVEL );   // a floor from CRONOS_DISPLAY_LEVEL; see the helper
+  _phase( "B1 apply_options" );
+  Options::_force_display_from_env( options.DISPLAY_LEVEL );   // a defaultfrom CRONOS_DISPLAY_LEVEL; see the helper
+  _phase( "B2 pre-check_transitions" );
   if( !_check_transitions() ){ _setupStatus = SetupStatus::INCONSISTENT_MODEL;  return false; }   // see add_transition
+  _phase( "B3 check_transitions" );
   if( !_check_equation_reductions() ){ _setupStatus = SetupStatus::INCONSISTENT_MODEL;  return false; }   // the causality refusal
 
   t_ThreadCap const _tcap( options.MAXTHREAD, options.MAXTHREAD != 1 || options.DISPLAY_LEVEL >= 1 );
@@ -11078,7 +11417,9 @@ FFModel::setup
   _classified = false;
 
   // A derived solver clears what a re-setup invalidates on its side.
+  _phase( "B4 check_equation_reductions" );
   if( !_on_setup_begin() ) return false;
+  _phase( "B5 on_setup_begin" );
 
 
   // --- optional setup phase timing -------------------------------------------
@@ -11125,6 +11466,7 @@ FFModel::setup
   // Transitions (see _transitions_lifted) are lowered AFTER order reduction: their rows read x(tau^-) / x(tau^+)
   // IN-SOLVE through pinned evaluations, which the reduction would capture as post-solve latches (and its
   // substitution map is applied to every equation, so a node shared with a captured output would be replaced too).
+  _phase( "B6 pre-lower_transitions" );
   if( !_lower_transitions() ){ _issetup = false;  _setupStatus = SetupStatus::INCONSISTENT_MODEL;  return false; }
 
   // Auto differential-elimination (Pantelides increment 1; OFF by default).  Rewrites
@@ -11134,7 +11476,9 @@ FFModel::setup
   _phase( "auto_diff_elim" );
 
   // Solver: the collocation arrays and the node cache, which the classification's mesh-wavenumber probe reads.
+  _phase( "B7 lower_transitions" );
   if( !_on_model_discretise() ) return false;
+  _phase( "B8 on_model_discretise" );
 
   // Automatic classification is a setup-time discretisation decision:
   // IC_AUTO may select value matching or characteristic/upwind interfaces,
@@ -11150,6 +11494,22 @@ FFModel::setup
     }
   }
   _phase( "classify_pde" );
+  // One line per block at DISPLAY_LEVEL >= 1 -- the class and its flags, in report()'s words -- so the
+  // outcome of classification is visible without the full report, which runs to thousands of lines on
+  // a large model (2026-10-25).
+  if( options.DISPLAY_LEVEL >= 1 ){
+    if( block_classification().empty() )
+      _disp( 1 ) << "FFModel::setup [classify] not classified\n";
+    for( auto const& [blk,cls] : block_classification() )
+      _disp( 1 ) << "FFModel::setup [classify] block " << blk << ": " << pde_type_name( cls.type )
+                 << ( cls.symbol_rectangular? "  symbol RECTANGULAR": "" )
+                 << ( cls.descriptor? "  descriptor": "" )
+                 << ( cls.At_singular? "  evolution coefficient singular": "" )
+                 << ( cls.evolution_hyperbolic? "  evolution-hyperbolic": "" )
+                 << ( cls.spatially_characteristic? "  spatially characteristic": "" )
+                 << ( cls.degenerate? "  DEGENERATE": "" )
+                 << "  eqns=" << _mEqn.size() << " states=" << var_state().size() << "\n";
+  }
 
 
   // Stage-2 high-index reduction: assemble the persisted Pantelides reduction
@@ -11163,6 +11523,7 @@ FFModel::setup
   // Solver: a validation (unconditional since rev319) of user-supplied incoming BCs at hyperbolic boundary faces, before the
   // outgoing closure is generated.
   if( !_on_before_closures() ) return false;
+  _phase( "B9 on_before_closures" );
 
   // Auto-generate the outgoing-characteristic boundary closure for hyperbolic
   // blocks.  Gated by CRONOS_AUTO_HYP_CLOSURE (environment-only since rev318).  Classification, the incoming-BC
@@ -11245,11 +11606,15 @@ FFModel::setup
 
   // Solver: counts, dependency map, interface plan, collocated caches and audits.
   _audit_dof_balance();
+  _phase( "audit_dof_balance" );
 
   _collect_findings();
+  _phase( "collect_findings" );
   _build_dynamic_form();
+  _phase( "build_dynamic_form" );
 
   if( !_on_model_ready() ) return false;
+  _phase( "on_model_ready (solver extraction)" );
 
   return _issetup;
 }

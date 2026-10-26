@@ -6,6 +6,7 @@
 #ifndef CRONOS__BASE_DE_HPP
 #define CRONOS__BASE_DE_HPP
 
+#include <set>
 #include <map>
 #include <string>
 #include <vector>
@@ -216,6 +217,7 @@ class BASE_DE
   std::string _extractError;                    //!< why the last extraction failed
 
   size_t _ns = 0;        //!< number of stages: _dT.size()-1
+  mutable bool _explicitIC_cached = false, _explicitIC = false;   //!< explicit_initial_conditions(), once per model
   size_t _nx = 0;        //!< number of states
   size_t _nx0 = 0;       //!< number of initial values
   size_t _nc = 0;        //!< number of constants
@@ -584,6 +586,55 @@ class BASE_DE
     std::vector<double> x;
   };
 
+  //! @brief Sparse Jacobian of @p rows w.r.t. @p wrt in SFAD's triplet form -- built ROW BY ROW, each
+  //! row differentiated only against the independents its own subgraph names.  FFGraph::SFAD sweeps the
+  //! subgraph of ALL rows once per independent, O(rows x wrt) however sparse the result (measured flat
+  //! in ms/n^2 on a tridiagonal probe, 2026-10-25); a row of a discretised model depends on a handful of
+  //! unknowns, so the sum of per-row calls is O(nnz x depth).  Entries that simplify to a literal zero
+  //! are kept, as SFAD keeps them, so every caller's filtering is unchanged.
+  static std::tuple<unsigned,unsigned*,unsigned*,FFVar*> _sfad_by_row
+    ( FFGraph* dag, std::vector<FFVar> const& rows, std::vector<FFVar> const& wrt )
+  {
+    std::vector<unsigned> rr, cc;  std::vector<FFVar> vv;
+    // DAG var id -> wrt index + 1.  Sized by the LARGEST id, not the variable COUNT: ids are not dense
+    // (variables are created and released), and the first cut sized this by Vars().size() -- so an
+    // unknown whose id was >= the count fell outside the array and its COLUMN silently vanished.
+    // DAESLV_asens caught it: d f/da came back exactly 0 where e^-k was due (2026-10-25).
+    long maxid = -1;
+    for( auto const& w : wrt ) maxid = std::max( maxid, w.id().second );
+    std::vector<unsigned> ndx( (size_t)( maxid + 2 ), 0 );
+    for( size_t j = 0; j < wrt.size(); ++j ){
+      long const id = wrt[j].id().second;
+      if( id >= 0 ) ndx[id] = (unsigned)j + 1;
+    }
+    std::vector<FFVar> w;  std::vector<unsigned> wj;
+    for( size_t k = 0; k < rows.size(); ++k ){
+      w.clear();  wj.clear();
+      auto sg = dag->subgraph( 1, &rows[k] );
+      for( auto const* v : sg.v_indep ){
+        long const id = v->id().second;
+        if( id < 0 || (size_t)id >= ndx.size() || !ndx[id] ) continue;
+        w.push_back( wrt[ ndx[id] - 1 ] );  wj.push_back( ndx[id] - 1 );
+      }
+      if( w.empty() ) continue;
+      auto Jk = dag->SFAD( 1, &rows[k], (unsigned)w.size(), w.data() );
+      unsigned const nnz = std::get<0>( Jk );
+      unsigned* jr = std::get<1>( Jk );  unsigned* jc = std::get<2>( Jk );  FFVar* jv = std::get<3>( Jk );
+      for( unsigned e = 0; e < nnz; ++e ){ rr.push_back( (unsigned)k );  cc.push_back( wj[ jc[e] ] );  vv.push_back( jv[e] ); }
+      delete[] jr;  delete[] jc;  delete[] jv;
+    }
+    // SFAD's contract is COLUMN order (ODESLV_BASE::_RHS_D_SET builds its column pointers by walking
+    // the triplets in sequence), and the rows came out row-major: sort on (col, row).
+    unsigned const nnz = (unsigned)rr.size();
+    std::vector<unsigned> ord( nnz );
+    for( unsigned e = 0; e < nnz; ++e ) ord[e] = e;
+    std::sort( ord.begin(), ord.end(), [&]( unsigned a, unsigned b ){
+      return cc[a] != cc[b]? cc[a] < cc[b]: rr[a] < rr[b]; } );
+    unsigned* r2 = new unsigned[ nnz ];  unsigned* c2 = new unsigned[ nnz ];  FFVar* v2 = new FFVar[ nnz ];
+    for( unsigned e = 0; e < nnz; ++e ){ r2[e] = rr[ ord[e] ];  c2[e] = cc[ ord[e] ];  v2[e] = vv[ ord[e] ]; }
+    return std::make_tuple( nnz, r2, c2, v2 );
+  }
+
   //! @brief Sensitivities of the consistent initial data w.r.t. the parameters, from the system LAST
   //! solved: @p dxdp[j][i] = d x_i / d p_j and @p ddxdp[j][i] = d (dx_i/dt) / d p_j.  Call it directly
   //! after solve_ic() or restart_ic(), whose solution it linearises about.
@@ -932,8 +983,19 @@ bool
 BASE_DE::_extract_from_model
 ()
 {
+  auto _xt = std::chrono::steady_clock::now();
+  auto _xlap = [&]( char const* what ){
+    if( options.DISPLAY_LEVEL >= 2 ){
+      auto now = std::chrono::steady_clock::now();
+      std::cerr << "  _extract_from_model [timing] " << std::left << std::setw(26) << what << std::right
+                << std::fixed << std::setprecision(1) << std::setw(10)
+                << std::chrono::duration<double,std::milli>( now - _xt ).count() << " ms\n";
+      _xt = now;
+    }
+  };
   _dT.clear(); _mT.clear(); _mX.clear(); _mP.clear(); _mC.clear(); _mQ.clear(); _mLHS.clear();
   _mIC.clear(); _mDE.clear(); _mQUAD.clear(); _mFCT.clear();
+  _explicitIC_cached = false;
   _ns = _nx = _nx0 = _nc = _np = _nq = _nf = 0;
   _extractError.clear();
 
@@ -1095,12 +1157,34 @@ BASE_DE::_extract_from_model
   _np = _mP.size();
 
   FFPartial OpP;                                     // each state's row, read as L * dx/dt + R = 0
+  _xlap( "A: stages/states/inputs" );
   std::vector<FFVar> rhs( _nx, FFVar( 0. ) );
   std::vector<FFVar> lhs( _nx, FFVar( 1. ) );   // kept undivided; _mLHS is filled per stage below
   std::vector<bool> got( _nx, false );
+  // Which states' TIME DERIVATIVES does a row contain?  One subgraph walk per row answers it; the
+  // alternative -- trying _split_in( row, d x_i/dt ) for EVERY state i -- is n_eqn x n_x symbolic
+  // differentiations.  At 200 mesh points of DAESLV_scaling that was 800 x 798 compose+FAD+compose,
+  // TWICE (divided form, then the undivided peel): 12.3 s of a 15.8 s setup, super-quadratic beyond
+  // (2026-10-25).  A row of a discretised PDE contains one derivative, occasionally two.
+  auto derivs_in = [&]( FFVar const& row ) -> std::vector<size_t> {
+    std::vector<size_t> out;
+    auto sg = FFModel::_dag->subgraph( 1, &row );
+    for( auto const* op : sg.l_op ){
+      if( !op || op->varout.empty() ) continue;
+      // a time derivative d x_i / dt is an FFPartial node: ONE operand, the state x_i, with the
+      // direction carried in the op's name ("Partial[t]"), not as an operand
+      if( op->type < FFOp::EXTERN || op->varin.size() != 1 || !op->varin[0] ) continue;
+      if( op->name() != "Partial[" + tvar.name() + "]" ) continue;
+      FFVar const* a = op->varin[0];
+      for( size_t i = 0; i < _nx; ++i )
+        if( a->id() == _mX[i].id() ){ out.push_back( i ); break; }
+    }
+    std::sort( out.begin(), out.end() );  out.erase( std::unique( out.begin(), out.end() ), out.end() );
+    return out;
+  };
   for( auto const& eqn : var_equation() ){
     if( !eqn.opt || eqn.opt->role != EqnRole::INTERIOR ) continue;
-    for( size_t i = 0; i < _nx; ++i ){
+    for( size_t i : derivs_in( eqn.var ) ){
       if( got[i] ) continue;
       FFVar L, R;
       if( !_split_in( eqn.var, OpP( _mX[i], tvar ), L, R ) ) continue;
@@ -1111,6 +1195,7 @@ BASE_DE::_extract_from_model
   // General mass-matrix form: peel each derivative off the row in turn -- _split_in returns the row with that
   // derivative SET TO ZERO, so feeding R back in exposes the next one, and what is left when every state has
   // been tried is the remainder.  Row-centric, so nothing here assumes a row belongs to one state.
+  _xlap( "B: divided-form loop" );
   std::vector< std::vector< std::pair<size_t,FFVar> > > mass_raw;
   std::vector<FFVar> res_raw;
   if( _wants_mass_rows() ){
@@ -1118,7 +1203,7 @@ BASE_DE::_extract_from_model
       if( !eqn.opt || eqn.opt->role != EqnRole::INTERIOR ) continue;
       std::vector< std::pair<size_t,FFVar> > row;
       FFVar rest = eqn.var;
-      for( size_t i = 0; i < _nx; ++i ){
+      for( size_t i : derivs_in( rest ) ){
         FFVar L, R;
         if( !_split_in( rest, OpP( _mX[i], tvar ), L, R ) ) continue;
         if( L.cst() && L.num().val() == 0. ) continue;
@@ -1147,6 +1232,7 @@ BASE_DE::_extract_from_model
     res_raw = subst_fixed( res_raw );
   }
   // Time-varying inputs, element by element (2026-09-28: shared by the dynamics, the OUTPUT evaluations and the
+  _xlap( "F: transitions" );
   // INTEGRANDS -- outputs and integrands used to keep the raw input variable, which failed at the first solve).
   auto elem_of_stage = [&]( size_t const k ){                // the element holding stage k
     double const mid = 0.5 * ( _dT[k] + _dT[k+1] );
@@ -1219,6 +1305,7 @@ BASE_DE::_extract_from_model
     _mDOT.resize( _nx );
     for( size_t i = 0; i < _nx; ++i ) _mDOT[i] = OpP( _mX[i], tvar );
   }
+  _xlap( "C: undivided rows (res_raw)" );
   for( auto const& eqn : var_equation() ){
     if( !eqn.opt || eqn.opt->role != EqnRole::INITIAL ) continue;
     // Keep the row UNDIVIDED, as _mRES keeps the evolution rows.  _split_in factorises a row as
@@ -1226,9 +1313,21 @@ BASE_DE::_extract_from_model
     // a materialised hidden constraint is not -- x^2 + y^2 - 1 split on y gives ic[y] = (1+y^2-x^2)/(2y),
     // self-referential.  The divided form LOSES the row, so an IC solve has to work from these.
     if( _wants_initial_rows() ) _mICRES.push_back( _in_model_dag( subst1( eqn.var ) ) );
-    for( size_t i = 0; i < _nx; ++i ){
+    // Try _split_in only against the states the row actually DEPENDS on.  The first cut tried every
+    // state for every row -- n_IC x n_x calls, each a compose + FAD + compose -- which at 200 mesh
+    // points of DAESLV_scaling was 320,000 symbolic differentiations to learn that u1_k - f pins u1_k:
+    // 13.9 s of a 15.8 s setup, and super-quadratic beyond (2026-10-25).  One subgraph names the
+    // row's independents; a row is affine in at most a few of them.
+    FFVar const row = subst1( eqn.var );
+    std::set<size_t> cand;
+    { auto sg = FFModel::_dag->subgraph( 1, &row );
+      for( auto const* v : sg.v_indep ){
+        for( size_t i = 0; i < _nx; ++i ) if( v->id() == _mX[i].id() ){ cand.insert( i ); break; }
+      }
+    }
+    for( size_t i : cand ){
       FFVar L, R;
-      if( !_split_in( subst1( eqn.var ), _mX[i], L, R ) ) continue;
+      if( !_split_in( row, _mX[i], L, R ) ) continue;
       if( L.cst() && L.num().val() == 0. ) continue;
       ic[i] = ( L.cst() && L.num().val() == 1. )? _in_model_dag( -R ): _in_model_dag( -R / L );
     }
@@ -1238,22 +1337,41 @@ BASE_DE::_extract_from_model
   // cannot resolve them, and the two consumers then fail differently and late -- ODESLV with a
   // missing-variable error out of the subgraph, a DAE consumer by reading whatever its working vector
   // happened to hold.  Neither names the model, so say it here, while the rows are in hand.
-  {
-    std::vector<FFVar> dIC;
-    try{ dIC = FFModel::_dag->FAD( ic, std::vector<FFVar>( _mX.begin(), _mX.end() ) ); }
-    catch( ... ){ dIC.clear(); }
-    if( dIC.size() == ic.size() * _nx )
-      for( size_t i = 0; i < ic.size(); ++i )
-        for( size_t j = 0; j < _nx; ++j ){
-          FFVar const& d = dIC[ i * _nx + j ];
-          if( d.cst() && d.num().val() == 0. ) continue;
-          if( _solves_initial_rows() ) break;          // the consumer resolves them; nothing to refuse
-          _extractError = "the initial condition for " + _mX[i].name() + " still depends on "
-                        + _mX[j].name() + ": the INITIAL rows are implicit in each other, and resolving"
-                          " them needs an initial-condition SOLVE, which this solver does not do";
-          return false;
-        }
+  _xlap( "D: INITIAL rows + split_in" );
+  // This check REFUSES coupled initial conditions for a solver that cannot resolve them.  Two things
+  // about how it was first written (2026-10-25):
+  //   - it built the FULL nx x nx symbolic Jacobian of the initial conditions, FAD( ic, all states ),
+  //     and only THEN asked whether the solver resolves coupled rows anyway -- inside the loop that
+  //     consumed the Jacobian, where DAESLV's answer (yes) broke out on the first nonzero.  At 4800
+  //     states that is 23 million FFVar nodes created in the user DAG to decide to do nothing: the
+  //     minutes and the >10 GB that DAESLV_scaling found at N=800, and all of it AFTER every timed
+  //     phase of FFModel::setup().
+  //   - for the solver that does need the check, a dense Jacobian is the wrong instrument: the
+  //     method of lines gives a tridiagonal one, and SFAD returns exactly its nonzeros.
+  // So: ask the solver FIRST, and differentiate SPARSELY.
+  if( !_solves_initial_rows() ){
+    std::vector<FFVar> const vX( _mX.begin(), _mX.end() );
+    try{
+      auto J = FFModel::_dag->SFAD( ic.size(), ic.data(), vX.size(), vX.data() );
+      unsigned const nnz = std::get<0>( J );
+      unsigned* rows = std::get<1>( J );  unsigned* cols = std::get<2>( J );  FFVar* vals = std::get<3>( J );
+      bool coupled = false;  size_t ri = 0, cj = 0;
+      for( unsigned k = 0; k < nnz && !coupled; ++k ){
+        FFVar const& d = vals[k];
+        if( d.cst() && d.num().val() == 0. ) continue;
+        coupled = true;  ri = rows[k];  cj = cols[k];
+      }
+      delete[] rows;  delete[] cols;  delete[] vals;
+      if( coupled ){
+        _extractError = "the initial condition for " + _mX[ri].name() + " still depends on "
+                      + _mX[cj].name() + ": the INITIAL rows are implicit in each other, and resolving"
+                        " them needs an initial-condition SOLVE, which this solver does not do";
+        return false;
+      }
+    }
+    catch( ... ){}
   }
+  _xlap( "E: coupled-IC check" );
   _mIC.assign( 1, ic );
   // TRANSITIONS (add_transition, 2026-09-29): one initial-value entry PER STAGE -- stage 0 the INITIAL equations, the
   // stage starting at a transition's tau its EXPLICIT map x_i(tau^+) = left_i(x(tau^-), p) (right_i must be the state
@@ -1435,6 +1553,7 @@ BASE_DE::_extract_from_model
   }
   _nq = _mQ.size();
   // The IC system's placeholders are minted HERE, once, and not where _mDOT is built: they must be the
+  _xlap( "G: integrands/outputs" );
   // LAST variables added to the model's dag.  Minting them mid-extraction -- before the parameters and
   // the initial rows are finalised -- segfaults FFODESLV's embedding, which is why the original code
   // created them inside _build_ic_system().  Hoisting them out of the per-call path is right; hoisting
@@ -1463,7 +1582,9 @@ BASE_DE::_extract_from_model
         _mDotLftVar[i] = FFModel::_dag->add_var( "ic_dlft" + std::to_string(i) );
     }
   }
+  _xlap( "H: ic placeholder vars" );
   if( !_build_ic_system() ) return false;
+  _xlap( "I: _build_ic_system" );
   return true;
 }
 
@@ -1588,14 +1709,19 @@ BASE_DE::_assemble_ic
                 return false; }
 
   // 4. which derivatives actually appear?  Those are the extra unknowns; an algebraic state has none.
+  // SFAD, not FAD: this asks a purely STRUCTURAL question -- does state i's derivative appear at all --
+  // and the dense form answers it by building rows*nx expressions and testing every one for being a
+  // structural zero.  Invisible at nx = 5; quadratic on a discretised model, which is where this is
+  // headed.  SFAD returns the non-zeros and nothing else.
   std::vector<bool> used( _nx, false );
-  std::vector<FFVar> const dPh = FFModel::_dag->FAD( plain, _mDotVar );
-  for( size_t r = 0; r < plain.size(); ++r )
-    for( size_t i = 0; i < _nx; ++i ){
-      FFVar const& d = dPh[ r*_nx + i ];
-      if( !( d.cst() && d.num().val() == 0. ) ) used[i] = true;
+  { auto const Js = _sfad_by_row( FFModel::_dag, plain, _mDotVar );
+    for( unsigned e = 0; e < std::get<0>( Js ); ++e ){
+      FFVar const& d = std::get<3>( Js )[e];
+      if( d.cst() && d.num().val() == 0. ) continue;        // keep the old guard: a structural entry
+      size_t const col = (size_t)std::get<2>( Js )[e];      // that simplifies to zero is not a use
+      if( col < _nx ) used[col] = true;
     }
-
+    delete[] std::get<1>( Js ); delete[] std::get<2>( Js ); delete[] std::get<3>( Js ); }
   // 5. move it all into this system's OWN graph
   std::vector<FFVar> srcV{ _mT[0] }, dstV( 1 );
   for( size_t i = 0; i < _nx; ++i ) srcV.push_back( _mX[i] );
@@ -1631,7 +1757,7 @@ BASE_DE::_assemble_ic
   // zeros.  This mirrors what the integrator already does for its own Jacobian, and is what lets a sparse
   // linear solver be offered under KINSOL rather than only a dense one.
   S.eval = S.row;
-  { auto const Js = S.dag->SFAD( S.row.size(), S.row.data(), S.unk.size(), S.unk.data() );
+  { auto const Js = _sfad_by_row( S.dag, S.row, S.unk );
     S.nnz = std::get<0>( Js );
     S.jrow.assign( S.nnz, 0 ); S.jcol.assign( S.nnz, 0 );
     for( unsigned e = 0; e < S.nnz; ++e ){
@@ -1685,7 +1811,7 @@ BASE_DE::_assemble_ic
   if( _np ){
     std::vector<FFVar> pv;
     for( size_t j = 0; j < _np; ++j ) pv.push_back( S.all[ 1 + _nx + j ] );
-    auto const Jp = S.dag->SFAD( S.row.size(), S.row.data(), pv.size(), pv.data() );
+    auto const Jp = _sfad_by_row( S.dag, S.row, pv );   // see _sfad_by_row: one call is O(rows x pv)
     S.nnzP = std::get<0>( Jp );
     S.jrowP.assign( S.nnzP, 0 ); S.jcolP.assign( S.nnzP, 0 );
     for( unsigned e = 0; e < S.nnzP; ++e ){
@@ -1707,7 +1833,7 @@ BASE_DE::_assemble_ic
     for( size_t i = 0; i < _nx; ++i ) lv.push_back( S.all[ lft0 + i ] );
     for( size_t i = 0; i < _mDotLftVar.size(); ++i ) lv.push_back( S.all[ lft0 + _nx + i ] );
     S.nLftCol = lv.size();
-    auto const Jl = S.dag->SFAD( S.row.size(), S.row.data(), lv.size(), lv.data() );
+    auto const Jl = _sfad_by_row( S.dag, S.row, lv );   // ditto: the stop system's left-state seed
     S.nnzL = std::get<0>( Jl );
     S.jrowL.assign( S.nnzL, 0 ); S.jcolL.assign( S.nnzL, 0 );
     for( unsigned e = 0; e < S.nnzL; ++e ){
@@ -1730,19 +1856,36 @@ BASE_DE::explicit_initial_conditions
 ()
 const
 {
+  // Is every initial-condition row affine in exactly ONE state, with a constant coefficient, and free of
+  // derivatives?  That decides whether the solver may set x(0) directly and skip KINSOL.
+  //
+  // This used to be answered with TWO dense nx x nx symbolic Jacobians -- FAD( ICRES, X ) and
+  // FAD( ICRES, DOT ) -- O(n^2) DAG nodes built at EVERY solve, since _IC_D_STA asks on each call: at
+  // 1600 states that was 730 ms per solve, more than the whole CVODES integration (0.44 s sparse), and
+  // the reason sparse looked barely better than dense in DAESLV_scaling (2026-10-25).  The question is
+  // structural: one subgraph walk per row names the states it depends on and whether a derivative node
+  // sits in it; only the one coefficient that then matters is differentiated.  And the answer is a
+  // property of the MODEL, so it is computed once and cached.
   if( _mICRES.empty() ) return false;
-  std::vector<FFVar> const dX = FFModel::_dag->FAD( _mICRES, _mX );
-  std::vector<FFVar> const dD = FFModel::_dag->FAD( _mICRES, _mDOT );
-  for( size_t r = 0; r < _mICRES.size(); ++r ){
-    size_t nst = 0;
-    for( size_t i = 0; i < _nx; ++i ){
-      FFVar const& d = dX[ r*_nx + i ];
-      if( !( d.cst() && d.num().val() == 0. ) ){ if( !d.cst() ) return false; ++nst; }
-      FFVar const& e = dD[ r*_nx + i ];
-      if( !( e.cst() && e.num().val() == 0. ) ) return false;      // carries a derivative
-    }
-    if( nst != 1 ) return false;                                   // not one state, pinned linearly
+  if( _explicitIC_cached ) return _explicitIC;
+  _explicitIC_cached = true;  _explicitIC = false;
+  std::set<long> stateId;  for( auto const& x : _mX ) stateId.insert( x.id().second );
+  std::string const dname = "Partial[" + ( _mT.empty()? std::string(): _mT[0].name() ) + "]";
+  for( auto const& row : _mICRES ){
+    auto sg = FFModel::_dag->subgraph( 1, &row );
+    for( auto const* op : sg.l_op )                                    // any derivative node at all?
+      if( op && op->type >= FFOp::EXTERN && op->name() == dname ) return false;
+    FFVar const* the_state = nullptr;  size_t nst = 0;
+    for( auto const* v : sg.v_indep )
+      if( stateId.count( v->id().second ) ){ ++nst; the_state = v; }
+    if( nst != 1 ) return false;                                      // not pinned by one state
+    FFVar const xs = *the_state;
+    auto J = FFModel::_dag->SFAD( 1, &row, 1, &xs );                   // ONE entry: its coefficient
+    bool ok = ( std::get<0>( J ) == 1 && std::get<3>( J )[0].cst() && std::get<3>( J )[0].num().val() != 0. );
+    delete[] std::get<1>( J );  delete[] std::get<2>( J );  delete[] std::get<3>( J );
+    if( !ok ) return false;                                           // coefficient not a nonzero constant
   }
+  _explicitIC = true;
   return true;
 }
 

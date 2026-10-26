@@ -8,6 +8,7 @@
 
 #undef  CRONOS__ODESLV_BASE_DEBUG
 
+#include <chrono>
 #include <limits>
 #include <utility>
 #include <cstdint>
@@ -921,7 +922,10 @@ ODESLV_BASE::_RHS_D_SET
 
   // Generate Jacobian using sparse forward AD
   delete[] std::get<1>(_pJAC); delete[] std::get<2>(_pJAC); delete[] std::get<3>(_pJAC);
-  _pJAC = _dag->SFAD( _nx, _pRHS, _nx, _pX ); // Jacobian in sparse format, ordered columnwise
+  // Row by row, each row against only the states it depends on (BASE_DE::_sfad_by_row): the one-call
+  // SFAD is O(nx^2) however sparse the result, and this runs at EVERY solve -- 1.8 s at 1600 states,
+  // against a 0.44 s integration (2026-10-25).  Column-ordered, as the pointer loop below requires.
+  _pJAC = _sfad_by_row( _dag, std::vector<FFVar>( _pRHS, _pRHS + _nx ), std::vector<FFVar>( _pX, _pX + _nx ) );
   _pJACCOLNDX.resize( _nx+1 );
   for( unsigned ie=0, ic=0; ie<std::get<0>(_pJAC); ++ie ){
 #ifdef CRONOS__ODESLV_BASE_DEBUG

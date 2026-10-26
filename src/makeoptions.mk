@@ -34,7 +34,7 @@ FLAG_SUNDIALS =
 
 PROF = #-pg
 OPTIM = -O2
-DEBUG = #-g
+DEBUG = #-g #-fsanitize=thread -fno-omit-frame-pointer -g
 WARN  = -Wall -Wno-misleading-indentation -Wno-unknown-pragmas -Wno-parentheses -Wno-unused-result
 CPP17 = -std=c++17
 CC    = gcc
@@ -43,7 +43,7 @@ CPP   = g++
 
 # <<-- NO CHANGE BEYOND THIS POINT -->>
 
-FLAG_CPP  = $(DEBUG) $(OPTIM) $(CPP17) $(WARN) $(PROF)
+FLAG_CPP  = -UNDEBUG $(DEBUG) $(OPTIM) $(CPP17) $(WARN) $(PROF)
 LINK      = $(CPP)
 FLAG_LINK = $(PROF)
 

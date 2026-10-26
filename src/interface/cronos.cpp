@@ -20,7 +20,7 @@ void mc_ocfeslv(py::module_&);
 void mc_ffocfe(py::module_&);
 
 // What this binary was compiled with (the macros CMake sets on every source of the module).
-static constexpr char const* kVersion = "5.0.1";
+static constexpr char const* kVersion = "5.1.0";
 #if defined(CRONOS__WITH_KLU)
 static constexpr bool kKLU = true;
 #else
@@ -51,8 +51,9 @@ PYBIND11_MODULE(cronos, m)
 {
   m.doc() = R"doc(
 Python interface of CRONOS: models of differential-algebraic systems on the DAG of MC++ (``FFModel``), and their
-solvers -- ``ODESLV`` (CVODES, with forward and adjoint sensitivities) and ``OCFESLV`` (orthogonal collocation on
-finite elements) -- plus their embedding as DAG operations (``FFODESLV``, ``FFOCFESLV``, ``FFOCFERES``).
+solvers -- ``ODESLV`` (CVODES, on the divided form), ``DAESLV`` (IDAS, on the undivided form, with consistent
+initialisation), both with forward and adjoint sensitivities, and ``OCFESLV`` (orthogonal collocation on
+finite elements) -- plus their embedding as DAG operations (``FFODESLV``, ``FFDAESLV``, ``FFOCFESLV``, ``FFOCFERES``).
 
 The DAG types (``FFGraph``, ``FFVar``, ``FFOp``) and the operators ``FFPartial``, ``FFIntegral``, ``FFEval`` come
 from ``pymcpp``, which this module imports.

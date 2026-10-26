@@ -1,7 +1,7 @@
 # This is the main makefile for CRONOS
 # Run `make help' for a list of available targets
 
-export version = 5.0.1
+export version = 5.1.0
 
 export rootpath       = $(shell cd .. ; pwd)
 export srcpath        = $(rootpath)/src

@@ -42,7 +42,7 @@ set(CMAKE_CXX_FLAGS_RELEASE
 
 # Options
 option(ENABLE_HSL "Enable HSL libraries" OFF)
-option(ENABLE_EXAMPLES "Build the test drivers in test/ODESLVS and test/OCFESLV" OFF)
+option(ENABLE_EXAMPLES "Build the test drivers in test/ODESLV, test/DAESLV and test/OCFESLV" OFF)
 option(ENABLE_PYTHON "Build the cronos Python extension module" ON)
 option(MC__USE_FADBAD "Use the FADBAD++ forward-AD implementation" OFF)
 

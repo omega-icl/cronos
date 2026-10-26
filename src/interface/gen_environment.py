@@ -77,7 +77,7 @@ REGISTRY = {
   'CRONOS_DUMP_COLS': ( 'rank', '`=c1,c2,...`: dump the nonzeros of selected columns of the audited Jacobian.' ),
   'CRONOS_DUMP_J': ( 'rank', '`=<file>`: write the audited Jacobian in coordinate form.' ),
   # solve diagnostics
-  'CRONOS_DISPLAY_LEVEL': ( 'audit', 'Floor for `DISPLAY_LEVEL`, an integer `0`..`9`: raises it wherever a driver set it lower, never lowers it, and does nothing when unset.  Applied to the setup and solve reports alike, so a whole sweep can be run with the classification logged without editing drivers.  A value that is not an integer 0..9 is reported once and ignored.' ),
+  'CRONOS_DISPLAY_LEVEL': ( 'audit', 'Default for `DISPLAY_LEVEL`, an integer `0`..`9`: applies wherever a driver has NOT set it -- a value the driver sets, `0` included, stands -- and does nothing when unset (the default is then `0`).  Resolved in the solvers\' Options constructors and at setup; a floor until 2026-10-25, which raised a driver\'s explicit `0`.' ),
   'CRONOS_SOLVE_VERBOSE': ( 'solve', 'Force `SOLVE.VERBOSE` on in every driver (force-on only), to trace a whole sweep\'s solves without editing drivers.' ),
   'CRONOS_AUDIT_BETA': ( 'solve', 'After each IC_TRACE solve with the projection applied: beta = Z^T lambda and the violation it absorbs.' ),
   'CRONOS_AUDIT_SENS': ( 'solve', '||dF/dvar|| restricted to the tau columns, once per sensitivity setup.' ),

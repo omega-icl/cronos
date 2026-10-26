@@ -8,11 +8,12 @@ carrying the include paths, compile definitions and link libraries; the `cronos`
 
 ```
 <cronosroot>/CMakeLists.txt
-<cronosroot>/src/*.hpp                      the 11 CRONOS headers
-<cronosroot>/src/interface/*.cpp            the 7 binders (ffdom ffmodel odeslv ffode ocfeslv ffocfe cronos)
-<cronosroot>/src/interface/gen_*_options.hpp  the 4 generated option headers the binders include
+<cronosroot>/src/*.hpp                      the CRONOS headers
+<cronosroot>/src/interface/*.cpp            the 10 binders (ffdom ffmodel odeslv daeslv base_kinsol ffode ffdae ocfeslv ffocfe cronos)
+<cronosroot>/src/interface/gen_*_options.hpp  the 6 generated option headers the binders include
 <cronosroot>/extern/pybind11                optional vendored pybind11 (else an installed package is used)
-<cronosroot>/test/ODESLVS/*.cpp             ODESLV drivers
+<cronosroot>/test/ODESLV/*.cpp              ODESLV drivers
+<cronosroot>/test/DAESLV/*.cpp              DAESLV drivers
 <cronosroot>/test/OCFESLV/*.cpp             OCFESLV drivers (+ helpers such as test_deriv_utils.hpp)
 <cronosroot>/notebook/                      optional: tutorials, installed as-is
 ```
@@ -45,7 +46,7 @@ cmake --install build --prefix <prefix>
 | `CRONOS_ARMA_WRAPPER` | OFF | link Armadillo's runtime wrapper library instead of using Armadillo header-only with BLAS/LAPACK (and SuperLU) linked directly; the wrapper also pulls in whatever Armadillo was built with, e.g. ARPACK and MPI |
 | `ENABLE_PYTHON` | ON | the `cronos` module |
 | `CRONOS_STUBS` | ON | generate and install `cronos.pyi` (needs `pybind11-stubgen` and `pymcpp` importable; `PYMCPP_DIR` points at the directory holding `pymcpp` if it is not on the Python path) |
-| `ENABLE_EXAMPLES` | OFF | build every driver in `test/ODESLVS` and `test/OCFESLV`, register each with CTest (labels `ODESLVS`, `OCFESLV`) |
+| `ENABLE_EXAMPLES` | OFF | build every driver in `test/ODESLV`, `test/DAESLV` and `test/OCFESLV`, register each with CTest (labels `ODESLV`, `DAESLV`, `OCFESLV`) |
 | `CRONOS_CXX_STANDARD` | 17 | as the Make setup; 20 accepted |
 | `CUSTOM_PYTHON_PATH` | | Python executable or virtual-environment root, as MC++ |
 

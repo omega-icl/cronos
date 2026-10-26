@@ -10,12 +10,14 @@ of factorable functions provide the model representation and automatic different
 * **`FFModel`** declares a model on an MC++ DAG: states, inputs and constants, their domains (time and space,
   discretised by finite elements), the equations with their role (interior, initial, boundary, ...), and the
   outputs.
-* **`ODESLV`** (`odeslvs_cvodes.hpp`) integrates ODE/DAE models with SUNDIALS CVODES, with forward and adjoint
-  sensitivities.
+* **`ODESLV`** (`odeslv_cvodes.hpp`) integrates ODE models with SUNDIALS CVODES, on the model's divided form,
+  with forward and adjoint sensitivities.
+* **`DAESLV`** (`daeslv_idas.hpp`) integrates DAE models with SUNDIALS IDAS, on the undivided form -- a mass
+  matrix and a residual -- with consistent initialisation and the same sensitivities and interface as `ODESLV`.
 * **`OCFESLV`** (`ocfeslv.hpp`) solves PDE/DAE models by orthogonal collocation on finite elements, either as one
   monolithic system or by marching through the time elements, with forward and adjoint sensitivities and state
   transitions (jumps); the monolithic time discretisation is causal, so both modes solve the same discretisation.
-* **`FFODESLV`, `FFOCFESLV`, `FFOCFERES`** embed a solver -- or the collocation residuals -- in an MC++ DAG as an
+* **`FFODESLV`, `FFDAESLV`, `FFOCFESLV`, `FFOCFERES`** embed a solver -- or the collocation residuals -- in an MC++ DAG as an
   external operation, so a simulation becomes a DAG function that can be composed, evaluated, sampled in parallel
   and differentiated.
 
@@ -34,7 +36,7 @@ A Python module, `cronos`, exposes all of this on top of PyMC++, MC++'s Python l
 | SuiteSparse | 7.x recommended (older found by library search) | KLU (LGPL-2.1+); UMFPACK and SPQR optional (GPL-2.0-or-later, see below) |
 | SuperLU | 5.2.x | OCFESLV's default sparse factorisation, through Armadillo |
 | Eigen | >= 3.3 | optional sparse QR |
-| SUNDIALS | **>= 7**, built with KLU (`-DENABLE_KLU=ON`) | CVODES for ODESLV |
+| SUNDIALS | **>= 7**, built with KLU (`-DENABLE_KLU=ON`) | CVODES for ODESLV, IDAS for DAESLV, KINSOL for the consistent-initialisation solve of both |
 | Python | 3.10+ (development headers) | for the `cronos` module |
 | pybind11 | **>= 3.0.3, not 3.1.0** (3.0.4 recommended) | Python bindings |
 | pybind11-stubgen | optional | generates the `cronos.pyi` type stub |

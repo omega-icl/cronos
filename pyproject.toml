@@ -9,7 +9,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "cronos-mcpp"                    # "cronos" is taken on PyPI; the module still imports as `cronos`
-version = "5.0.1"                       # keep equal to cronos.__version__ (src/interface/cronos.cpp)
+version = "5.1.0"                       # keep equal to cronos.__version__ (src/interface/cronos.cpp)
 description = "Simulation and sensitivity analysis of ODE, DAE and PDE models on MC++ factorable-function DAGs"
 readme = "README.md"
 license = "EPL-2.0"                     # GPL-2.0-or-later is a Secondary License (see LICENSE): the GPL build

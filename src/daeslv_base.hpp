@@ -6,6 +6,7 @@
 #ifndef CRONOS__DAESLV_BASE_HPP
 #define CRONOS__DAESLV_BASE_HPP
 
+#include <chrono>
 #include <string>
 #include <vector>
 
@@ -163,9 +164,15 @@ bool
 DAESLV_BASE::_extract_dae
 ()
 {
+  auto _t0 = std::chrono::steady_clock::now();
   if( !_extract_from_model() ) return false;
+  if( options.DISPLAY_LEVEL >= 2 ) std::cerr << "DAESLV_BASE::_extract_dae [timing] extract_from_model  "
+    << std::fixed << std::setprecision(2) << std::chrono::duration<double,std::milli>( std::chrono::steady_clock::now() - _t0 ).count() << " ms\n";
+  _t0 = std::chrono::steady_clock::now();
   if( _mMASS.empty() ){ _extractError = "no evolution rows were collected"; return false; }
   if( !_build_id() ) return false;
+  if( options.DISPLAY_LEVEL >= 2 ) std::cerr << "DAESLV_BASE::_extract_dae [timing] build_id            "
+    << std::fixed << std::setprecision(2) << std::chrono::duration<double,std::milli>( std::chrono::steady_clock::now() - _t0 ).count() << " ms\n";
   // IDAS integrates a SQUARE residual: one row per unknown.  The unknowns are the states, so this is the
   // place a mis-posed model shows up, before any IDACalcIC is asked to make sense of it.
   if( n_residual() != _nx ){

@@ -1,14 +1,16 @@
-# %% [markdown]
+#!/usr/bin/env python
+# coding: utf-8
+
 # # Simulation of a Serial Batch Reactor Network
-#
+# 
 # The purpose of this tutorial is to implement and simulate a serial batch chemical reactor network using the libraries `pymcpp` (MC++) and `cronos` (CRONOS).
-#
+# 
 # The network consists of two batch reactors connected in series. The reaction mechanism characterizing the two reactors is the same:
 # $$\begin{equation*}
 #     2{\sf A} \xrightarrow{k_1} {\sf B} \xrightarrow{k_2} {\sf C}
 # \end{equation*}$$
 # where component ${\sf B}$ is the desired product.
-#
+# 
 # The reactor dynamics are ordinary differential equations (ODEs) that describe the evolution of component molar concentrations in continuous time:
 # $$\begin{align*}
 #         \dot{c}_{{\sf A},j}(t) &= -2k_{1,j}(T_j)\,c_{{\sf A},j}(t)^2\\
@@ -16,30 +18,33 @@
 #         \dot{c}_{{\sf C},j}(t) &= k_{2,j}(T_j)\,c_{{\sf B},j}(t)
 # \end{align*}$$
 # where $c_{i,j}(t)$ ($\text{kmol m}^{-3}$) describes the molar concentration of component $i={\sf A},{\sf B},{\sf C}$ in reactor $j=1,2$; and $T_j$ (K) the temperature in reactor $j$.
-#
+# 
 # The system adheres to Arrhenius kinetics:
 # $$\begin{equation*}
 #     k_{r,j}(T) = k^\circ_{r,j} \exp\left(-\frac{E_{r,j}}{RT}\right)
 # \end{equation*}$$
 # where $T$ (K) is the reaction temperature; $k_{r,j}$ the temperature-dependent rate constant of reaction step $r=1,2$ for reactor $j$; $k^\circ_{r,j}$ the pre-exponential factor; $E_{r,j}$ the activation energy; and $R$ denotes the ideal gas constant.
-#
+# 
 # The time is normalized by the batch duration $\tau_j$, $t \in [0,1]$, so that $\tau_j$ appears as a parameter of the dynamics.
 
-# %% [markdown]
 # We start by importing both the `pymcpp` and `cronos` libraries. Set `CRONOS_PYPATH` (or edit the cell) if the modules are not on the Python path.
 
-# %%
+# In[1]:
+
+
 import pymcpp
 import cronos
 from pymcpp import FFGraph, FFPartial, FFEval
 from cronos import FFDom, FFModel, ODESLV, FFODESLV
 
-# %% [markdown]
+
 # ## A single batch reactor
-#
+# 
 # The model is declared on a DAG: the independent variable $t$, the states, the parameters (batch duration, temperature and initial concentrations) and the constants (kinetic parameters). The derivatives and point evaluations along $t$ are DAG operations: `FFPartial` and `FFEval`.
 
-# %%
+# In[2]:
+
+
 IVPDAG = FFGraph()
 
 # Independent variable (normalized time)
@@ -65,10 +70,12 @@ Ea2 = IVPDAG.add_var("Ea2")
 
 OpP, OpE = FFPartial(), FFEval()
 
-# %% [markdown]
+
 # A solver `ODESLV` is created and populated with the parametric initial value problem, through the `FFModel` interface: the time domain, the states, the inputs (parameters) and constants, the equations with their region and role, and the outputs:
 
-# %%
+# In[3]:
+
+
 IVP = ODESLV(IVPDAG)
 IVP.add_domain(t, FFDom(0., 1., 1))    # normalized time horizon, one stage
 IVP.set_evolution_domain(t)
@@ -83,8 +90,8 @@ R = 8.314  # J/mol·K
 k1 = kr1 * pymcpp.exp(-Ea1 / (R * T))
 k2 = kr2 * pymcpp.exp(-Ea2 / (R * T))
 
-INTERIOR = FFModel.EqnOptions(FFModel.EqnRole.INTERIOR)
-INITIAL  = FFModel.EqnOptions(FFModel.EqnRole.INITIAL)
+INTERIOR = FFModel.EqnRole.INTERIOR
+INITIAL  = FFModel.EqnRole.INITIAL
 T_INT = FFDom.ALL - FFDom.LB           # (0,1]: the dynamics
 IVP.add_equation(OpP(cA, t) - tau * (-2 * k1 * cA**2),         [t], [T_INT], INTERIOR)
 IVP.add_equation(OpP(cB, t) - tau * (k1 * cA**2 - k2 * cB),    [t], [T_INT], INTERIOR)
@@ -97,13 +104,14 @@ for c in (cA, cB, cC):                 # batch-end concentrations
 IVP.setup()
 IVP.report()
 
-# %% [markdown]
+
 # The model report shows the declared model as the solver sees it: the equations written out with their regions, the outputs, the classification and the degrees of freedom.
 
-# %% [markdown]
 # A simulation of the first reactor for a batch duration $\tau=600~\rm min$ and temperature $T=750~\rm K$, starting from $c_{\sf A}=2~\text{kmol m}^{-3}$. The inputs and constants are given **by name**; the forward (`solve_fsens`) and adjoint (`solve_asens`) sensitivity analyses give the gradients of the batch-end concentrations with respect to the parameters:
 
-# %%
+# In[4]:
+
+
 values = {tau: [600.], T: [750.], cA0: [2.], cB0: [0.], cC0: [0.],
           kr1: [6.66e-3], Ea1: [2.52e3], kr2: [1.03], Ea2: [5e3]}
 
@@ -114,13 +122,12 @@ IVP.solve(values)
 IVP.solve_fsens(values)
 IVP.solve_asens(values)
 
-# %% [markdown]
-# The options of `ODESLV` combine the model options (`FFModel.Options`) and the CVODES options. They are
-# grouped: `SOLVE` holds what the integration does, `OUTPUT` what is recorded from it, and `INITIAL` how the
-# initial conditions are resolved; a few model-wide settings such as `DISPLAY_LEVEL` sit at the top level.
-# Each is documented (e.g. `help(ODESLV.Options.t_Solve.RTOL)`, or `help(IVP.options)` for all of them):
 
-# %%
+# The options of `ODESLV` combine the model options (`FFModel.Options`) and the CVODES options. They are grouped: `SOLVE` holds what the integration does, `OUTPUT` what is recorded from it, and `INITIAL` how the initial conditions are resolved; a few model-wide settings such as `DISPLAY_LEVEL` sit at the top level. Each is documented (e.g. `help(ODESLV.Options.t_Solve.RTOL)`, or `help(IVP.options)` for all of them):
+
+# In[5]:
+
+
 for group, name in (("SOLVE", "INTMETH"), ("SOLVE", "NLINSOL"), ("SOLVE", "LINSOL"),
                     ("SOLVE", "RTOL"), ("SOLVE", "ATOL"), ("SOLVE", "NMAX"),
                     ("OUTPUT", "RESRECORD"), ("INITIAL", "BYPASS_EXPLICIT"), (None, "DISPLAY_LEVEL")):
@@ -132,10 +139,12 @@ for group, name in (("SOLVE", "INTMETH"), ("SOLVE", "NLINSOL"), ("SOLVE", "LINSO
         doc = doc.rsplit(")", 1)[-1].strip()
     print("%-22s = %-24s %s" % (label, getattr(holder, name), doc))
 
-# %% [markdown]
+
 # The gradients of the batch-end concentrations, one row per parameter and one column per output, agree between forward and adjoint sensitivity analysis:
 
-# %%
+# In[6]:
+
+
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -153,12 +162,14 @@ for n, row in zip(names, G_fwd):
     print("%-5s %14.6e %14.6e %14.6e" % ((n,) + tuple(row)))
 print("max |forward - adjoint| =", np.abs(G_fwd - G_adj).max())
 
-# %% [markdown]
+
 # ### Trajectories
-#
+# 
 # The trajectories are displayed from the `results_solve` field: NumPy arrays of the recorded time points `t`, states `x` (in the order of `var_state`) and quadratures `q`. The normalized time is scaled back by $\tau$:
 
-# %%
+# In[7]:
+
+
 IVP.solve(values)
 
 TAU = values[tau][0]
@@ -174,10 +185,12 @@ plt.plot(res.t * TAU, res.x[:, 2], "-g", label="$c_{C,1}$")
 plt.legend(loc="best")
 plt.show()
 
-# %% [markdown]
+
 # The sensitivity trajectories of `solve_fsens` are in `results_fsens`: `xp[i]` holds the sensitivities of the states with respect to the $i$-th sensitivity direction (here the parameters, in the order of `var_parameter`). The sensitivities of the concentrations with respect to the temperature $T$:
 
-# %%
+# In[8]:
+
+
 IVP.solve_fsens(values)
 sens = IVP.results_fsens
 iT = names.index("T")
@@ -191,7 +204,10 @@ plt.plot(sens.t * TAU, sens.xp[iT, :, 2], "-g", label=r"$\partial c_{C,1}/\parti
 plt.legend(loc="best")
 plt.show()
 
-# %%
+
+# In[9]:
+
+
 IVP.solve_asens(values)
 adj = IVP.results_asens
 iF = 2 # Output cC(1)
@@ -205,12 +221,14 @@ plt.plot(adj.t * TAU, adj.l[iT, :, 2], "-g", label=r"$\lambda_{C,1}$")
 plt.legend(loc="best")
 plt.show()
 
-# %% [markdown]
+
 # ### Both reactors in series
-#
+# 
 # The second reactor starts from the batch-end concentrations of ${\sf A}$ and ${\sf B}$ in the first one, without ${\sf C}$ (separated between the reactors). Two successive simulations with the same solver give the trajectories through the network, here for $\tau_1=\tau_2=400~\rm min$ and $T_1=T_2=800~\rm K$:
 
-# %%
+# In[10]:
+
+
 kin = {kr1: [6.66e-3], Ea1: [2.52e3], kr2: [1.03], Ea2: [5e3]}
 TAU1, T1v, TAU2, T2v = 400., 800., 400., 800.
 
@@ -234,18 +252,23 @@ plt.text(TAU1 + TAU2 / 2, plt.ylim()[1] * 0.95, "reactor 2", ha="center")
 plt.legend(loc="center right")
 plt.show()
 
-# %% [markdown]
+
 # ## The reactor network as a DAG
-#
+# 
 # To simulate the two batch reactors connected in series as one function, we define a separate DAG and embed the solver twice as an external operation `FFODESLV`. Each embedding maps the solver's inputs to DAG variables: map 1 lists the inputs differentiated through the solver's sensitivities, map 2 the remaining ones (here the constants), whose values pass through the DAG:
 
-# %%
+# In[11]:
+
+
 DAG = FFGraph()
 OpIVP = FFODESLV()
 IVP.options.SOLVE.VERBOSE    = 0  # turn off display during numerical simulation
 IVP.options.OUTPUT.RESRECORD = 0  # turn off trajectory record
 
-# %%
+
+# In[12]:
+
+
 # reactor #1 initial concentrations
 cA1_0 = DAG.add_var("cA1_0")
 cB1_0 = DAG.add_var("cB1_0")
@@ -271,7 +294,10 @@ DAG.output([cA1_f, cB1_f, cC1_f])
 
 print(cA1_f, " = ", cA1_f.str())
 
-# %%
+
+# In[13]:
+
+
 # reactor #2 initial concentrations
 cC2_0 = DAG.add_var("cC2_0")
 
@@ -293,25 +319,32 @@ cB2_f.set("cB2_f")
 cC2_f.set("cC2_f")
 DAG.output([cA2_f, cB2_f, cC2_f])
 
-# %% [markdown]
+
 # Lastly, we define the two process outputs of interest:
 
-# %%
+# In[14]:
+
+
 xC1_f = cC1_f / (cA1_f + cB1_f + cC1_f)
 xC1_f.set("xC1_f")
 
 print(xC1_f, " = ", xC1_f.str())
 
-# %%
+
+# In[15]:
+
+
 xB2_f = cB2_f / (cA2_f + cB2_f + cC2_f)
 xB2_f.set("xB2_f")
 
 print(xB2_f, " = ", xB2_f.str())
 
-# %% [markdown]
+
 # This DAG can be evaluated as any other DAG using the `eval` method; the result agrees with the two successive simulations above:
 
-# %%
+# In[16]:
+
+
 inputs = [tau1, T1, tau2, T2, kr11, Ea11, kr21, Ea21, cA1_0, cB1_0, cC1_0, kr12, Ea12, kr22, Ea22, cC2_0]
 nominal = [400, 800, 400, 800, 6.66e-3, 2.52e3, 1.03, 5e3, 2, 0, 0, 6.66e-3, 2.52e3, 1.03, 5e3, 0]
 [xC1_f_val, xB2_f_val] = DAG.eval([xC1_f, xB2_f], inputs, nominal)
@@ -319,10 +352,12 @@ print("xC1_f =", xC1_f_val)
 print("xB2_f =", xB2_f_val)
 print("from the simulations above: xC1_f =", traj1[-1, 3] / traj1[-1, 1:].sum(), " xB2_f =", traj2[-1, 2] / traj2[-1, 1:].sum())
 
-# %% [markdown]
+
 # Finally, we conduct multiple DAG evaluations over the operation domain $(\tau_j,T_j)\in [250,800] \times [250, 1000]$:
 
-# %%
+# In[17]:
+
+
 from scipy.stats import qmc
 
 sampler = qmc.Sobol(d=4, scramble=False, seed=1)
@@ -334,16 +369,22 @@ samInput[:, 3] = 250 + samInput[:, 3] * (1000 - 250)
 
 print(samInput)
 
-# %%
+
+# In[18]:
+
+
 DAG.options.MAXTHREAD = 0  # use all available threads
+
 samOutput = DAG.veval([xC1_f, xB2_f], [tau1, T1, tau2, T2], samInput.tolist(),
                       [kr11, Ea11, kr21, Ea21, cA1_0, cB1_0, cC1_0, kr12, Ea12, kr22, Ea22, cC2_0],
                       [6.66e-3, 2.52e3, 1.03, 5e3, 2, 0, 0, 6.66e-3, 2.52e3, 1.03, 5e3, 0],
                       walltime=True)
-
 print(np.array(samOutput))
 
-# %%
+
+# In[19]:
+
+
 samOutput = np.array(samOutput)
 
 fig = plt.figure(figsize=(14, 9))
@@ -357,13 +398,16 @@ ax.view_init(elev=25, azim=200)
 
 plt.show()
 
-# %% [markdown]
+
 # We can also evaluate the derivatives of the two outputs $x_{C,1}, x_{B,2}$ with respect to any of the inputs $\tau_1,T_1,\tau_2,T_2$. The derivatives of the `FFODESLV` operations are computed by forward or adjoint sensitivity analysis (`FFODESLV.options.GRADIENT`):
 
-# %%
+# In[20]:
+
+
 [Row, Col, Grad] = DAG.fdiff([xC1_f, xB2_f], [tau1, T1, tau2, T2])
 print("Row:", Row)
 print("Col:", Col)
 
 Grad_val = DAG.eval(Grad, inputs, nominal)
 print("Grad =", Grad_val)
+

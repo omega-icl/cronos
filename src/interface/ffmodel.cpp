@@ -550,6 +550,32 @@ options : FFModel.EqnOptions, optional
           py::arg("masks") = std::vector<int>(),
           py::arg_v("options", M::EqnOptions(), "FFModel.EqnOptions()"),
           "Declare several equations on the same region.")
+            // the ROLE given directly: add_equation(e, doms, masks, FFModel.EqnRole.INITIAL).  pybind tries
+      // the overloads in order, so these sit AFTER the EqnOptions pair and catch the calls that pass
+      // a role where EqnOptions is expected -- which C++ accepts by conversion and Python does not.
+      .def(
+          "add_equation",
+          [](M& self, mc::FFVar const& e, std::vector<mc::FFVar> const& d,
+             std::vector<int> const& l, M::EqnRole r, int b)
+          { self.add_equation(e, d, l, M::EqnOptions(r, b)); },
+          py::arg("eqn"), py::arg("doms") = std::vector<mc::FFVar>(),
+          py::arg("masks") = std::vector<int>(), py::arg("role"), py::arg("block") = 0,
+          R"doc(
+Declare one equation with its ROLE, the common case.
+
+Equivalent to passing ``options=FFModel.EqnOptions(role, block)``: the block id
+defaults to 0 and the remaining options to what that role resolves.
+)doc")
+      .def(
+          "add_equation",
+          [](M& self, std::vector<mc::FFVar> const& e,
+             std::vector<mc::FFVar> const& d, std::vector<int> const& l,
+             M::EqnRole r, int b) { self.add_equation(e, d, l, M::EqnOptions(r, b)); },
+          py::arg("eqns"), py::arg("doms") = std::vector<mc::FFVar>(),
+          py::arg("masks") = std::vector<int>(), py::arg("role"), py::arg("block") = 0,
+          R"doc(
+Declare several equations sharing one ROLE.
+)doc")
       .def("add_output", &add_output, py::arg("fct"),
            py::arg("doms")  = std::vector<mc::FFVar>(), py::kw_only(),
            py::arg("point") = std::nullopt, py::arg("side") = std::nullopt,

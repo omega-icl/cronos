@@ -17,14 +17,23 @@ for model development and analysis -- can compose, evaluate and differentiate.
 * **Model declaration** (`FFModel`): states, inputs and constants on an MC++ DAG; one or several domains -- time
   and space -- each discretised into finite elements with a collocation node family; equations with their role
   (interior, initial, boundary, interface, link, ...) and the region they hold on; point, distributed and integral
-  outputs; state transitions (jumps) at given times; automatic index reduction of DAEs and order reduction of PDEs.
-* **ODE/DAE integration** (`ODESLV`, header `odeslvs_cvodes.hpp`): with SUNDIALS CVODES, with forward and adjoint
-  sensitivities of the outputs with respect to the model's parameters and controls.
+  outputs; state transitions (jumps) at given times; automatic order reduction of PDEs, and index reduction of
+  DAEs -- by substitution (the default) or by the method of dummy derivatives (`REDUCE.DUMMY_DERIV`), which keeps
+  every constraint as a row and holds it to solver tolerance.
+* **ODE integration** (`ODESLV`, header `odeslv_cvodes.hpp`): with SUNDIALS CVODES, on the model's DIVIDED
+  form, with forward and adjoint sensitivities of the outputs with respect to the model's parameters and
+  controls.
+* **DAE integration** (`DAESLV`, header `daeslv_idas.hpp`): with SUNDIALS IDAS, on the UNDIVIDED form --
+  a mass matrix and a residual, so an implicit or singular mass matrix needs no division -- with consistent
+  initialisation by a shared KINSOL corrector (the high-index hidden constraints included, so a model declares
+  only its free initial data), forward sensitivities, adjoint sensitivities of several outputs in one backward
+  sweep, dense or sparse (KLU) linear algebra, and the same stage structure, transitions, recording and
+  parallel embedding as ODESLV.  The two solvers expose the same interface and share their base (`BASE_DE`).
 * **Orthogonal collocation on finite elements** (`OCFESLV`, header `ocfeslv.hpp`): PDE/DAE models on tensor
   domains, solved either as one monolithic system or by marching through the time elements -- both solve the
   same discretisation, since the monolithic time discretisation is causal -- with strong, weak (penalty) or
   trace imposition of the interface conditions, forward and adjoint sensitivities, and state transitions.
-* **Embedding in DAGs** (`FFODESLV`, `FFOCFESLV`, `FFOCFERES`): a solver, or the collocation residuals, as an
+* **Embedding in DAGs** (`FFODESLV`, `FFDAESLV`, `FFOCFESLV`, `FFOCFERES`): a solver, or the collocation residuals, as an
   external operation of an MC++ DAG: the simulation becomes a function that can be composed with other DAG
   operations, evaluated and sampled in parallel, and differentiated -- forward and reverse -- through the
   solver's own sensitivities.
@@ -36,12 +45,15 @@ The tutorials in `notebook/`, each a Jupyter notebook and a Python script:
 * `FFModel_tutorial` -- analysing a model before solving it: classification of the equations, index and order
   reduction, initial data for high-index DAEs, and the model report;
 * `ODESLV_tutorial` -- a serial batch-reactor network: ODE simulation, and forward and adjoint sensitivities;
+* `DAESLV_tutorial` -- a constant-pressure vented batch reactor, an index-2 DAE with a closed form to check
+  against: why it is index 2, consistent initialisation, forward and adjoint sensitivities, the solver as a
+  DAG operation, and parallel scenario evaluation;
 * `OCFESLV_tutorial` -- nonlinear heat conduction in a rod with a heater schedule: both solve modes, sensitivities,
   and the embedding in a DAG.
 
 ## Configuration
 
-CRONOS is configured through its options -- `FFModel::Options` for the model, `OCFESLV::Options` and the ODESLV
+CRONOS is configured through its options -- `FFModel::Options` for the model, `OCFESLV::Options` and the ODESLV/DAESLV
 options for the solvers -- available in Python as `options` on each object, with their documentation.  A few
 `CRONOS_*` environment variables remain: diagnostics that instrument a whole test sweep without editing any driver,
 a thread cap, and three test switches.  None is needed to run a model; they are listed in
@@ -78,6 +90,7 @@ open `doc/html/index.html`.
 src/                 the CRONOS headers (header-only library)
 src/interface/       the Python binders, the generated option headers, the check scripts
 test/ODESLV/         ODESLV test drivers
+test/DAESLV/         DAESLV test drivers
 test/OCFESLV/        OCFESLV test drivers (the corpus the solver is validated against)
 notebook/            tutorials (Python scripts and Jupyter notebooks)
 doc/                 the Doxygen configuration (CRONOS.dox) and main page (CRONOS.txt); ENVIRONMENT.md

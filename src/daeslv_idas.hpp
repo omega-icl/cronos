@@ -282,6 +282,19 @@ public:
     const
     { return _fp; }
 
+  //! @brief The per-stage trace printed under SOLVE.VERBOSE, in ODESLV_BASE::_print_interm's format.
+  //! DAESLV carried the FLAG -- added for symmetry on 2026-10-23 -- and nothing that read it, so the
+  //! option was true on both solvers while only ODESLV printed anything.  Written here rather than
+  //! hoisted: ODESLV_BASE::_print_interm is an overload set of three function TEMPLATES with separate
+  //! out-of-class definitions, and moving it belongs in its own commit.
+  static void _print_stage
+    ( double const t, size_t const n, double const* v, std::string const& var,
+      std::ostream& os = std::cout )
+    { if( !v ) return;
+      os << " @t = " << std::scientific << std::setprecision(6) << std::left << t << " :" << std::endl;
+      for( size_t i = 0; i < n; ++i )
+        os << " " << var << "[" << i << "] = " << v[i] << std::endl; }
+
   //! @brief Forward sensitivities with the inputs given BY NAME, as ODESLV_CVODES has it.
   STATUS solve_fsens
     ( std::vector<FFModel::InputVal> const& vIn, std::ostream& os=std::cout )
@@ -370,31 +383,31 @@ public:
   STATUS _solve_asens_one
     ( std::vector<double> const& p, size_t const ifct,
       std::vector<double> const& c = std::vector<double>(), std::ostream& os = std::cout )
-    { _asa = true;  _asaF = ifct;  _asaQ = (size_t)-1;
-      STATUS const st = solve( p, c, os );
-      _asa = false;  _asaF = (size_t)-1;  _asaQ = (size_t)-1;  return st; }
+    { return _solve_asens_set( p, std::vector<size_t>{ ifct }, c, os ); }
 
-  //! @brief The adjoint of EVERY output, in one call -- ODESLV_CVODES's signature and behaviour.
-  //! One backward sweep serves one output, so this runs nf of them and accumulates their gradients
-  //! into val_function_gradient(); _solve_asens_one is the single-output step it repeats.
+  //! @brief The adjoint of the outputs in @p fcts, every backward problem registered up front and
+  //! advanced TOGETHER by one IDASolveB per target, over a single forward solve.  This is the engine;
+  //! solve_asens() passes every output, _solve_asens_one() passes one.
+  STATUS _solve_asens_set
+    ( std::vector<double> const& p, std::vector<size_t> const& fcts,
+      std::vector<double> const& c = std::vector<double>(), std::ostream& os = std::cout )
+    { _asa = true;
+      _asaP.assign( fcts.size(), AdjProblem() );
+      _asaIdx.resize( fcts.size() );
+      for( size_t b = 0; b < fcts.size(); ++b ){ _asaP[b].ifct = fcts[b];  _asaIdx[b] = b; }
+      _asaCur = 0;
+      STATUS const st = solve( p, c, os );
+      _asa = false;  _asaCur = 0;  return st; }
+
+  //! @brief The adjoint of EVERY output, in one call -- ODESLV_CVODES's signature and behaviour:
+  //! nf backward problems registered up front and advanced together, one forward solve, one set of
+  //! checkpoints.  The gradient of every output lands in val_function_gradient().
   STATUS solve_asens
     ( std::vector<double> const& p, std::vector<double> const& c = std::vector<double>(),
       std::ostream& os = std::cout )
-    { std::vector< std::vector<double> > acc;
-      std::vector< std::vector< std::vector<double> > > lk;
-      STATUS st = NORMAL;
-      for( size_t r = 0; r < ( _nf? _nf: 1 ); ++r ){
-        st = _solve_asens_one( p, r, c, os );
-        if( st != NORMAL ) return st;
-        if( acc.empty() ) acc.assign( _np, std::vector<double>( _nf, 0. ) );
-        for( size_t j = 0; j < _np && j < _fp.size(); ++j )
-          if( r < _fp[j].size() ) acc[j][r] = _fp[j][r];     // keep this output's column
-        if( lk.empty() ) lk = _lk; else for( size_t k = 0; k < lk.size() && k < _lk.size(); ++k )
-          for( size_t f = 0; f < lk[k].size() && f < _lk[k].size(); ++f )
-            if( f == r ) lk[k][f] = _lk[k][f];
-      }
-      _fp.swap( acc );  _lk.swap( lk );
-      return st; }
+    { std::vector<size_t> all( _nf? _nf: 1 );
+      for( size_t r = 0; r < all.size(); ++r ) all[r] = r;
+      return _solve_asens_set( p, all, c, os ); }
 
   //! @brief Quadratures at every stage time, one row per time, _nq wide.  Each row is that STAGE's
   //! increment, not a running total: a quadrature restarts at zero on every stage, and summing them is
@@ -426,6 +439,7 @@ protected:
   size_t _nres;                              //!< rows of the residual (== _nx)
   size_t _ncoef;                             //!< mass-matrix entries actually present
   size_t _offJy, _offJyp;                    //!< where the dF/dy and dF/dy' entries start in _dEVAL
+  size_t _offJypdot = 0;  bool _hasJypdot = false;   //!< the time derivative of dF/dy' beside it (state-dependent mass)
   //! SOLVER-LOCAL dag, as ODESLV_BASE::_SETUP builds one: the model's description is INSERTED here and
   //! everything downstream -- residual, Jacobian blocks, evaluation -- happens in this graph.  Note the
   //! model's dag is never mutated: the mass coefficients and remainders are inserted FIRST and the
@@ -449,6 +463,8 @@ protected:
     std::vector<int>   ixJy, ixJyp;          //!< where each entry lands in the CSC value array
     std::vector<sunindextype> colptr, rowidx;
     size_t nJy = 0, nJyp = 0, nnz = 0, offJy = 0, offJyp = 0;
+    size_t offJypdot = 0;                      //!< d(dF/dy')/dt, one entry per Jyp entry, same (row, state); 0 size when Jyp is constant
+    bool   hasJypdot = false;
   };
   //! The consistent-IC system, assembled at setup from pieces that already exist: the stage-0 residual
   //! rows (the INTERIOR rows, which relate dx/dt to x) TOGETHER WITH the INITIAL rows, in the unknowns
@@ -489,13 +505,63 @@ protected:
   std::vector<double> _dQUAD;                //!< their values
   bool                _fsa = false;          //!< this solve carries forward sensitivities
   bool                _asa = false;          //!< ... or runs the adjoint instead
-  size_t              _asaF = (size_t)-1;    //!< which OUTPUT this backward problem is the adjoint of
-  size_t              _asaQ = (size_t)-1;    //!< the quadrature it reads, if it is an integral output
-  size_t              _asaWqCol = 0;         //!< the stage time the quadrature coefficient sits at
-  bool                _asaHasX = false;      //!< the output has a TERMINAL part, so lambda(T) is seeded
-  double              _asaWq = 1.;           //!< df/dq: the weight the running term enters with, which
-                                             //!< is 1 for a bare integral and need not be in general
-  std::vector<double> _asaHx;                //!< (df/dx)(T) -- the terminal seed
+  //! @brief One BACKWARD PROBLEM: the adjoint of one output.  Held per output so that every problem
+  //! can be registered up front and advanced TOGETHER by a single IDASolveB, as ODESLV_CVODES does
+  //! with CVodeB -- rather than re-running the whole solve once per output (2026-10-23).  A callback
+  //! reaches its own entry through IDASetUserDataB; see _asaIdx.
+  struct AdjProblem
+  {
+    size_t              ifct  = (size_t)-1;  //!< which OUTPUT this problem is the adjoint of
+    size_t              iq    = (size_t)-1;  //!< the quadrature it reads, if it is an integral output
+    size_t              wqcol = 0;           //!< the stage time the quadrature coefficient sits at
+    bool                hasx  = false;       //!< the output has a TERMINAL part, so lambda(T) is seeded
+    double              wq    = 1.;          //!< df/dq: the weight the running term enters with
+    std::vector<double> hx;                  //!< (df/dx)(T) -- the terminal seed
+    int                 indexB = -1;         //!< IDAS's handle for this backward problem
+  };
+  // memo for _eval_rows: see its body
+  bool                _evalMemoValid = false, _evalMemoFull = false;
+  FFSubgraph          _opRES;             //!< the residual rows alone, for _eval_residual
+  std::vector<FFVar>  _pivD;               //!< the dummy-pivot matrix on the private DAG (empty: no dummies)
+  //! @brief Determinant of the dummy-pivot matrix at (t, y): the reduced system is index 1 only while it is
+  //! nonzero.  Evaluated at stage boundaries under DISPLAY_LEVEL >= 2 and on an IDASolve failure, so a
+  //! degenerate STATIC pivot is reported by name rather than as an mxstep failure at some t.
+  double _dummy_pivot_det( double const t, double const* y )
+  {
+    size_t const n = dummy_derivatives().size();
+    if( _pivD.size() != n*n || !n ) return 0.;
+    _dVAR[0] = t;
+    for( size_t i = 0; i < _nx; ++i ) _dVAR[1+i] = y[i];
+    std::vector<double> D( n*n, 0. );
+    _dag->eval( n*n, _pivD.data(), D.data(), _vVAR.size(), _vVAR.data(), _dVAR.data() );
+    double det = 1.;                                         // Gaussian elimination with partial pivoting
+    for( size_t r = 0; r < n; ++r ){
+      size_t p = r;  for( size_t rr = r+1; rr < n; ++rr ) if( std::fabs( D[rr*n+r] ) > std::fabs( D[p*n+r] ) ) p = rr;
+      if( p != r ){ for( size_t k = 0; k < n; ++k ) std::swap( D[r*n+k], D[p*n+k] ); det = -det; }
+      if( D[r*n+r] == 0. ) return 0.;
+      det *= D[r*n+r];
+      for( size_t rr = r+1; rr < n; ++rr ){ double const f = D[rr*n+r] / D[r*n+r]; for( size_t k = r; k < n; ++k ) D[rr*n+k] -= f * D[r*n+k]; }
+    }
+    return det;
+  }
+  std::vector<double> _dWRKres;
+  double              _evalMemoT = 0.;
+  size_t              _evalMemoStage = 0, _evalStageTag = 0;
+  std::vector<double> _evalMemoY, _evalMemoYp;
+  std::vector<AdjProblem> _asaP;              //!< one per output while the adjoint runs
+  std::vector<size_t>     _asaIdx;            //!< stable addresses for IDASetUserDataB
+  size_t                  _asaCur = 0;        //!< the problem the scalar accessors below refer to
+
+  // Step (a) of the refactor: the six per-output members are now fields of AdjProblem, reached through
+  // these names so that nothing else moves in this commit.  _asaCur is 0 throughout while _asaP holds
+  // one problem; steps (b)-(d) replace these with per-problem lookups at the call sites.
+  size_t&              _asaF_()     { return _asaP[_asaCur].ifct; }
+  size_t&              _asaQ_()     { return _asaP[_asaCur].iq; }
+  size_t&              _asaWqCol_() { return _asaP[_asaCur].wqcol; }
+  bool&                _asaHasX_()  { return _asaP[_asaCur].hasx; }
+  double&              _asaWq_()    { return _asaP[_asaCur].wq; }
+  std::vector<double>& _asaHx_()    { return _asaP[_asaCur].hx; }
+
   std::vector< std::vector< std::vector<double> > > _sk;   //!< sensitivities at every stage time
 
   std::vector< std::vector< std::vector<double> > > _qpk;  //!< quadrature sensitivities per stage time
@@ -565,9 +631,12 @@ protected:
   //! adjoint is algebraic in lambda, inheriting the index structure exactly as IDASetId does forward.
   //! Jyp and Jy are the SAME stage-plan blocks the state residual and the sensitivity residual use.
   int IDRESB__
-    ( sunrealtype tt, N_Vector yy, N_Vector yp, N_Vector yyB, N_Vector ypB, N_Vector rrB, void* )
+    ( sunrealtype tt, N_Vector yy, N_Vector yp, N_Vector yyB, N_Vector ypB, N_Vector rrB, void* ud )
     override
     {
+      // which backward problem this call belongs to.  IDAS hands back the pointer given to
+      // IDASetUserDataB, as CVODES does for ODESLV's _ifct; the void* was discarded before.
+      if( ud ) _asaCur = *static_cast<size_t const*>( ud );
       _eval_rows( tt, N_VGetArrayPointer( yy ), N_VGetArrayPointer( yp ) );
       double const* lam = N_VGetArrayPointer( yyB );
       double const* lap = N_VGetArrayPointer( ypB );
@@ -575,27 +644,186 @@ protected:
       for( size_t i = 0; i < _nx; ++i ) r[i] = 0.;
       for( size_t e = 0; e < _nJyp; ++e ) r[ _cJyp[e] ] += _dEVAL[ _offJyp + e ] * lap[ _rJyp[e] ];
       for( size_t e = 0; e < _nJy;  ++e ) r[ _cJy[e]  ] -= _dEVAL[ _offJy  + e ] * lam[ _rJy[e]  ];
+      if( _hasJypdot )                                     // + (dF_y'/dt)^T lambda: see _build_plans
+        for( size_t e = 0; e < _nJyp; ++e ) r[ _cJyp[e] ] += _dEVAL[ _offJypdot + e ] * lam[ _rJyp[e] ];
       // (dg/dy)^T for the objective's integrand: the quadrature this backward problem is the adjoint of
-      if( _asaQ < _nq )
+      if( _asaQ_() < _nq )
         for( size_t e = 0; e < _nQy; ++e )
-          if( (size_t)_rQy[e] == _asaQ ) r[ _cQy[e] ] += _asaWq * _dEVAL[ _offQy + e ];
+          if( (size_t)_rQy[e] == _asaQ_() ) r[ _cQy[e] ] += _asaWq_() * _dEVAL[ _offQy + e ];
       return 0;
     }
+
+  //! @brief Consistent initialisation of the ADJOINT at a point, by its own extended system
+  //!
+  //!      [ Jyp^T    0   ] [ lambda  ]   [   v    ]
+  //!      [ -Jy^T   Jyp^T ] [ lambda' ] = [ -g_y^T ]
+  //!
+  //! given the costate @p v = dJ/dx there and the integrand gradient @p gy, after _eval_rows() at that
+  //! point.  Linear in both unknowns, solved by structure in three square dense solves; see the body.
+  //! Used at the TERMINAL time, at an interior IMPULSE (v = Jyp^T lambda + h_x) and after a JUMP
+  //! (v = v^- from ic_adjoint), which were three copies of a dense Jyp^T inversion that is singular on
+  //! any model with an algebraic row (2026-10-23).
+  bool _adjoint_seed
+    ( SUNContext ctx, double const tt, std::vector<double> const& v_in, std::vector<double> const& gy,
+      double* lamv, double* lampv, std::string& why, std::vector<double>* dGdp_direct = nullptr )
+    {
+    std::vector<double> v = v_in;
+    // The terminal seed ( lambda(T), lambda'(T) ) of the adjoint, from its own rows at T, which are
+    // LINEAR in both -- the extended system
+    //      [ Jyp^T    0   ] [ lambda  ]   [  h_x   ]
+    //      [ -Jy^T   Jyp^T ] [ lambda' ] = [ -g_y^T ]
+    // in the same (value, derivative) shape the forward side initialises in.  Index reduction has
+    // left the forward system index 1, so its adjoint is index 1 and these rows are complete.
+    //
+    // Solved by STRUCTURE, generally (2026-10-25).  The first cut took the "differential block" of Jyp
+    // -- derivative-carrying rows by differential states -- to be square, true of every model then in
+    // the corpus and false of every dummy-reduced one: the level d_nA + nB' = 0 carries nB' as well as
+    // nB's own row does, so ne > nd.  It is also false of the substitution-reduced index-3 pendulum.
+    // Squareness is not needed:
+    //   (A) a differential-state row i of the first block,  sum_j Jyp[j][i] lam_j = h_x[i]  -- nd rows;
+    //   (B) an algebraic-state row i of the second block carries NO lambda' (that column of Jyp is
+    //       zero), so it reads  sum_j Jy[j][i] lam_j = g_y[i]  -- na rows;
+    //   together, n rows in the n unknowns lambda: ONE square dense solve.
+    //   (C) the differential-state rows of the second block then give lambda' of the derivative-
+    //       carrying equations:  sum_j Jyp[j][i] lam'_j = sum_j Jy[j][i] lam_j - g_y[i]  -- nd rows in
+    //       ne >= nd unknowns, solved in the minimum-norm sense through its normal equations when
+    //       ne > nd (lambda' of an equation beyond the differential count is free; the smallest
+    //       consistent choice is taken).  lambda' of an algebraic equation is undetermined and unused.
+    // An algebraic-state row of the FIRST block is a compatibility condition, 0 = h_x[i]: a point
+    // output on an algebraic state cannot be seeded, as before.
+    std::vector<bool> eqDif( _nx, false ), stDif( _nx, false );
+    for( size_t e = 0; e < _nJyp; ++e ){
+      eqDif[ (size_t)_rJyp[e] ] = true;  stDif[ (size_t)_cJyp[e] ] = true;
+    }
+    std::vector<size_t> eqIx, stIx;
+    for( size_t j = 0; j < _nx; ++j ) if( eqDif[j] ) eqIx.push_back( j );
+    for( size_t i = 0; i < _nx; ++i ) if( stDif[i] ) stIx.push_back( i );
+    size_t const nd = stIx.size(), ne = eqIx.size();
+    bool okT = true;
+    // A point output that reads an ALGEBRAIC state.  An algebraic-state row of the first block would
+    // read 0 = h_x[i] -- the seed was refused on it until 2026-10-25.  The index-1 theory does not require
+    // that: at T, given the differential states y_d, the n rows F(y_d, y_d', y_a, p) = 0 determine the n
+    // unknowns z = (y_d', y_a) -- square however the derivative-carrying rows outnumber the differential
+    // states, which they do on a dummy-reduced block -- so the output's TOTAL derivative w.r.t. y_d is
+    //     h_d - F_{y_d}^T w,   with   (dF/dz)^T w = [ 0 ; h_a ],   and a direct term   -F_p^T w
+    // (Cao, Li & Petzold's terminal condition, with z in place of y_a alone).  Project, zero h_a, and
+    // hand the direct term back for the gradient quadrature.  The ordinary index-1 adjoint for everyone;
+    // dummy derivatives make it reachable, since they turn states algebraic.
+    { bool reads_alg = false;
+      for( size_t i = 0; i < _nx; ++i ) if( !stDif[i] && std::fabs( v[i] ) > 0. ) reads_alg = true;
+      if( reads_alg ){
+        std::vector<size_t> zPos( _nx, (size_t)-1 );        // state -> its column in z (y_d' first, then y_a)
+        size_t nz = 0;
+        for( size_t i = 0; i < _nx; ++i ) if( stDif[i] )  zPos[i] = nz++;
+        for( size_t i = 0; i < _nx; ++i ) if( !stDif[i] ) zPos[i] = nz++;
+        if( nz != _nx ){ why = "the adjoint seed: z is not square"; return false; }
+        SUNMatrix AT = SUNDenseMatrix( (sunindextype)_nx, (sunindextype)_nx, ctx );  N_Vector w = N_VNew_Serial( (sunindextype)_nx, ctx );
+        for( size_t c = 0; c < _nx; ++c ) for( size_t r = 0; r < _nx; ++r ) SM_ELEMENT_D( AT, r, c ) = 0.;
+        // (dF/dz)^T: row = z component, column = equation
+        for( size_t e = 0; e < _nJyp; ++e )                   // y_d' columns of z, from Jyp
+          SM_ELEMENT_D( AT, (sunindextype)zPos[ (size_t)_cJyp[e] ], (sunindextype)_rJyp[e] ) += _dEVAL[ _offJyp + e ];
+        for( size_t e = 0; e < _nJy; ++e )                    // y_a columns of z, from Jy
+          if( !stDif[ (size_t)_cJy[e] ] )
+            SM_ELEMENT_D( AT, (sunindextype)zPos[ (size_t)_cJy[e] ], (sunindextype)_rJy[e] ) += _dEVAL[ _offJy + e ];
+        for( size_t i = 0; i < _nx; ++i ) N_VGetArrayPointer( w )[ zPos[i] ] = stDif[i]? 0.: v[i];
+        SUNLinearSolver LS = SUNLinSol_Dense( w, AT, ctx );
+        bool ok = LS && ( SUNLinSolSetup( LS, AT ) == 0 ) && ( SUNLinSolSolve( LS, AT, w, w, 0. ) == 0 );
+        if( LS ) SUNLinSolFree( LS );
+        if( !ok ){ SUNMatDestroy( AT ); N_VDestroy( w ); why = "the adjoint seed: dF/d(y_d', y_a) is singular at t=" + std::to_string( tt ) + " (the system is not index 1 there)"; return false; }
+        double const* wv = N_VGetArrayPointer( w );          // w is indexed by EQUATION
+        for( size_t e = 0; e < _nJy; ++e )                    // h_d <- h_d - F_{y_d}^T w
+          if( stDif[ (size_t)_cJy[e] ] ) v[ (size_t)_cJy[e] ] -= _dEVAL[ _offJy + e ] * wv[ (size_t)_rJy[e] ];
+        for( size_t i = 0; i < _nx; ++i ) if( !stDif[i] ) v[i] = 0.;
+        if( dGdp_direct ){                                    // -F_p^T w
+          dGdp_direct->assign( _np, 0. );
+          for( size_t e = 0; e < _nFp; ++e ) (*dGdp_direct)[ (size_t)_cFp[e] ] -= _dEVAL[ _offFp + e ] * wv[ (size_t)_rFp[e] ];
+        }
+        SUNMatDestroy( AT ); N_VDestroy( w );
+      }
+    }
+    auto dense = [&]( size_t n ){ return SUNDenseMatrix( (sunindextype)n, (sunindextype)n, ctx ); };
+    auto solve_square = [&]( SUNMatrix A, N_Vector b, std::string const& what ) -> bool {
+      SUNLinearSolver LS = SUNLinSol_Dense( b, A, ctx );
+      bool ok = LS && ( SUNLinSolSetup( LS, A ) == 0 ) && ( SUNLinSolSolve( LS, A, b, b, 0. ) == 0 );
+      if( LS ) SUNLinSolFree( LS );
+      if( !ok ) why = "the adjoint seed: " + what;
+      return ok;
+    };
+    // ---- (A)+(B): lambda
+    { SUNMatrix A = dense( _nx );  N_Vector b = N_VNew_Serial( (sunindextype)_nx, ctx );
+      if( !A || !b ){ why = "the adjoint seed: allocation"; if( A ) SUNMatDestroy( A ); if( b ) N_VDestroy( b ); return false; }
+      for( size_t c = 0; c < _nx; ++c ) for( size_t r = 0; r < _nx; ++r ) SM_ELEMENT_D( A, r, c ) = 0.;
+      // row i = STATE i; column j = EQUATION j
+      for( size_t e = 0; e < _nJyp; ++e )                          // (A): differential states, Jyp
+        SM_ELEMENT_D( A, (sunindextype)_cJyp[e], (sunindextype)_rJyp[e] ) += _dEVAL[ _offJyp + e ];
+      for( size_t e = 0; e < _nJy; ++e )                           // (B): algebraic states, Jy
+        if( !stDif[ (size_t)_cJy[e] ] )
+          SM_ELEMENT_D( A, (sunindextype)_cJy[e], (sunindextype)_rJy[e] ) += _dEVAL[ _offJy + e ];
+      if( _hasJypdot )                                             // (B) carries -(dF_y'/dt)^T lambda too
+        for( size_t e = 0; e < _nJyp; ++e )
+          if( !stDif[ (size_t)_cJyp[e] ] )                       // (a state with a y' column is differential: never here)
+            SM_ELEMENT_D( A, (sunindextype)_cJyp[e], (sunindextype)_rJyp[e] ) -= _dEVAL[ _offJypdot + e ];
+      for( size_t i = 0; i < _nx; ++i ) N_VGetArrayPointer( b )[i] = stDif[i]? v[i]: gy[i];
+      okT = solve_square( A, b, "the (lambda) system of the extended seed is singular" );
+      if( okT ) for( size_t i = 0; i < _nx; ++i ) lamv[i] = N_VGetArrayPointer( b )[i];
+      SUNMatDestroy( A );  N_VDestroy( b );
+      if( !okT ) return false;
+    }
+    // ---- (C): lambda' of the derivative-carrying equations, from the differential-state rows
+    for( size_t i = 0; i < _nx; ++i ) lampv[i] = 0.;
+    if( nd ){
+      std::vector<size_t> stPos( _nx, (size_t)-1 ), eqPos( _nx, (size_t)-1 );
+      for( size_t m = 0; m < nd; ++m ) stPos[ stIx[m] ] = m;
+      for( size_t m = 0; m < ne; ++m ) eqPos[ eqIx[m] ] = m;
+      // M (nd x ne): M[r][c] = Jyp[eqIx[c]][stIx[r]];  rhs[r] = sum_j Jy[j][stIx[r]] lam_j - gy[stIx[r]]
+      std::vector<double> M( nd * ne, 0. ), rhs( nd, 0. );
+      for( size_t e = 0; e < _nJyp; ++e )
+        M[ stPos[ (size_t)_cJyp[e] ] * ne + eqPos[ (size_t)_rJyp[e] ] ] += _dEVAL[ _offJyp + e ];
+      for( size_t m = 0; m < nd; ++m ) rhs[m] = -gy[ stIx[m] ];
+      for( size_t e = 0; e < _nJy; ++e )
+        if( stDif[ (size_t)_cJy[e] ] ) rhs[ stPos[ (size_t)_cJy[e] ] ] += _dEVAL[ _offJy + e ] * lamv[ (size_t)_rJy[e] ];
+      if( _hasJypdot )                                             // (C): Jyp^T lam' = (Jy - Jypdot)^T lam - g_y
+        for( size_t e = 0; e < _nJyp; ++e )
+          if( stDif[ (size_t)_cJyp[e] ] ) rhs[ stPos[ (size_t)_cJyp[e] ] ] -= _dEVAL[ _offJypdot + e ] * lamv[ (size_t)_rJyp[e] ];
+      if( ne == nd ){
+        SUNMatrix A = dense( nd );  N_Vector b = N_VNew_Serial( (sunindextype)nd, ctx );
+        for( size_t r = 0; r < nd; ++r ){ for( size_t c = 0; c < nd; ++c ) SM_ELEMENT_D( A, r, c ) = M[ r*ne + c ]; N_VGetArrayPointer( b )[r] = rhs[r]; }
+        okT = solve_square( A, b, "the differential block of Jyp is singular" );
+        if( okT ) for( size_t m = 0; m < nd; ++m ) lampv[ eqIx[m] ] = N_VGetArrayPointer( b )[m];
+        SUNMatDestroy( A );  N_VDestroy( b );
+      }
+      else{                                   // minimum-norm: lam' = M^T z,  (M M^T) z = rhs
+        SUNMatrix A = dense( nd );  N_Vector b = N_VNew_Serial( (sunindextype)nd, ctx );
+        for( size_t r = 0; r < nd; ++r ){
+          for( size_t c = 0; c < nd; ++c ){ double a = 0.; for( size_t k = 0; k < ne; ++k ) a += M[ r*ne + k ] * M[ c*ne + k ]; SM_ELEMENT_D( A, r, c ) = a; }
+          N_VGetArrayPointer( b )[r] = rhs[r];
+        }
+        okT = solve_square( A, b, "the normal equations of the lambda' seed are singular" );
+        if( okT ) for( size_t m = 0; m < ne; ++m ){ double a = 0.; for( size_t r = 0; r < nd; ++r ) a += M[ r*ne + m ] * N_VGetArrayPointer( b )[r]; lampv[ eqIx[m] ] = a; }
+        SUNMatDestroy( A );  N_VDestroy( b );
+      }
+    }
+    return okT;
+    }
+
   //! @brief The gradient quadrature of the backward problem:  dqB/dp_j = (dg/dp_j) - (dF/dp_j)^T lambda.
   //! dF/dp is the same SFAD block the forward sensitivity residual uses as its inhomogeneous term; this
   //! is that block transposed, which is the whole of what ASA costs once FSA exists.
   int IDQUADB__
-    ( sunrealtype tt, N_Vector yy, N_Vector yp, N_Vector yyB, N_Vector, N_Vector rrQB, void* )
+    ( sunrealtype tt, N_Vector yy, N_Vector yp, N_Vector yyB, N_Vector, N_Vector rrQB, void* ud )
     override
     {
+      // which backward problem this call belongs to.  IDAS hands back the pointer given to
+      // IDASetUserDataB, as CVODES does for ODESLV's _ifct; the void* was discarded before.
+      if( ud ) _asaCur = *static_cast<size_t const*>( ud );
       _eval_rows( tt, N_VGetArrayPointer( yy ), N_VGetArrayPointer( yp ) );
       double const* lam = N_VGetArrayPointer( yyB );
       double* q = N_VGetArrayPointer( rrQB );
       for( size_t j = 0; j < _np; ++j ) q[j] = 0.;
       for( size_t e = 0; e < _nFp; ++e ) q[ _cFp[e] ] += _dEVAL[ _offFp + e ] * lam[ _rFp[e] ];
-      if( _asaQ < _nq )
+      if( _asaQ_() < _nq )
         for( size_t e = 0; e < _nQp; ++e )
-          if( (size_t)_rQp[e] == _asaQ ) q[ _cQp[e] ] += _asaWq * _dEVAL[ _offQp + e ];
+          if( (size_t)_rQp[e] == _asaQ_() ) q[ _cQp[e] ] += _asaWq_() * _dEVAL[ _offQp + e ];
       return 0;
     }
   //! @brief Adjoint Jacobian; phase 6, refuses for now.
@@ -657,6 +885,9 @@ protected:
 
   //! @brief Evaluate the rows and their y-derivatives at (t, y, p) into _dEVAL.
   void _eval_rows
+    ( double const t, double const* y, double const* yp );
+  //! @brief Evaluate the residual rows ONLY; see the definition for why.
+  void _eval_residual
     ( double const t, double const* y, double const* yp );
 
   //! @brief Accumulate the function terms of stage time @p k.
@@ -754,6 +985,16 @@ bool
 DAESLV_IDAS::_build_plans
 ()
 {
+  auto _bt = std::chrono::steady_clock::now();
+  auto _blap = [&]( char const* what ){
+    if( options.DISPLAY_LEVEL >= 2 ){
+      auto now = std::chrono::steady_clock::now();
+      std::cerr << "  _build_plans [timing] " << std::left << std::setw(28) << what << std::right
+                << std::fixed << std::setprecision(1) << std::setw(10)
+                << std::chrono::duration<double,std::milli>( now - _bt ).count() << " ms\n";
+      _bt = now;
+    }
+  };
   delete _dag; _dag = new FFGraph;
   _pT.assign( 1, FFVar() );   _dag->insert( FFModel::_dag, 1,   _mT.data(), _pT.data() );
   _pX.assign( _nx, FFVar() ); _dag->insert( FFModel::_dag, _nx, _mX.data(), _pX.data() );
@@ -765,6 +1006,11 @@ DAESLV_IDAS::_build_plans
   // assembles _vFCT -- the shared extraction already split every output into INTEGRAL and POINT parts
   _pQv.assign( _nq, FFVar() );
   if( _nq ) _dag->insert( FFModel::_dag, _nq, _mQ.data(), _pQv.data() );
+  _pivD.clear();
+  if( !dummy_pivot().empty() ){
+    _pivD.assign( dummy_pivot().size(), FFVar() );
+    _dag->insert( FFModel::_dag, dummy_pivot().size(), const_cast<FFVar*>( dummy_pivot().data() ), _pivD.data() );
+  }
   _vFVAR.clear();
   _vFVAR.push_back( _pT[0] );
   for( auto const& v : _pX  ) _vFVAR.push_back( v );
@@ -815,6 +1061,7 @@ DAESLV_IDAS::_build_plans
   for( auto const& v : _pP  ) _vVAR.push_back( v );
   for( auto const& v : _pC  ) _vVAR.push_back( v );   // constants are variables of the eval, with fixed values
   _dVAR.assign( _vVAR.size(), 0. );
+_blap( "vars + outputs" );
 
   _plan.assign( _mMASS.size(), StagePlan() );
   _nnzjacmax = 0;
@@ -828,6 +1075,7 @@ DAESLV_IDAS::_build_plans
       for( auto const& [ ix, co ] : _mMASS[sg][k] ){ at.emplace_back( k, ix ); Msrc.push_back( co ); }
     if( !Msrc.empty() ) _dag->insert( FFModel::_dag, Msrc.size(), Msrc.data(), M.data() );
     _dag->insert( FFModel::_dag, _mRES[sg].size(), const_cast<FFVar*>( _mRES[sg].data() ), R.data() );
+_blap( "stage: insert M,R" );
     // the quadrature integrands of this stage, from the SAME per-stage forms ODESLV uses: INTEGRAL
     // captures were turned into quadratures by the shared extraction, so there is nothing to re-derive
     if( _nq ){
@@ -837,12 +1085,24 @@ DAESLV_IDAS::_build_plans
     }
     P.F = R;
     for( size_t c = 0; c < at.size(); ++c ) P.F[ at[c].first ] += M[c] * _pYP[ at[c].second ];
+_blap( "stage: assemble F" );
 
     std::tuple<unsigned,unsigned*,unsigned*,FFVar*> Jy, Jyp, Fp;
     bool haveFp = false;
     try{
-      Jy  = _dag->SFAD( P.F.size(), P.F.data(), _nx, _pX.data()  );
-      Jyp = _dag->SFAD( P.F.size(), P.F.data(), _nx, _pYP.data() );
+      // dF/dy row by row, each row against only the states it depends on -- see BASE_DE::_sfad_by_row.
+      // One SFAD over the whole residual was 0.8 s at 2400 states and quadratic (2026-10-25).
+      Jy = _sfad_by_row( _dag, P.F, _pX );
+      // dF/dy' needs NO differentiation: F = R + sum_c M_c y'_{at[c].second} with R free of y', so
+      // the Jacobian w.r.t. y' is exactly the mass coefficients M, each at its (row, state) -- the
+      // pairs _extract_from_model already peeled off the rows.  Assembled here in the triplet form
+      // SFAD returns.  SFAD is O(rows x states) regardless of sparsity (one subgraph sweep per
+      // independent), and this call was half of _build_plans at 2400 states (2026-10-25).
+      { unsigned const nnz = (unsigned)at.size();
+        unsigned* rr = new unsigned[ nnz ];  unsigned* cc = new unsigned[ nnz ];  FFVar* vv = new FFVar[ nnz ];
+        for( unsigned c = 0; c < nnz; ++c ){ rr[c] = (unsigned)at[c].first;  cc[c] = (unsigned)at[c].second;  vv[c] = M[c]; }
+        Jyp = std::make_tuple( nnz, rr, cc, vv ); }
+_blap( "stage: SFAD Jy, Jyp" );
       // dF/dp, the inhomogeneous term of the sensitivity residual
       //     F_s,j = dF/dy . s_j + dF/dy' . s'_j + dF/dp_j
       // SFAD like the other two: a parameter touches few rows, and the dense form would build
@@ -853,6 +1113,7 @@ DAESLV_IDAS::_build_plans
 
     std::set< std::pair<size_t,size_t> > pat;                       // (col, row)
     for( unsigned e = 0; e < std::get<0>(Jy);  ++e ) pat.emplace( std::get<2>(Jy)[e],  std::get<1>(Jy)[e]  );
+_blap( "stage: SFAD Fp" );
     for( unsigned e = 0; e < std::get<0>(Jyp); ++e ) pat.emplace( std::get<2>(Jyp)[e], std::get<1>(Jyp)[e] );
     P.nnz = pat.size();
     P.colptr.assign( _nx + 1, 0 );
@@ -875,6 +1136,25 @@ DAESLV_IDAS::_build_plans
     P.eval = P.F;
     P.offJy  = P.eval.size();  P.eval.insert( P.eval.end(), std::get<3>(Jy),  std::get<3>(Jy)  + P.nJy  );
     P.offJyp = P.eval.size();  P.eval.insert( P.eval.end(), std::get<3>(Jyp), std::get<3>(Jyp) + P.nJyp );
+    // d(dF/dy')/dt.  The adjoint of F(t,y,y') = 0 is d/dt( F_y'^T lambda ) - F_y^T lambda + g_y = 0, and
+    // when F_y' depends on y the derivative is F_y'^T lambda' + (dF_y'/dt)^T lambda: the second term is
+    // sum_k (dM/dy_k) y'_k per entry, zero for a constant mass matrix -- every model in the corpus until
+    // dummy derivatives, whose level rows carry 2x x' and 2u x' (2026-10-25: the dummy-reduced pendulum's
+    // adjoint was wrong by this term while the constant-mass reactor's was right).  Formed only when some
+    // coefficient is not a constant; the block has Jyp's indices.
+    { bool any = false;
+      std::vector<FFVar> dot( P.nJyp );
+      for( unsigned e = 0; e < P.nJyp; ++e ){
+        FFVar const& Me = std::get<3>(Jyp)[e];
+        dot[e] = 0.;
+        if( Me.cst() ) continue;
+        auto d = _dag->FAD( std::vector<FFVar>{ Me }, _pX );
+        for( size_t k = 0; k < _nx; ++k )
+          if( !( d[k].cst() && d[k].num().val() == 0. ) ){ dot[e] += d[k] * _pYP[k]; any = true; }
+      }
+      P.hasJypdot = any;
+      if( any ){ P.offJypdot = P.eval.size();  P.eval.insert( P.eval.end(), dot.begin(), dot.end() ); }
+    }
     if( haveFp ){
       P.nFp = std::get<0>(Fp);
       P.rFp.resize( P.nFp ); P.cFp.resize( P.nFp );
@@ -910,16 +1190,19 @@ bool
 DAESLV_IDAS::_build_rows
 ( size_t const s )
 {
+  ++_evalStageTag;  _evalMemoValid = false;      // the rows change: the memo must not survive
+
   size_t const ss = ( s < _plan.size() )? s: _plan.size() - 1;
   StagePlan const& P = _plan[ss];
   _vEVAL = P.eval;
+  _opRES = _dag->subgraph( P.F.size(), _vEVAL.data() );   // residual rows only: P.F leads P.eval
   _vQUAD = P.Q;  _dQUAD.assign( _nq, 0. );
   _nFp = P.nFp;  _offFp = P.offFp;  _rFp = P.rFp;  _cFp = P.cFp;
   _rJy = P.rJy;  _cJy = P.cJy;  _rJyp = P.rJyp;  _cJyp = P.cJyp;
   _nQy = P.nQy; _offQy = P.offQy; _rQy = P.rQy; _cQy = P.cQy;
   _nQyp = P.nQyp; _offQyp = P.offQyp; _rQyp = P.rQyp; _cQyp = P.cQyp;
   _nQp = P.nQp; _offQp = P.offQp; _rQp = P.rQp; _cQp = P.cQp;
-  _offJy = P.offJy;  _offJyp = P.offJyp;
+  _offJy = P.offJy;  _offJyp = P.offJyp;  _offJypdot = P.offJypdot;  _hasJypdot = P.hasJypdot;
   _nJy = P.nJy;      _nJyp = P.nJyp;
   _ixJy = P.ixJy;    _ixJyp = P.ixJyp;
   _colptr = P.colptr; _rowidx = P.rowidx;
@@ -960,14 +1243,37 @@ bool
 DAESLV_IDAS::setup
 ()
 {
+  // Serialise the EXTRACTION, as ODESLV_CVODES::setup() does.  FFModel::dag_mutex() states the
+  // contract: setups are locked -- recursively, because they nest -- while solves are not, each
+  // solver evaluating on its own working DAG afterwards.  A DAG operation builds one solver per
+  // thread (FFBaseDE's copy constructor: new SOLVER, then setup( *Op._pODESLV )), and every one of
+  // those setups extracts into the user DAG the threads SHARE.  DAESLV took this lock in
+  // setup( IVP ) only, so the nested setup() ran unserialised and a multi-threaded veval of an
+  // FFDAESLV raced -- fine at MAXTHREAD=1, throwing above it, where the same sweep over an
+  // FFODESLV was fine (reported 2026-10-24).
+  std::lock_guard<std::recursive_mutex> dag_lock_( dag_mutex() );   // see FFModel::dag_mutex()
+  auto _tick = std::chrono::steady_clock::now();
+  auto _lap = [&]( char const* what ){
+    if( options.DISPLAY_LEVEL >= 2 ){
+      auto now = std::chrono::steady_clock::now();
+      std::cerr << "DAESLV_IDAS::setup [timing] " << std::left << std::setw(30) << what << std::right
+                << std::fixed << std::setprecision(2) << std::setw(10)
+                << std::chrono::duration<double,std::milli>( now - _tick ).count() << " ms\n";
+      _tick = now;
+    }
+  };
   if( !FFModel::setup() ){ _extractError = "FFModel::setup() failed"; return false; }
+  _lap( "FFModel::setup" );
   if( !_extract_dae() ) return false;
+  _lap( "extract_dae" );
   _nres = n_residual();
   // the sensitivity directions, from the registered controls -- as ODESLV resolves them after its own
   // extraction.  The FF operations check sensitivity_index().size() against n_control_dof().
   if( !_resolve_sensitivity_index() ) return false;
+  _lap( "resolve_sensitivity_index" );
 
   if( !_build_plans() ) return false;
+  _lap( "build_plans" );
   _vInpLvl.clear();
   for( auto const& [ name, levels ] : _mInpLevels )
     for( auto const& lv : levels ) _vInpLvl.push_back( lv );
@@ -977,6 +1283,7 @@ DAESLV_IDAS::setup
   _dX0.assign( _nx, 0. );
   _dXP0.assign( _nx, 0. );
   registration();
+  _lap( "registration (+InpLvl)" );
   return true;
 }
 
@@ -1021,10 +1328,52 @@ void
 DAESLV_IDAS::_eval_rows
 ( double const t, double const* y, double const* yp )
 {
+  // Memo: with several backward problems registered, IDAS calls each one's residual at the SAME
+  // (t, y, y') in turn, and every call re-evaluated the forward Jacobians -- six problems, six
+  // identical evaluations per step, which is where the adjoint's cost went after the sweep was made
+  // simultaneous (measured 2026-10-24: 3.6x at nf=6, against ODESLV's 2.1x).  Skip when nothing has
+  // changed since the last evaluation; the stage tag is part of the key because _build_rows() changes
+  // what the rows mean without touching (t, y, y').
+  if( _evalMemoValid && _evalMemoFull && _evalMemoT == t && _evalMemoStage == _evalStageTag
+      && std::equal( _evalMemoY.begin(), _evalMemoY.end(), y )
+      && std::equal( _evalMemoYp.begin(), _evalMemoYp.end(), yp ) )
+    return;
+  _evalMemoT = t;  _evalMemoStage = _evalStageTag;
+  _evalMemoY.assign( y, y + _nx );  _evalMemoYp.assign( yp, yp + _nx );
+  _evalMemoValid = true;
+
   _dVAR[0] = t;
   for( size_t i = 0; i < _nx; ++i ) _dVAR[1+i] = y[i];
   for( size_t i = 0; i < _nx; ++i ) _dVAR[1+_nx+i] = yp[i];
   _dag->eval( _dWRK, _vEVAL.size(), _vEVAL.data(), _dEVAL.data(),
+              _vVAR.size(), _vVAR.data(), _dVAR.data() );
+  _evalMemoFull = true;
+}
+
+inline
+void
+DAESLV_IDAS::_eval_residual
+( double const t, double const* y, double const* yp )
+{
+  // The RESIDUAL alone.  _eval_rows evaluates one combined vector -- the residual rows followed by every
+  // entry of dF/dy, dF/dy', dF/dp and the output Jacobians -- and IDRES__ called it on every residual
+  // evaluation, so each of IDAS's ~850 residual calls at 4800 states also computed ~25,000 Jacobian
+  // entries that IDAS asked for 46 times.  That was the whole of the staggering gap to CVODES in
+  // DAESLV_scaling (2026-10-25): 106 s against 0.6 s at 9600 states, and KLU barely helping because the
+  // cost was never in the factorisation.  The ODE path evaluates its RHS alone and its Jacobian only in
+  // the Jacobian callback; this is the same split.  Shares the memo, so a Jacobian call right after a
+  // residual call at the same point -- the usual order -- costs one full evaluation, not two.
+  if( _evalMemoValid && _evalMemoT == t && _evalMemoStage == _evalStageTag
+      && std::equal( _evalMemoY.begin(), _evalMemoY.end(), y )
+      && std::equal( _evalMemoYp.begin(), _evalMemoYp.end(), yp ) )
+    return;                                     // full or residual-only, the rows are already in _dEVAL
+  _evalMemoT = t;  _evalMemoStage = _evalStageTag;
+  _evalMemoY.assign( y, y + _nx );  _evalMemoYp.assign( yp, yp + _nx );
+  _evalMemoValid = true;  _evalMemoFull = false;
+  _dVAR[0] = t;
+  for( size_t i = 0; i < _nx; ++i ) _dVAR[1+i] = y[i];
+  for( size_t i = 0; i < _nx; ++i ) _dVAR[1+_nx+i] = yp[i];
+  _dag->eval( _opRES, _dWRKres, _nres, _vEVAL.data(), _dEVAL.data(),
               _vVAR.size(), _vVAR.data(), _dVAR.data() );
 }
 
@@ -1036,7 +1385,7 @@ DAESLV_IDAS::IDRES__
   sunrealtype const* y  = N_VGetArrayPointer( yy );
   sunrealtype const* dy = N_VGetArrayPointer( yp );
   sunrealtype*       r  = N_VGetArrayPointer( rr );
-  _eval_rows( tt, y, dy );
+  _eval_residual( tt, y, dy );
   for( size_t k = 0; k < _nres; ++k ) r[k] = _dEVAL[k];
   ++stats.numRES;
   return 0;
@@ -1205,7 +1554,16 @@ DAESLV_IDAS::solve
     IDASetId( mem, id );
     if( options.SOLVE.LINSOL != BASE_IDAS::Options::DENSEDQ )
       IDASetJacFn( mem, MC_IDJAC__ );         // analytic; DENSEDQ leaves IDAS its difference quotient
-    IDASetSuppressAlg( mem, options.SOLVE.SUPPRESSALG );
+    // A dummy derivative is a derivative -- dv stands for v', an acceleration -- and the local-error
+    // estimate BDF's predictor gives for it is meaningless, so with the dummies in the error test the
+    // step collapses: 1749 steps on the index-3 pendulum against 179 with algebraics excluded, and the
+    // forward sensitivities stalled outright (DAESLV_dummy, 2026-10-25).  IDAS offers only the global
+    // switch; a model that minted dummies gets it regardless of the option.
+    bool const suppress = options.SOLVE.SUPPRESSALG || !dummy_derivatives().empty();
+    if( suppress && !options.SOLVE.SUPPRESSALG && options.DISPLAY_LEVEL >= 1 )
+      std::cerr << "DAESLV_IDAS ** algebraic states excluded from the error test: the model carries "
+                << dummy_derivatives().size() << " dummy derivative(s)\n";
+    IDASetSuppressAlg( mem, suppress );
     IDASetMaxOrd( mem, options.SOLVE.MAXORD );
     if( options.SOLVE.NMAX ) IDASetMaxNumSteps( mem, (long)options.SOLVE.NMAX );
     if( options.SOLVE.HMAX > 0. ) IDASetMaxStep( mem, options.SOLVE.HMAX );
@@ -1253,6 +1611,10 @@ DAESLV_IDAS::solve
                                              _nq, yQS? N_VGetArrayPointer( yQS[j] ): nullptr ) );
     }
     if( rec ) results_solve.push_back( Results( _dT[0], _nx, _dX0.data(), _nq, _qk.back().data() ) );
+    if( options.SOLVE.VERBOSE ){
+      _print_stage( _dT[0], _nx, _dX0.data(), " x", os );
+      if( _nq ) _print_stage( _dT[0], _nq, _qk.back().data(), " q", os );
+    }
     _dF.assign( _nf, 0. );                                           // the function accumulator
     _dFGrad.assign( _nf * _np, 0. );
     { std::vector< std::vector<double> > s0, sq0;
@@ -1292,22 +1654,28 @@ DAESLV_IDAS::solve
       // an integral (a running g_y term, lambda(T) = 0); a column in the STATE block at the final stage
       // time makes it a point value (no running term, lambda(T) seeded from df/dx there).  Detected
       // rather than declared, so a caller cannot mislabel it.
-      _asaQ = (size_t)-1;  _asaHx.assign( _nx, 0. );
-      if( _asaF >= _nf ){ ok = false; why = "solve_asens: no such output"; break; }
-      { bool anyQ = false, anyX = false, anyT = false;
-        size_t const kT = _vFCT.empty()? 0: _vFCT.size()-1;
-        for( size_t k = 0; k < _rFJ.size(); ++k )
-          for( size_t e = 0; e < _rFJ[k].size(); ++e ){
-            if( (size_t)_rFJ[k][e] != _asaF ) continue;
-            size_t const col = (size_t)_cFJ[k][e];
-            if( col >= _nx && col < _nx + _nq ){ anyQ = true; _asaQ = col - _nx; _asaWqCol = k; }
-            else if( col < _nx ){ anyX = true;  if( k == kT ) anyT = true; }
-          }
-        _asaHasX = anyT;      // the TERMINAL seed; interior terms arrive as impulses in the sweep
-        (void)anyX;
-        if( !anyQ && !anyX ){ ok = false; why = "solve_asens: that output depends on neither the states"
-                                               " at any stage time nor a quadrature"; break; }
+      // Classify EVERY registered output -- its quadrature, its terminal part, its seed vector --
+      // not only problem 0; each problem's fields are its own.
+      for( _asaCur = 0; _asaCur < _asaP.size() && ok; ++_asaCur ){
+        _asaQ_() = (size_t)-1;  _asaHx_().assign( _nx, 0. );
+        if( _asaF_() >= _nf ){ ok = false; why = "solve_asens: no such output"; continue; }
+        { bool anyQ = false, anyX = false, anyT = false;
+          size_t const kT = _vFCT.empty()? 0: _vFCT.size()-1;
+          for( size_t k = 0; k < _rFJ.size(); ++k )
+            for( size_t e = 0; e < _rFJ[k].size(); ++e ){
+              if( (size_t)_rFJ[k][e] != _asaF_() ) continue;
+              size_t const col = (size_t)_cFJ[k][e];
+              if( col >= _nx && col < _nx + _nq ){ anyQ = true; _asaQ_() = col - _nx; _asaWqCol_() = k; }
+              else if( col < _nx ){ anyX = true;  if( k == kT ) anyT = true; }
+            }
+          _asaHasX_() = anyT;      // the TERMINAL seed; interior terms arrive as impulses in the sweep
+          (void)anyX;
+          if( !anyQ && !anyX ){ ok = false; why = "solve_asens: that output depends on neither the states"
+                                                 " at any stage time nor a quadrature"; continue; }
+        }
       }
+      _asaCur = 0;
+      if( !ok ) break;
       if( IDAAdjInit( mem, (int)options.SOLVE.ASACHKPT, IDA_HERMITE ) != IDA_SUCCESS ){
         ok = false; why = "IDAAdjInit"; break; }
     }
@@ -1433,7 +1801,41 @@ DAESLV_IDAS::solve
           int ncheck = 0;
           int const fl = _asa? IDASolveF( mem, TSTOP, &tret, yy, yp, IDA_NORMAL, &ncheck )
                              : IDASolve ( mem, TSTOP, &tret, yy, yp, IDA_NORMAL );
-          if( fl != IDA_SUCCESS && fl != IDA_TSTOP_RETURN ){ ok = false; why = "IDASolve to the stage boundary"; break; }
+          if( fl != IDA_SUCCESS && fl != IDA_TSTOP_RETURN ){
+            ok = false; why = "IDASolve to the stage boundary";
+            if( !dummy_derivatives().empty() ){
+              double const det = _dummy_pivot_det( tret, N_VGetArrayPointer( yy ) ), ref = dummy_pivot_ref();
+              std::ostringstream o;
+              o << " -- the dummy-derivative pivot at t=" << tret << " is " << std::scientific << std::setprecision(2) << det
+                << " against " << ref << " at the reference (" << std::fixed << std::setprecision(1) << ( ref != 0.? 100.*std::fabs( det/ref ): 0. )
+                << "%): the STATIC pivot chosen at setup has degenerated along the trajectory; a reference nearer"
+                   " this state, or a stage boundary before it, re-selects the dummies";
+              why += o.str();
+            }
+            break; }
+          if( !dummy_derivatives().empty() ){
+            // A degenerate STATIC pivot is not a slow solve but a WRONG one: at the singular point the
+            // algebraic constraint fixes the dummied state only up to a branch -- x^2 + y^2 = 1 gives y
+            // up to sign where y = 0 -- and the integrator steps across and may take the other branch.
+            // The pendulum swung through four such points to x(3) = 0.825 against 0.789, with the
+            // constraint held to 1e-12 throughout (2026-10-25).  The determinant 4y^2 touches zero
+            // without changing sign, so a sign test cannot see it: the solve FAILS when it falls below
+            // a thousandth of its reference, and says where.
+            double const det = _dummy_pivot_det( tret, N_VGetArrayPointer( yy ) ), ref = dummy_pivot_ref();
+            if( options.DISPLAY_LEVEL >= 2 )
+              std::cerr << "DAESLV_IDAS ** dummy-derivative pivot at t=" << tret << ": " << std::scientific << std::setprecision(2)
+                        << det << " (reference " << ref << ")\n";
+            if( ref != 0. && std::fabs( det ) < 1e-3 * std::fabs( ref ) ){
+              ok = false;
+              std::ostringstream o;
+              o << "the dummy-derivative pivot has degenerated at t=" << tret << ": " << std::scientific << std::setprecision(2)
+                << det << " against " << ref << " at the reference.  The STATIC pivot chosen at setup is singular here and"
+                   " the dummied state's branch is ambiguous beyond it; the solve is stopped rather than continued to a"
+                   " wrong answer.  A reference nearer this state, or a stage boundary before it, re-selects the dummies;"
+                   " substitution (REDUCE.DUMMY_DERIV off) has no pivot";
+              why = o.str();  break;
+            }
+          }
           if( !rec || st+1 == NSTEP ) continue;        // the boundary row is pushed below, beside _xk
           if( _nq && IDAGetQuadDky( mem, TSTOP, 0, Nq ) != IDA_SUCCESS ){ ok = false; why = "IDAGetQuadDky"; break; }
           results_solve.push_back( Results( TSTOP, _nx, N_VGetArrayPointer( yy ),
@@ -1456,6 +1858,10 @@ DAESLV_IDAS::solve
         // instead is how the first attempt recorded only t0.
         if( rec ) results_solve.push_back( Results( tret, _nx, N_VGetArrayPointer( yy ),
                                                    _nq, _nq? _qk.back().data(): nullptr ) );
+        if( options.SOLVE.VERBOSE ){
+          _print_stage( tret, _nx, N_VGetArrayPointer( yy ), " x", os );
+          if( _nq ) _print_stage( tret, _nq, _qk.back().data(), " q", os );
+        }
       }
       if( ok && _nq ){
         // Dky rather than IDAGetQuad, as ODESLV uses CVodeGetQuadDky: with the stop time set the two
@@ -1509,30 +1915,54 @@ DAESLV_IDAS::solve
   // terminal term to seed it with.  One backward problem per adjoined output; a single stage here, so
   // no re-integration is needed -- the forward sweep's checkpoints still cover it.
   if( ok && _asa ){
-    int indexB = -1;
-    N_Vector yB = N_VNew_Serial( (sunindextype)_nx, ctx );
-    N_Vector ypB = N_VNew_Serial( (sunindextype)_nx, ctx );
-    N_Vector qB = N_VNew_Serial( (sunindextype)std::max<size_t>( _np, 1 ), ctx );
+    // One set of vectors PER BACKWARD PROBLEM.  _asaP still holds a single entry here, so this is the
+    // same storage as before, reached through the current index; step (d) registers nf of them and a
+    // single IDASolveB advances them all, as CVodeB does for ODESLV.
+    size_t const nB = _asaP.size();
+    std::vector<int> indexBv( nB, -1 );
+    std::vector<N_Vector> yBv( nB, nullptr ), ypBv( nB, nullptr ), qBv( nB, nullptr );
+    for( size_t b = 0; b < nB; ++b ){
+      yBv[b]  = N_VNew_Serial( (sunindextype)_nx, ctx );
+      ypBv[b] = N_VNew_Serial( (sunindextype)_nx, ctx );
+      qBv[b]  = N_VNew_Serial( (sunindextype)std::max<size_t>( _np, 1 ), ctx );
+      N_VConst( 0., yBv[b] );  N_VConst( 0., ypBv[b] );  N_VConst( 0., qBv[b] );
+    }
+    // the names the body already uses, RE-BOUND per problem.  These were references, which bind once
+    // and would have kept pointing at problem 0 as _asaCur advanced -- harmless while nB is 1 and
+    // wrong the moment step (d) registers more, so they are values re-assigned by _asaBind().
+    int      indexB = -1;
+    N_Vector yB = nullptr, ypB = nullptr, qB = nullptr;
+    auto _asaBind = [&]( size_t const b ){
+      indexB = indexBv[b];  yB = yBv[b];  ypB = ypBv[b];  qB = qBv[b];
+    };
+    _asaBind( _asaCur );
     SUNMatrix AB = nullptr; SUNLinearSolver LSB = nullptr;
-    N_VConst( 0., yB ); N_VConst( 0., ypB ); N_VConst( 0., qB );
     double const tEnd = _dT.back(), tBeg = _dT.front();
     // df/dq, the weight the running term enters with.  1 for a bare integral output, and read from the
     // same Jacobian that classified the output rather than assumed.  Evaluated at the final stage time:
     // a coefficient that is itself state-dependent AND sits at an earlier stage time would want
     // re-evaluating there, which no output in the corpus does.
-    _asaWq = 0.;
-    if( _asaQ < _nq && _asaWqCol < _vFJac.size() && !_vFJac[_asaWqCol].empty() ){
-      std::vector<double> dj( _vFJac[_asaWqCol].size(), 0. );
-      _dag->eval( _vFJac[_asaWqCol].size(), _vFJac[_asaWqCol].data(), dj.data(),
+    // Register EVERY backward problem before the sweep: its weight, its vectors, its linear solver
+    // and its consistent terminal seed.  _asaCur selects which one the accessors and the callbacks
+    // refer to, so the body below is the single-problem code, run once per output.
+    if( _lk.size() != _ns+1 ) _lk.assign( _ns+1, std::vector<std::vector<double>>( _nf ) );
+    for( _asaCur = 0; _asaCur < nB && ok; ++_asaCur ){
+      _asaBind( _asaCur );
+    _asaWq_() = 0.;
+    if( _asaQ_() < _nq && _asaWqCol_() < _vFJac.size() && !_vFJac[_asaWqCol_()].empty() ){
+      std::vector<double> dj( _vFJac[_asaWqCol_()].size(), 0. );
+      _dag->eval( _vFJac[_asaWqCol_()].size(), _vFJac[_asaWqCol_()].data(), dj.data(),
                   _vFVAR.size(), _vFVAR.data(), _dFVAR.data() );
       for( size_t e = 0; e < dj.size(); ++e )
-        if( (size_t)_rFJ[_asaWqCol][e] == _asaF && (size_t)_cFJ[_asaWqCol][e] == _nx + _asaQ )
-          _asaWq += dj[e];
+        if( (size_t)_rFJ[_asaWqCol_()][e] == _asaF_() && (size_t)_cFJ[_asaWqCol_()][e] == _nx + _asaQ_() )
+          _asaWq_() += dj[e];
     }
     do{
       if( IDACreateB( mem, &indexB ) != IDA_SUCCESS ){ ok = false; why = "IDACreateB"; break; }
       if( IDAInitB( mem, indexB, MC_IDRESB__, tEnd, yB, ypB ) != IDA_SUCCESS ){
         ok = false; why = "IDAInitB"; break; }
+      if( IDASetUserDataB( mem, indexB, &_asaIdx[ _asaCur ] ) != IDA_SUCCESS ){
+        ok = false; why = "IDASetUserDataB"; break; }
       if( IDASStolerancesB( mem, indexB, options.SOLVE.RTOLB, options.SOLVE.ATOLB ) != IDA_SUCCESS ){
         ok = false; why = "IDASStolerancesB"; break; }
       AB = SUNDenseMatrix( (sunindextype)_nx, (sunindextype)_nx, ctx );
@@ -1549,36 +1979,49 @@ DAESLV_IDAS::solve
       // A POINT output has no running integrand; its whole influence enters through the TERMINAL
       // condition  Jyp^T lambda(T) = ( df/dx )( T ).  _dFVAR still holds the final stage time from the
       // forward sweep's last _eval_fct, so the function Jacobian is evaluated where it belongs.
-      if( _asaHasX && !_vFJac.empty() ){
-        size_t const kT = _vFJac.size()-1;
-        if( !_vFJac[kT].empty() ){
+      // The terminal system runs for EVERY output kind.  h_x is zero when there is no point output,
+      // but a pure quadrature still needs lambda'(T) = -g_y^T from step (c): left at zero, IDASolveB
+      // fails its first step at T (this guard was `_asaHasX_() &&`, and IDACalcICB used to repair it).
+      {
+        if( _asaHasX_() && !_vFJac.empty() && !_vFJac[ _vFJac.size()-1 ].empty() ){
+          size_t const kT = _vFJac.size()-1;
           std::vector<double> dj( _vFJac[kT].size(), 0. );
           _dag->eval( _vFJac[kT].size(), _vFJac[kT].data(), dj.data(),
                       _vFVAR.size(), _vFVAR.data(), _dFVAR.data() );
           for( size_t e = 0; e < dj.size(); ++e )
-            if( (size_t)_rFJ[kT][e] == _asaF && (size_t)_cFJ[kT][e] < _nx )
-              _asaHx[ _cFJ[kT][e] ] += dj[e];
+            if( (size_t)_rFJ[kT][e] == _asaF_() && (size_t)_cFJ[kT][e] < _nx )
+              _asaHx_()[ _cFJ[kT][e] ] += dj[e];
         }
         // Jyp^T lambda = h_x, densely, at the final time.  Singular where Jyp has zero rows, which is
         // exactly where lambda is algebraic -- IDACalcICB resolves those below.
         _eval_rows( tEnd, N_VGetArrayPointer( yy ), N_VGetArrayPointer( yp ) );
-        std::vector<double> Mt( _nx*_nx, 0. );
-        for( size_t e = 0; e < _nJyp; ++e ) Mt[ (size_t)_cJyp[e] + _nx*(size_t)_rJyp[e] ] += _dEVAL[ _offJyp + e ];
-        SUNMatrix AT = SUNDenseMatrix( (sunindextype)_nx, (sunindextype)_nx, ctx );
-        N_Vector bT = N_VNew_Serial( (sunindextype)_nx, ctx );
-        SUNLinearSolver LST = SUNLinSol_Dense( bT, AT, ctx );
-        bool okT = ( AT && bT && LST );
-        if( okT ){
-          for( size_t c = 0; c < _nx; ++c )
-            for( size_t r = 0; r < _nx; ++r ) SM_ELEMENT_D( AT, r, c ) = Mt[ r + _nx*c ];
-          for( size_t r = 0; r < _nx; ++r ) N_VGetArrayPointer( bT )[r] = _asaHx[r];
-          okT = ( SUNLinSolSetup( LST, AT ) == 0 ) && ( SUNLinSolSolve( LST, AT, bT, bT, 0. ) == 0 );
+        // The terminal condition is  Jyp^T lambda(T) = h_x.  Jyp^T is SINGULAR whenever the model has an
+        // algebraic equation -- index 1 is enough -- because that equation contributes a zero ROW to Jyp,
+        // hence a zero COLUMN to Jyp^T, and its multiplier lambda_j never appears.  Inverting the whole
+        // thing, as this did, therefore fails on every DAE and not only on high-index ones.
+        //
+        // The system is still CONSISTENT, and its structure says which part to solve.  Write
+        //    eqDif[j]  <=>  row j of Jyp has an entry   (equation j is differential)
+        //    stDif[i]  <=>  col i of Jyp has an entry   (state i is differential)
+        // Row i of Jyp^T lambda = h_x reads  sum_j Jyp[j][i] lambda_j = h_x[i]:
+        //   * for an ALGEBRAIC state i the left side is identically zero, so the row is a COMPATIBILITY
+        //     condition, h_x[i] = 0 -- the objective may not depend directly on an algebraic state at T;
+        //   * for a DIFFERENTIAL state i it determines the lambda_j of the differential equations, and
+        //     that square sub-block is the invertible one.
+        // The multipliers of the algebraic equations are left to IDACalcICB below, which is what the
+        // forward side does too: solve what the structure determines, let consistent initialisation find
+        // the rest.
+        std::vector<double> gyT( _nx, 0. );
+        if( _asaQ_() < _nq )
+          for( size_t e = 0; e < _nQy; ++e )
+            if( (size_t)_rQy[e] == _asaQ_() ) gyT[ _cQy[e] ] += _asaWq_() * _dEVAL[ _offQy + e ];
+        std::vector<double> dGdpT;
+        if( !_adjoint_seed( ctx, tEnd, _asaHx_(), gyT, N_VGetArrayPointer( yB ), N_VGetArrayPointer( ypB ), why, &dGdpT ) ){
+          ok = false; break; }
+        if( !dGdpT.empty() && qB && _np ){                     // IDAQuadInitB copied qB already: push the direct term
+          for( size_t j = 0; j < _np; ++j ) N_VGetArrayPointer( qB )[j] += dGdpT[j];
+          if( IDAQuadReInitB( mem, indexB, qB ) != IDA_SUCCESS ){ ok = false; why = "IDAQuadReInitB with the projected seed"; break; }
         }
-        if( okT ) for( size_t i = 0; i < _nx; ++i ) N_VGetArrayPointer( yB )[i] = N_VGetArrayPointer( bT )[i];
-        if( LST ) SUNLinSolFree( LST );
-        if( AT ) SUNMatDestroy( AT );
-        if( bT ) N_VDestroy( bT );
-        if( !okT ){ ok = false; why = "the terminal adjoint condition Jyp^T lambda(T) = df/dx is singular"; break; }
         if( IDAReInitB( mem, indexB, tEnd, yB, ypB ) != IDA_SUCCESS ){ ok = false; why = "IDAReInitB with the terminal seed"; break; }
       }
 
@@ -1588,8 +2031,10 @@ DAESLV_IDAS::solve
         int const rc = IDASetIdB( mem, indexB, idB );
         N_VDestroy( idB );
         if( rc != IDA_SUCCESS ){ ok = false; why = "IDASetIdB"; break; }
-        if( IDACalcICB( mem, indexB, tBeg, yy, yp ) != IDA_SUCCESS ){
-          ok = false; why = "IDACalcICB (the backward initial condition)"; break; }
+        // IDACalcICB is NOT called for the terminal seed: ( lambda(T), lambda'(T) ) are fully
+        // determined by the linear extended system above -- measured, it moved lambda by 0.0 on every
+        // model once that was in place -- so a Newton iteration on a linear problem has nothing to do.
+        // IDASetIdB stays: IDAS still wants the partition for its error test on the algebraic part.
         if( IDAGetConsistentICB( mem, indexB, yB, ypB ) != IDA_SUCCESS ){
           ok = false; why = "IDAGetConsistentICB"; break; }
       }
@@ -1604,49 +2049,54 @@ DAESLV_IDAS::solve
       // differentiated in one go; here the map term is the stop system rather than a divided map, so
       // the two parts are taken separately -- this is the measurement part, which is what parameter
       // estimation against time-series data needs and which needs no restart machinery.
+    } while( false );
+      indexBv[ _asaCur ] = indexB;        // IDACreateB wrote it into the local; the sweep reads indexBv
+    }   // end of the per-output creation loop: every backward problem is registered and seeded
+    _asaCur = 0;  _asaBind( 0 );
+    if( !ok ) goto backward_done;
+    do{
       sunrealtype tb2 = tBeg;
       if( _lk.size() != _ns+1 ) _lk.assign( _ns+1, std::vector<std::vector<double>>( _nf ) );
-      if( _asaF < _nf )                       // lambda(T), at the TERMINAL -- as ODESLV fills _lk[_ns]
-        _lk[_ns][_asaF].assign( N_VGetArrayPointer( yB ), N_VGetArrayPointer( yB ) + _nx );
+      if( _asaF_() < _nf )                       // lambda(T), at the TERMINAL -- as ODESLV fills _lk[_ns]
+        _lk[_ns][_asaF_()].assign( N_VGetArrayPointer( yB ), N_VGetArrayPointer( yB ) + _nx );
       for( size_t kk = _ns; kk > 0 && ok; --kk ){
         if( kk < _ns ){
-          // the impulse at this stage time, from the output's own Jacobian evaluated THERE
-          std::vector<double> hx( _nx, 0. );
-          if( kk < _vFJac.size() && !_vFJac[kk].empty() ){
-            _dFVAR[0] = _dT[kk];
-            for( size_t i = 0; i < _nx && kk < _xk.size(); ++i ) _dFVAR[1+i] = _xk[kk][i];
-            for( size_t m = 0; m < _nq && kk < _qk.size(); ++m ) _dFVAR[1+_nx+m] = _qk[kk][m];
-            std::vector<double> dj( _vFJac[kk].size(), 0. );
-            _dag->eval( _vFJac[kk].size(), _vFJac[kk].data(), dj.data(),
-                        _vFVAR.size(), _vFVAR.data(), _dFVAR.data() );
-            for( size_t e = 0; e < dj.size(); ++e )
-              if( (size_t)_rFJ[kk][e] == _asaF && (size_t)_cFJ[kk][e] < _nx ) hx[ _cFJ[kk][e] ] += dj[e];
-          }
+          // The impulse at this stage time, PER PROBLEM: each output's own Jacobian evaluated here
           bool any = false;
-          for( double v : hx ) if( v != 0. ){ any = true; break; }
-          if( any ){
-            _eval_rows( _dT[kk], _xk[kk].data(), _dXP0.data() );
-            std::vector<double> Mt( _nx*_nx, 0. );
-            for( size_t e = 0; e < _nJyp; ++e )
-              Mt[ (size_t)_cJyp[e] + _nx*(size_t)_rJyp[e] ] += _dEVAL[ _offJyp + e ];
-            SUNMatrix AK = SUNDenseMatrix( (sunindextype)_nx, (sunindextype)_nx, ctx );
-            N_Vector bK = N_VNew_Serial( (sunindextype)_nx, ctx );
-            SUNLinearSolver LSK = SUNLinSol_Dense( bK, AK, ctx );
-            bool okK = ( AK && bK && LSK );
-            if( okK ){
-              for( size_t c = 0; c < _nx; ++c )
-                for( size_t r = 0; r < _nx; ++r ) SM_ELEMENT_D( AK, r, c ) = Mt[ r + _nx*c ];
-              for( size_t r = 0; r < _nx; ++r ) N_VGetArrayPointer( bK )[r] = hx[r];
-              okK = ( SUNLinSolSetup( LSK, AK ) == 0 ) && ( SUNLinSolSolve( LSK, AK, bK, bK, 0. ) == 0 );
+          for( _asaCur = 0; _asaCur < nB && ok; ++_asaCur ){
+            _asaBind( _asaCur );
+            // the impulse at this stage time, from the output's own Jacobian evaluated THERE
+            std::vector<double> hx( _nx, 0. );
+            if( kk < _vFJac.size() && !_vFJac[kk].empty() ){
+              _dFVAR[0] = _dT[kk];
+              for( size_t i = 0; i < _nx && kk < _xk.size(); ++i ) _dFVAR[1+i] = _xk[kk][i];
+              for( size_t m = 0; m < _nq && kk < _qk.size(); ++m ) _dFVAR[1+_nx+m] = _qk[kk][m];
+              std::vector<double> dj( _vFJac[kk].size(), 0. );
+              _dag->eval( _vFJac[kk].size(), _vFJac[kk].data(), dj.data(),
+                          _vFVAR.size(), _vFVAR.data(), _dFVAR.data() );
+              for( size_t e = 0; e < dj.size(); ++e )
+                if( (size_t)_rFJ[kk][e] == _asaF_() && (size_t)_cFJ[kk][e] < _nx ) hx[ _cFJ[kk][e] ] += dj[e];
             }
-            if( okK )
-              for( size_t i = 0; i < _nx; ++i )
-                N_VGetArrayPointer( yB )[i] += N_VGetArrayPointer( bK )[i];
-            if( LSK ) SUNLinSolFree( LSK );
-            if( AK ) SUNMatDestroy( AK );
-            if( bK ) N_VDestroy( bK );
-            if( !okK ){ ok = false; why = "the interior adjoint impulse Jyp^T dlambda = df/dx is singular"; break; }
+            bool anyB = false;
+            for( double v : hx ) if( v != 0. ){ anyB = true; break; }
+            if( anyB ){ any = true;
+              _eval_rows( _dT[kk], _xk[kk].data(), _dXP0.data() );
+              // the costate AFTER the impulse is the costate before it plus h_x; re-seed ( lambda,
+              // lambda' ) from that by the extended system, which keeps the algebraic multipliers
+              // consistent -- adding a dense-solved dlambda to lambda did not
+              std::vector<double> vk( _nx, 0. ), gyk( _nx, 0. );
+              { double const* l = N_VGetArrayPointer( yB );
+                for( size_t e = 0; e < _nJyp; ++e ) vk[ _cJyp[e] ] += _dEVAL[ _offJyp + e ] * l[ _rJyp[e] ]; }
+              for( size_t i = 0; i < _nx; ++i ) vk[i] += hx[i];
+              if( _asaQ_() < _nq )
+                for( size_t e = 0; e < _nQy; ++e )
+                  if( (size_t)_rQy[e] == _asaQ_() ) gyk[ _cQy[e] ] += _asaWq_() * _dEVAL[ _offQy + e ];
+              if( !_adjoint_seed( ctx, _dT[kk], vk, gyk, N_VGetArrayPointer( yB ), N_VGetArrayPointer( ypB ), why ) ){
+                ok = false; break; }
+            }
           }
+          _asaCur = 0;  _asaBind( 0 );
+          if( !ok ) break;
           // A RESTARTING boundary: the forward solved a stop system here, so the co-state must cross it
           // by that system's TRANSPOSE -- v^- from v^+ -- and the stop contributes its own -dF/dp^T mu
           // to the gradient.  Then lambda^- solves Jyp^-^T lambda^- = v^-.  ODESLV does the same through
@@ -1654,39 +2104,45 @@ DAESLV_IDAS::solve
           bool const restarts_bwd = ( _mMASS.size() > 1 ) || !var_transition().empty();
           bool const stopped_here = restarts_bwd && kk < _xplus.size() && !_xplus[kk].empty();
           if( stopped_here ){
-            // v^+ = Jyp^+^T lambda^+ at the start of stage kk, plus whatever impulse was just added
-            _eval_rows( _dT[kk], _xplus[kk].data(), _xpplus[kk].data() );
-            std::vector<double> vplus( _nx, 0. );
-            double const* l = N_VGetArrayPointer( yB );
-            for( size_t e = 0; e < _nJyp; ++e ) vplus[ _cJyp[e] ] += _dEVAL[ _offJyp + e ] * l[ _rJyp[e] ];
-            std::vector<double> vminus, dvminus, dGdp( _np, 0. );
-            std::vector<double> parv( _np, 0. );
-            for( size_t j = 0; j < _np; ++j ) parv[j] = _dVAR[ 1 + 2*_nx + j ];
-            if( !ic_adjoint( _dT[kk], _xk[kk], _xpk[kk], _xplus[kk], _xpplus[kk], vplus, parv,
-                             vminus, dvminus, dGdp ) ){ ok = false; why = "ic_adjoint at a stop"; break; }
-            for( size_t j = 0; j < _np; ++j ) N_VGetArrayPointer( qB )[j] += dGdp[j];
-            // lambda^- from v^-: the rows of stage kk-1 at its END, where Jyp^- is evaluated
+            // Phase 1, on stage kk's rows, PER PROBLEM: the costate v^+ from lambda^+, the stop
+            // system's transpose to v^-, and its -dF/dp^T mu into that problem's gradient.
+            std::vector< std::vector<double> > vminusB( nB );
+            for( _asaCur = 0; _asaCur < nB && ok; ++_asaCur ){
+              _asaBind( _asaCur );
+              // v^+ = Jyp^+^T lambda^+ at the start of stage kk, plus whatever impulse was just added
+              _eval_rows( _dT[kk], _xplus[kk].data(), _xpplus[kk].data() );
+              std::vector<double> vplus( _nx, 0. );
+              double const* l = N_VGetArrayPointer( yB );
+              for( size_t e = 0; e < _nJyp; ++e ) vplus[ _cJyp[e] ] += _dEVAL[ _offJyp + e ] * l[ _rJyp[e] ];
+              std::vector<double>& vminus = vminusB[_asaCur];  std::vector<double> dvminus, dGdp( _np, 0. );
+              std::vector<double> parv( _np, 0. );
+              for( size_t j = 0; j < _np; ++j ) parv[j] = _dVAR[ 1 + 2*_nx + j ];
+              if( !ic_adjoint( _dT[kk], _xk[kk], _xpk[kk], _xplus[kk], _xpplus[kk], vplus, parv,
+                               vminus, dvminus, dGdp ) ){ ok = false; why = "ic_adjoint at a stop"; break; }
+              for( size_t j = 0; j < _np; ++j ) N_VGetArrayPointer( qB )[j] += dGdp[j];
+              // lambda^- from v^-: the rows of stage kk-1 at its END, where Jyp^- is evaluated
+            }
+            _asaCur = 0;  _asaBind( 0 );
+            if( !ok ) break;
+            // Phase 2, ONCE: switch to the left stage's rows
             if( !_build_rows( kk-1 ) ){ ok = false; why = "_build_rows for the adjoint stop"; break; }
             _eval_rows( _dT[kk], _xk[kk].data(), _xpk[kk].data() );
-            std::vector<double> Mt( _nx*_nx, 0. );
-            for( size_t e = 0; e < _nJyp; ++e ) Mt[ (size_t)_cJyp[e] + _nx*(size_t)_rJyp[e] ] += _dEVAL[ _offJyp + e ];
-            SUNMatrix AS = SUNDenseMatrix( (sunindextype)_nx, (sunindextype)_nx, ctx );
-            N_Vector bS = N_VNew_Serial( (sunindextype)_nx, ctx );
-            SUNLinearSolver LSS = SUNLinSol_Dense( bS, AS, ctx );
-            bool okS = ( AS && bS && LSS );
-            if( okS ){
-              for( size_t c = 0; c < _nx; ++c )
-                for( size_t r = 0; r < _nx; ++r ) SM_ELEMENT_D( AS, r, c ) = Mt[ r + _nx*c ];
-              for( size_t r = 0; r < _nx; ++r ) N_VGetArrayPointer( bS )[r] = vminus[r];
-              okS = ( SUNLinSolSetup( LSS, AS ) == 0 ) && ( SUNLinSolSolve( LSS, AS, bS, bS, 0. ) == 0 );
+            // Phase 3, on stage kk-1's rows, PER PROBLEM: lambda^- from v^-
+            for( _asaCur = 0; _asaCur < nB && ok; ++_asaCur ){
+              _asaBind( _asaCur );
+              std::vector<double> const& vminus = vminusB[_asaCur];
+              std::vector<double> gyS( _nx, 0. );
+              if( _asaQ_() < _nq )
+                for( size_t e = 0; e < _nQy; ++e )
+                  if( (size_t)_rQy[e] == _asaQ_() ) gyS[ _cQy[e] ] += _asaWq_() * _dEVAL[ _offQy + e ];
+              if( !_adjoint_seed( ctx, _dT[kk], vminus, gyS, N_VGetArrayPointer( yB ), N_VGetArrayPointer( ypB ), why ) ){
+                ok = false; break; }
+              // The forward sweep's checkpoints do not span a reinitialisation.  Re-integrate THIS stage
+              // forward on its own, as ODESLV does, so the backward solve across it has checkpoints.
             }
-            if( okS ) for( size_t i = 0; i < _nx; ++i ) N_VGetArrayPointer( yB )[i] = N_VGetArrayPointer( bS )[i];
-            if( LSS ) SUNLinSolFree( LSS );
-            if( AS ) SUNMatDestroy( AS );
-            if( bS ) N_VDestroy( bS );
-            if( !okS ){ ok = false; why = "Jyp^T lambda^- = v^- at a stop is singular"; break; }
-            // The forward sweep's checkpoints do not span a reinitialisation.  Re-integrate THIS stage
-            // forward on its own, as ODESLV does, so the backward solve across it has checkpoints.
+            _asaCur = 0;  _asaBind( 0 );
+            if( !ok ) break;
+            // Phase 4, ONCE: the forward re-integration to this stop (below)
             if( IDAAdjReInit( mem ) != IDA_SUCCESS ){ ok = false; why = "IDAAdjReInit"; break; }
             for( size_t i = 0; i < _nx; ++i ){
               N_VGetArrayPointer( yy )[i] = kk-1 < _xplus.size() && !_xplus[kk-1].empty()? _xplus[kk-1][i]: _xk[kk-1][i];
@@ -1710,38 +2166,60 @@ DAESLV_IDAS::solve
           // backward BDF history for nothing and cost three orders: 5e-08 where the single-sweep
           // version had 8e-11.  qB is passed back so the accumulated gradient carries across.
           if( any ){
-            if( IDAReInitB( mem, indexB, _dT[kk], yB, ypB ) != IDA_SUCCESS ){
-              ok = false; why = "IDAReInitB at an interior stage time"; break; }
-            if( _np && IDAQuadReInitB( mem, indexB, qB ) != IDA_SUCCESS ){
-              ok = false; why = "IDAQuadReInitB"; break; }
+            // EVERY problem is reinitialised: IDAS holds its own copy of each lambda, and a problem
+            // whose lambda changed in yBv without an IDAReInitB simply carries on from the old one --
+            // which is what left the interior outputs at zero in the first cut of this step
+            for( size_t b = 0; b < nB && ok; ++b ){
+              if( IDAReInitB( mem, indexBv[b], _dT[kk], yBv[b], ypBv[b] ) != IDA_SUCCESS ){
+                ok = false; why = "IDAReInitB at an interior stage time"; break; }
+              if( _np && IDAQuadReInitB( mem, indexBv[b], qBv[b] ) != IDA_SUCCESS ){
+                ok = false; why = "IDAQuadReInitB"; break; }
+            }
+            if( !ok ) break;
           }
         }
         // The backward sweep sub-samples by RESRECORD exactly as the forward one does, stopping at
         // each recorded time rather than interpolating, and pushes the STAGE-END row first so the
         // repeated t separates the blocks -- the same pair that shows a discontinuity forward.
-        bool const brec = options.OUTPUT.RESRECORD && _asaF < results_asens.size();
+        bool const brec = options.OUTPUT.RESRECORD && !results_asens.empty();
         if( brec ){
-          if( _np && IDAGetQuadB( mem, indexB, &tb2, qB ) != IDA_SUCCESS ){ ok = false; why = "IDAGetQuadB"; break; }
-          results_asens[_asaF].push_back( Results( _dT[kk], _nx, N_VGetArrayPointer( yB ),
-                                                   _np, _np? N_VGetArrayPointer( qB ): nullptr ) );
+          // the STAGE-END row, for EVERY problem -- the first cut pushed it for problem 0 only, which
+          // left an integral output four rows short of a point output and the binder refusing them
+          for( size_t b = 0; b < nB && ok; ++b ){
+            if( _np && IDAGetQuadB( mem, indexBv[b], &tb2, qBv[b] ) != IDA_SUCCESS ){ ok = false; why = "IDAGetQuadB"; break; }
+            if( _asaP[b].ifct < results_asens.size() )
+              results_asens[ _asaP[b].ifct ].push_back( Results( _dT[kk], _nx, N_VGetArrayPointer( yBv[b] ),
+                                                                 _np, _np? N_VGetArrayPointer( qBv[b] ): nullptr ) );
+          }
+          if( !ok ) break;
         }
         { unsigned const NB = options.OUTPUT.RESRECORD? options.OUTPUT.RESRECORD: 1;
           double const TB = ( _dT[kk] - _dT[kk-1] ) / (double)NB;
           double tgt = _dT[kk] - TB;
           for( unsigned st = 0; st < NB && ok; ++st, tgt -= TB ){
             if( st+1 == NB ) tgt = _dT[kk-1];           // land exactly on the stage start
+            // ONE call advances EVERY registered backward problem, as CVodeB does for ODESLV --
+            // over a single forward solve and a single set of checkpoints
             if( IDASolveB( mem, tgt, IDA_NORMAL ) < 0 ){ ok = false; why = "IDASolveB"; break; }
-            if( IDAGetB( mem, indexB, &tb2, yB, ypB ) != IDA_SUCCESS ){ ok = false; why = "IDAGetB"; break; }
-            if( _np && IDAGetQuadB( mem, indexB, &tb2, qB ) != IDA_SUCCESS ){ ok = false; why = "IDAGetQuadB"; break; }
+            for( size_t b = 0; b < nB && ok; ++b ){
+              if( IDAGetB( mem, indexBv[b], &tb2, yBv[b], ypBv[b] ) != IDA_SUCCESS ){
+                ok = false; why = "IDAGetB"; break; }
+              if( _np && IDAGetQuadB( mem, indexBv[b], &tb2, qBv[b] ) != IDA_SUCCESS ){
+                ok = false; why = "IDAGetQuadB"; break; }
+            }
+            if( !ok ) break;
+            _asaBind( _asaCur );
             // the t0 row waits: qB there is only the RUNNING part of the gradient, and the
             // initial-condition term is added below -- recording it early is what left ODESLV's
             // d f/da = 0.5596 against a column of zeros here, for a parameter that acts only
             // through x(0)
-            if( brec )
-              results_asens[_asaF].push_back( Results( tgt, _nx, N_VGetArrayPointer( yB ),
-                                                       _np, _np? N_VGetArrayPointer( qB ): nullptr ) );
-            if( st+1 == NB && _asaF < _nf )          // the stage boundary, as ODESLV records it
-              _lk[kk-1][_asaF].assign( N_VGetArrayPointer( yB ), N_VGetArrayPointer( yB ) + _nx );
+            for( size_t b = 0; b < nB; ++b ){
+              if( brec )
+                results_asens[ _asaP[b].ifct ].push_back( Results( tgt, _nx, N_VGetArrayPointer( yBv[b] ),
+                                                         _np, _np? N_VGetArrayPointer( qBv[b] ): nullptr ) );
+              if( st+1 == NB && _asaP[b].ifct < _nf )          // the stage boundary, as ODESLV records it
+                _lk[kk-1][ _asaP[b].ifct ].assign( N_VGetArrayPointer( yBv[b] ), N_VGetArrayPointer( yBv[b] ) + _nx );
+            }
           }
         }
         if( !ok ) break;
@@ -1770,67 +2248,78 @@ DAESLV_IDAS::solve
                     _vFVAR.size(), _vFVAR.data(), _dFVAR.data() );
         for( size_t e = 0; e < dj.size(); ++e ){
           size_t const col = (size_t)_cFJ[k][e];
-          if( (size_t)_rFJ[k][e] == _asaF && col >= _nx + _nq && col - _nx - _nq < _np )
+          if( (size_t)_rFJ[k][e] == _asaF_() && col >= _nx + _nq && col - _nx - _nq < _np )
             dp[ col - _nx - _nq ] += dj[e];
         }
       }
-      // An output VALUE sitting at t0 has no backward sweep behind it -- the loop runs kk = _ns..1
-      // and never makes stage time 0 an impulse point -- so lambda(t0) must carry (df/dx)(t0) before
-      // the initial-condition term below multiplies it by dx0/dp.
-      if( !_vFJac.empty() && !_vFJac[0].empty() ){
-        _dFVAR[0] = _dT[0];
-        for( size_t i = 0; i < _nx && !_xk.empty(); ++i ) _dFVAR[1+i] = _xk[0][i];
-        for( size_t m = 0; m < _nq && !_qk.empty(); ++m ) _dFVAR[1+_nx+m] = _qk[0][m];
-        std::vector<double> dj( _vFJac[0].size(), 0. );
-        _dag->eval( _vFJac[0].size(), _vFJac[0].data(), dj.data(),
-                    _vFVAR.size(), _vFVAR.data(), _dFVAR.data() );
-        std::vector<double> h0( _nx, 0. );
-        bool any0 = false;
-        for( size_t e = 0; e < dj.size(); ++e )
-          if( (size_t)_rFJ[0][e] == _asaF && (size_t)_cFJ[0][e] < _nx ){
-            h0[ _cFJ[0][e] ] += dj[e];  any0 = true;
-          }
-        if( any0 )
-          for( size_t i = 0; i < _nx; ++i ) N_VGetArrayPointer( yB )[i] += h0[i];
-      }
-
-      std::vector<double> ic( _np, 0. );   // one per PARAMETER -- sized by _nx it aliased across them
-      { std::vector< std::vector<double> > dxdp, ddxdp;
-        // the START system, explicitly: ic_sens() linearises whatever was solved LAST, which after a
-        // restart is the last STOP -- and dx+/dp at a jump is not dx0/dp.  Measured: on x(1+) = a x(1-)
-        // the term came out as lambda(t0).x(1-) = 0.1075 on top of the right 0.1653.
-        _icLast = &_icStart;
-        if( ic_sens( dxdp, ddxdp ) && !dxdp.empty() ){
-          _eval_rows( tBeg, _dX0.data(), _dXP0.data() );
-          std::vector<double> Ml( _nx, 0. );
-          double const* l0 = N_VGetArrayPointer( yB );
-          for( size_t e = 0; e < _nJyp; ++e ) Ml[ _cJyp[e] ] += _dEVAL[ _offJyp + e ] * l0[ _rJyp[e] ];
-          for( size_t j = 0; j < _np && j < dxdp.size(); ++j ){
-            double acc = 0.;
-            for( size_t i = 0; i < _nx && i < dxdp[j].size(); ++i ) acc += Ml[i] * dxdp[j][i];
-            ic[j] = acc;
-          }
-        } }
+      // Per backward problem: its t0 term, its initial-condition term, its summary row and its
+      // gradient row.  Each problem's lambda and qB are its own; _asaBind selects them.
       _dFGrad.assign( _nf * _np, 0. );
-      // qB becomes the WHOLE gradient, not just its running part, so the recorded lambda_q at t0 IS
-      // what val_function_gradient() reports rather than a piece of it
-      for( size_t j = 0; j < _np; ++j ) N_VGetArrayPointer( qB )[j] += ic[j] + dp[j];
-      // A SECOND row at t0, carrying the whole gradient.  It repeats t0, so _record gives it a block
-      // of its own at the head of the file -- ODESLV writes the same pair, the summary row then the
-      // trajectory's own t0 row with the running part alone.
-      if( options.OUTPUT.RESRECORD && _asaF < results_asens.size() )
-        results_asens[_asaF].push_back( Results( tBeg, _nx, N_VGetArrayPointer( yB ),
-                                                 _np, _np? N_VGetArrayPointer( qB ): nullptr ) );
-      // this sweep adjoined VALUE _asaF, so it writes that row.  The guard here was
-      // blk_fct(r).first == r, which reads r as an OUTPUT index where _nf counts VALUES: for a
-      // DISTRIBUTED output (blk_fct(0) = (0,5)) it holds only at r = 0, so rows 1..4 stayed zero and
-      // every adjoint gradient of such an output came back 0 while the forward one was exact.
-      if( _asaF < _nf )
-        for( size_t j = 0; j < _np; ++j ) _dFGrad[ _asaF*_np + j ] = N_VGetArrayPointer( qB )[j];
+      for( _asaCur = 0; _asaCur < nB; ++_asaCur ){
+        _asaBind( _asaCur );
+        // An output VALUE sitting at t0 has no backward sweep behind it -- the loop runs kk = _ns..1
+        // and never makes stage time 0 an impulse point -- so lambda(t0) must carry (df/dx)(t0) before
+        // the initial-condition term below multiplies it by dx0/dp.
+        if( !_vFJac.empty() && !_vFJac[0].empty() ){
+          _dFVAR[0] = _dT[0];
+          for( size_t i = 0; i < _nx && !_xk.empty(); ++i ) _dFVAR[1+i] = _xk[0][i];
+          for( size_t m = 0; m < _nq && !_qk.empty(); ++m ) _dFVAR[1+_nx+m] = _qk[0][m];
+          std::vector<double> dj( _vFJac[0].size(), 0. );
+          _dag->eval( _vFJac[0].size(), _vFJac[0].data(), dj.data(),
+                      _vFVAR.size(), _vFVAR.data(), _dFVAR.data() );
+          std::vector<double> h0( _nx, 0. );
+          bool any0 = false;
+          for( size_t e = 0; e < dj.size(); ++e )
+            if( (size_t)_rFJ[0][e] == _asaF_() && (size_t)_cFJ[0][e] < _nx ){
+              h0[ _cFJ[0][e] ] += dj[e];  any0 = true;
+            }
+          if( any0 )
+            for( size_t i = 0; i < _nx; ++i ) N_VGetArrayPointer( yB )[i] += h0[i];
+        }
+
+        std::vector<double> ic( _np, 0. );   // one per PARAMETER -- sized by _nx it aliased across them
+        { std::vector< std::vector<double> > dxdp, ddxdp;
+          // the START system, explicitly: ic_sens() linearises whatever was solved LAST, which after a
+          // restart is the last STOP -- and dx+/dp at a jump is not dx0/dp.  Measured: on x(1+) = a x(1-)
+          // the term came out as lambda(t0).x(1-) = 0.1075 on top of the right 0.1653.
+          _icLast = &_icStart;
+          if( ic_sens( dxdp, ddxdp ) && !dxdp.empty() ){
+            _eval_rows( tBeg, _dX0.data(), _dXP0.data() );
+            std::vector<double> Ml( _nx, 0. );
+            double const* l0 = N_VGetArrayPointer( yB );
+            for( size_t e = 0; e < _nJyp; ++e ) Ml[ _cJyp[e] ] += _dEVAL[ _offJyp + e ] * l0[ _rJyp[e] ];
+            for( size_t j = 0; j < _np && j < dxdp.size(); ++j ){
+              double acc = 0.;
+              for( size_t i = 0; i < _nx && i < dxdp[j].size(); ++i ) acc += Ml[i] * dxdp[j][i];
+              ic[j] = acc;
+            }
+          } }
+        // qB becomes the WHOLE gradient, not just its running part, so the recorded lambda_q at t0 IS
+        // what val_function_gradient() reports rather than a piece of it
+        for( size_t j = 0; j < _np; ++j ) N_VGetArrayPointer( qB )[j] += ic[j] + dp[j];
+        // A SECOND row at t0, carrying the whole gradient.  It repeats t0, so _record gives it a block
+        // of its own at the head of the file -- ODESLV writes the same pair, the summary row then the
+        // trajectory's own t0 row with the running part alone.
+        if( options.OUTPUT.RESRECORD && _asaF_() < results_asens.size() )
+          results_asens[_asaF_()].push_back( Results( tBeg, _nx, N_VGetArrayPointer( yB ),
+                                                   _np, _np? N_VGetArrayPointer( qB ): nullptr ) );
+        // this sweep adjoined VALUE _asaF_(), so it writes that row.  The guard here was
+        // blk_fct(r).first == r, which reads r as an OUTPUT index where _nf counts VALUES: for a
+        // DISTRIBUTED output (blk_fct(0) = (0,5)) it holds only at r = 0, so rows 1..4 stayed zero and
+        // every adjoint gradient of such an output came back 0 while the forward one was exact.
+        if( _asaF_() < _nf )
+          for( size_t j = 0; j < _np; ++j ) _dFGrad[ _asaF_()*_np + j ] = N_VGetArrayPointer( qB )[j];
+      }
+      _asaCur = 0;  _asaBind( 0 );
     } while( false );
+    backward_done:
     if( LSB ) SUNLinSolFree( LSB );
     if( AB ) SUNMatDestroy( AB );
-    N_VDestroy( yB ); N_VDestroy( ypB ); N_VDestroy( qB );
+    for( size_t b = 0; b < nB; ++b ){
+      if( yBv[b] ) N_VDestroy( yBv[b] );
+      if( ypBv[b] ) N_VDestroy( ypBv[b] );
+      if( qBv[b] ) N_VDestroy( qBv[b] );
+    }
   }
 
   // The forward linear solver is freed HERE, after the backward sweep: the re-integration of a stage

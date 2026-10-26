@@ -59,16 +59,8 @@ bind_ffmodel_options(PyOpt& c)
           "CLASS_STRICT", mc::FFModel::Options::CLASS_STRICT,
           "Attempt PDE classification during setup and interrupt when it fails")
       .export_values();
-  c.def_readwrite(
-      "DISPLAY_LEVEL", &mc::FFModel::Options::DISPLAY_LEVEL,
-      "Console verbosity for setup()/eval() (default: 0). Tiered: 0 = silent: "
-      "only errors, validation failures, and warnings print. 1 = key "
-      "structural decisions: closures, interface-plan DROP / KEEP- EXPLICIT, "
-      "continuity redundancy / value-slaved drops, order and tau reduction "
-      "summaries. 2 = detailed diagnostics (includes everything at level 1): "
-      "phase and [iplan] timings, trace conditioning (rcond / SVD / sparsity), "
-      "per-predicate timing accumulators, verbose detection and edge "
-      "breakdowns. Errors and warnings are NEVER gated by this level.");
+  c.def_readwrite("DISPLAY_LEVEL", &mc::FFModel::Options::DISPLAY_LEVEL,
+                  "undocumented");
   py::class_<mc::FFModel::Options::t_Reduce> c_REDUCE(
       c, "t_Reduce", "Order reduction of high-order derivatives.");
   c_REDUCE.def(py::init<>());
@@ -125,6 +117,24 @@ bind_ffmodel_options(PyOpt& c)
       "full declaration is reported as a surplus by the DOF audit. Which data "
       "is free is a modelling choice -- for the index-3 pendulum {x,u} works, "
       "{x,y} does not.");
+  c_REDUCE.def_readwrite(
+      "DUMMY_DERIV", &mc::FFModel::Options::t_Reduce::DUMMY_DERIV,
+      "Reduce a high-index block by the METHOD OF DUMMY DERIVATIVES (Mattsson "
+      "& Soderlind) rather than by substitution. Substitution differentiates "
+      "the consumed constraint and overwrites its row with the derivative, "
+      "keeping the constraint itself only at the initial point: on the "
+      "interior it then holds only as well as its derivative is integrated -- "
+      "exactly for a linear constraint, since BDF conserves linear invariants, "
+      "but to integration tolerance for a nonlinear one (DAESLV_drift: "
+      "|x^2+y^2-1| of 1.9e-4 at rtol 1e-4). Dummy derivatives KEEP the "
+      "constraint as an interior row, ADD its derivative as another, and mint "
+      "one algebraic state per differentiation to stand for the derivative of "
+      "a chosen state, substituted wherever that derivative appears; the "
+      "system stays square, the chosen state becomes algebraic, and the "
+      "constraint holds to solver tolerance at every step. Index 2 (one "
+      "differentiation) is implemented; higher index falls back to "
+      "substitution with a message until the cascade is (default false, "
+      "2026-10-25).");
   c.def_readwrite("REDUCE", &mc::FFModel::Options::REDUCE,
                   "Order reduction of high-order derivatives.");
   py::class_<mc::FFModel::Options::t_Classify> c_CLASSIFY(

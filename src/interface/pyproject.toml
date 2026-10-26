@@ -1,0 +1,17 @@
+[project]
+name = "cronos-binders"
+version = "5.0.1"
+description = "Python binders of CRONOS: FFModel, ODESLV, DAESLV, OCFESLV"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "cronos-mcpp>=5.0.0",   # imports as `cronos`; brings pymcpp and numpy
+    "graphviz>=0.21",
+    "matplotlib>=3.11.0",
+    "scipy>=1.17.1",
+]
+
+[dependency-groups]
+dev = [
+    "ipykernel>=7.3.0",
+]

@@ -1,11 +1,11 @@
 [project]
 name = "cronos-tutorials"
-version = "5.0.0"
-description = "Tutorials of CRONOS (Jupyter notebooks and Python scripts): FFModel, ODESLV, OCFESLV"
+version = "5.1.0"
+description = "Tutorials of CRONOS (Jupyter notebooks and Python scripts): FFModel, ODESLV, DAESLV, OCFESLV"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "cronos-mcpp>=5.0.0",   # imports as `cronos`; brings pymcpp and numpy
+    "cronos-mcpp>=5.1.0",   # imports as `cronos`; brings pymcpp and numpy; the DAESLV tutorial needs 5.1
     "graphviz>=0.21",
     "matplotlib>=3.11.0",
     "scipy>=1.17.1",

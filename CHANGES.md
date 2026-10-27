@@ -1,6 +1,6 @@
 # Changes
 
-## 5.1.0 (2026-10-25)
+## 5.1.0 (2026-10-27)
 
 The headline is a second integrator. **DAESLV** integrates the model's undivided form with SUNDIALS IDAS,
 beside ODESLV on CVODES, with the same interface, the same sensitivities, and a shared base. Around it: the

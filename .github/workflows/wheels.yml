@@ -18,8 +18,8 @@ on:
 
 env:
   # The MC++ sources the module is compiled against.  They must be those of the pymcpp release pinned in
-  # pyproject.toml (objects cross between the two modules): set the release tag once pymcpp 5.0.3 is published.
-  MCPP_REF: v5.0.4
+  # pyproject.toml (objects cross between the two modules): the pymcpp release's tag, once it is published.
+  MCPP_REF: v5.1.0
 
 jobs:
   build_wheels:

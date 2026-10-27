@@ -160,12 +160,12 @@ With UMFPACK (sparse elimination at setup) and SPQR, under GPL-2.0-or-later.  It
 release under the same name, with a build tag; giving pip (or uv) the release page makes it prefer them:
 
 ```
-pip install cronos-mcpp -f https://github.com/omega-icl/cronos/releases/expanded_assets/v5.0.0
-uv pip install cronos-mcpp --find-links https://github.com/omega-icl/cronos/releases/expanded_assets/v5.0.0
+pip install cronos-mcpp -f https://github.com/omega-icl/cronos/releases/expanded_assets/v5.1.0
+uv pip install cronos-mcpp --find-links https://github.com/omega-icl/cronos/releases/expanded_assets/v5.1.0
 ```
 
 The page must be given at EVERY install or upgrade: without it, pip finds only the PyPI wheels and installs the EPL
-build.  To make that permanent, use one of: a line `-f https://github.com/omega-icl/cronos/releases/expanded_assets/v5.0.0`
+build.  To make that permanent, use one of: a line `-f https://github.com/omega-icl/cronos/releases/expanded_assets/v5.1.0`
 in `requirements.txt`; `find-links` in pip's configuration (`pip config set global.find-links <page>`); or
 `find-links = ["<page>"]` under `[tool.uv]` in a uv project.  A package that depends on `cronos-mcpp` is satisfied by
 either build, so installing it keeps the GPL build.

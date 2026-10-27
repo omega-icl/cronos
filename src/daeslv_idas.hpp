@@ -545,6 +545,11 @@ protected:
     return det;
   }
   std::vector<double> _dWRKres;
+  //! @brief The variable binding of the evaluation calls, cached: FFGraph::eval's plain overload builds a
+  //! hash map of every variable on EVERY call; the overload taking this map builds it once (MC++ 5.1) and
+  //! looks variables up in it.  One per (subgraph, variable list) pair; cleared when _vVAR is rebound.
+  std::unordered_map<FFVar::pt_idVar, std::pair<size_t,size_t>, hash_FFVarId> _ndxRES, _ndxEVAL;
+  FFSubgraph          _opEVAL;             //!< the rows and every Jacobian entry, for _eval_rows
   double              _evalMemoT = 0.;
   size_t              _evalMemoStage = 0, _evalStageTag = 0;
   std::vector<double> _evalMemoY, _evalMemoYp;
@@ -1054,7 +1059,7 @@ DAESLV_IDAS::_build_plans
   _pYP.clear();
   for( size_t i = 0; i < _nx; ++i ) _pYP.push_back( _dag->add_var( "d" + _mX[i].name() + "/dt" ) );
 
-  _vVAR.clear();
+  _vVAR.clear();  _ndxRES.clear();  _ndxEVAL.clear();  _opEVAL.clear();
   _vVAR.push_back( _pT[0] );
   for( auto const& v : _pX  ) _vVAR.push_back( v );
   for( auto const& v : _pYP ) _vVAR.push_back( v );
@@ -1196,6 +1201,7 @@ DAESLV_IDAS::_build_rows
   StagePlan const& P = _plan[ss];
   _vEVAL = P.eval;
   _opRES = _dag->subgraph( P.F.size(), _vEVAL.data() );   // residual rows only: P.F leads P.eval
+  _opEVAL.clear();                                          // the full rows, rebuilt lazily by the first _eval_rows of the stage
   _vQUAD = P.Q;  _dQUAD.assign( _nq, 0. );
   _nFp = P.nFp;  _offFp = P.offFp;  _rFp = P.rFp;  _cFp = P.cFp;
   _rJy = P.rJy;  _cJy = P.cJy;  _rJyp = P.rJyp;  _cJyp = P.cJyp;
@@ -1345,8 +1351,8 @@ DAESLV_IDAS::_eval_rows
   _dVAR[0] = t;
   for( size_t i = 0; i < _nx; ++i ) _dVAR[1+i] = y[i];
   for( size_t i = 0; i < _nx; ++i ) _dVAR[1+_nx+i] = yp[i];
-  _dag->eval( _dWRK, _vEVAL.size(), _vEVAL.data(), _dEVAL.data(),
-              _vVAR.size(), _vVAR.data(), _dVAR.data() );
+  { std::vector<size_t> const ln{ _vVAR.size() };  std::vector<FFVar const*> const lp{ _vVAR.data() };  std::vector<double const*> const lv{ _dVAR.data() };
+    _dag->eval( _opEVAL, _ndxEVAL, _dWRK, (unsigned)_vEVAL.size(), _vEVAL.data(), _dEVAL.data(), ln, lp, lv ); }
   _evalMemoFull = true;
 }
 
@@ -1373,8 +1379,8 @@ DAESLV_IDAS::_eval_residual
   _dVAR[0] = t;
   for( size_t i = 0; i < _nx; ++i ) _dVAR[1+i] = y[i];
   for( size_t i = 0; i < _nx; ++i ) _dVAR[1+_nx+i] = yp[i];
-  _dag->eval( _opRES, _dWRKres, _nres, _vEVAL.data(), _dEVAL.data(),
-              _vVAR.size(), _vVAR.data(), _dVAR.data() );
+  { std::vector<size_t> const ln{ _vVAR.size() };  std::vector<FFVar const*> const lp{ _vVAR.data() };  std::vector<double const*> const lv{ _dVAR.data() };
+    _dag->eval( _opRES, _ndxRES, _dWRKres, (unsigned)_nres, _vEVAL.data(), _dEVAL.data(), ln, lp, lv ); }
 }
 
 inline

@@ -586,55 +586,6 @@ class BASE_DE
     std::vector<double> x;
   };
 
-  //! @brief Sparse Jacobian of @p rows w.r.t. @p wrt in SFAD's triplet form -- built ROW BY ROW, each
-  //! row differentiated only against the independents its own subgraph names.  FFGraph::SFAD sweeps the
-  //! subgraph of ALL rows once per independent, O(rows x wrt) however sparse the result (measured flat
-  //! in ms/n^2 on a tridiagonal probe, 2026-10-25); a row of a discretised model depends on a handful of
-  //! unknowns, so the sum of per-row calls is O(nnz x depth).  Entries that simplify to a literal zero
-  //! are kept, as SFAD keeps them, so every caller's filtering is unchanged.
-  static std::tuple<unsigned,unsigned*,unsigned*,FFVar*> _sfad_by_row
-    ( FFGraph* dag, std::vector<FFVar> const& rows, std::vector<FFVar> const& wrt )
-  {
-    std::vector<unsigned> rr, cc;  std::vector<FFVar> vv;
-    // DAG var id -> wrt index + 1.  Sized by the LARGEST id, not the variable COUNT: ids are not dense
-    // (variables are created and released), and the first cut sized this by Vars().size() -- so an
-    // unknown whose id was >= the count fell outside the array and its COLUMN silently vanished.
-    // DAESLV_asens caught it: d f/da came back exactly 0 where e^-k was due (2026-10-25).
-    long maxid = -1;
-    for( auto const& w : wrt ) maxid = std::max( maxid, w.id().second );
-    std::vector<unsigned> ndx( (size_t)( maxid + 2 ), 0 );
-    for( size_t j = 0; j < wrt.size(); ++j ){
-      long const id = wrt[j].id().second;
-      if( id >= 0 ) ndx[id] = (unsigned)j + 1;
-    }
-    std::vector<FFVar> w;  std::vector<unsigned> wj;
-    for( size_t k = 0; k < rows.size(); ++k ){
-      w.clear();  wj.clear();
-      auto sg = dag->subgraph( 1, &rows[k] );
-      for( auto const* v : sg.v_indep ){
-        long const id = v->id().second;
-        if( id < 0 || (size_t)id >= ndx.size() || !ndx[id] ) continue;
-        w.push_back( wrt[ ndx[id] - 1 ] );  wj.push_back( ndx[id] - 1 );
-      }
-      if( w.empty() ) continue;
-      auto Jk = dag->SFAD( 1, &rows[k], (unsigned)w.size(), w.data() );
-      unsigned const nnz = std::get<0>( Jk );
-      unsigned* jr = std::get<1>( Jk );  unsigned* jc = std::get<2>( Jk );  FFVar* jv = std::get<3>( Jk );
-      for( unsigned e = 0; e < nnz; ++e ){ rr.push_back( (unsigned)k );  cc.push_back( wj[ jc[e] ] );  vv.push_back( jv[e] ); }
-      delete[] jr;  delete[] jc;  delete[] jv;
-    }
-    // SFAD's contract is COLUMN order (ODESLV_BASE::_RHS_D_SET builds its column pointers by walking
-    // the triplets in sequence), and the rows came out row-major: sort on (col, row).
-    unsigned const nnz = (unsigned)rr.size();
-    std::vector<unsigned> ord( nnz );
-    for( unsigned e = 0; e < nnz; ++e ) ord[e] = e;
-    std::sort( ord.begin(), ord.end(), [&]( unsigned a, unsigned b ){
-      return cc[a] != cc[b]? cc[a] < cc[b]: rr[a] < rr[b]; } );
-    unsigned* r2 = new unsigned[ nnz ];  unsigned* c2 = new unsigned[ nnz ];  FFVar* v2 = new FFVar[ nnz ];
-    for( unsigned e = 0; e < nnz; ++e ){ r2[e] = rr[ ord[e] ];  c2[e] = cc[ ord[e] ];  v2[e] = vv[ ord[e] ]; }
-    return std::make_tuple( nnz, r2, c2, v2 );
-  }
-
   //! @brief Sensitivities of the consistent initial data w.r.t. the parameters, from the system LAST
   //! solved: @p dxdp[j][i] = d x_i / d p_j and @p ddxdp[j][i] = d (dx_i/dt) / d p_j.  Call it directly
   //! after solve_ic() or restart_ic(), whose solution it linearises about.
@@ -1714,7 +1665,7 @@ BASE_DE::_assemble_ic
   // structural zero.  Invisible at nx = 5; quadratic on a discretised model, which is where this is
   // headed.  SFAD returns the non-zeros and nothing else.
   std::vector<bool> used( _nx, false );
-  { auto const Js = _sfad_by_row( FFModel::_dag, plain, _mDotVar );
+  { auto const Js = FFModel::_dag->SFAD( (unsigned)plain.size(), plain.data(), (unsigned)_mDotVar.size(), _mDotVar.data() );
     for( unsigned e = 0; e < std::get<0>( Js ); ++e ){
       FFVar const& d = std::get<3>( Js )[e];
       if( d.cst() && d.num().val() == 0. ) continue;        // keep the old guard: a structural entry
@@ -1757,7 +1708,7 @@ BASE_DE::_assemble_ic
   // zeros.  This mirrors what the integrator already does for its own Jacobian, and is what lets a sparse
   // linear solver be offered under KINSOL rather than only a dense one.
   S.eval = S.row;
-  { auto const Js = _sfad_by_row( S.dag, S.row, S.unk );
+  { auto const Js = S.dag->SFAD( (unsigned)S.row.size(), S.row.data(), (unsigned)S.unk.size(), S.unk.data() );
     S.nnz = std::get<0>( Js );
     S.jrow.assign( S.nnz, 0 ); S.jcol.assign( S.nnz, 0 );
     for( unsigned e = 0; e < S.nnz; ++e ){
@@ -1811,7 +1762,7 @@ BASE_DE::_assemble_ic
   if( _np ){
     std::vector<FFVar> pv;
     for( size_t j = 0; j < _np; ++j ) pv.push_back( S.all[ 1 + _nx + j ] );
-    auto const Jp = _sfad_by_row( S.dag, S.row, pv );   // see _sfad_by_row: one call is O(rows x pv)
+    auto const Jp = S.dag->SFAD( (unsigned)S.row.size(), S.row.data(), (unsigned)pv.size(), pv.data() );
     S.nnzP = std::get<0>( Jp );
     S.jrowP.assign( S.nnzP, 0 ); S.jcolP.assign( S.nnzP, 0 );
     for( unsigned e = 0; e < S.nnzP; ++e ){
@@ -1833,7 +1784,7 @@ BASE_DE::_assemble_ic
     for( size_t i = 0; i < _nx; ++i ) lv.push_back( S.all[ lft0 + i ] );
     for( size_t i = 0; i < _mDotLftVar.size(); ++i ) lv.push_back( S.all[ lft0 + _nx + i ] );
     S.nLftCol = lv.size();
-    auto const Jl = _sfad_by_row( S.dag, S.row, lv );   // ditto: the stop system's left-state seed
+    auto const Jl = S.dag->SFAD( (unsigned)S.row.size(), S.row.data(), (unsigned)lv.size(), lv.data() );
     S.nnzL = std::get<0>( Jl );
     S.jrowL.assign( S.nnzL, 0 ); S.jcolL.assign( S.nnzL, 0 );
     for( unsigned e = 0; e < S.nnzL; ++e ){

@@ -1095,14 +1095,14 @@ _blap( "stage: assemble F" );
     std::tuple<unsigned,unsigned*,unsigned*,FFVar*> Jy, Jyp, Fp;
     bool haveFp = false;
     try{
-      // dF/dy row by row, each row against only the states it depends on -- see BASE_DE::_sfad_by_row.
-      // One SFAD over the whole residual was 0.8 s at 2400 states and quadratic (2026-10-25).
-      Jy = _sfad_by_row( _dag, P.F, _pX );
+      // dF/dy by SFAD, which since MC++ 5.1 sweeps each column's cone only, O(nnz x depth).  (CRONOS carried
+      // its own per-row loop, BASE_DE::_sfad_by_row, while SFAD swept the whole subgraph once per
+      // independent; retired 2026-10-26 once the two measured the same.)
+      Jy = _dag->SFAD( (unsigned)P.F.size(), P.F.data(), (unsigned)_pX.size(), _pX.data() );
       // dF/dy' needs NO differentiation: F = R + sum_c M_c y'_{at[c].second} with R free of y', so
       // the Jacobian w.r.t. y' is exactly the mass coefficients M, each at its (row, state) -- the
       // pairs _extract_from_model already peeled off the rows.  Assembled here in the triplet form
-      // SFAD returns.  SFAD is O(rows x states) regardless of sparsity (one subgraph sweep per
-      // independent), and this call was half of _build_plans at 2400 states (2026-10-25).
+      // SFAD returns.
       { unsigned const nnz = (unsigned)at.size();
         unsigned* rr = new unsigned[ nnz ];  unsigned* cc = new unsigned[ nnz ];  FFVar* vv = new FFVar[ nnz ];
         for( unsigned c = 0; c < nnz; ++c ){ rr[c] = (unsigned)at[c].first;  cc[c] = (unsigned)at[c].second;  vv[c] = M[c]; }

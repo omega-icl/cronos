@@ -67,6 +67,11 @@ alternative to substitution, and a setup and solve path that scale to meshes of 
 
 ### Performance
 
+* Requires MC++ 5.1 (`pymcpp~=5.1.0`): its `FFSubgraph` slot guard, without which the embedded solvers segfault
+  when the model's own variables are the operation's inputs, and its cone-restricted `SFAD`/`SBAD`, which made
+  CRONOS's own row-by-row differentiation (`_sfad_by_row`) redundant -- retired, the seven call sites going to
+  `SFAD` directly, with the setup times equal within noise.
+
 Setup and solve were measured on a reaction-diffusion model by the method of lines, from 118 to 9,598 states
 (`DAESLV_scaling`), and every O(n^2) step found was removed:
 

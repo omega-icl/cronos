@@ -310,32 +310,32 @@ wheels = [
 
 [[package]]
 name = "cronos-mcpp"
-version = "5.0.0"
+version = "5.1.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "pymcpp" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/9c/87/664d87ead19125f2ee9e5c9b9314e9239d64791a4f3ae8f0fad86d590ccb/cronos_mcpp-5.0.0.tar.gz", hash = "sha256:09ff87fa4c5f2721fa10fbb3649df34874c87fadb1b30e87834de2c0d8c6c0fa", size = 1651938, upload-time = "2026-10-09T17:00:54.581Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/9a/ee/267007d978eef08ff1d1d401000eff5acfce192ab9ba198820506233e866/cronos_mcpp-5.1.0.tar.gz", hash = "sha256:3f6f03ea095fbf2b7d82985cd65e2d65d9238189525c7a53177bf441ba44438e", size = 2414518, upload-time = "2026-10-27T23:18:04.251Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/37/6b/9c67c0fa7dca22c68851e42b09ad3d83aa16ff4b967c753ea3ac59e6ee01/cronos_mcpp-5.0.0-cp311-cp311-macosx_14_0_arm64.whl", hash = "sha256:a88277ae83a63379772a70e1eaae13aff07412fdf83de3cb1e56235d3836c70d", size = 2584453, upload-time = "2026-10-09T17:00:22.946Z" },
-    { url = "https://files.pythonhosted.org/packages/4d/5a/d7f2819f9ad5369cd2579c2261a6a444969fb659531fba94097bc95f190e/cronos_mcpp-5.0.0-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:dce2dcf9eff0e952c0a8cb0aa329211f93e00e51959bc7bcb89b02c008aee1ca", size = 14914149, upload-time = "2026-10-09T17:00:24.836Z" },
-    { url = "https://files.pythonhosted.org/packages/c3/02/1081a080e5db3a368d8569a601e14e00f9ffaf6b075ea5996792a731fcdb/cronos_mcpp-5.0.0-cp311-cp311-win_amd64.whl", hash = "sha256:416c2ac6d987d6ede25a2f5ae98f2248efb3b7dd7c2422f18b31e878855fca6a", size = 15857109, upload-time = "2026-10-09T17:00:27.736Z" },
-    { url = "https://files.pythonhosted.org/packages/ab/8c/37437d51629b54f8bd0786314f902ac0297e21c239af0c53b6fcdea10d9c/cronos_mcpp-5.0.0-cp312-cp312-macosx_14_0_arm64.whl", hash = "sha256:74a88424e4d18800f7a211c5bc46d8b9546a56d60b56a1a89a3d6d8f95b14c4a", size = 2585624, upload-time = "2026-10-09T17:00:30.215Z" },
-    { url = "https://files.pythonhosted.org/packages/b8/e4/62be4929456b313567bfa6300b5f5b14b0deb8a3614dee6daea7f7520681/cronos_mcpp-5.0.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:8f1b6f2f7c17ca1d6c9d354f87c1230ce00970c2be28c0cd693a029b025c0b4a", size = 14900334, upload-time = "2026-10-09T17:00:33.007Z" },
-    { url = "https://files.pythonhosted.org/packages/68/9e/6e0561450cf2d0a7ae800e5c84f85226f8d986d151d284bcb75509f99401/cronos_mcpp-5.0.0-cp312-cp312-win_amd64.whl", hash = "sha256:3a14d94a097ef46484b0eab76d1adda003c6dfa627b68ba508b3daa7100caadd", size = 15786084, upload-time = "2026-10-09T17:00:35.988Z" },
-    { url = "https://files.pythonhosted.org/packages/05/20/15ee6f55bccb9ef0f016c41cb971a5c0ebd458b70aa39b6c86b664da62e6/cronos_mcpp-5.0.0-cp313-cp313-macosx_14_0_arm64.whl", hash = "sha256:9870061849615962dc5a3b8941c2995bb42a00b67722d912f78376df78e7ade3", size = 2586675, upload-time = "2026-10-09T17:00:38.314Z" },
-    { url = "https://files.pythonhosted.org/packages/92/a0/148b683458adc323004f1dbe295cc2188f7eff21fd86b399c8963ff9cdc5/cronos_mcpp-5.0.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:34996d3f435ca8717bd8dbe01dd9d400441b5fb3d3ac40da44f1b41f772e8b2a", size = 14902047, upload-time = "2026-10-09T17:00:40.396Z" },
-    { url = "https://files.pythonhosted.org/packages/aa/f5/666466a395594a00a15017964b6faa41b1f9e59755d970fe51e822f3d836/cronos_mcpp-5.0.0-cp313-cp313-win_amd64.whl", hash = "sha256:e2053d16b1ea41a3a643d6f50aef9b06d7b2bc30b2abc57c11134a9b110f0c32", size = 15787486, upload-time = "2026-10-09T17:00:43.459Z" },
-    { url = "https://files.pythonhosted.org/packages/32/f0/1d392aead746cd94352534426e6e6f3905d143078358f4cddadae39ea10b/cronos_mcpp-5.0.0-cp314-cp314-macosx_14_0_arm64.whl", hash = "sha256:bae00db49a3f2840257a355efe864f9ff3173469e8b3535290e6f4bb5f51647f", size = 2586677, upload-time = "2026-10-09T17:00:46.486Z" },
-    { url = "https://files.pythonhosted.org/packages/5a/fc/493fed8f5cf1a13070b0e528420a1e1f4a8b52b534aa471bc9b6436a474d/cronos_mcpp-5.0.0-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:ceef105257d1fa98b0218f1946de76dfb60ba500a1c534f4eba97c0659d33f7d", size = 14902105, upload-time = "2026-10-09T17:00:48.931Z" },
-    { url = "https://files.pythonhosted.org/packages/83/da/a6d8d8247fb861f703262fc612292890814c58ce7644ca5a3301e1e9180d/cronos_mcpp-5.0.0-cp314-cp314-win_amd64.whl", hash = "sha256:53633c72cdd5cefc300d9ae0de29c787ef85db865c5c296ee0d095cb35df1789", size = 16104751, upload-time = "2026-10-09T17:00:51.952Z" },
+    { url = "https://files.pythonhosted.org/packages/b2/32/d54249a81e4270aa7c5c77075fe09566a60d13e2e094432f83025ec26739/cronos_mcpp-5.1.0-cp311-cp311-macosx_14_0_arm64.whl", hash = "sha256:4026fb4d77447e0bd73879f2dce3ad03c4aa991ff9cc1e74301e1b6627d862db", size = 3056719, upload-time = "2026-10-27T23:17:30.517Z" },
+    { url = "https://files.pythonhosted.org/packages/b6/71/61f8839d42859745c6ba806f9bbfd7488393adbf87d9e7bc8891886325ce/cronos_mcpp-5.1.0-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:edb08f387cc81db9fd5a92585a4ba86823eb53cbe2fca38460f06da36dfd687a", size = 15439534, upload-time = "2026-10-27T23:17:32.714Z" },
+    { url = "https://files.pythonhosted.org/packages/6f/87/06b61ce9a95cfcc23c34648775abd42ac9a3019c8369c04e815976c531c3/cronos_mcpp-5.1.0-cp311-cp311-win_amd64.whl", hash = "sha256:b32ccbcafec055f7a34f87c4d4a49104fd4a7ff3ff3e6e65434e4fc0ce2dc1c1", size = 16424216, upload-time = "2026-10-27T23:17:35.657Z" },
+    { url = "https://files.pythonhosted.org/packages/b1/af/2aa851e4326daf8063356e0e10c71e333c7b91abf84026d0f79a05afbdfe/cronos_mcpp-5.1.0-cp312-cp312-macosx_14_0_arm64.whl", hash = "sha256:a52c0ba32399d8ec77707f208eac414ec402f15cafda6328b9576021f54cb8a2", size = 3058416, upload-time = "2026-10-27T23:17:38.326Z" },
+    { url = "https://files.pythonhosted.org/packages/02/65/bfd1ce2825db0ccf778a664ddc8e1c3a39152f9185cb39daa1f77a381401/cronos_mcpp-5.1.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:f2497efae87855d1520417896c1bdd6f502085e798d77d25ab10b5b170989389", size = 15421318, upload-time = "2026-10-27T23:17:41.263Z" },
+    { url = "https://files.pythonhosted.org/packages/65/3f/e52738be4b092f8e3ac116c9fa52fdfaa6fa293617fce61731925029a000/cronos_mcpp-5.1.0-cp312-cp312-win_amd64.whl", hash = "sha256:e99c23e3bd4e3c6d5183dda9fabd812193ad0e2f3df9c714d80c4c4d55105596", size = 16328682, upload-time = "2026-10-27T23:17:44.623Z" },
+    { url = "https://files.pythonhosted.org/packages/5f/74/8a2b83cfc7af883bd8d4d730fc7b7160332acfd6403b8f934fd9fa6e74ed/cronos_mcpp-5.1.0-cp313-cp313-macosx_14_0_arm64.whl", hash = "sha256:446be06b8f69fa34063c39cf78a056e6d850df840d963ac6e2933a6845950424", size = 3059779, upload-time = "2026-10-27T23:17:47.465Z" },
+    { url = "https://files.pythonhosted.org/packages/e5/4b/1fe5af2ae31a1fd5dd5dc8e815276d72c78f912236cc91e452894ca7a182/cronos_mcpp-5.1.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:899d6271b136bddbf436ece7f714e66229682b58da9b34c9069ee820cbf6e6d4", size = 15421345, upload-time = "2026-10-27T23:17:49.971Z" },
+    { url = "https://files.pythonhosted.org/packages/c2/51/cc09f4d71043349d34266a6d193a32c842847b5d600a6841ed9b6e164758/cronos_mcpp-5.1.0-cp313-cp313-win_amd64.whl", hash = "sha256:44bd4cf49d324e0140204c63a74c030aac64a62ff2f8cc4a4c334347f826cd05", size = 16330071, upload-time = "2026-10-27T23:17:53.213Z" },
+    { url = "https://files.pythonhosted.org/packages/de/c1/5e1b409e4775bbcd1cea37778a806aea35ddb6d2ca0a427129dc50a340e2/cronos_mcpp-5.1.0-cp314-cp314-macosx_14_0_arm64.whl", hash = "sha256:28255cda0e50d930bcbbd92fdc31d63d387480406df97290eac4ff2f67dd8756", size = 3060033, upload-time = "2026-10-27T23:17:55.917Z" },
+    { url = "https://files.pythonhosted.org/packages/69/c3/9f028c4fae3bbc94377ee8bef31e8aa5781c6afd2c44f7a935644412e80a/cronos_mcpp-5.1.0-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:ef7c136dfa946809818420e348d2cb04204070c156a4a59d9bddb0ddda8f2f1d", size = 15421514, upload-time = "2026-10-27T23:17:58.649Z" },
+    { url = "https://files.pythonhosted.org/packages/6e/2d/902d578600628e2f99179a3700a9851be9378db57a02e7d3aad05e384c88/cronos_mcpp-5.1.0-cp314-cp314-win_amd64.whl", hash = "sha256:87cc90af1e010d3c78449cda474b55f1421a9d597a25bc339d07497253c3d8d8", size = 16670577, upload-time = "2026-10-27T23:18:01.619Z" },
 ]
 
 [[package]]
 name = "cronos-tutorials"
-version = "5.0.0"
+version = "5.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "cronos-mcpp" },
@@ -352,7 +352,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "cronos-mcpp", specifier = ">=5.0.0" },
+    { name = "cronos-mcpp", specifier = ">=5.1.0" },
     { name = "graphviz", specifier = ">=0.21" },
     { name = "matplotlib", specifier = ">=3.11.0" },
     { name = "scipy", specifier = ">=1.17.1" },
@@ -1165,22 +1165,22 @@ wheels = [
 
 [[package]]
 name = "pymcpp"
-version = "5.0.4"
+version = "5.1.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/3c/3d/172cfc5660e6f8cceaecdaf7663d8cb30ed4ebac9b07fb71066ad3b9e0ed/pymcpp-5.0.4.tar.gz", hash = "sha256:4b2045a1212bcddfeff99302c0d08eaa8ae0488fb4750c5e1c6581918a19ed79", size = 8016512, upload-time = "2026-10-08T15:23:32.1Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/10/70/e23060b8ce1b4c4753444d6ba23f2feb2786545b48c5af0c6eee8552faae/pymcpp-5.1.0.tar.gz", hash = "sha256:70d6155ddc15f4f5efc986d0193287695bf649391a1a27788c683d8c6560b10a", size = 8042345, upload-time = "2026-10-27T09:07:57.687Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/cb/32/4b3eb1036872a810b80f6fcaae7d3f0e1cd8b8fe170920fefd6d8a04ffc1/pymcpp-5.0.4-cp311-cp311-macosx_14_0_arm64.whl", hash = "sha256:9b224464af04dcec626ff54ce32fccc08b9edd79652386196b61a327b199e373", size = 3680024, upload-time = "2026-10-08T15:22:59.273Z" },
-    { url = "https://files.pythonhosted.org/packages/31/10/d4266db8ae5c050339451d06e8ba2955e565da9a02bf2e586e93d40265d5/pymcpp-5.0.4-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:8e0941785024f3013358bcc2faff6f8c056de715732e72199aa4cac3417a8a38", size = 16068790, upload-time = "2026-10-08T15:23:02.063Z" },
-    { url = "https://files.pythonhosted.org/packages/ca/39/e2bee9d7f6c9f4d0fcd9b509f948bbab6570d30eccf7f8baac542053821b/pymcpp-5.0.4-cp311-cp311-win_amd64.whl", hash = "sha256:4ec49be5050bfdcebb40af18f58fcd96496da0e1d47579edc23f38da64604645", size = 17426553, upload-time = "2026-10-08T15:23:05.308Z" },
-    { url = "https://files.pythonhosted.org/packages/5b/34/f471000a7f2b99ecd9ff39b82d3c6a7df0c55b15e09fee1390eb7d8a0e8c/pymcpp-5.0.4-cp312-cp312-macosx_14_0_arm64.whl", hash = "sha256:80054d5e5f715fb91cfb9fa02c48b3be10beb2010b24fef65dcab3074ab08d39", size = 3681732, upload-time = "2026-10-08T15:23:07.873Z" },
-    { url = "https://files.pythonhosted.org/packages/b4/b7/69ce7b4c27c2263ca083c5beed331dfbe4e6b76f06df0f27a221de3496df/pymcpp-5.0.4-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:f1676b02efe76ddfd9385d6201fb785aa2a9c846fe4df48fa2102f2e09e0e6fd", size = 16004665, upload-time = "2026-10-08T15:23:10.249Z" },
-    { url = "https://files.pythonhosted.org/packages/f9/4c/c2506a1a56900d797ffddee61cb7e06acfcfc4c6da3a19a97ddbaa1d3dd0/pymcpp-5.0.4-cp312-cp312-win_amd64.whl", hash = "sha256:c8e510596bb4e87844309119f9dc68940de0b7338de825f2093255a52408da67", size = 17152724, upload-time = "2026-10-08T15:23:13.341Z" },
-    { url = "https://files.pythonhosted.org/packages/ad/1f/63160e2d9aeb1ab6b7673d9adcb5dd3e4511cff79d4f49c2f6dd22176621/pymcpp-5.0.4-cp313-cp313-macosx_14_0_arm64.whl", hash = "sha256:8632535fb76cf9d4edf1ad925ecc7a997ed94bd0cd3f6935cba549d49096fda3", size = 3686663, upload-time = "2026-10-08T15:23:15.948Z" },
-    { url = "https://files.pythonhosted.org/packages/71/44/757dbde619c3698ff60e227cd57e94d69bd4ebcd4451c493d94718dc181d/pymcpp-5.0.4-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:30ff7e71e1ce4f383c12f77bda0d27ef71143043f575d30dcd1e7de2823b2a09", size = 16005342, upload-time = "2026-10-08T15:23:18.523Z" },
-    { url = "https://files.pythonhosted.org/packages/a1/c0/a2b52d57bcdf19dd3a9a1ac0ee4447936a87d839bb84901ecddcb2efb3d5/pymcpp-5.0.4-cp313-cp313-win_amd64.whl", hash = "sha256:b37623e97cc44b2e63287f19c25742fa576bb20a358b4243421b4308fcc2a0ad", size = 17160467, upload-time = "2026-10-08T15:23:21.777Z" },
-    { url = "https://files.pythonhosted.org/packages/79/4d/a510a8611814d837b52d79cc1af447549f309925216bdd37c0e69e88ad42/pymcpp-5.0.4-cp314-cp314-macosx_14_0_arm64.whl", hash = "sha256:6a669733f17db6f917ecb9eb04018c4c697488b9c34ae2e6279240c0d9a4c613", size = 3686916, upload-time = "2026-10-08T15:23:24.26Z" },
-    { url = "https://files.pythonhosted.org/packages/50/08/87454f2cb31ba08cc6bdfe0764c034a185da85c66be6ef03bf35c75feb95/pymcpp-5.0.4-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:39109d77f0d0b51e9f1962892cadfd25f715e0f96870892147ac2d70adcd87c2", size = 16004334, upload-time = "2026-10-08T15:23:26.49Z" },
-    { url = "https://files.pythonhosted.org/packages/31/14/7ecb91da282516c21d4d08fba87d99a6a55cd86c7ce0df55bc656a99faa1/pymcpp-5.0.4-cp314-cp314-win_amd64.whl", hash = "sha256:56375039babd946b174c69997408b2b503a081848936b2c5697d57e87a282cb1", size = 17563195, upload-time = "2026-10-08T15:23:29.421Z" },
+    { url = "https://files.pythonhosted.org/packages/e6/dc/9019e1e3f468306e56c5eee37eb5ed8f01cd520c5d09df80a04f41431c2b/pymcpp-5.1.0-cp311-cp311-macosx_14_0_arm64.whl", hash = "sha256:95d62c81fe9adc8ae298cab5e63c00778ae2d0f000522ae9487d90de4bb582f7", size = 3700295, upload-time = "2026-10-27T09:07:31.547Z" },
+    { url = "https://files.pythonhosted.org/packages/fe/cf/c0225180e977c93817310d14d4b717883983e33e7e97a01f37bd7436661d/pymcpp-5.1.0-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:7bcc7e16bf7d1a8246ed73510977685d3e981229f3ca514181f4dba17ad330cf", size = 16088059, upload-time = "2026-10-27T09:07:33.584Z" },
+    { url = "https://files.pythonhosted.org/packages/03/e0/f5e24fe38842a4afd7671727437eee6d00d68864bf8b9e58618152c5bbaf/pymcpp-5.1.0-cp311-cp311-win_amd64.whl", hash = "sha256:3eb187e0db4af79db8082010447189c0976869db3906760d25507a90cfc1c350", size = 17451836, upload-time = "2026-10-27T09:07:36.068Z" },
+    { url = "https://files.pythonhosted.org/packages/ba/cf/89107f5b22bf7f17d5fc7ca14a975e5a104b6f1fa727a586c98525508cbf/pymcpp-5.1.0-cp312-cp312-macosx_14_0_arm64.whl", hash = "sha256:f75892ec5178db1b17924fb30202aa767fe9783733399c03830286a4754236f5", size = 3701398, upload-time = "2026-10-27T09:07:38.644Z" },
+    { url = "https://files.pythonhosted.org/packages/40/e0/8a36451bc4008bb9f6c2755502a36950d4caf7d20b5932132fc7f8e06f8c/pymcpp-5.1.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:c5164508c4c51f92f908d3746f90bf96fc649ddf70e32fa2049068ff982da64c", size = 16024644, upload-time = "2026-10-27T09:07:40.383Z" },
+    { url = "https://files.pythonhosted.org/packages/32/b0/00deffa3b27863456d34d7248e87b6d941fd3e7e46e1a146d54c37d31d72/pymcpp-5.1.0-cp312-cp312-win_amd64.whl", hash = "sha256:242b2f01445f2edae03de3499d3c828b0252791b753407c4a3f220fe0c31135e", size = 17177144, upload-time = "2026-10-27T09:07:42.549Z" },
+    { url = "https://files.pythonhosted.org/packages/77/b6/41f44b5947f4fe8b1234c83fd0541641bf6643b4e7bcf7a8a4203a2a322c/pymcpp-5.1.0-cp313-cp313-macosx_14_0_arm64.whl", hash = "sha256:0e65a1975f06875caf812a0ded4ff4d6f5bcf0cd5326b290f38468cd29746a34", size = 3704135, upload-time = "2026-10-27T09:07:44.651Z" },
+    { url = "https://files.pythonhosted.org/packages/25/c3/e913712528f1e8cbd26aac2c736fb150f989cf8ae46ef8f97743651449f7/pymcpp-5.1.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:bec861319fce07581e18a0ba7d3b97623cc8734454ff24cf9a8a7b468d37ee76", size = 16024137, upload-time = "2026-10-27T09:07:46.346Z" },
+    { url = "https://files.pythonhosted.org/packages/17/a7/24648545f88d886111d357d47c30e3b6378c3047854bb4dd09b2022dd0b1/pymcpp-5.1.0-cp313-cp313-win_amd64.whl", hash = "sha256:79dec1b6727e92ebf77b8af19e987d30534d7ffd089de65f4a8950fb7ade242d", size = 17186705, upload-time = "2026-10-27T09:07:48.921Z" },
+    { url = "https://files.pythonhosted.org/packages/e2/3e/ed4970b2a470f7c6cfca70c9f80a9aeee7f762ecb434af71f1627197574a/pymcpp-5.1.0-cp314-cp314-macosx_14_0_arm64.whl", hash = "sha256:bf63d0e818399ea5825cbb2901f86cc4cb48f2466ecd27f7a7b07177d3524187", size = 3704017, upload-time = "2026-10-27T09:07:51.055Z" },
+    { url = "https://files.pythonhosted.org/packages/b5/a0/a774f7ecfc55b1ebad7a9f6c39d44da1a3d08dfe52ada3b725d89a20888b/pymcpp-5.1.0-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:64705afc980df55c1ccf1deb278b8d31574a268213fa8b016f49093f1aa7449f", size = 16024011, upload-time = "2026-10-27T09:07:52.676Z" },
+    { url = "https://files.pythonhosted.org/packages/62/bc/02e0d4d6737ec76ab0379fa8e2f65df7e203cdef33e54db1992f82e07457/pymcpp-5.1.0-cp314-cp314-win_amd64.whl", hash = "sha256:9c5baaede15aa4784d5c80608c7508d6fd300199950ade89c0fa8e3578b4df70", size = 17588748, upload-time = "2026-10-27T09:07:54.931Z" },
 ]
 
 [[package]]

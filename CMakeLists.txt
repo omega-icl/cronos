@@ -855,6 +855,17 @@ if(ENABLE_PYTHON)
         ${_check_cmds})
   endif()
   if(_check_cmds)
+  # CRONOS's version is written in three places (pyproject.toml, cronos.cpp, CRONOS.dox) and the MC++ release it is
+  # built against in four (wheels.yml's MCPP_REF, the pymcpp~= and the two pymcpp== pins); tools/ci/check_version.py
+  # requires each set to agree, and the MC++ tree a local build compiles against (MCPP_ROOT) to be that release.
+  # The first v5.1.0 tag had MCPP_REF at v5.1.0 and the pins at 5.0.4, and `check` passed (2026-10-27).  Runs FIRST.
+  set(CRONOS_CHECK_VERSION "${CMAKE_CURRENT_SOURCE_DIR}/tools/ci/check_version.py")
+  if(EXISTS "${CRONOS_CHECK_VERSION}")
+    set(_check_cmds
+        COMMAND ${CMAKE_COMMAND} -E echo "== check_version.py"
+        COMMAND ${Python3_EXECUTABLE} "${CRONOS_CHECK_VERSION}" "${CMAKE_CURRENT_SOURCE_DIR}" --mcpp-root "${MCPP_ROOT}"
+        ${_check_cmds})
+  endif()
     add_custom_target(
       check
       ${_check_cmds}

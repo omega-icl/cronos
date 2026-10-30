@@ -4569,6 +4569,29 @@ protected:
   // The control registry (_controls, _nControlDof) is FFModel's -- see the note by
   // _on_controls_changed() above.  The uses below resolve to the inherited members unchanged.
 
+  //! @brief The marching context as seen by the DIRECTION-AGNOSTIC code (the OCVar environment,
+  //! the interface plan, the determinacy audits).  Those are built over the collocated
+  //! directions and must not read the marching driver's state directly: they ask this.  Phase 1
+  //! of the MoL work moves them into OCFEBASE, where this declaration goes with a "not marching"
+  //! default; OCFESLV then answers it from the members below.  Introduced as C0 so that every
+  //! later commit of that phase is a pure move.
+  struct MarchContext {
+    bool   in_march = false;   //!< a resident marching window is being assembled
+    size_t window   = 0;       //!< its index (meaningful when in_march)
+    size_t n_grid   = 0;       //!< size of the recorded march grid (N+1 for N steps; 0: none)
+    size_t n_steps  = 0;       //!< n_march_steps(): 0 when monolithic
+    bool   active   = false;   //!< SOLVE.MARCHING with a recorded grid of at least one step
+  };
+  virtual MarchContext _march_context
+    () const
+    {
+      MarchContext m;
+      m.in_march = _inMarch;  m.window = _marchWindow;
+      m.n_grid   = _marchGrid.size();  m.n_steps = n_march_steps();
+      m.active   = options.SOLVE.MARCHING && m.n_steps >= 1;
+      return m;
+    }
+
   //! @brief Reentrancy guard: true while _solve_marching() drives per-element solve()s.
   bool                                      _inMarch = false;
   mutable bool                              _sampleOwnElement = false;   //!< sample_input: element-boundary nodes from their own element (transfer_terminal)
@@ -9075,9 +9098,10 @@ const
           // element 0).  Remap the evolution element to the resident window so pos_input()
           // reads THIS window's slot (control DOF k), not element 0.  Inert off marching.
           auto ndx_in = ndx_el;
-          if( _inMarch && _evolution_dom_var.dag() && _mInpDisc.count( _vInp[pos] ) ){
+          auto const mctx = _march_context();
+          if( mctx.in_march && _evolution_dom_var.dag() && _mInpDisc.count( _vInp[pos] ) ){
             auto ite = ndx_in.find( _evolution_dom_var );
-            if( ite != ndx_in.end() ) ite->second = _marchWindow;
+            if( ite != ndx_in.end() ) ite->second = mctx.window;
           }
           inc = pos_input( _vInp[pos], ndx_in );
           OCinp[pos].update( &inp[inc], ndx_in );
@@ -10147,8 +10171,9 @@ const
       // marching (2026-10-06): the evolution direction is collapsed to the resident window (one element), but the
       // output's rows span the WHOLE horizon -- count them over the global windows, with the global element index,
       // as the per-window emission applies the masks (see _march_field_rows)
-      bool const evo_march = _evolution_dom_var.dag() && var.id() == _evolution_dom_var.id() && _marchGrid.size() > 1;
-      size_t const nel_eff = evo_march? _marchGrid.size() - 1: dom.n_elem;
+      auto const mctx = _march_context();
+      bool const evo_march = _evolution_dom_var.dag() && var.id() == _evolution_dom_var.id() && mctx.n_grid > 1;
+      size_t const nel_eff = evo_march? mctx.n_steps: dom.n_elem;
       switch( lim ){
         case FFDom::ALL:
         case FFDom::ALL-FFDom::LB:
@@ -12995,8 +13020,9 @@ OCFESLV::_wdecide_restore
   }
 
   // ---- per-window BEFORE deficiencies (win 0, and win 1 when marching) -------
-  bool const marching = ( options.SOLVE.MARCHING && _marchGrid.size() >= 2 && n_march_steps() >= 1 );
-  size_t const nwin = marching ? std::min<size_t>( 2, n_march_steps() ) : 1;
+  auto const mctx = _march_context();
+  bool const marching = mctx.active;
+  size_t const nwin = marching ? std::min<size_t>( 2, mctx.n_steps ) : 1;
   std::vector<double> x, u; std::string reftag;
   _reference_point( x, u, reftag );
   double const* xv = x.empty() ? nullptr : x.data();
@@ -13113,8 +13139,8 @@ OCFESLV::_wdecide_restore
     double const* xav = xa.empty() ? nullptr : xa.data();
     double const* uav = ua.empty() ? nullptr : ua.data();
     double const* cav = _vCstVal.empty() ? nullptr : _vCstVal.data();
-    bool const marching_a = ( options.SOLVE.MARCHING && _marchGrid.size() >= 2 && n_march_steps() >= 1 );
-    size_t const nwin_a = marching_a ? std::min<size_t>( 2, n_march_steps() ) : 1;
+    bool const marching_a = mctx.active;
+    size_t const nwin_a = marching_a ? std::min<size_t>( 2, mctx.n_steps ) : 1;
     for( size_t w = 0; w < nwin_a; ++w ){
       t_JacAssembly A;
       bool const oka = ( w == 0 && !marching_a ) ? assemble( xav, uav, cav, A, true )
@@ -13782,8 +13808,9 @@ OCFESLV::_audit_determinacy
   }
   else _reference_point( x, u, reftag );
   double const* cst = _vCstVal.empty() ? nullptr : _vCstVal.data();
-  bool const marching = ( options.SOLVE.MARCHING && _marchGrid.size() >= 2 && n_march_steps() >= 1 );
-  size_t const nwin = marching ? std::min<size_t>( 2, n_march_steps() ) : 1;
+  auto const mctx = _march_context();
+  bool const marching = mctx.active;
+  size_t const nwin = marching ? std::min<size_t>( 2, mctx.n_steps ) : 1;
 
   auto imp_name = [&]() -> char const* {
     return options.INTERFACE.IMPOSITION == Options::IC_WEAK   ? "IC_WEAK"
@@ -25991,9 +26018,10 @@ const
             }
             case INPUT: {
               auto nel_in = nel;   // marching: remap evolution element of a distributed input to the resident window
-              if( _inMarch && _evolution_dom_var.dag() && _mInpDisc.count( _vInp[upd.pos] ) ){
+              auto const mctx = _march_context();
+              if( mctx.in_march && _evolution_dom_var.dag() && _mInpDisc.count( _vInp[upd.pos] ) ){
                 auto ite = nel_in.find( _evolution_dom_var );
-                if( ite != nel_in.end() ) ite->second = _marchWindow;
+                if( ite != nel_in.end() ) ite->second = mctx.window;
               }
               inc = pos_input( _vInp[upd.pos], nel_in );
               bool zeroit = false;

@@ -1542,66 +1542,57 @@ public:
       return 1.0;   // CRONOS_SAT_SIGMA1 '+R+'; 1.0 is reset()'s former default
     }
 
-};
+  //! @brief Compact summary of frozen interface-plan diagnostics.
+  struct InterfacePlanDiagnosticSummary
+  {
+    size_t n_receiver_edges = 0;
+    size_t n_weak_sat_terms = 0;
+    size_t n_trace_constraints = 0;
+    size_t n_tau_claim_keys = 0;
 
+    // IC_TRACE-specific accounting.  These fields distinguish the number of
+    // exact trace rows from the number of multiplier columns and make any
+    // exact-only/hybrid trace reduction visible in diagnostics.
+    size_t n_trace_variables = 0;
+    size_t n_trace_constraint_declared = 0;
+    size_t n_tau_claim_columns = 0;
+    size_t n_exact_replacement_rows = 0;
+    size_t n_physical_rows_dropped_by_trace = 0;
+    size_t n_constraints_without_tau = 0;
+    size_t n_tau_keys_without_receiver = 0;
 
-////////////////////////////////////////////////////////////////////////
-class OCFESLV
-////////////////////////////////////////////////////////////////////////
-: public OCFEBASE
-{
+    size_t n_receiver_principal = 0;
+    size_t n_receiver_auxiliary = 0;
+    size_t n_receiver_geometric = 0;
 
-  friend  std::ostream& operator<< ( std::ostream&, OCFESLV const& );
-  template <typename U> friend class OCVar;
+    size_t n_frozen_principal = 0;
+    size_t n_frozen_auxiliary = 0;
+    size_t n_frozen_geometric = 0;
+
+    size_t n_duplicate_retained_trace_claims = 0;
+    size_t n_duplicate_tau_claim_keys = 0;
+    size_t n_duplicate_receiver_edge_identities = 0;
+
+    size_t n_geometric_candidates = 0;
+    size_t n_geometric_discarded_covered = 0;
+    size_t n_geometric_emitted = 0;
+  };
+
+protected:
+  //! @brief what SPQR reports about the factorization it just did.  Plain
+  //! types only, so the declaration needs no CRONOS__WITH_SPQR guard.
+  struct t_SpqrStat
+  {
+    size_t  nrow = 0, ncol = 0, nnzA = 0, rank = 0;
+    int64_t nnzR = 0;          //!< cc.SPQR_istat[0] -- nonzeros in R, THE fill measure
+    int64_t ncolsing = 0;      //!< cc.SPQR_istat[5]
+    int64_t nrowsing = 0;      //!< cc.SPQR_istat[6]
+    int     ordering = -1;     //!< cc.SPQR_istat[7] -- the ordering ACTUALLY used, which
+                               //!< under SPQR_ORDERING_BEST names the concrete winner
+    double  flops = 0., t_analyze = 0., t_factorize = 0.;
+  };
 
 public:
-  //! @brief The collocation grid of direction @p dir (OCBase::colloc_dom): the grid the equations are collocated on,
-  //! onto which a nonlinear operation lifts a coarser multi-node input first (2026-09-28)
-  FFDom const* colloc_dom
-    ( FFVar const& dir )
-    const override
-    { auto const it = _mDom.find( dir );  return it == _mDom.end()? nullptr: &it->second; }
-
-  //! @brief CAUSALITY of a lifted claim (a transition): its receivers must lie AFTER the jump.  An ordinary continuity
-  //! claim x(tau+) = x(tau-) is symmetric, so receivers on both sides are right; a lifted claim x(tau+) = w, with w defined
-  //! by pre-jump data, is not -- a receiver in the element ENDING at tau puts post-jump information into a pre-jump row
-  //! (a penalty under IC_WEAK, a multiplier term under IC_STRONG / IC_TRACE), and the solution before tau depended on the
-  //! jump (PSA1: 2.9e-3; 2026-09-30).  True for an edge that belongs to a lifted claim and receives in element iel_lo.
-  bool _lifted_prejump_receiver
-    ( OCPlan::InterfaceReceiverEdge const& e )
-    const
-    {
-      if( !_lifted_claim_aux( e.claim_key ) ) return false;
-      size_t const evo = _evolution_dom_var.id().second;
-      for( auto const& [d, el] : e.receiver_block_el ) if( d == evo ) return el == e.claim_key.iel_lo;
-      return e.receiver_dom_id == evo && e.receiver_iel == e.claim_key.iel_lo;
-    }
-
-  //! @brief OCFESLV imposes transitions through lifted auxiliaries (FFModel::_transitions_lifted): the continuity claim
-  //! of a post-jump state across tau joins x_i(tau^+) to its auxiliary w_i instead of to x_i(tau^-) -- see
-  //! _trace_claim_coeffs -- in every imposition mode (penalty under IC_WEAK, exact under IC_STRONG / IC_TRACE).
-  bool _transitions_supported() const override { return true; }
-  bool _transitions_lifted() const override { return !options.SOLVE.MARCHING; }   // marching: a transfer map (_apply_march_jumps)
-  //! @brief v1: tau on an element boundary of the evolution direction -- in monolithic AND marching solves (marching
-  //! validates against the user's DECLARED grid, as its working domain is collapsed to one window: a tau between two
-  //! seams was silently ignored before 2026-10-06, WORKPLAN 1.6)
-  bool _validate_transition_tau_unlifted() const override { return true; }
-  bool _accept_transition_tau
-    ( double const tau, std::string& why )
-    const override
-    {
-      FFDom const* pd = nullptr;
-      if( _transitions_lifted() ){
-        auto const it = _mDom.find( _evolution_dom_var );  if( it != _mDom.end() ) pd = &it->second;
-      }
-      else{
-        auto const it = _usr._mDomUsr.find( _usr._evolution_dom_varUsr );  if( it != _usr._mDomUsr.end() ) pd = &it->second;
-      }
-      if( !pd ){ why = "no evolution domain"; return false; }
-      for( size_t k = 1; k < pd->n_elem; ++k )
-        if( std::fabs( pd->elem_bnd[k] - tau ) <= 64.*DBL_EPSILON*std::max( 1., std::fabs( tau ) ) ) return true;
-      why = "tau must be an ELEMENT BOUNDARY of the evolution direction (add one there)";  return false;
-    }
   //! @brief Column of the lifted auxiliary's value at the SAME spatial node as a claim's face (v1.5 profiles): the
   //! auxiliary has the state's layout with the evolution direction removed, so the face offset sface + oface*stride
   //! carries over, within the block of the face's spatial elements (@p ndx without the evolution direction).
@@ -1626,212 +1617,6 @@ public:
          && std::fabs( L.tau - tb ) <= 64.*DBL_EPSILON*std::max( 1., std::fabs( tb ) ) ) return &L.aux;
       return nullptr;
     }
-
-  //! @brief Build the marching transfer maps (see t_MarchJump); false with the reason printed if v1 cannot march them
-  bool _build_march_jumps
-    ()
-    {
-      _marchJumps.clear();      // frees the Jacobians (unique_ptr)
-      _marchJumpsReady = true;
-      if( _mTrn.empty() ) return true;
-      FFModel::t_TransitionJumps G;  std::string why;
-      auto is_state = [&]( FFVar const& v ){ return _mVar.count( v ) > 0; };
-      if( !_transition_jumps( _mTrn, is_state, G, why ) ){ _disp( 2 ) << "OCFESLV::solve ** TRANSITION: " << why << std::endl; return false; }
-      FFVar const t = _evolution_dom_var;
-      for( auto const& g : G ){
-        t_MarchJump M;  M.tau = g.tau;  M.xs = g.jump;
-        for( auto const& [x, dm] : _mVar ) if( dm.count( t ) ) M.evo.push_back( x );   // v1.5: profiles, node by node
-        std::vector<FFVar> tgt, rep;
-        for( auto const& x : M.xs ){ std::ostringstream nm; nm << "Xp_" << x.name() << "@" << g.tau; M.xp.push_back( _dag->add_var( nm.str() ) ); tgt.push_back( x ); rep.push_back( M.xp.back() ); }
-        for( size_t const k : g.comp ){
-          auto const& tr = _mTrn[ k / 65536 ];  size_t const c = k % 65536;
-          M.R.push_back( tr.left[c] - _dag->compose( std::vector<FFVar>{ tr.right[c] }, tgt, rep )[0] );
-        }
-        FFSubgraph sg = _dag->subgraph( M.R.size(), M.R.data() );
-        for( auto const* op : sg.l_op ){
-          if( !op || op->type != FFOp::VAR || !op->varout[0] ) continue;
-          FFVar const& v = *op->varout[0];
-          if( _mDom.count( v ) ){ _disp( 2 ) << "OCFESLV::solve ** TRANSITION at tau = " << g.tau << ": a marching map may not read the"
-                                              " domain variable " << v.name() << " (v1.5: its node coordinates are not available at the seam)" << std::endl; return false; }
-          auto const ii = _mInp.find( v );
-          if( ii == _mInp.end() ) continue;
-          if( !ii->second.empty() ){ _disp( 2 ) << "OCFESLV::solve ** TRANSITION at tau = " << g.tau << ": marching v1 transfers maps whose inputs"
-                                                  " are time-invariant (" << v.name() << " is distributed)" << std::endl; return false; }
-          M.inp.push_back( v );
-        }
-        M.J .reset( _dag->FAD( M.R.size(), M.R.data(), M.xp.size(),  M.xp.data() ) );
-        M.Jx.reset( _dag->FAD( M.R.size(), M.R.data(), M.evo.size(), M.evo.data() ) );
-        if( !M.inp.empty() ) M.Jp.reset( _dag->FAD( M.R.size(), M.R.data(), M.inp.size(), M.inp.data() ) );
-        _marchJumps.push_back( std::move( M ) );
-      }
-      return true;
-    }
-
-  //! @brief At window k's seam tau = _marchGrid[k]: if transitions sit there, solve R( x-, x+, p ) = 0 for x+ (Newton;
-  //! one step for an explicit map) from the previous window's terminals x-, and hand x+ on instead of the terminal --
-  //! into the IC input (data path) or _marchICTerminal (general-IC override path).  False if Newton fails.
-  bool _apply_march_jumps
-    ( size_t const k, double const* var, double* pinp, double const* cst )
-    {
-      if( !_marchJumpsReady && !_build_march_jumps() ) return false;
-      double const tau = _marchGrid[k];
-      for( auto& M : _marchJumps ){
-        if( std::fabs( M.tau - tau ) > 64.*DBL_EPSILON*std::max( 1., std::fabs( tau ) ) ) continue;
-        size_t const m = M.xs.size(), ne = M.evo.size();
-        // the previous window's terminals, node by node (a scalar state is broadcast)
-        auto const prof = terminal_profile( var, pinp, cst );
-        std::vector< std::vector<double> > xe( ne );  size_t nn = 1;
-        for( size_t e = 0; e < ne; ++e ){
-          auto const ip = prof.find( M.evo[e] );
-          xe[e] = ( ip != prof.end() && !ip->second.empty() )? ip->second: std::vector<double>{ terminal_value( M.evo[e], t_Coord{}, var, pinp, cst ) };
-          if( xe[e].size() > 1 ){
-            if( nn > 1 && xe[e].size() != nn ){ _disp( 2 ) << "OCFESLV::solve ** TRANSITION at tau = " << tau << ": profiles with different"
-                                                           " node counts in one marching map (v1.5)" << std::endl; return false; }
-            nn = xe[e].size(); }
-        }
-        std::vector<FFVar> vv;  for( auto const& x : M.evo ) vv.push_back( x );  for( auto const& u : M.xp ) vv.push_back( u );
-        std::vector<double> tail;
-        for( auto const& u : M.inp ){ vv.push_back( u ); tail.push_back( pinp[ pos_input( u, std::map<FFVar,size_t,lt_FFVar>() ) ] ); }
-        for( size_t c = 0; c < _vCst.size(); ++c ){ vv.push_back( _vCst[c] ); tail.push_back( cst? cst[c]: 0. ); }
-        M.vars = vv;  M.at_n.assign( nn, std::vector<double>() );
-        std::vector< std::vector<double> > wprof( m, std::vector<double>( nn ) );
-        for( size_t j = 0; j < nn; ++j ){
-          std::vector<double> vl( ne + m );
-          for( size_t e = 0; e < ne; ++e ) vl[e] = xe[e].size() > 1? xe[e][j]: xe[e][0];
-          std::vector<double> xp( m );
-          for( size_t i = 0; i < m; ++i ) for( size_t e = 0; e < ne; ++e ) if( M.evo[e].id() == M.xs[i].id() ) xp[i] = vl[e];   // guess: x-
-          vl.insert( vl.end(), tail.begin(), tail.end() );
-          bool conv = false;
-          for( int it = 0; it < 30 && !conv; ++it ){
-            for( size_t i = 0; i < m; ++i ) vl[ne+i] = xp[i];
-            std::vector<double> r( m ), a( m*m );
-            _dag->eval( m, M.R.data(), r.data(), vv.size(), vv.data(), vl.data() );
-            _dag->eval( m*m, M.J.get(), a.data(), vv.size(), vv.data(), vl.data() );
-            double rn = 0.;  for( double const q : r ) rn = std::max( rn, std::fabs( q ) );
-            double xn = 1.;  for( double const q : xp ) xn = std::max( xn, std::fabs( q ) );
-            if( rn <= 1e-14 * xn ){ conv = true; break; }
-            std::vector<double> b( m );  for( size_t i = 0; i < m; ++i ) b[i] = -r[i];
-            if( !_small_solve( a, b, m ) ){ _disp( 2 ) << "OCFESLV::solve ** TRANSITION at tau = " << tau << ": singular dR/dx+" << std::endl; return false; }
-            for( size_t i = 0; i < m; ++i ) xp[i] += b[i];
-          }
-          if( !conv ){ _disp( 2 ) << "OCFESLV::solve ** TRANSITION at tau = " << tau << ": the jump map did not converge" << std::endl; return false; }
-          for( size_t i = 0; i < m; ++i ){ vl[ne+i] = xp[i];  wprof[i][j] = xp[i]; }
-          M.at_n[j] = vl;
-        }
-        M.at = M.at_n[0];
-        for( size_t i = 0; i < m; ++i ){                 // hand x+ on through the state's own transfer path
-          FFVar const& st = M.xs[i];
-          for( auto const& [s2, ic] : _marchTransfers ){
-            if( s2.id() != st.id() ) continue;
-            if( ic.dag() ){
-              // the canonical IC-input path: terminal_profile() and set_input_values() share the element-major /
-              // node-inner layout, so a post-jump profile on the SAME spatial grid as the input is written directly
-              if( nn > 1 ){
-                size_t ndof = 1;  auto const ii = _mInp.find( ic );
-                if( ii != _mInp.end() ) for( auto const& d : ii->second ){ auto const& od = _mDom.at( d ); ndof *= od.n_elem * od.n_node; }
-                if( ii == _mInp.end() || ndof != nn ){
-                  _disp( 2 ) << "OCFESLV::solve ** TRANSITION at tau = " << tau << ": the IC input of " << st.name() << " is not on the"
-                               " state's spatial grid (" << ndof << " vs " << nn << " nodes) -- v1.5 does not resample" << std::endl; return false; }
-                set_input_values( ic, wprof[i], pinp );
-              }
-              else set_input_values( ic, std::vector<double>{ wprof[i][0] }, pinp );
-            }
-            else{
-              auto itt = _marchICTerminal.find( st );
-              if( itt != _marchICTerminal.end() ){
-                if( nn > 1 && itt->second.size() == nn ) itt->second = wprof[i];
-                else std::fill( itt->second.begin(), itt->second.end(), wprof[i][0] );
-              }
-            }
-          }
-        }
-      }
-      return true;
-    }
-
-  //! @brief Solve a x = b in place for a small dense m x m system (partial pivoting); false if singular
-  static bool _small_solve
-    ( std::vector<double> a, std::vector<double>& b, size_t const m, bool const transpose = false )
-    {
-      if( transpose ) for( size_t i = 0; i < m; ++i ) for( size_t j = i+1; j < m; ++j ) std::swap( a[i*m+j], a[j*m+i] );
-      for( size_t c = 0; c < m; ++c ){
-        size_t pr = c;  for( size_t i = c+1; i < m; ++i ) if( std::fabs( a[i*m+c] ) > std::fabs( a[pr*m+c] ) ) pr = i;
-        if( std::fabs( a[pr*m+c] ) < 1e-300 ) return false;
-        if( pr != c ){ for( size_t j = 0; j < m; ++j ) std::swap( a[c*m+j], a[pr*m+j] ); std::swap( b[c], b[pr] ); }
-        for( size_t i = c+1; i < m; ++i ){ double const f = a[i*m+c]/a[c*m+c]; for( size_t j = c; j < m; ++j ) a[i*m+j] -= f*a[c*m+j]; b[i] -= f*b[c]; }
-      }
-      for( size_t c = m; c-- > 0; ){ double q = b[c]; for( size_t j = c+1; j < m; ++j ) q -= a[c*m+j]*b[j]; b[c] = q/a[c*m+c]; }
-      return true;
-    }
-
-  //! @brief ADJOINT through the jump at window k's seam -- the transpose of _march_jump_fsens.  With y = J^{-T} mu+ (mu+
-  //! the adjoint on the post-jump initial values, from @p lam_term), the costate handed to window k-1 is
-  //!   mu-_e = [e continuous] mu+_e - ( dR/dx-^T y )_e,   and the input-space gradient gains  - dR/dinp^T y.
-  bool _march_jump_asens
-    ( size_t const k, std::map<FFVar,std::vector<double>,lt_FFVar>& lam_term, std::vector<double>& ldinp )
-    {
-      double const tau = _marchGrid[k];
-      for( auto const& M : _marchJumps ){
-        if( std::fabs( M.tau - tau ) > 64.*DBL_EPSILON*std::max( 1., std::fabs( tau ) ) || M.at_n.empty() ) continue;
-        size_t const m = M.xs.size(), ne = M.evo.size(), ni = M.inp.size(), nn = M.at_n.size();
-        std::map<FFVar,std::vector<double>,lt_FFVar> incoming = lam_term;   // mu+ as handed back from window k
-        for( size_t i = 0; i < m; ++i ){ auto& v = lam_term[ M.xs[i] ]; if( v.empty() ) v.assign( nn, 0. ); else std::fill( v.begin(), v.end(), 0. ); }
-        for( size_t e = 0; e < ne; ++e ){ auto& v = lam_term[ M.evo[e] ]; if( v.empty() ) v.assign( nn, 0. ); }
-        for( size_t j = 0; j < nn; ++j ){                // node by node (v1.5 profiles; nn = 1 for scalars)
-          std::vector<double> a( m*m ), ax( m*ne ), ap( m*ni );
-          _dag->eval( m*m,  M.J.get(),  a.data(),  M.vars.size(), M.vars.data(), M.at_n[j].data() );
-          _dag->eval( m*ne, M.Jx.get(), ax.data(), M.vars.size(), M.vars.data(), M.at_n[j].data() );
-          if( ni ) _dag->eval( m*ni, M.Jp.get(), ap.data(), M.vars.size(), M.vars.data(), M.at_n[j].data() );
-          std::vector<double> y( m, 0. );
-          for( size_t i = 0; i < m; ++i ){ auto it = incoming.find( M.xs[i] );
-            if( it != incoming.end() && !it->second.empty() ) y[i] = it->second.size() > j? it->second[j]: it->second[0]; }
-          if( !_small_solve( a, y, m, /*transpose=*/true ) ) return false;
-          for( size_t e = 0; e < ne; ++e ){
-            double q = 0.;  for( size_t i = 0; i < m; ++i ) q -= ax[i*ne+e]*y[i];
-            auto& v = lam_term[ M.evo[e] ];
-            if( v.size() > j ) v[j] += q; else for( auto& z : v ) z += q;
-          }
-          for( size_t qi = 0; qi < ni; ++qi ){
-            double q = 0.;  for( size_t i = 0; i < m; ++i ) q -= ap[i*ni+qi]*y[i];
-            ldinp[ pos_input( M.inp[qi], std::map<FFVar,size_t,lt_FFVar>() ) ] += q;
-          }
-        }
-      }
-      return true;
-    }
-
-  //! @brief FORWARD sensitivity through the jump at window k's seam: for the post-jump states,
-  //!   s+ = -J^{-1} ( dR/dx- . s- + dR/dinp . dinp )      (implicit function theorem; J = dR/dx+)
-  //! replaces the terminal sensitivity carried in @p sens_term.  @p dinp: the direction, input layout.
-  bool _march_jump_fsens
-    ( size_t const k, std::map<FFVar,std::vector<double>,lt_FFVar>& sens_term, std::vector<double> const& dinp )
-    {
-      double const tau = _marchGrid[k];
-      for( auto const& M : _marchJumps ){
-        if( std::fabs( M.tau - tau ) > 64.*DBL_EPSILON*std::max( 1., std::fabs( tau ) ) || M.at_n.empty() ) continue;
-        size_t const m = M.xs.size(), ne = M.evo.size(), ni = M.inp.size(), nn = M.at_n.size();
-        std::vector< std::vector<double> > out( m, std::vector<double>( nn ) );
-        for( size_t j = 0; j < nn; ++j ){                // node by node (v1.5 profiles; nn = 1 for scalars)
-          std::vector<double> a( m*m ), ax( m*ne ), ap( m*ni );
-          _dag->eval( m*m,  M.J.get(),  a.data(),  M.vars.size(), M.vars.data(), M.at_n[j].data() );
-          _dag->eval( m*ne, M.Jx.get(), ax.data(), M.vars.size(), M.vars.data(), M.at_n[j].data() );
-          if( ni ) _dag->eval( m*ni, M.Jp.get(), ap.data(), M.vars.size(), M.vars.data(), M.at_n[j].data() );
-          std::vector<double> b( m, 0. );
-          for( size_t i = 0; i < m; ++i ){
-            for( size_t e = 0; e < ne; ++e ){ auto it = sens_term.find( M.evo[e] ); double se = 0.;
-              if( it != sens_term.end() && !it->second.empty() ) se = it->second.size() > j? it->second[j]: it->second[0];
-              b[i] -= ax[i*ne+e]*se; }
-            for( size_t q = 0; q < ni; ++q ) b[i] -= ap[i*ni+q]*dinp[ pos_input( M.inp[q], std::map<FFVar,size_t,lt_FFVar>() ) ];
-          }
-          if( !_small_solve( a, b, m ) ) return false;
-          for( size_t i = 0; i < m; ++i ) out[i][j] = b[i];
-        }
-        for( size_t i = 0; i < m; ++i ){ auto& v = sens_term[ M.xs[i] ];
-          if( v.size() == nn ) v = out[i]; else if( v.empty() ) v = out[i]; else std::fill( v.begin(), v.end(), out[i][0] ); }
-      }
-      return true;
-    }
-
 
   // ---------------------------------------------------------------------------------------------------------
   // rev309 -- INTERIM KNOBS, environment-only.  Each has ONE measured setting that is the desired behaviour;
@@ -1896,11 +1681,6 @@ public:
   static int _knob_DROP_POLICY
     ()
     { return static_cast<int>( FFModel::Options::_env_int( "CRONOS_DROP_POLICY", -1, -1, 2 ) ); }
-  //! @brief W-test the claims dropped by the redundancy pass on the built system, and restore as explicit the subset
-  //! that is needed (one re-derive, revert-guarded).  Default on; (The CRONOS_DROP_WDECIDE variable is retired, 2026-10-07.)
-  static bool _knob_DROP_WDECIDE
-    ()
-    { return true; }
 
   // rev314 -- FOURTEEN more environment-only knobs (see the rev309 block for the rule).
   //! @brief Stage A -- WITHDRAWN, default off.  Reached k=0 on PDE2 and MBC but collapsed interface continuity
@@ -1917,71 +1697,6 @@ public:
     ()
     { return true; }   // CRONOS_NO_PIN_CLOSURE (retired 2026-10-07, WORKPLAN 3.C)
 
-  //! @brief Tier-0 skip policy on interface-augmented systems.  ALWAYS (default): skip plain Newton whenever the
-  //! system carries trace variables under SPQR.  AUTO consults the setup audit's right-deficiency for the window and
-  //! attempts tier-0 only on an affirmative full-rank verdict -- no verdict, or a deficiency, keeps the skip.  NEVER attempts
-  //! tier-0 regardless; a dead tier-0 falls through to the QR tier, so a wrong NEVER costs one failed factorization, not
-  //! correctness.  Environment: CRONOS_SKIP_NT_ON_TRACE = always|auto|never (or 0|1|2), applied at its single use site.
-  static int _knob_SKIP_NT_ON_TRACE
-    ()
-    { return Options::NT_SKIP_ALWAYS; }
-
-  //! @brief Diagonal regularisation added to the TAU BLOCK ONLY of the
-  //! sensitivity Jacobian before factorisation, as a MULTIPLE of
-  //! ||J||_inf.  0 (default) = off.
-  //! WHY.  An interface-augmented Jacobian is STRUCTURALLY SINGULAR
-  //! (see the note at the SPQR tier-0 skip): the primal never
-  //! factorises it, it uses the QR min-norm tier.  The sensitivity
-  //! path uses a dense LU, which reports rcond ~1e-17 and falls back
-  //! to an approximate solve that does not terminate usefully --
-  //! measured on MMPDE10 at nel_xi=8, IC_TRACE (18202^2) while
-  //! IC_WEAK at the same mesh (15360^2) is clean.  The 2842 tau
-  //! columns are the whole difference.
-  //! WHAT IT ASSUMES.  Orphan multiplier columns are a GAUGE
-  //! freedom: null(J) lies in the tau block and dF/dvar is zero
-  //! there, so the tau components of the sensitivity solution do not
-  //! enter dF/dp.  Pinning them to zero IS the min-norm choice, and
-  //! dF/dp is unchanged to O(delta).
-  //! THE ASSUMPTION IS NOT PROVEN.  It has two parts and they are
-  //! different claims:
-  //! (1) dF/dvar _|_ null(J)      -> the gradient is well defined;
-  //! (2) null(J) subset tau span  -> pinning s_tau removes ALL of
-  //! it, so J_reg is actually nonsingular.
-  //! (1) follows from the physical solution being unique under
-  //! IC_TRACE (its tau-table matches IC_WEAK at every tau).  (2)
-  //! does NOT follow from (1), and the fixed ~2.4e-09 near-null
-  //! direction recorded in the roadmap is unexplained and may have a
-  //! physical component.  _knob_AUDIT_SENS_NULL (CRONOS_AUDIT_SENS)
-  //! measures (1); a sweep of this knob's delta measures (2).
-  static double _knob_SENS_TAU_REG
-    ()
-    { return 0.0; }
-
-  //! @brief Solve the sensitivity systems with a dense pseudo-inverse
-  //! (arma::pinv) instead of LU.  DIAGNOSTIC ONLY -- O(n^3) dense SVD,
-  //! usable only at nel small enough to fit (a few thousand columns).
-  //! WHY IT EXISTS.  The interface-augmented Jacobian is structurally
-  //! singular, so J s = b determines s only up to null(J).  The
-  //! reduced gradient is nonetheless WELL DEFINED -- measured: with
-  //! AUDIT_SENS_NULL, dF/dvar has ZERO nonzero entries on the tau
-  //! columns, so dF/dvar _|_ null(J) and every solution s gives the
-  //! same dF/dvar . s.  What is needed is a solver that returns ANY
-  //! valid solution rather than failing; the min-norm one is the
-  //! natural choice and is what the primal's QR tier already returns.
-  //! WHAT IT IS FOR.  pinv is the cheap STAND-IN for SPQR: if the
-  //! min-norm solution reproduces the finite-difference gradient at a
-  //! small mesh, then adopting SPQR in the sensitivity path will
-  //! reproduce it at scale -- and that is worth knowing BEFORE paying
-  //! for the factorization-ownership work SPQR needs (a handle in
-  //! FSensBlock, destructor/move semantics, and a SECOND
-  //! factorization for J^T since QR does not transpose the way LU
-  //! does).
-  //! NOT A PRODUCTION PATH.  Dense SVD of an 18202^2 system is ~2.6 GB
-  //! and O(n^3); use nel_xi 2-3.
-  static bool _knob_SENS_MINNORM_PINV
-    ()
-    { return false; }
-
   //! @brief Mint continuity claims from the C0 claim classification: a claim whose (state, direction) is IMPLIED,
   //! CLOSURE or NONE is not created, so nothing has to rescue it.  Exact modes (IC_STRONG, IC_TRACE) only -- under IC_WEAK
   //! a suppressed claim changes a penalty rather than a constraint.  Default off (the plan is then unchanged).
@@ -1990,67 +1705,11 @@ public:
     ()
     { return false; }
 
-  //! return false from setup() immediately after the audit reports,
-  //! without
-  //! building the derivative/linear caches or running any solve.
-  //! For structural corpus sweeps: every audited quantity is fixed
-  //! at setup time.  Environment: CRONOS_AUDIT_SETUP_ONLY.
-  static bool _knob_AUDIT_SETUP_ONLY
-    ()
-    { return Options::_env_flag( "CRONOS_AUDIT_SETUP_ONLY", false ); }
-
   //! @brief After every solve() under IC_TRACE with the projection applied, report beta = Z^T lambda and the
   //! violation eps*||beta|| = ||Z^T r_c^raw|| it absorbs.  Environment: CRONOS_AUDIT_BETA.
   static bool _knob_AUDIT_BETA
     ()
     { return Options::_env_flag( "CRONOS_AUDIT_BETA", false ); }
-
-  //! @brief Report ||dF/dvar|| restricted to the tau columns, once per sensitivity setup -- claim (1) of
-  //! _knob_SENS_TAU_REG, and cheap: dF/dvar is already assembled as B.gfct/B.cfct, so no factorisation is involved.
-  //! Off by default; CRONOS_AUDIT_SENS.
-  static bool _knob_AUDIT_SENS_NULL
-    ()
-    { return Options::_env_flag( "CRONOS_AUDIT_SENS", false ); }
-
-  //! after every solve(), report per-state duplicate-node
-  //! spreads (report_duplicate_node_spreads).  Nodes that coincide
-  //! geometrically but belong to different elements carry separate
-  //! unknowns, so the spread over each coincidence group measures
-  //! the interface conditions ACTUALLY satisfied by the solution --
-  //! independently of rank, residual, verdict or convergence, all
-  //! four of which were clean when Stage A destroyed MBC5's radial
-  //! fluxes by 24 orders.  Off by default; CRONOS_DUP_SPREAD=1.
-  //! NOT under the CRONOS_AUDIT umbrella: it changes driver output.
-  static bool _knob_AUDIT_DUP_SPREAD
-    ()
-    { return Options::_env_flag( "CRONOS_DUP_SPREAD", false ); }
-
-  //! warn (non-fatally) when the worst max_pair spread
-  //! exceeds this under an EXACT imposition mode, where continuity
-  //! is round-off limited (~1e-17 at any mesh) rather than
-  //! truncation limited.  Default 1e-10.  REPORT ONLY -- promoting
-  //! it to a failure is a correctness gate and needs an over-fire
-  //! scan across the corpus first; see the detect-then-promote
-  //! discipline that governed every other gate in this arc.
-  static double _knob_DUP_SPREAD_WARN
-    ()
-    { return Options::_env_dbl( "CRONOS_DUP_SPREAD_WARN", 1e-10 ); }
-
-  //! a gap at the cut below this triggers the re-evaluation at 1.3x the
-  //! reference point (1e2).  A cut of 1e6 fires on nearly every
-  //! DETERMINED instance in the corpus (sigma_min/tol ~ 1e3-1e5 is ordinary
-  //! conditioning for a discretised PDE) and doubles the audit cost at n > 1e4
-  //! for nothing; the genuinely marginal cases sit at 6-20.  Environment:
-  //! CRONOS_DETERMINACY_GAP_MIN (an AUDIT parameter, kept as a diagnostic).
-  static double _knob_DETERMINACY_GAP_MIN
-    ()
-    { return Options::_env_dbl( "CRONOS_DETERMINACY_GAP_MIN", 1e2 ); }
-
-  //! largest dimension the dense-SVD fallback backend accepts (3000).
-  //! (The CRONOS_DETERMINACY_MAX_DENSE variable is retired, 2026-10-07: a measured constant.)
-  static size_t _knob_DETERMINACY_MAX_DENSE
-    ()
-    { return 3000; }
 
   //! @brief the solver's effective verbosity.  SOLVE.DISPLAY_LEVEL < 0 (the default) FOLLOWS the model's
   //! DISPLAY_LEVEL, resolved HERE, at read time -- not copied at reset(), because drivers set DISPLAY_LEVEL
@@ -2061,75 +1720,6 @@ public:
     const
     { return options.SOLVE.DISPLAY_LEVEL < 0 ? options.DISPLAY_LEVEL : options.SOLVE.DISPLAY_LEVEL; }
 
-
-  //! @brief the SOLVER's per-equation options.  Derives from FFModel::EqnOptions (role,
-  //! participate_in_classification, block_id) and adds how OCFESLV imposes each equation at interfaces.
-  //! OCFESLV's factory guarantees that EVERY stored equation -- user-added or minted by reduce_order() or
-  //! setup() -- carries this type, which is what makes _sopt() below safe.
-  struct EqnOptions
-  : public FFModel::EqnOptions
-  {
-    Options::InterfaceType interface_type;              //!< local interface-condition type (IC_AUTO: resolved)
-    bool                   receive_sat;                 //!< may receive weak (SAT) interface penalties
-    bool                   donate_for_state_continuity; //!< may be donated as a duplicate trace row
-
-    //! @brief Role-derived defaults: INITIAL, BOUNDARY and
-    //! INTERFACE are donated, DIAGNOSTIC receives no SAT, LINK is never donated.
-    EqnOptions
-      ( EqnRole r = EqnRole::AUTO, int b = 0, Options::InterfaceType it = Options::IC_AUTO )
-      : FFModel::EqnOptions( r, b ), interface_type( it ), receive_sat( true ), donate_for_state_continuity( false )
-      { _solver_role_defaults(); }
-
-    //! @brief Explicit flags; the role invariants still apply: INTERFACE never enters classification, LINK and
-    //! DIAGNOSTIC are never donated.
-    EqnOptions
-      ( EqnRole r, int b, Options::InterfaceType it, bool classify, bool sat, bool donate = false )
-      : FFModel::EqnOptions( r, b ), interface_type( it ), receive_sat( sat ), donate_for_state_continuity( donate )
-      {
-        participate_in_classification = classify;
-        if( role == EqnRole::INTERFACE ) participate_in_classification = false;
-        if( role == EqnRole::LINK || role == EqnRole::DIAGNOSTIC ) donate_for_state_continuity = false;
-      }
-
-    //! @brief Promote a model-side options object: the solver fields take their role-derived defaults.  Used
-    //! by OCFESLV's factory for every equation the model mints itself.
-    explicit EqnOptions
-      ( FFModel::EqnOptions const& base )
-      : FFModel::EqnOptions( base ), interface_type( Options::IC_AUTO ), receive_sat( true ),
-        donate_for_state_continuity( false )
-      { _solver_role_defaults(); }
-
-    EqnOptions( EqnOptions const& other ) = default;
-    EqnOptions& operator=( EqnOptions const& other ) = default;
-
-    //! @brief Contract: a derived options type MUST override clone(), or copies drop these fields.
-    std::shared_ptr<FFModel::EqnOptions> clone
-      ()
-      const override
-      { return std::make_shared<EqnOptions>( *this ); }
-
-    void _solver_role_defaults
-      ()
-      {
-        if( role == EqnRole::INITIAL || role == EqnRole::BOUNDARY || role == EqnRole::INTERFACE )
-          donate_for_state_continuity = true;
-        if( role == EqnRole::DIAGNOSTIC ) receive_sat = false;
-        if( role == EqnRole::LINK ) donate_for_state_continuity = false;
-      }
-  };
-
-  //! @brief view stored options as the solver's type.  THROWS if the object is not one -- an equation
-  //! that bypassed _make_equation_options() is exactly the silent failure class this refactor keeps meeting,
-  //! so it must fail loudly rather than read a base object as if it had solver fields.
-  static EqnOptions const& _sopt
-    ( FFModel::EqnOptions const& o )
-    {
-      auto const* p = dynamic_cast<EqnOptions const*>( &o );
-      if( !p ) throw std::logic_error( "OCFESLV::_sopt ** equation options lack the solver's fields: "
-                                       "an equation was stored without going through _make_equation_options()" );
-      return *p;
-    }
-
   //! @brief every stored options object is OCFESLV's own type.
   std::shared_ptr<FFModel::EqnOptions> _make_equation_options
     ( FFModel::EqnOptions const& seed )
@@ -2139,68 +1729,6 @@ public:
       return std::make_shared<EqnOptions>( seed );
     }
 
-  //! @brief the model's rules, then the solver's on the solver's own fields.
-  void _normalise_equation_options
-    ( FFModel::EqnOptions& opt, std::map<FFVar,int,lt_FFVar> const& eqndom )
-    const override
-    {
-      FFModel::_normalise_equation_options( opt, eqndom );
-      auto* p = dynamic_cast<EqnOptions*>( &opt );
-      if( !p ) throw std::logic_error( "OCFESLV::_normalise_equation_options ** not the solver's options type" );
-      if( p->role == EqnRole::DIAGNOSTIC ){ p->receive_sat = false; p->donate_for_state_continuity = false; }
-      if( p->role == EqnRole::LINK ) p->donate_for_state_continuity = false;
-    }
-
-  //! @brief slice the requested configuration into the applied one, and host the imposition
-  //! instrument that used to live inside the model.
-  void _apply_options
-    ()
-    override
-    {
-      // 2026-10-12: the CRONOS_DISPLAY_LEVEL floor is applied to the SOLVER's object first, so the slice below
-      // carries it into FFModel::options too and both layers report at the same level.
-      FFModel::Options::_force_display_from_env( options.DISPLAY_LEVEL );
-      // slice the requested configuration into the APPLIED one (FFModel::options is the member the
-      // model layer reads; `options` here is the solver's richer, shadowing object).
-      FFModel::options = static_cast<FFModel::Options const&>( options );
-
-      // IC_TRACE system instead -- the instrument for the MBC-family TRACE defect
-      // analysis (pre-existing upstream: MBC3/MBC5 fail under IC_TRACE while
-      // legacy IC_STRONG passes).  Off by default: rev144 behaviour untouched.
-      // (CRONOS_STRONG_VIA_TRACE (retired 2026-10-07, WORKPLAN 3.B batch 2b): a driver wanting the trace system sets IC_TRACE)
-
-    }
-
-
-  //! @brief Physical equation-node metadata after interface filtering.
-  //!
-  //! `retained` is true when the physical equation row is present in the
-  //! residual system.  Under IC_STRONG, `interface_donor` marks rows removed
-  //! because exact interface continuity rows replace them.  This metadata is
-  //! intended for diagnostics so they do not check equations at rows that OCFESLV
-  //! intentionally replaced by interface constraints.
-  struct t_EqnNode
-  {
-    size_t eqn_index = 0;
-    size_t flat_index = 0;
-    t_Coord coord;
-    std::map<FFVar,size_t,lt_FFVar> elem;
-    std::map<FFVar,size_t,lt_FFVar> inode;
-    bool base_keep = false;
-    bool interface_donor = false;
-    bool retained = false;
-  };
-
-  //! @brief Return physical nodes for equation `eqn_index`; optionally only rows retained by OCFESLV.
-  std::vector<t_EqnNode> equation_nodes
-    ( size_t eqn_index, bool retained_only=false )
-    const;
-
-  //! @brief Return physical nodes for equation expression `eqn`; optionally only rows retained by OCFESLV.
-  std::vector<t_EqnNode> equation_nodes
-    ( FFVar const& eqn, bool retained_only=false )
-    const;
-
   //! @brief Return interface plan.
   mc::OCPlan const& interface_plan
     ()
@@ -2208,79 +1736,7 @@ public:
     noexcept
     { return _plan; }
 
-
-  //! @brief Reason for the most recent setup() call (OK if it succeeded).
-
-  // setup_status() and setup_status_str() live in FFModel (shared with ODESLV).
-
 protected:
-
-
-protected:
-
-
-  // ---------------------------------------------------------------------------
-  // rev107 [taucol]: observation state for the direct named-column instrument.
-  // ---------------------------------------------------------------------------
-  // All MUTABLE for the same reason _stage2PreflightReported is: _eval_eqn() is
-  // const and these record only what a diagnostic has seen.  NO BEHAVIOUR READS
-  // THEM -- grep for each name before changing that.  Deliberately NOT propagated
-  // by deep_copy_from(): a copied environment observes its own assembly.
-  //
-  // _tauHostRows is written ONCE, by the plan half, and only READ by the assembly
-  // half.  That direction matters: the assembly half must not re-derive which rows
-  // host a tau or the two halves stop being independent observations.
-
-
-  //! @brief vector of output-function dependencies
-  std::vector<FFDep>                 _depFct;
-
-
-  //! @brief vector of output-function subgraphs
-  mutable std::vector<FFSubgraph>    _sgFct;
-
-
-  //! @brief Count of scalar output functions during setup
-  size_t                             _nCollFct = 0;
-
-
-  // ------------------------------------------------------------------
-  // Interface plan — owned by OCPlan, driven by OCFESLV::setup()
-  // ------------------------------------------------------------------
-
-
-  //! @brief Internal exact-interface claim occurrence key.
-  struct t_InterfaceClaimOccurrenceKey {
-    int    block_id;
-    size_t eqn_id;
-    size_t dom_id;
-    size_t iel_lo;
-    size_t face;
-    int    kind;
-    bool operator<( t_InterfaceClaimOccurrenceKey const& o ) const
-    {
-      if( block_id != o.block_id ) return block_id < o.block_id;
-      if( eqn_id   != o.eqn_id   ) return eqn_id   < o.eqn_id;
-      if( dom_id   != o.dom_id   ) return dom_id   < o.dom_id;
-      if( iel_lo   != o.iel_lo   ) return iel_lo   < o.iel_lo;
-      if( face     != o.face     ) return face     < o.face;
-      return kind < o.kind;
-    }
-  };
-
-
-  struct t_InterfaceTensorCornerDim {
-    size_t       face_stride = 0;
-    FFDom const* pdom        = nullptr;
-    FFVar const* pvar        = nullptr;
-    size_t       n_node      = 0;
-    size_t       n_elem      = 0;
-    size_t       iel         = 0;
-    size_t       inode       = 0;
-  };
-
-  enum { CLAIM_EXACT_C0 = 0, CLAIM_EXACT_C1 = 1, CLAIM_EXACT_ROW = CLAIM_EXACT_C0 };
-
   //! @brief Claim key freeze/unfreeze — delegate to OCPlan static helpers.
   static t_FrozenInterfaceClaimKey _freeze_interface_claim_key
     ( t_InterfaceClaimKey const& k )
@@ -2288,18 +1744,6 @@ protected:
   static t_InterfaceClaimKey _unfreeze_interface_claim_key
     ( t_FrozenInterfaceClaimKey const& k )
     { return OCPlan::unfreeze_claim_key( k ); }
-  bool _suppress_tensor_interface_corner
-    ( Options::InterfaceType type, bool exact_reduced_weak, int block_id,
-      FFVar const& face_dom,
-      std::vector<t_InterfaceTensorCornerDim> const& od,
-      FFVar const* recv_state = nullptr ) const;
-  //! @brief C1: drop every claim whose (state, direction) the C0 classification does not tag NATURAL.
-  //! Such a claim is not an independent flux condition -- its continuity follows from a pointwise relation, or
-  //! is not owed at all -- so the plan never sees it and nothing has to rescue it.  Exact modes only; a census
-  //! line per state names the tag.  @return the number of claims suppressed.
-  size_t _apply_c0_claim_filter
-    ( std::map<t_InterfaceClaimKey,size_t>& claims )
-    const;
 
   //! @brief The working state / domain variable carrying a given id, or nullptr.  The plan keys states and
   //! domains by id; C0 keys them by FFVar, so the C1 filter needs the map back.
@@ -2321,78 +1765,13 @@ protected:
     }
 
 public:
-
   //! @brief The coupling decisions of the last setup, for a tailored driver to assert on.
   std::map<std::pair<size_t,size_t>,t_CouplingRecord> const& coupling_log() const { return _couplingLog; }
 
 protected:
-
-  bool _load_frozen_interface_plan
-    ( std::map<t_InterfaceClaimKey,size_t>& claims ) const;
-  void _store_frozen_interface_plan
-    ( std::map<t_InterfaceClaimKey,size_t> const& claims,
-      InterfacePlanDraft& draft,
-      PlanInput const& in ) const;   // rev152b: decision layer reads through the contract
-
-  //! @brief pack everything the plan decision layer reads into a
-  //! PlanInput.  Called before _store_frozen_interface_plan; the plan decision layer reads
-  //! the result.
-  PlanInput _pack_plan_input
-    ( std::map<t_InterfaceClaimKey,size_t> const& claims,
-      InterfacePlanDraft const& draft ) const;
   //! @brief copy PlanDecisions into the draft (and _keepExplicitReason);
   //! the only writer of decision fields.
   void _apply_plan_decisions( PlanDecisions const& dec, InterfacePlanDraft& draft ) const;
-
-  //! @brief Build sparse coefficients for one exact trace claim.
-  bool _trace_claim_coeffs
-    ( t_InterfaceClaimKey const& claim,
-      std::vector<std::pair<size_t,double>>& coeffs ) const;
-
-  //! @brief the two VALUE functionals of a claim, one per side (lo = element
-  //! iel_lo evaluated at +1, hi = iel_lo+1 at -1; C1 scaled by 2/width).  Same decode and
-  //! threshold as _trace_claim_coeffs (which stays byte-identical: coeffs = lo - hi,
-  //! interleaved); packed into PlanInput::DofEdge for the GLOBAL builder's trace DOFs.
-  bool _trace_claim_sides
-    ( t_InterfaceClaimKey const& claim,
-      std::vector<std::pair<size_t,double>>& lo,
-      std::vector<std::pair<size_t,double>>& hi ) const;
-
-  //! @brief COLUMN-LEVEL pinned pairs.  For every state, seam direction, seam and
-  //! transverse node, FIX1's predicate ("an INITIAL/BOUNDARY equation with mask ALL in the
-  //! seam direction, whose transverse masks contain this node, pinning only this state")
-  //! evaluated independently of any row visit.  Each pinned coincident pair is appended as a
-  //! nodal DofEdge (identification/forest joins only, never realised).  MEASURED need: blk0's
-  //! u at t=0 (no row visits the node) and PDE5's two BC-pinned y-claims at x=0/1 that the
-  //! corner dedup claimed before the pin test could record them.
-  void _pinned_column_pairs
-    ( std::vector<PlanInput::DofEdge>& out ) const;
-
-  //! @brief Build pre-compiled sparse SAT coefficients for one weak-SAT term.
-  //!
-  //! Each (col, coeff) entry satisfies coeff = prefactor * w_lagrange[k],
-  //! so eval time reduces to buf[flat] += sum_k coeff_k * var[col_k].
-  //! Returns true with empty coeffs when prefactor == 0 (valid, zero contribution).
-  //! Returns false when the claim geometry is invalid.
-  bool _sat_claim_coeffs
-    ( t_InterfaceClaimKey const& claim,
-      double prefactor,
-      std::vector<std::pair<size_t,double>>& coeffs ) const;
-
-  //! @brief Build executable frozen exact trace rows from retained claims.
-  bool _build_frozen_trace_constraint_terms
-    ( std::map<t_InterfaceClaimKey,size_t> const& claims,
-      InterfacePlanDraft& draft ) const;
-
-  //! @brief Build or load the setup-frozen IC_TRACE/IC_STRONG claim basis.
-  //!
-  //! This method derives retained trace claims and receiver edges from the
-  //! IC_WEAK SAT receiver graph.  _eval_eqn() only consumes executable frozen
-  //! vectors built from this setup-owned plan.
-  void _prepare_interface_plan_tables
-    ( std::map<t_InterfaceClaimKey,size_t>& claims,
-      InterfacePlanDraft& draft,
-      bool store_plan = true ) const;
 
   //! @brief Reset the sealed plan to the empty state.
   //!
@@ -2400,11 +1779,6 @@ protected:
   //! that the stale plan cannot be consumed by eval()/deriv().
   void _clear_frozen_interface_consumers() const
     { _plan.reset(); _interfacePlanBuildAllowed = false; }
-
-
-  //! @brief Build the complete interface plan into a transactional draft.
-  bool _build_interface_plan_draft
-    ( InterfacePlanDraft& draft );
 
   //! @brief Validate a completed draft before commit (delegates to OCPlan).
   bool _validate_interface_plan_draft
@@ -2435,28 +1809,6 @@ protected:
                        ? _plan.n_trace_var_explicit() : _plan.n_trace_var();
     }
 
-  //! @brief Build the frozen receiver graph used by exact-row and tau consumers.
-  bool _build_interface_receiver_graph
-    ( InterfacePlanDraft& draft ) const;
-
-  //! @brief Build the frozen weak-SAT consumer list from the receiver graph.
-  bool _build_frozen_weak_sat_terms
-    ( InterfacePlanDraft& draft ) const;
-
-  //! @brief Shared redundancy pre-pass consumed by BOTH IC_TRACE and IC_STRONG.
-  //!
-  //! Builds per-column receiver coupling from the frozen weak-SAT terms (keyed
-  //! by lambda_index, identical to the in-Schur column scheme but mode-agnostic)
-  //! and flags every column-dependent continuity claim -- one whose continuity
-  //! row is a linear combination of the others, hence Schur-uneliminable
-  //! (IC_STRONG) and, kept explicit (IC_TRACE), a benign-but-singular null that
-  //! stalls the solver.  Flagged claims are recorded in _strong_dropped_claims;
-  //! returns false (with _strong_redundancy_pending set) to request the pass-2
-  //! re-run that excludes them from allocation.  No-op for IC_WEAK and for
-  //! column-rank-full plans (PDE2/3/4), so those builds are unchanged.
-  bool _detect_redundant_continuity_claims
-    ( InterfacePlanDraft& draft ) const;
-
   //! @brief Principal-symbol block-eligibility predicate for dropping a
   //! continuity claim (item 11).  True iff the block's principal symbol makes a
   //! value/flux continuity claim redundant: parabolic/parabolic-closure (flux
@@ -2466,15 +1818,6 @@ protected:
   //! (keep all).  Single source of truth shared by the redundancy gate and the
   //! value-slaved drop, so neither can drop a claim in an ineligible block.
   bool _block_drop_eligible( int block_id ) const;
-
-
-  //! @brief Count and freeze IC_TRACE exact constraints and tau columns.
-  bool _build_frozen_trace_constraints_and_tau_terms
-    ( InterfacePlanDraft& draft ) const;
-
-  //! @brief Build setup-frozen tau-block audit/pivot/projection for IC_STRONG.
-  bool _build_frozen_strong_tau_elimination
-    ( InterfacePlanDraft& draft ) const;
 
   //! @brief v2 interface decision layer (Phase 1; defined inline at end of this header).
   //!
@@ -2488,145 +1831,6 @@ protected:
       bool                   aux_alg_receiver,
       bool                   is_geo_c0 ) const;
 
-
-  //! @brief Forward-AD DAG work vector used by deriv()
-  mutable std::vector<OCVar<t_FAD>>  _wrkOCF;
-
-
-  //! @brief Forward-AD output function values used by deriv()
-  mutable std::vector<t_FAD>         _FFct;
-
-
-  //! @brief Cached row-wise sparsity pattern of the equation Jacobian. Columns are stacked as [collocated states, collocated inputs]. Thus columns 0.._nCollVar-1 correspond to state coefficients and columns _nCollVar.._nCollVar+_nCollInp-1 correspond to input coefficients.
-  std::vector< std::vector<size_t> > _jacPatternEqn;
-
-  //! @brief Cached row-wise sparsity pattern of the output-function Jacobian. Columns are stacked as [collocated states, collocated inputs]. Thus columns 0.._nCollVar-1 correspond to state coefficients and columns _nCollVar.._nCollVar+_nCollInp-1 correspond to input coefficients.
-  std::vector< std::vector<size_t> > _jacPatternFct;
-
-  //! @brief Per-row linearity flags derived from FFDep.
-  std::vector<bool>                  _jacLinearEqn;
-  std::vector<bool>                  _jacLinearFct;
-  bool                               _jacAllEqnLinear = false;
-  bool                               _jacAllFctLinear = false;
-
-
-  //! @brief Cached output evaluation domains used by eval_fct().
-  std::vector< std::set<FFVar,lt_FFVar> > _fctEvalDom;
-
-
-  //! @brief Cached sparse affine residual/output map for purely linear rows.
-  struct t_LinearRow
-  {
-    double                           offset = 0.;
-    std::vector<double>              val;
-  };
-  mutable std::vector<t_LinearRow>   _linEqn;
-  mutable std::vector<t_LinearRow>   _linFct;
-  mutable std::vector<double>        _linCstVal;
-  mutable bool                       _linEqnReady = false;
-  mutable bool                       _linFctReady = false;
-
-  //! @brief Cached color assigned to each stacked derivative column
-  std::vector<unsigned>              _jacColor;
-
-  //! @brief Number of colors in the cached compressed-forward seed matrix
-  unsigned                           _jacNColor = 0;
-
-  //! @brief True when _jacPattern/_jacColor match the current setup/options
-  bool                               _jacReady = false;
-
-  //! @brief Option/classification signature used to build the derivative cache
-  Options::InterfaceType             _jacInterfaceType  = Options::IC_AUTO;
-  Options::ImpositionType            _jacImpositionType = Options::IC_STRONG;
-  bool                               _jacClassified     = false;
-
-
-  //! @brief Clear what a re-setup invalidates on the solver side (derivative caches, the interface plan, the
-  //! per-block symbol/classification/face caches).  Overrides FFModel::_on_setup_begin().
-  bool _on_setup_begin
-    ()
-    override;
-
-  //! @brief Preflight the declared model before it is imported (overrides FFModel::_validate_model): the
-  //! solver's check, which also validates against the marching grid.
-  //! @brief Under SOLVE.MARCHING the working evolution domain is collapsed to its first element, but the march covers
-  //! the full recorded grid: an output point on the evolution coordinate is checked against [t_0, t_N].
-  void _output_point_bounds
-    ( FFVar const& var, double& lo, double& up )
-    const override
-    {
-      if( options.SOLVE.MARCHING && !_marchGrid.empty() && _evolution_dom_var.dag()
-          && var.id().second == _evolution_dom_var.id().second ){
-        lo = _marchGrid.front();
-        up = _marchGrid.back();
-      }
-    }
-
-  bool _validate_model
-    ()
-    override;
-
-  //! @brief Before order reduction: hoist the evolution structure and, when marching, collapse the evolution
-  //! domain to the first window -- reduction then runs against the horizon actually being solved.
-  bool _on_before_reduction
-    ()
-    override;
-
-  //! @brief After reduction: build the collocation arrays and the node cache.  The cache must exist before
-  //! classification, whose mesh-wavenumber probe reads it.
-  bool _on_model_discretise
-    ()
-    override;
-
-  //! @brief Opt-in validation of user-supplied incoming BCs at hyperbolic boundary faces (count and
-  //! characteristic direction), so a mis-placed inflow condition fails setup cleanly instead of producing a
-  //! rank-deficient solve.  Always on (unconditional).
-  bool _on_before_closures
-    ()
-    override;
-
-  //! @brief After classification, the reduction plan and the closures: counts and subgraph caches, dependency
-  //! map and evaluation plans, SAT coupling, the interface plan, the collocated caches and the audits.
-  bool _on_model_ready
-    ()
-    override;
-
-  //! @brief The declared model has been imported onto a new working DAG: derive the working input collocation
-  //! from FFModel's declaration (the input shares its domains' grid and differs only in local order and node
-  //! type).  @p vAllVarsLoc / @p ndxAllVars are the positional index the import produced.
-  void _on_model_imported
-    ( std::vector<FFVar> const& vAllVarsLoc,
-      std::map<FFVar::pt_idVar,size_t> const& ndxAllVars )
-    override
-    {
-    // The input shares its domains' grid: take each domain's FFDom and apply the input's declared
-    // collocation.  (Through rev192 the FFDom was captured when add_input() ran; deriving it here means a
-    // domain REDECLARED after its inputs now governs them too -- NOTES_20260911m Sec.3.)
-    _mInpDisc.clear();
-    for( auto const& [inp, decl] : _usr._mInpDiscUsr ){
-      t_Dom disc;
-      for( auto const& [dvar, ic] : decl ){
-        auto itdom = _usr._mDomUsr.find( dvar );
-        if( itdom == _usr._mDomUsr.end() )
-          throw Exceptions( Exceptions::INDEX );
-        FFDom opt = itdom->second;
-        opt.type = ic.type;
-        if( ic.n_node ) opt.n_node = ic.n_node;
-        if( opt.n_node == 0 )
-          throw FFDom::Exceptions( FFDom::Exceptions::NODES );
-        disc[ _local( dvar, vAllVarsLoc, ndxAllVars ) ] = opt;
-      }
-      _mInpDisc[ _local( inp, vAllVarsLoc, ndxAllVars ) ] = std::move( disc );
-    }
-    }
-
-  //! @brief The declared model was replaced: drop the moving-mesh specifications, which name variables of the
-  //! model that has just been discarded.
-  void _on_model_replaced
-    ()
-    override
-    { _adaptDomUsr.clear(); }
-
   //! @brief The classification is about to be recomputed: the SAT coupling table must be rebuilt before any
   //! interface plan is built or evaluated.
   void _on_classify_begin
@@ -2634,96 +1838,9 @@ protected:
     override
     { _satCouplingBuilt = false; }
 
-  //! @brief The classification is determined but not yet published: derive the per-(primitive,direction) symbol
-  //! interface reads (cached in _blockInterfaceRead, consumed by the symbol-AUTO resolver).  Only needed when the
-  //! interface type is actually derived (IC_AUTO); the balance probe forces it on as a diagnostic.
-  void _on_classify_ready
-    ( std::vector<double> const& state_ref, std::vector<double> const& input_ref,
-      std::vector<double> const& cst_ref, std::vector<double> const& dom_ref )
-    override
-    {
-      bool want_reads = ( options.INTERFACE.TYPE == Options::IC_AUTO );
-#ifdef MC__OCFESLV_SYMBOL_BALANCE_PROBE
-      want_reads = true;
-#endif
-      if( want_reads )
-        _compute_interface_reads( state_ref, cst_ref, dom_ref, input_ref );
-    }
-
-  //! @brief The classification is published: it can change IC_AUTO dispatch and therefore the residual
-  //! ordering/pattern for strong interface rows, so invalidate the derivative and linear-evaluation caches;
-  //! rebuild now only in eager mode.
-  //! @return false if an eager rebuild fails
-  bool _on_classify_published
-    ()
-    override
-    {
-    // Classification can change IC_AUTO dispatch and therefore the residual
-    // ordering/pattern for strong interface rows.  Invalidate derivative and
-    // linear-evaluation caches; rebuild now only in eager mode.
-    if( _issetup ){
-      _jacReady = false;
-      _linEqnReady = _linFctReady = false;
-      _reset_colloc( _OCFVar, _OCFInp, _OCFDom, _OCFCst );
-      _OCFEqn = OCVar<t_FAD>();
-      _wrkOCF.clear();
-      if( options.SOLVE.DERIV_CACHE == Options::DERIV_EAGER
-       || options.SOLVE.LINEAR_EVAL_CACHE == Options::LINEAR_EAGER ){
-        if( !_setup_deriv_cache() ) return false;
-        _reset_autodiff( _FVar, _FInp, _FEqn, _FFct );
-        if( options.SOLVE.LINEAR_EVAL_CACHE == Options::LINEAR_EAGER
-         && !_setup_linear_cache( true, true, _vCstVal.empty()? nullptr: _vCstVal.data() ) )
-          return false;
-      }
-    }
-      return true;
-    }
-
-  //! @brief Invalidate the derivative/Jacobian caches after a model change (the FFModel mutators call this
-  //! hook).
-  void _on_model_changed( ModelChange const chg ) override
-  {
-    switch( chg ){
-     case ModelChange::DERIVATIVES:  _jacReady = false; break;
-    }
-  }
-
-  //! @brief Build cached Jacobian sparsity pattern and column coloring
-  bool _setup_deriv_cache
-    ();
-
-  //! @brief Ensure cached Jacobian sparsity/coloring match current setup/options.
-  bool _ensure_deriv_cache
-    ();
-
-  //! @brief Build dependency update plans for residual and output evaluation.
-  void _setup_eval_plans
-    ();
-
   //! @brief Build per-element physical node cache for domain variables.
   void _setup_node_cache
     ();
-
-  //! @brief Build cached sparse affine maps for purely linear rows and fixed setup constants.
-  bool _setup_linear_cache
-    ( bool need_eqn, bool need_fct, double const* cst )
-    const;
-
-  //! @brief Try to evaluate rows through cached sparse affine maps.
-  bool _eval_linear_cache
-    ( double* eqn, double* fct, double const* var, double const* inp, double const* cst )
-    const;
-
-  //! @brief Check whether supplied constants match setup constants.
-  bool _linear_cache_constants_match
-    ( double const* cst )
-    const;
-
-  //! @brief Greedy coloring of the column-intersection graph induced by pattern
-  std::vector<unsigned> _color_jacobian_columns
-    ( std::vector< std::vector<size_t> > const& pattern, size_t const ncol, unsigned& ncolor )
-    const;
-
 
   //! @brief Check consistency of a collocation model container set.
   //!
@@ -2742,27 +1859,14 @@ protected:
     ( int block_id, FFVar const& dom )
     const;
 
-
   //! @brief True when an auxiliary state represents a derivative in a given direction.
   bool _auxiliary_state_in_direction
     ( FFVar const& state, FFVar const& dom )
     const;
 
-
-  //! @brief True when a specific LINK equation defines an auxiliary in a given direction.
-  bool _link_equation_in_direction
-    ( FFVar const& eqn, int block_id, FFVar const& dom )
-    const;
-
   //! @brief True when an equation expression contains an auxiliary generated in a given direction.
   bool _equation_has_aux_link_in_direction
     ( FFVar const& eqn, int block_id, FFVar const& dom )
-    const;
-
-
-  //! @brief True when automatic same-domain interface handling is enabled in a block/direction.
-  bool _block_receive_interface_in_direction
-    ( int block_id, FFVar const& dom )
     const;
 
   //! @brief True when IC_WEAK should use exact replacement in a reduced direction.
@@ -2787,180 +1891,7 @@ protected:
     ( int block_id, size_t state_id, FFVar const& dom, int lim )
     const;
 
-  //! @brief Whether an equation-node trace is retained after exact interface replacement.
-  bool _keep_eqn_node
-    ( FFVar const& eqn, FFModel::EqnOptions const& opt, FFVar const& dom, FFDom const& pdom,
-      size_t iel, size_t inode, int lim, bool weak, size_t eqn_ndx = std::numeric_limits<size_t>::max() )
-    const;
-
-
-  //! @brief Reset local working environment: the solver's state, then FFModel's (overrides FFModel::_reset).
-  void _reset
-    ()
-    override;
-
-  //! @brief Test whether a variable is part of the vector of constants
-  bool _constant
-    ( FFVar const& var )
-    const;
-
-
-  //! @brief Generate vector of adjacent-above block to current block ndx_el corresponding to the variable domain var_dom
-  std::vector< std::pair< std::map<FFVar, size_t, lt_FFVar>, FFVar const* > > _above_block
-    ( std::map<FFVar, size_t, lt_FFVar> const& ndx_el, std::set< FFVar, lt_FFVar > const& var_dom )
-    const;
-
-
-  //! @brief Templated initialization of AD variable vectors
-  template <typename U>
-  void _reset_autodiff
-    ( std::vector<FADType<U>>& Fvar, std::vector<FADType<U>>& Finp,
-      std::vector<FADType<U>>& Feqn, std::vector<FADType<U>>& Ffct )
-    const;
-
-
-  //! @brief Templated evaluation of collocated equation residuals
-  template <typename U>
-  void _eval_fct
-    ( U* fct, U const* var, U const* inp,
-      OCVar<U>& OCres, std::vector<OCVar<U>>& OCvar,  std::vector<OCVar<U>>& OCinp,
-      std::vector<OCVar<U>>& OCdom, std::vector<OCVar<U>>& OCcst, std::vector<OCVar<U>>& OCwrk )
-    const;
-
-  //! @brief Helper for copying derivative sparsity pattern
-  static void _deriv_copy_pattern
-    ( std::vector<std::vector<size_t>> const& pattern, size_t* nnz, size_t** colnz );
-
-  //! @brief Helper for extracting results from AD arrays
-  template <typename U>
-  static void _deriv_extract_rows
-    ( FADType<U> const* val, std::vector< std::vector<size_t> > const& pattern,
-      std::vector<unsigned> const& color, size_t const ncol, U* res, U** grad );
-
-  //! @brief Templated sparse derivative evaluation of collocated equation residuals in compressed FADBAD forward mode
-  template <typename U>
-  void _deriv_eqn
-    ( U* eqn, U** gradeqn, size_t* nnzeqn, size_t** colnzeqn,
-      OCVar<FADType<U>>& OCFeqn, std::vector<OCVar<FADType<U>>>& OCFvar,
-      std::vector<OCVar<FADType<U>>>& OCFinp, std::vector<OCVar<FADType<U>>>& OCFdom,
-      std::vector<OCVar<FADType<U>>>& OCFcst, std::vector<OCVar<FADType<U>>>& OCFwrk,
-      FADType<U>* Feqn, FADType<U>* Fvar, FADType<U>* Finp )
-    const;
-
-  //! @brief Templated sparse derivative evaluation of collocated output functions in compressed FADBAD forward mode
-  template <typename U>
-  void _deriv_fct
-    ( U* fct, U** gradfct, size_t* nnzfct, size_t** colnzfct,
-      OCVar<FADType<U>>& OCFfct, std::vector<OCVar<FADType<U>>>& OCFvar,
-      std::vector<OCVar<FADType<U>>>& OCFinp, std::vector<OCVar<FADType<U>>>& OCFdom,
-      std::vector<OCVar<FADType<U>>>& OCFcst, std::vector<OCVar<FADType<U>>>& OCFwrk,
-      FADType<U>* Ffct, FADType<U>* Fvar, FADType<U>* Finp )
-    const;
-
-
 public:
-
-  //! @brief Default Constructor
-  OCFESLV
-    ( FFGraph* dag = nullptr )
-    {
-      set( dag );
-    }
-
-  //! @brief Copy constructor: rebuild the working DAG from the source OC model.  A copy of an environment that
-  //! is not set up is itself an empty, not-set-up environment (is_setup() reports which).
-  OCFESLV
-    ( OCFESLV const& src )
-    {
-      deep_copy_from( src );
-    }
-
-  //! @brief Assignment: rebuild the working DAG from the source OC model.  Assigning a not-set-up source leaves
-  //! this environment empty and not set up (see the copy constructor).
-  OCFESLV& operator=
-    ( OCFESLV const& src )
-    {
-      if( this != &src ) deep_copy_from( src );
-      return *this;
-    }
-
-  //! @brief Destructor: clears the solver state; FFModel's destructor then releases the declared model and
-  //! the working DAG.
-  virtual ~OCFESLV
-    ()
-    {
-      _reset();
-    }
-
-  //! @brief The working domain map, as OCBase's collocation layer reads it: FFModel's (owner) map.  Always the
-  //! working one -- the collocation layer runs during setup(), before _issetup is set.
-  t_Dom const& _dom_colloc
-    ()
-    const
-    override
-    { return _mDom; }
-
-  //! @brief Deep copy from another set-up environmentred and working model, options, analyses and the homotopy settings (parameters,
-  //! remapped to this DAG, and per-stage step caps); the last continuation report is not copied.
-  //! @return false if @p src is not set up, or if the DAG import fails; this environment is then left empty
-  //! (not set up), never half-built.
-  bool deep_copy_from
-    ( OCFESLV const& src );
-
-
-  //! @brief Expected behaviour for built-in interface-plan diagnostics.
-  enum class InterfacePlanGeometricExpectation
-  {
-    ANY = 0,    //!< Do not check the number of geometric-C0 edges.
-    ZERO,       //!< Require no geometric-C0 receiver/frozen terms.
-    NONZERO     //!< Require at least one geometric-C0 receiver/frozen term.
-  };
-
-  //! @brief Compact summary of frozen interface-plan diagnostics.
-  struct InterfacePlanDiagnosticSummary
-  {
-    size_t n_receiver_edges = 0;
-    size_t n_weak_sat_terms = 0;
-    size_t n_trace_constraints = 0;
-    size_t n_tau_claim_keys = 0;
-
-    // IC_TRACE-specific accounting.  These fields distinguish the number of
-    // exact trace rows from the number of multiplier columns and make any
-    // exact-only/hybrid trace reduction visible in diagnostics.
-    size_t n_trace_variables = 0;
-    size_t n_trace_constraint_declared = 0;
-    size_t n_tau_claim_columns = 0;
-    size_t n_exact_replacement_rows = 0;
-    size_t n_physical_rows_dropped_by_trace = 0;
-    size_t n_constraints_without_tau = 0;
-    size_t n_tau_keys_without_receiver = 0;
-
-    size_t n_receiver_principal = 0;
-    size_t n_receiver_auxiliary = 0;
-    size_t n_receiver_geometric = 0;
-
-    size_t n_frozen_principal = 0;
-    size_t n_frozen_auxiliary = 0;
-    size_t n_frozen_geometric = 0;
-
-    size_t n_duplicate_retained_trace_claims = 0;
-    size_t n_duplicate_tau_claim_keys = 0;
-    size_t n_duplicate_receiver_edge_identities = 0;
-
-    size_t n_geometric_candidates = 0;
-    size_t n_geometric_discarded_covered = 0;
-    size_t n_geometric_emitted = 0;
-  };
-
-  //! @brief Human-readable name for an interface receiver-edge source.
-
-//==========================================================================================================
-// INTERFACE PLAN -- claims -> realisations -> rows and columns.  The DECISIONS live in ocplan.hpp; what is here
-// is the assembly: which claims exist, which rows receive them, and how the chosen realisation becomes
-// matrix structure.
-// (banner placed from the definitions themselves: this region is lines 1459-1889 of the pre-rev268 file)
-//==========================================================================================================
-
   static char const* interface_edge_source_name
     ( OCPlan::InterfaceEdgeSource const source ) noexcept
   {
@@ -3069,6 +2000,654 @@ public:
     return out;
   }
 
+protected:
+  //! @brief Flat state-DOF (column) indices belonging to evolution element
+  //! @p iel_evo -- every evolution-domain-bearing state, over all spatial
+  //! elements and nodes.  pos_state flattens the element multi-index in
+  //! lt_FFVar (DAG-creation) order, so which domain is innermost depends on
+  //! variable creation order, NOT on being the evolution direction (drivers
+  //! create t before z, so t is currently innermost => strided slabs).  This
+  //! accessor does NOT depend on that ordering: it fixes the evolution element,
+  //! enumerates the spatial multi-index, and delegates flattening to pos_state,
+  //! so the returned set is correct whether a slab is contiguous or strided.
+  //! States NOT on the evolution domain are excluded (they are not slab-local).
+  std::vector<size_t> _evolution_slab_cols
+    ( size_t iel_evo ) const;
+
+public:
+  //! @brief Read the collocated DOF values of distributed input @p input from @p inp
+  //! in the same element-major / node-inner ordering set_input_values() writes.  The
+  //! inverse of set_input_values(); returns an empty vector on unknown input.
+  std::vector<double> get_input_values
+    ( FFVar const& input, double const* inp ) const;
+
+  //! @brief Clear the protected-claims set (call before a fresh problem/run).
+  void clear_protected_interface_claims()
+    { _strong_protected_claims.clear(); }
+
+protected:
+  //! @brief differential-core SHAPE from the USER-side structures.
+  //!
+  //! Rows   = equations carrying at least one d/d(evolution) of a state.
+  //! Cols   = distinct states so differentiated ( _states_with_evolution_derivative ).
+  //! Square <=> rows == cols, which is the classifier's own marchability criterion
+  //! (the retired DIFFERENTIAL_RECTANGULAR was marchable only when the domain was
+  //! user-supplied), replicated where it can actually be consulted.
+  //!
+  //! IT WILL NOT ALWAYS AGREE WITH THE [classify] LINE'S sym=RxC, and that is expected:
+  //! this runs on _usr._mEqnUsr BEFORE localisation and BEFORE _reduce_order, while the
+  //! classifier counts RETAINED rows after both.  Both numbers are reported so a
+  //! disagreement is visible rather than assumed away.  A model where they differ is a
+  //! finding about the replica, not a licence to trust it.
+  void _differential_core_shape
+    ( size_t& rows, size_t& cols ) const;
+
+  //! @brief True if output expression @p fctvar contains an OpI (FFIntegral) quadrature
+  //! over the evolution variable -- i.e. an evolution-direction integral whose per-element
+  //! contributions must be SUMMED across the march.  All other outputs (terminal /
+  //! final-time / spatial-only) take the last element's value.
+  bool _fct_is_evolution_integral( FFVar const& fctvar ) const;
+
+  //! @brief Adjoint of the capture quadrature (Stage 1b): given lam_cap[R] (the adjoint on each cap's
+  //! value, indexed like R's spatial dofs), scatter it onto the state adjoint @p ls at R's collocation
+  //! dofs with the SAME LGR weights jac*w_ref[m] used by _fill_capture_sens, summed over evolution
+  //! elements.  Transpose of d(cap)/dp = INT jac*w_ref*s[R].  ACCUM only (LATCH handled inline).
+  void _fill_capture_sens_adjoint( std::map<FFVar,std::vector<double>,lt_FFVar> const& lam_cap,
+                                   double* ls ) const;
+
+  //! @brief LATCH transpose of the forward latch d(cap)/dp = eval_colloc(src,tau): scatter ONE latch
+  //! capture's cap-adjoint @p lamC onto @p ls at TAU's evolution element with the value Lagrange
+  //! weights L_m(tau) (NOT the ACCUM quadrature jac*w_ref).  Per-capture (tau not lost to
+  //! source-aggregation).  No-ops unless tau lies in the current evolution domain (window under
+  //! marching, full horizon monolithic).
+  void _fill_capture_sens_adjoint_latch( FFVar const& src, double tau,
+                                         std::vector<double> const& lamC, double* ls,
+                                         int const side = FFDom::MINUS ) const;
+
+  //! @brief Orientation of IC_TRACE multiplier receiver terms.
+  //!
+  //! Exact trace rows use the canonical orientation g = u_left(+1)-u_right(-1).
+  //! Receiver rows on the left/low element get +lambda and rows on the
+  //! right/high element get -lambda, matching the transpose saddle-point pair.
+  static double _trace_receiver_orient
+    ( bool current_element_is_right_of_interface )
+    { return current_element_is_right_of_interface ? -1.0 : 1.0; }
+
+  //! @brief Canonical block id for a physical IC_TRACE claim slot.
+  int _trace_claim_block
+    ( size_t state_id, size_t dom_id ) const;
+
+  //! @brief Default SAT spectral penalty parameter for domain d.
+  //! Returns tau = (n_node - 1)^2 / element_width.
+  //! The effective C0 penalty coefficient is  INTERFACE.SAT_SIGMA0 * tau,
+  //! and the effective C1 penalty coefficient is  CRONOS_SAT_SIGMA1 * tau / element_width.
+  double _sat_tau
+    ( FFDom const& dom, size_t const iel )
+    const
+    { double const nm1 = static_cast<double>( dom.n_node - 1 );
+      return nm1 * nm1 / dom.elem_width( iel ); }
+
+  //! @brief Default SAT spectral penalty parameter using representative width; retained for setup paths without a block index.
+  double _sat_tau
+    ( FFDom const& dom )
+    const
+    { double const nm1 = static_cast<double>( dom.n_node - 1 );
+      return nm1 * nm1 / dom.w_elem; }
+
+  //! @brief Interface-symmetric finite-element width shared by elements
+  //! iel_lo and iel_lo+1.  Returns the harmonic mean of the two adjoining
+  //! element widths, so that both elements bordering an internal interface
+  //! evaluate an identical SAT penalty parameter.  This is what makes the
+  //! two-sided IC_WEAK / IC_VALUE penalty discretely conservative on
+  //! nonuniform finite-element grids.
+  double _sat_iface_width
+    ( FFDom const& dom, size_t const iel_lo )
+    const
+    { double const wL = dom.elem_width( iel_lo );
+      double const wR = dom.elem_width( iel_lo + 1 );
+      double const s  = wL + wR;
+      return ( s > 0. ) ? ( 2. * wL * wR / s ) : 0.; }
+
+  //! @brief Build _satCoupling for the current classification signature.
+  //! Called by setup immediately after classification; evaluation must not
+  //! rely on this as a hidden topology-building fallback.
+  void _ensure_sat_coupling
+    () const;
+
+  //! @brief Dry structural pass of the residual assembler that verifies the
+  //! strong-imposition interface/corner logic keeps the collocation system
+  //! square: LOOP 1 interface rows + LOOP 2 equation nodes == _nCollEqn,
+  //! and LOOP 1 emissions == LOOP 2 interface-replacement drops.  Index-based and value-
+  //! independent.  Surfaces a squareness violation at setup()/classify_pde()
+  //! time instead of at the first eval()/deriv() call.
+  bool _audit_strong_interface_rows
+    ();
+
+public:
+  //! @brief Name of a state by its variable id (empty when not a state).
+  std::string state_name_of_id
+    ( size_t sid )
+    const
+    { for( auto const& kv : _mVar )
+        if( static_cast<size_t>( kv.first.id().second ) == sid ) return kv.first.name();
+      return std::string(); }
+
+  //! @brief Sparse modified Gram-Schmidt column rank, 1e-9 relative cut.
+  //!
+  //! Same algorithm and tolerance as the rank_of() lambda in interface_rank_symmetry, which
+  //! additionally reports the dependent indices.  Used by the projection phase so that the
+  //! k it computes is the k the audit reports.
+  static size_t _sparse_column_rank
+    ( std::vector<std::vector<std::pair<size_t,double>>> V )
+    {
+      typedef std::vector<std::pair<size_t,double>> SpV;
+      std::vector<SpV> basis;
+      size_t rank = 0;
+      for( size_t j = 0; j < V.size(); ++j ){
+        SpV c = V[j];
+        std::sort( c.begin(), c.end(),
+                   []( std::pair<size_t,double> const& a,
+                       std::pair<size_t,double> const& b ){ return a.first < b.first; } );
+        double n0 = 0.;
+        for( size_t k = 0; k < c.size(); ++k ) n0 += c[k].second * c[k].second;
+        n0 = std::sqrt( n0 );
+        if( n0 <= 64. * DBL_EPSILON ) continue;
+        for( size_t bi = 0; bi < basis.size(); ++bi ){
+          SpV const& q = basis[bi];
+          double d = 0.;
+          size_t a = 0, b = 0;
+          while( a < c.size() && b < q.size() ){
+            if     ( c[a].first < q[b].first ) ++a;
+            else if( c[a].first > q[b].first ) ++b;
+            else { d += c[a].second * q[b].second; ++a; ++b; }
+          }
+          if( d == 0. ) continue;
+          SpV out;
+          out.reserve( c.size() + q.size() );
+          a = 0; b = 0;
+          while( a < c.size() && b < q.size() ){
+            if     ( c[a].first < q[b].first ){ out.push_back( c[a] ); ++a; }
+            else if( c[a].first > q[b].first ){ out.push_back(
+                       std::make_pair( q[b].first, -d * q[b].second ) ); ++b; }
+            else { out.push_back( std::make_pair(
+                     c[a].first, c[a].second - d * q[b].second ) ); ++a; ++b; }
+          }
+          for( ; a < c.size(); ++a ) out.push_back( c[a] );
+          for( ; b < q.size(); ++b )
+            out.push_back( std::make_pair( q[b].first, -d * q[b].second ) );
+          c.swap( out );
+        }
+        double nr = 0.;
+        for( size_t k = 0; k < c.size(); ++k ) nr += c[k].second * c[k].second;
+        nr = std::sqrt( nr );
+        if( nr <= 1e-9 * std::max( 1.0, n0 ) ) continue;
+        double const inv = 1.0 / nr;
+        for( size_t k = 0; k < c.size(); ++k ) c[k].second *= inv;
+        basis.push_back( c );
+        ++rank;
+      }
+      return rank;
+    }
+
+  //! @brief 2026-10-15 (WORKPLAN 4R.21): the DEFINING ROW of each state, state id -> equation index.
+  //! A declaration (EqnOptions::defines) always wins.  Otherwise INFERRED: among the participating rows that are
+  //! not evolution rows, those whose FFInv letter in the state is L or S -- linear, or separably linear (the state
+  //! appears once, multiplied by a coefficient that may involve other states).  The FFPartial overload types its
+  //! OPERAND U, so a row that differentiates the state can never be L/S in it: "pointwise in the state" comes for
+  //! free, and no proxy substitution is needed.  Tie-break: a unique L beats any S; a unique S is taken; otherwise
+  //! the state is AMBIGUOUS and gets no inferred row (declare it).  Measured on OCFE_Burger_move --form q:
+  //! q -> QDEF (S; the PDE is excluded as an evolution row), g -> DEF (L), xg -> XGDEF (L over DEF's S).
+  std::map<size_t,size_t> _defining_rows() const;
+
+  //! @brief true once CRONOS_AUDIT_TAUCOL has been read.  Static so the
+  //! getenv cost is paid once per process, matching kEvoFace / kEvoFaceH.
+  //! @brief report-format revision, embedded in the [taucol/plan] banner so a
+  //! binary can be checked for the FORMAT it emits, not merely for having the instrument.
+  static char const* taucol_instrument_rev() { return "instrument rev108"; }
+
+  //! @brief resolve a state id to its printed name (same lookup the
+  //! IC_TRACE detail report uses; duplicated rather than shared because that one
+  //! is a lambda local to a print_details branch).
+  std::string _taucol_state_name( size_t const sid ) const
+    {
+      for( auto const& kv : _mVar )
+        if( static_cast<size_t>( kv.first.id().second ) == sid ){
+          std::ostringstream osn; osn << kv.first; return osn.str();
+        }
+      std::ostringstream osn; osn << "state#" << sid; return osn.str();
+    }
+
+  //! @brief resolve a domain id to its printed name.
+  std::string _taucol_dom_name( size_t const did ) const
+    {
+      for( auto const& kv : _mDom )
+        if( static_cast<size_t>( kv.first.id().second ) == did ){
+          std::ostringstream osn; osn << kv.first; return osn.str();
+        }
+      std::ostringstream osn; osn << "dom#" << did; return osn.str();
+    }
+
+  //! @brief printable form of a physical residual row key.
+  std::string _taucol_row_str( FrozenPhysicalResidualRowKey const& rk ) const
+    {
+      std::ostringstream o;
+      o << "row_id=" << rk.row_id << " blk=[";
+      for( size_t i = 0; i < rk.block_el.size(); ++i )
+        o << ( i ? "," : "" ) << rk.block_el[i].first << ":" << rk.block_el[i].second;
+      o << "] flat=" << rk.flat;
+      return o.str();
+    }
+
+  //! @brief Decode a state-coefficient column index into "state[el=..](nd=..)@coord".
+  //!
+  //! Layout mirrors pos_state(): each state owns a contiguous range starting at its
+  //! _blkVar offset; within it, element blocks of blk_size coefficients are strided with
+  //! the FIRST domain direction fastest, and within a block the node multi-index is
+  //! flattened the same way (see the receiver_flat construction).  Returns "?" for a
+  //! column outside every state range (a trace/tau column under IC_TRACE).
+  std::string decode_state_column
+    ( size_t col )
+    const
+    {
+      for( auto const& [v, dom] : _mVar ){
+        auto itb = _blkVar.find( v );
+        if( itb == _blkVar.end() ) continue;
+        size_t const base     = std::get<0>( itb->second );
+        size_t const blk_size = std::get<1>( itb->second );
+        if( !blk_size ) continue;
+        size_t span = blk_size;
+        for( auto const& d : dom ){
+          auto itd = _mDom.find( d );
+          if( itd == _mDom.end() ){ span = 0; break; }
+          span *= itd->second.n_elem;
+        }
+        if( !span || col < base || col >= base + span ) continue;
+
+        size_t local = col - base;
+        size_t blkid = local / blk_size, nodeoff = local % blk_size;
+
+        std::ostringstream ss;
+        ss << v.name() << "[";
+        std::ostringstream nn, cc;
+        bool first = true;
+        for( auto const& d : dom ){
+          auto const& dd = _mDom.at( d );
+          size_t const iel = blkid % ( dd.n_elem ? dd.n_elem : 1 );
+          blkid /= ( dd.n_elem ? dd.n_elem : 1 );
+          size_t const ind = nodeoff % ( dd.n_node ? dd.n_node : 1 );
+          nodeoff /= ( dd.n_node ? dd.n_node : 1 );
+          if( !first ){ ss << ","; nn << ","; cc << ","; }
+          first = false;
+          ss << d.name() << "=" << iel;
+          nn << ind;
+          // Physical coordinate of the node: reference nodes live in [-1,1].
+          auto const& xr = dd.lgnodes();
+          if( ind < xr.size() && iel < dd.n_elem )
+            cc << d.name() << "="
+               << std::setprecision(4) << ( dd.elem_lo( iel )
+                  + 0.5 * ( xr[ind] + 1.0 ) * dd.elem_width( iel ) );
+          else
+            cc << d.name() << "=?";
+        }
+        ss << "](nd=" << nn.str() << ")@" << cc.str();
+        return ss.str();
+      }
+      return std::string( "?col" ) + std::to_string( col );
+    }
+
+  //! @brief Ordered vector of state variables as registered after setup()
+  //! Includes auxiliary variables introduced by reduce_order().
+  std::vector<FFVar> const& states_colloc
+    ()
+    const
+    { return _vVar; }
+
+  //! @brief Return vector of node coordinates for the domain of variable var
+  std::vector<std::vector<double>> node_colloc
+    ( FFVar const& var )
+    const;
+
+  //! @brief 2026-10-02: the ROW-level causal design is active -- every element's first time node is an initial node:
+  //! the `ALL - LB` rows are not collocated there and each state with an evolution derivative gets an exact
+  //! continuity row against the previous element (as a marching window's start).  For now under the option /
+  //! environment only (the jumping-input gate keeps the claims-based causal block).
+  //! @brief The gate that admits the causal evolution-direction treatment: an INPUT distributed in the evolution
+  //! direction with an interior evolution interface whose declared continuity is below C0 (undeclared: may jump).
+  bool _evolution_input_may_jump() const
+  {
+    if( !_evolution_dom_set || !_evolution_dom_var.dag() ) return false;
+    for( auto const& kv : _mInp ){
+      FFVar const& inp = kv.first;
+      bool here = false;
+      for( auto const& dv : kv.second )
+        if( dv.id() == _evolution_dom_var.id() ){ here = true; break; }
+      if( !here ) continue;                                          // not distributed in t
+      if( _input_dom( inp, _evolution_dom_var ).n_elem < 2 ) continue; // no interior t-interface
+      int level = static_cast<int>( DISCONTINUOUS );                 // default when undeclared
+      auto itc = _mInpCont.find( inp );
+      if( itc != _mInpCont.end() ){
+        auto itd = itc->second.find( _evolution_dom_var );
+        if( itd != itc->second.end() ) level = static_cast<int>( itd->second );
+      }
+      if( level < static_cast<int>( CONTINUOUS_C0 ) ) return true;   // may jump -> kinked
+    }
+    return false;
+  }
+
+  //! @brief base offset of a state's data in the flat collocation vector.
+  //!
+  //! THREE WRONG ANSWERS PRECEDED THIS ONE; do not replace it without reading them.
+  //!
+  //!  1. Walking the state list, accumulating `node_colloc( st ).size()`.  That adds
+  //!     ZERO for a SCALAR state (node_colloc returns an empty vector) even though the state
+  //!     owns a var[] slot, so every state after the first scalar one was read short.  It
+  //!     produced plausible numbers, not errors: OCFE_scalar_nest reported a 2.5e-01
+  //!     "continuity violation" that was really a'(z) sampled at the wrong two nodes.
+  //!
+  //!  2. Using `pos_state( st, {} )`.  pos_state does `ndx_el.at(v)` for EVERY domain
+  //!     of the state, so an empty index map throws std::out_of_range for every DISTRIBUTED
+  //!     state.  The empty-map idiom is only valid for scalars -- which is the branch it was
+  //!     copied from (_init_var_block's `if( dom.empty() )` path).  This aborted PDE38 and
+  //!     scalar_nest after a successful solve.
+  //!
+  //!  3. Taking _blkVar's blk_pos directly would be correct today but duplicates pos_state's
+  //!     contract, so a change to the layout would silently desynchronise the two.
+  //!
+  //! Correct: pos_state with every domain of the state pinned to element 0, which is block 0
+  //! for scalars and distributed states alike, and delegates the layout entirely.
+  size_t _state_base_offset
+    ( FFVar const& st )
+    const
+    {
+      std::map<FFVar,size_t,lt_FFVar> ndx0;
+      auto const itv = _mVar.find( st );
+      if( itv != _mVar.end() )
+        for( auto const& d : itv->second ) ndx0[d] = 0;
+      return pos_state( st, ndx0 );
+    }
+
+protected:
+  //! @brief condition estimate on the retained R11 block of a weak
+  //! rank-revealing QR; deflates the rank by the number of sigma(R11) below tol_abs.
+  static void _refine_rank_from_R
+    ( arma::sp_mat const& R11, arma::sp_mat const& R12, double tol_abs,
+      size_t& rank, double& gap, double& sigma_cut );
+
+  //! @brief live (staircase-pivot) columns of a SQUEEZED SPQR R, in column
+  //! order.  ONE definition for both callers (numeric_rank and _null_basis once ran two
+  //! textual copies of the same loop); `sorted` selects the O(1)
+  //! last-entry test, everything else takes the column scan.  Pointers are the
+  //! raw CSC triple of the cholmod R (no cholmod types here, so the declaration needs
+  //! no SPQR guard).
+  static void _staircase_live_columns
+    ( int64_t const* rp, int64_t const* rI, double const* rx,
+      size_t ncol, size_t r, bool sorted, std::vector<size_t>& live );
+
+  //! @brief dense-SVD rank oracle (CRONOS_RANK_ORACLE=1, default OFF).  Below
+  //! CRONOS_RANK_ORACLE_MAXN it factorizes the SAME matrix densely at the SAME
+  //! tol_abs and prints AGREE/DISAGREE against the refined rank.  Report-only: it
+  //! never changes a rank, a verdict, or a plan.
+  static void _rank_oracle_check
+    ( arma::sp_mat const& M, double tol_abs, size_t rank_backend, size_t rank_refined,
+      char const* backend );
+
+  //! @brief one line of SPQR's own statistics (CRONOS_SPQR_STAT=1, or under
+  //! CRONOS_DEBUG_RANK).  Report-only; default off.
+  static void _spqr_stat_report( t_SpqrStat const& S, char const* tag );
+
+public:
+  //! @brief the SOLVER's per-equation options.  Derives from FFModel::EqnOptions (role,
+  //! participate_in_classification, block_id) and adds how OCFESLV imposes each equation at interfaces.
+  //! OCFESLV's factory guarantees that EVERY stored equation -- user-added or minted by reduce_order() or
+  //! setup() -- carries this type, which is what makes _sopt() below safe.
+  struct EqnOptions
+  : public FFModel::EqnOptions
+  {
+    Options::InterfaceType interface_type;              //!< local interface-condition type (IC_AUTO: resolved)
+    bool                   receive_sat;                 //!< may receive weak (SAT) interface penalties
+    bool                   donate_for_state_continuity; //!< may be donated as a duplicate trace row
+
+    //! @brief Role-derived defaults: INITIAL, BOUNDARY and
+    //! INTERFACE are donated, DIAGNOSTIC receives no SAT, LINK is never donated.
+    EqnOptions
+      ( EqnRole r = EqnRole::AUTO, int b = 0, Options::InterfaceType it = Options::IC_AUTO )
+      : FFModel::EqnOptions( r, b ), interface_type( it ), receive_sat( true ), donate_for_state_continuity( false )
+      { _solver_role_defaults(); }
+
+    //! @brief Explicit flags; the role invariants still apply: INTERFACE never enters classification, LINK and
+    //! DIAGNOSTIC are never donated.
+    EqnOptions
+      ( EqnRole r, int b, Options::InterfaceType it, bool classify, bool sat, bool donate = false )
+      : FFModel::EqnOptions( r, b ), interface_type( it ), receive_sat( sat ), donate_for_state_continuity( donate )
+      {
+        participate_in_classification = classify;
+        if( role == EqnRole::INTERFACE ) participate_in_classification = false;
+        if( role == EqnRole::LINK || role == EqnRole::DIAGNOSTIC ) donate_for_state_continuity = false;
+      }
+
+    //! @brief Promote a model-side options object: the solver fields take their role-derived defaults.  Used
+    //! by OCFESLV's factory for every equation the model mints itself.
+    explicit EqnOptions
+      ( FFModel::EqnOptions const& base )
+      : FFModel::EqnOptions( base ), interface_type( Options::IC_AUTO ), receive_sat( true ),
+        donate_for_state_continuity( false )
+      { _solver_role_defaults(); }
+
+    EqnOptions( EqnOptions const& other ) = default;
+    EqnOptions& operator=( EqnOptions const& other ) = default;
+
+    //! @brief Contract: a derived options type MUST override clone(), or copies drop these fields.
+    std::shared_ptr<FFModel::EqnOptions> clone
+      ()
+      const override
+      { return std::make_shared<EqnOptions>( *this ); }
+
+    void _solver_role_defaults
+      ()
+      {
+        if( role == EqnRole::INITIAL || role == EqnRole::BOUNDARY || role == EqnRole::INTERFACE )
+          donate_for_state_continuity = true;
+        if( role == EqnRole::DIAGNOSTIC ) receive_sat = false;
+        if( role == EqnRole::LINK ) donate_for_state_continuity = false;
+      }
+  };
+
+protected:
+  struct t_InterfaceTensorCornerDim {
+    size_t       face_stride = 0;
+    FFDom const* pdom        = nullptr;
+    FFVar const* pvar        = nullptr;
+    size_t       n_node      = 0;
+    size_t       n_elem      = 0;
+    size_t       iel         = 0;
+    size_t       inode       = 0;
+  };
+
+public:
+  //! @brief Expected behaviour for built-in interface-plan diagnostics.
+  enum class InterfacePlanGeometricExpectation
+  {
+    ANY = 0,    //!< Do not check the number of geometric-C0 edges.
+    ZERO,       //!< Require no geometric-C0 receiver/frozen terms.
+    NONZERO     //!< Require at least one geometric-C0 receiver/frozen term.
+  };
+
+  //! @brief sparse residual Jacobian assembled at a supplied var vector by
+  //! assemble() / assemble_window().  Solver-independent; the sparsity pattern is
+  //! cached inside so repeated calls at new points pay only the value evaluation.
+  struct t_JacAssembly
+  {
+    size_t n = 0, m = 0;          //!< equation rows, variable columns (states + trace/tau)
+    size_t n_tau = 0, tau0 = 0;   //!< tau column count and offset (n_tau = 0 under IC_WEAK)
+    size_t nnz = 0;               //!< pattern nonzeros (state + input columns, as deriv() reports)
+    arma::sp_mat J;               //!< n x m; = diag(rw)*J*diag(cw) iff equilibrated
+    arma::vec    r;               //!< residual at the point (row-scaled iff equilibrated)
+    std::vector<double> rw, cw;   //!< equilibration weights (all 1 unless equilibrated)
+    bool   equilibrated = false;
+    bool   ic_override  = false;  //!< marching window k>0 continuity-pin rows applied
+    size_t window       = 0;      //!< marching window index the assembly corresponds to
+    double ms_deriv = 0., ms_asm = 0.;
+    // cached sparsity pattern (filled on first use)
+    bool pattern_ready = false;
+    std::vector<size_t> rownnz;
+    std::vector<std::vector<size_t>> rowcol;
+    std::vector<double> grad;
+    std::vector<double*> gradptr;
+    // rev137: the drop mask (rows = claim rows, cols = tau columns) applied at assembly;
+    // empty in rev137, set by the plan in rev138.
+    std::vector<size_t> mask_rows, mask_cols;
+    // rev137: cached IC_WEAK SAT re-injection stencil for the marching override rows
+    std::map<size_t,std::vector<std::pair<size_t,double>>> ic_sat;
+    bool   ic_sat_ready = false; size_t ic_sat_window = 0; bool ic_sat_override = false;
+    void clear() { *this = t_JacAssembly{}; }
+  };
+
+  //! @brief assembled interface blocks B and C.
+  //!
+  //! B = multiplier columns over receiver rows; C = continuity rows over state columns.
+  //! Shared by interface_rank_symmetry() and by the trace-projection phase, which must see
+  //! the SAME blocks: two copies of this assembly that can drift is the defect class this
+  //! whole arc diagnosed (a claim made in one pass about an object built in another, with
+  //! no verification between).
+  struct InterfaceBlocks {
+    std::map<t_FrozenInterfaceClaimKey,size_t>    tau_ndx;   //!< claim -> dense tau index
+    std::vector<t_FrozenInterfaceClaimKey>        tau_key;   //!< dense tau index -> claim
+    std::map<FrozenPhysicalResidualRowKey,size_t> brow_ndx;  //!< receiver row -> dense index
+    std::vector<std::map<size_t,double>>          bcol;      //!< B, by tau: row index -> coeff
+    std::map<size_t,std::map<size_t,double>>      crow;      //!< C, by row: state col -> coeff
+    std::map<size_t,t_FrozenInterfaceClaimKey>    ckey;      //!< C row -> claim
+    size_t n_tau_col_in_C = 0;   //!< continuity coefficients that referenced a multiplier column
+    size_t ntau() const noexcept { return tau_ndx.size(); }
+  };
+
+  //! @brief Per-state duplicate-node spread at an element interface.
+  //!
+  //! Nodes that coincide geometrically but belong to different elements carry SEPARATE
+  //! collocation unknowns.  Continuity means those unknowns agree; the spread hi-lo over
+  //! each geometric coincidence group is therefore a DIRECT measurement of the interface
+  //! conditions actually being satisfied by the solution, independent of any rank, residual
+  //! or convergence report.
+  struct DuplicateNodeSpread
+  {
+    double max_pair_spread   = 0.0;  //!< over groups of multiplicity >= 2 (faces)
+    double max_corner_spread = 0.0;  //!< over groups of multiplicity >= 4 (corners)
+    size_t max_multiplicity  = 0;    //!< largest coincidence group seen
+    size_t n_group           = 0;    //!< number of coincidence groups with multiplicity >= 2
+  };
+
+  //! @brief CAUSALITY of a lifted claim (a transition): its receivers must lie AFTER the jump.  An ordinary continuity
+  //! claim x(tau+) = x(tau-) is symmetric, so receivers on both sides are right; a lifted claim x(tau+) = w, with w defined
+  //! by pre-jump data, is not -- a receiver in the element ENDING at tau puts post-jump information into a pre-jump row
+  //! (a penalty under IC_WEAK, a multiplier term under IC_STRONG / IC_TRACE), and the solution before tau depended on the
+  //! jump (PSA1: 2.9e-3; 2026-09-30).  True for an edge that belongs to a lifted claim and receives in element iel_lo.
+  bool _lifted_prejump_receiver
+    ( OCPlan::InterfaceReceiverEdge const& e )
+    const
+    {
+      if( !_lifted_claim_aux( e.claim_key ) ) return false;
+      size_t const evo = _evolution_dom_var.id().second;
+      for( auto const& [d, el] : e.receiver_block_el ) if( d == evo ) return el == e.claim_key.iel_lo;
+      return e.receiver_dom_id == evo && e.receiver_iel == e.claim_key.iel_lo;
+    }
+
+  //! @brief view stored options as the solver's type.  THROWS if the object is not one -- an equation
+  //! that bypassed _make_equation_options() is exactly the silent failure class this refactor keeps meeting,
+  //! so it must fail loudly rather than read a base object as if it had solver fields.
+  static EqnOptions const& _sopt
+    ( FFModel::EqnOptions const& o )
+    {
+      auto const* p = dynamic_cast<EqnOptions const*>( &o );
+      if( !p ) throw std::logic_error( "OCFESLV::_sopt ** equation options lack the solver's fields: "
+                                       "an equation was stored without going through _make_equation_options()" );
+      return *p;
+    }
+
+protected:
+  bool _suppress_tensor_interface_corner
+    ( Options::InterfaceType type, bool exact_reduced_weak, int block_id,
+      FFVar const& face_dom,
+      std::vector<t_InterfaceTensorCornerDim> const& od,
+      FFVar const* recv_state = nullptr ) const;
+  //! @brief C1: drop every claim whose (state, direction) the C0 classification does not tag NATURAL.
+  //! Such a claim is not an independent flux condition -- its continuity follows from a pointwise relation, or
+  //! is not owed at all -- so the plan never sees it and nothing has to rescue it.  Exact modes only; a census
+  //! line per state names the tag.  @return the number of claims suppressed.
+  size_t _apply_c0_claim_filter
+    ( std::map<t_InterfaceClaimKey,size_t>& claims )
+    const;
+
+  bool _load_frozen_interface_plan
+    ( std::map<t_InterfaceClaimKey,size_t>& claims ) const;
+
+  //! @brief Build sparse coefficients for one exact trace claim.
+  bool _trace_claim_coeffs
+    ( t_InterfaceClaimKey const& claim,
+      std::vector<std::pair<size_t,double>>& coeffs ) const;
+
+  //! @brief the two VALUE functionals of a claim, one per side (lo = element
+  //! iel_lo evaluated at +1, hi = iel_lo+1 at -1; C1 scaled by 2/width).  Same decode and
+  //! threshold as _trace_claim_coeffs (which stays byte-identical: coeffs = lo - hi,
+  //! interleaved); packed into PlanInput::DofEdge for the GLOBAL builder's trace DOFs.
+  bool _trace_claim_sides
+    ( t_InterfaceClaimKey const& claim,
+      std::vector<std::pair<size_t,double>>& lo,
+      std::vector<std::pair<size_t,double>>& hi ) const;
+
+  //! @brief COLUMN-LEVEL pinned pairs.  For every state, seam direction, seam and
+  //! transverse node, FIX1's predicate ("an INITIAL/BOUNDARY equation with mask ALL in the
+  //! seam direction, whose transverse masks contain this node, pinning only this state")
+  //! evaluated independently of any row visit.  Each pinned coincident pair is appended as a
+  //! nodal DofEdge (identification/forest joins only, never realised).  MEASURED need: blk0's
+  //! u at t=0 (no row visits the node) and PDE5's two BC-pinned y-claims at x=0/1 that the
+  //! corner dedup claimed before the pin test could record them.
+  void _pinned_column_pairs
+    ( std::vector<PlanInput::DofEdge>& out ) const;
+
+  //! @brief Build pre-compiled sparse SAT coefficients for one weak-SAT term.
+  //!
+  //! Each (col, coeff) entry satisfies coeff = prefactor * w_lagrange[k],
+  //! so eval time reduces to buf[flat] += sum_k coeff_k * var[col_k].
+  //! Returns true with empty coeffs when prefactor == 0 (valid, zero contribution).
+  //! Returns false when the claim geometry is invalid.
+  bool _sat_claim_coeffs
+    ( t_InterfaceClaimKey const& claim,
+      double prefactor,
+      std::vector<std::pair<size_t,double>>& coeffs ) const;
+
+  //! @brief Build executable frozen exact trace rows from retained claims.
+  bool _build_frozen_trace_constraint_terms
+    ( std::map<t_InterfaceClaimKey,size_t> const& claims,
+      InterfacePlanDraft& draft ) const;
+
+  //! @brief Shared redundancy pre-pass consumed by BOTH IC_TRACE and IC_STRONG.
+  //!
+  //! Builds per-column receiver coupling from the frozen weak-SAT terms (keyed
+  //! by lambda_index, identical to the in-Schur column scheme but mode-agnostic)
+  //! and flags every column-dependent continuity claim -- one whose continuity
+  //! row is a linear combination of the others, hence Schur-uneliminable
+  //! (IC_STRONG) and, kept explicit (IC_TRACE), a benign-but-singular null that
+  //! stalls the solver.  Flagged claims are recorded in _strong_dropped_claims;
+  //! returns false (with _strong_redundancy_pending set) to request the pass-2
+  //! re-run that excludes them from allocation.  No-op for IC_WEAK and for
+  //! column-rank-full plans (PDE2/3/4), so those builds are unchanged.
+  bool _detect_redundant_continuity_claims
+    ( InterfacePlanDraft& draft ) const;
+
+  //! @brief Build setup-frozen tau-block audit/pivot/projection for IC_STRONG.
+  bool _build_frozen_strong_tau_elimination
+    ( InterfacePlanDraft& draft ) const;
+
+  //! @brief True when a specific LINK equation defines an auxiliary in a given direction.
+  bool _link_equation_in_direction
+    ( FFVar const& eqn, int block_id, FFVar const& dom )
+    const;
+
+  //! @brief True when automatic same-domain interface handling is enabled in a block/direction.
+  bool _block_receive_interface_in_direction
+    ( int block_id, FFVar const& dom )
+    const;
+
+public:
   //! @brief Display frozen interface-plan diagnostics.
   //!
   //! This is intended for setup/debug regression checks of IC_WEAK/IC_TRACE/
@@ -3385,6 +2964,1272 @@ public:
         && s.n_duplicate_receiver_edge_identities == 0
         && trace_purity_ok;
   }
+
+protected:
+  //! @brief null basis of sparse M at tolerance tol_abs via SPQR dead-column
+  //! back-substitution + deflated inverse iteration for refinement demotions.
+  static bool _null_basis( arma::sp_mat const& M, double tol_abs, size_t& rank_out, arma::mat& N );
+
+  //! @brief Resolve the effective interface type for one equation/block/domain.
+  Options::InterfaceType _resolve_interface_type
+    ( FFModel::EqnOptions const* eqnopt, FFVar const* pdom, bool weak, int block_id )
+    const;
+
+  //! @brief Validate user-supplied incoming BCs at hyperbolic boundary faces:
+  //! the count must equal rank of the incoming projector (A+ at LB / A- at UB)
+  //! and each BC's state coupling must lie in the incoming characteristic space,
+  //! rejecting outgoing-direction / mis-placed BCs (e.g. an inflow condition put
+  //! on the wrong end).  Returns false on violation so setup() fails cleanly
+  //! instead of producing a rank-deficient solve.  Always on (unconditional).
+  bool _validate_hyperbolic_incoming_bcs();
+
+  //! @brief Interface-symmetric SAT penalty parameter for the interface
+  //! between elements iel_lo and iel_lo+1.  Returns (n_node-1)^2 divided by
+  //! the interface-symmetric width, so the value is identical whether the
+  //! interface is reached from its low- or high-side element.  Equal-and-
+  //! opposite SAT contributions from the two elements then telescope exactly.
+  double _sat_tau_face
+    ( FFDom const& dom, size_t const iel_lo )
+    const
+    { double const nm1 = static_cast<double>( dom.n_node - 1 );
+      double const w   = _sat_iface_width( dom, iel_lo );
+      return ( w > 0. ) ? ( nm1 * nm1 / w ) : 0.; }
+
+  //! @brief Principal-symbol SAT coupling for (symbolic equation ndx, state
+  //! _vVar[state_pos], domain dom).  Returns the cached classified coupling
+  //! when available, or 1.0 (identity) for unclassified models / uncoupled
+  //! rows.  O(small) linear scan; cheaper than the prior inline triple loop.
+  double _sat_coupling
+    ( size_t const ndx, size_t const state_pos, FFVar const& dom )
+    const;
+
+  //! @brief Post-classification suitability + consistent-IC validator for the
+  //! evolution/marching domain.  Runs at end of setup() (needs classification +
+  //! reduction + DOF-audit results).  Standalone setup-hardening and the future
+  //! marching/MOL applicability gate.  Warn-by-default; fatal only under
+  //! Options::FATAL.EVOLUTION_DOMAIN.  Returns false only on a fatal violation.
+  bool _validate_evolution_domain
+    () const;
+
+public:
+  t_FrozenInterfaceClaimKey _trace_slot_key( t_InterfaceClaimKey key ) const
+    {
+      key.block_id = _trace_claim_block( key.state_id, key.dom_id );
+      key.eqn_id   = std::numeric_limits<size_t>::max();
+      if( key.kind == CLAIM_EXACT_ROW ) key.kind = CLAIM_EXACT_C0;
+      return _freeze_interface_claim_key( key );
+    }
+
+  //! @brief Assemble B and C.  Takes its inputs explicitly so it serves the committed
+  //!        _plan (audit, end of setup) and the draft (projection phase, mid-build) alike.
+  void build_interface_blocks
+    ( std::map<t_FrozenInterfaceClaimKey,std::vector<size_t>> const& tau_claims,
+      std::vector<FrozenWeakSatTerm>         const& weak_sat_terms,
+      std::vector<FrozenTraceConstraintTerm> const& trace_constraints,
+      size_t trace_var_offset,
+      InterfaceBlocks& out ) const
+    {
+      out = InterfaceBlocks{};
+
+      // Dense tau index.  Covers BOTH the Schur-eliminated and the IC_STRONG keep-explicit
+      // taus, so the count matches n_trace_var in either mode.
+      for( auto const& kv : tau_claims ){
+        if( kv.second.empty() ) continue;
+        size_t const n = out.tau_ndx.size();
+        out.tau_ndx.emplace( kv.first, n );
+      }
+      out.tau_key.assign( out.tau_ndx.size(), t_FrozenInterfaceClaimKey{} );
+      for( auto const& kv : out.tau_ndx ) out.tau_key[ kv.second ] = kv.first;
+
+      // B: multiplier columns over receiver rows.  Row indices are assigned in
+      // weak_sat_terms order -- do not reorder, several reports quote these indices.
+      out.bcol.assign( out.tau_ndx.size(), std::map<size_t,double>{} );
+      for( auto const& term : weak_sat_terms ){
+        if( !term.trace_tau_allowed ) continue;
+        if( std::fabs( term.trace_prefactor ) <= 64. * DBL_EPSILON ) continue;
+        auto const it = out.tau_ndx.find( _trace_slot_key( term.claim_key ) );
+        if( it == out.tau_ndx.end() ) continue;
+        FrozenPhysicalResidualRowKey rk;
+        rk.row_id   = term.row_id;
+        rk.block_el = term.receiver_block_el;
+        rk.flat     = term.receiver_emit_flat;
+        auto ir = out.brow_ndx.find( rk );
+        if( ir == out.brow_ndx.end() ){
+          size_t const n = out.brow_ndx.size();
+          ir = out.brow_ndx.emplace( rk, n ).first;
+        }
+        out.bcol[ it->second ][ ir->second ] += term.trace_prefactor;
+      }
+
+      // C: continuity rows over state columns only.
+      for( auto const& t : trace_constraints ){
+        auto& r = out.crow[ t.row ];
+        for( auto const& cv : t.coeff ){
+          if( cv.first >= trace_var_offset ){ ++out.n_tau_col_in_C; continue; }
+          r[ cv.first ] += cv.second;
+        }
+        out.ckey[ t.row ] = _trace_slot_key( t.edge );
+      }
+    }
+
+  // =====================================================================
+  // rev150c [statenull]: census of the STATE-SIDE null directions of the audited
+  // Jacobian, i.e. the def_right - k' directions that are not pure-tau.
+  //
+  // WHY.  MBC3 under IC_WEAK is STATE_CONTENT (defR=8, growing 8->11->17 with
+  // refinement) with no taus in the system; under IC_TRACE the same model reports
+  // defR=k' -- every null direction pure-tau, the 8 state directions CLOSED.  TRACE
+  // only adds tau columns, C rows and exact-replacement rows to the WEAK plan, so
+  // one of those supplies rank the weak realisation lacks.  The record attributed
+  // the 8 to mesh/boundary DOFs (Defect-A pattern) from the growth law alone;
+  // nobody had looked at the vectors.  This census does.
+  //
+  // WHAT IT PRINTS.  The rev140 QR dead-column basis of the full J (orthonormal,
+  // original column coordinates, un-equilibrated through cw).  The PER-DIRECTION
+  // lines are basis-dependent (any rotation of the null space is another basis) and
+  // exist for localisation only.  The MASS AGGREGATES are not: for an orthonormal
+  // basis, sum_d v[c,d]^2 is the diagonal of the null-space projector, a property of
+  // the space, and the state-block share of it is the number of state-side null
+  // directions.  Read the aggregates first.
+  //
+  // NODE CLASS per column, per dimension of the state's domain:
+  //   seam      first node of a non-first element, or last node of a non-last one
+  //   boundary  first node of the first element, or last node of the last one
+  //   interior  anything else
+  // A column is 'seam' if any dimension is a seam, else 'boundary' if any is a
+  // boundary, else 'interior'.  Mass on seam nodes of claimed states says
+  // "interface realisation"; mass on boundary/interior says "not the interface plan".
+  //
+  // Gated on CRONOS_STATENULL_CENSUS=1; default off.  Runs one extra SPQR on the
+  // audited J when def_right > k'.  det-inert: prints only.
+  // =====================================================================
+  void _statenull_census( t_JacAssembly const& A, double tol_abs, size_t k_prime ) const
+    {
+      size_t rk = 0; arma::mat NB;
+      if( !_null_basis( A.J, tol_abs, rk, NB ) || !NB.n_cols ){
+        _disp( 3 ) << "  [statenull] null basis unavailable (no SPQR, or empty)" << std::endl;
+        return;
+      }
+      size_t const m    = (size_t)A.J.n_cols;
+      size_t const tau0 = A.n_tau ? A.tau0 : m;          // state columns are [0,tau0)
+      size_t const K    = (size_t)NB.n_cols;
+
+      // ---- decode every state column once --------------------------------------
+      struct ColInfo { int state = -1; int cls = -1; std::string seam; };   // cls 0 int,1 bnd,2 seam
+      std::vector<ColInfo> info( tau0 );
+      std::vector<std::string> sname;
+      { int sid = 0;
+        for( auto const& [v, dom] : _mVar ){
+          { std::ostringstream o; o << v; sname.push_back( o.str() ); }
+          auto itb = _blkVar.find( v );
+          if( itb == _blkVar.end() ){ ++sid; continue; }
+          size_t const base = std::get<0>( itb->second );
+          size_t const bsz  = std::get<1>( itb->second );
+          size_t span = bsz;
+          for( auto const& d : dom ){ auto itd = _mDom.find( d ); if( itd == _mDom.end() ){ span = 0; break; } span *= itd->second.n_elem; }
+          for( size_t col = base; span && bsz && col < base + span && col < tau0; ++col ){
+            size_t local = col - base, blkid = local / bsz, nodeoff = local % bsz;
+            int cls = 0; std::string seam;
+            for( auto const& d : dom ){
+              auto const& dd = _mDom.at( d );
+              size_t const ne = dd.n_elem ? dd.n_elem : 1, nn = dd.n_node ? dd.n_node : 1;
+              size_t const iel = blkid % ne;  blkid /= ne;
+              size_t const ind = nodeoff % nn; nodeoff /= nn;
+              bool const lo = ( ind == 0 ), hi = ( ind + 1 == nn );
+              if( ( lo && iel > 0 ) || ( hi && iel + 1 < ne ) ){
+                cls = 2; if( !seam.empty() ) seam += "+"; seam += d.name() + ( lo ? "-lo" : "-hi" );
+              }
+              else if( ( lo && iel == 0 ) || ( hi && iel + 1 == ne ) ){ if( cls < 1 ) cls = 1; }
+            }
+            info[col].state = sid; info[col].cls = cls; info[col].seam = seam;
+          }
+          ++sid;
+        } }
+
+      // ---- per-direction state/tau split; un-equilibrate through cw --------------
+      std::vector<double> smass( K, 0. );
+      std::vector<arma::vec> vv( K );
+      size_t n_state_side = 0;
+      for( size_t d = 0; d < K; ++d ){
+        arma::vec v = NB.col( (arma::uword)d );
+        if( A.equilibrated && A.cw.size() == m )
+          for( size_t c = 0; c < m; ++c ) v( (arma::uword)c ) *= A.cw[c];
+        double const nrm = arma::norm( v ); if( nrm > 0. ) v /= nrm;
+        double s = 0.; for( size_t c = 0; c < tau0; ++c ) s += v( (arma::uword)c ) * v( (arma::uword)c );
+        smass[d] = s; vv[d] = std::move( v );
+        if( s > 0.5 ) ++n_state_side;
+      }
+
+      std::ios::fmtflags const cf = std::cerr.flags(); auto const cp = std::cerr.precision();
+      _disp( 3 ) << "  [statenull] J " << A.J.n_rows << "x" << m << " rank=" << rk
+                << " null_dim=" << K << " state-side=" << n_state_side
+                << " (expected def_right-k'=" << ( K > k_prime ? K - k_prime : 0 ) << ")"
+                << " tau0=" << tau0 << " equilibrated=" << ( A.equilibrated ? 1 : 0 )
+                << "  [aggregates are basis-independent; dir# lines are not]" << std::endl;
+
+      // ---- aggregates over the state-side directions ---------------------------
+      std::map<int,double> by_state; std::map<int,double> by_cls; std::map<std::string,double> by_seam;
+      double tot = 0.;
+      for( size_t d = 0; d < K; ++d ){
+        if( smass[d] <= 0.5 ) continue;
+        for( size_t c = 0; c < tau0; ++c ){
+          double const w = vv[d]( (arma::uword)c ) * vv[d]( (arma::uword)c );
+          if( w == 0. ) continue;
+          tot += w;
+          by_state[ info[c].state ] += w; by_cls[ info[c].cls ] += w;
+          if( info[c].cls == 2 ) by_seam[ info[c].seam ] += w;
+        }
+      }
+      _disp( 3 ) << std::fixed << std::setprecision(3);
+      _disp( 3 ) << "  [statenull] state-side mass total=" << tot << "  by state:";
+      { std::vector<std::pair<double,int>> srt; for( auto const& kv : by_state ) srt.push_back( { kv.second, kv.first } );
+        std::sort( srt.rbegin(), srt.rend() );
+        for( auto const& [w, s] : srt ) _disp( 3 ) << "  " << ( s >= 0 && (size_t)s < sname.size() ? sname[s] : "?" ) << "=" << w; }
+      _disp( 3 ) << std::endl;
+      _disp( 3 ) << "  [statenull] by node class:  seam=" << by_cls[2] << "  boundary=" << by_cls[1]
+                << "  interior=" << by_cls[0] << std::endl;
+      if( !by_seam.empty() ){
+        _disp( 3 ) << "  [statenull] seam mass by direction:";
+        for( auto const& kv : by_seam ) _disp( 3 ) << "  " << kv.first << "=" << kv.second;
+        _disp( 3 ) << std::endl;
+      }
+
+      // ---- per-direction detail (localisation only) ----------------------------
+      size_t shown = 0;
+      for( size_t d = 0; d < K && shown < 24; ++d ){
+        if( smass[d] <= 0.5 ) continue;
+        ++shown;
+        arma::vec const av = arma::abs( vv[d] );
+        arma::uvec const idx = arma::sort_index( av, "descend" );
+        _disp( 3 ) << "  [statenull] dir#" << d << " state_mass=" << smass[d] << ":";
+        for( size_t j = 0; j < idx.n_elem && j < 6; ++j ){
+          size_t const c = (size_t)idx(j);
+          if( av( idx(j) ) < 1e-6 ) break;
+          _disp( 3 ) << "  " << std::setprecision(3) << vv[d]( idx(j) ) << "@"
+                    << ( c < tau0 ? decode_state_column( c ) : ( "tau" + std::to_string( c - tau0 ) ) )
+                    << ( c < tau0 && info[c].cls == 2 ? "[" + info[c].seam + "]" : "" );
+        }
+        _disp( 3 ) << std::endl;
+      }
+      if( n_state_side > shown )
+        _disp( 3 ) << "  [statenull] ... (" << n_state_side << " state-side directions total)" << std::endl;
+
+      // ---- rev150d [statenull/rows]: who sees the direction, and who cancels whom ---
+      // The net J*v is zero by definition.  The GROSS row mass sum_c |J_rc v_c| is
+      // nonzero exactly on the rows that see the direction; within such a row the
+      // signed contributions J_rc*v_c, grouped by column state, name the cancellation.
+      // Computed on the EQUILIBRATED J and its null vector (columns folded through cw,
+      // rows through rw), so row ranking is by scaled row -- the right scale for "does
+      // this row see it" since that is the scale the rank decision was taken at.
+      // Row provenance: _rowEqnNdx[r] = source equation index (row_id in taucol keys),
+      // -1 for plan-owned rows; only used when its length matches J.
+      // CRONOS_STATENULL_ROWS=1; default off.
+      { static bool const kRows = Options::_env_flag( "CRONOS_STATENULL_ROWS", false );
+        if( kRows ){
+          bool const have_prov = ( _rowProvenanceReady && _rowEqnNdx.size() == (size_t)A.J.n_rows );
+          size_t const nr = (size_t)A.J.n_rows;
+          size_t rshown = 0;
+          for( size_t d = 0; d < K && rshown < 8; ++d ){
+            if( smass[d] <= 0.5 ) continue;
+            ++rshown;
+            arma::vec const vs = NB.col( (arma::uword)d );      // equilibrated coordinates
+            std::vector<double> gross( nr, 0. ), net( nr, 0. );
+            for( arma::sp_mat::const_iterator it = A.J.begin(); it != A.J.end(); ++it ){
+              double const t = (*it) * vs( it.col() );
+              if( t == 0. ) continue;
+              gross[ it.row() ] += std::fabs( t ); net[ it.row() ] += t;
+            }
+            std::map<int,double> by_rowid; double gtot = 0.;
+            std::vector<size_t> order; order.reserve( nr );
+            for( size_t r = 0; r < nr; ++r ){
+              if( gross[r] <= 0. ) continue;
+              gtot += gross[r]; order.push_back( r );
+              by_rowid[ have_prov ? _rowEqnNdx[r] : -2 ] += gross[r];
+            }
+            std::sort( order.begin(), order.end(), [&]( size_t a, size_t b ){ return gross[a] > gross[b]; } );
+            _disp( 3 ) << "  [statenull/rows] dir#" << d << " rows-seeing=" << order.size()
+                      << " gross-total=" << gtot << "  gross by row_id:";
+            { std::vector<std::pair<double,int>> srt; for( auto const& kv : by_rowid ) srt.push_back( { kv.second, kv.first } );
+              std::sort( srt.rbegin(), srt.rend() ); size_t n = 0;
+              for( auto const& [w, id] : srt ){ if( ++n > 6 ) break; _disp( 3 ) << "  row_id=" << id << ":" << w; } }
+            _disp( 3 ) << std::endl;
+            for( size_t q = 0; q < order.size() && q < 6; ++q ){
+              size_t const r = order[q];
+              // signed contributions of this row, by column
+              std::vector<std::pair<double,size_t>> contrib;
+              std::map<int,double> by_state;
+              for( arma::sp_mat::const_row_iterator it = A.J.begin_row( r ); it != A.J.end_row( r ); ++it ){
+                double const t = (*it) * vs( it.col() );
+                if( t == 0. ) continue;
+                contrib.push_back( { t, (size_t)it.col() } );
+                by_state[ it.col() < tau0 ? info[ it.col() ].state : -3 ] += t;
+              }
+              std::sort( contrib.begin(), contrib.end(),
+                         []( auto const& a, auto const& b ){ return std::fabs( a.first ) > std::fabs( b.first ); } );
+              _disp( 3 ) << "      r=" << r << " row_id=" << ( have_prov ? _rowEqnNdx[r] : -2 )
+                        << " gross=" << gross[r] << " net=" << std::scientific << std::setprecision(1) << net[r]
+                        << std::fixed << std::setprecision(3) << "  by state:";
+              for( auto const& kv : by_state )
+                _disp( 3 ) << "  " << ( kv.first >= 0 && (size_t)kv.first < sname.size() ? sname[kv.first] : ( kv.first == -3 ? "tau" : "?" ) )
+                          << "=" << std::showpos << kv.second << std::noshowpos;
+              _disp( 3 ) << std::endl << "          ";
+              for( size_t j = 0; j < contrib.size() && j < 6; ++j ){
+                size_t const c = contrib[j].second;
+                _disp( 3 ) << "  " << std::showpos << contrib[j].first << std::noshowpos << "@"
+                          << ( c < tau0 ? decode_state_column( c ) : ( "tau" + std::to_string( c - tau0 ) ) )
+                          << ( c < tau0 && info[c].cls == 2 ? "[" + info[c].seam + "]" : "" );
+              }
+              _disp( 3 ) << std::endl;
+            }
+          }
+        } }
+      std::cerr.flags( cf ); std::cerr.precision( cp );
+    }
+
+  //! @brief Duplicate-node spread for one state, over the flat collocation vector `var`.
+  //!
+  //! `off` is the state's base offset into `var`.  OMIT IT: the default derives it from
+  //! pos_state(), which is the only correct source.  Computing it by walking states and
+  //! accumulating node_colloc().size() is WRONG in the presence of scalar states -- see the
+  //! note in report_duplicate_node_spreads().  The parameter is retained only for
+  //! callers that already hold a verified offset.
+  DuplicateNodeSpread duplicate_node_spread
+    ( FFVar const& st, std::vector<double> const& var,
+      size_t off = std::numeric_limits<size_t>::max() )
+    const;
+
+  //! @brief Report per-state duplicate-node spreads and return the worst max_pair.
+  //!
+  //! WHY THIS LIVES IN THE HEADER.  The withdrawn Stage A interface rule passed k=0,
+  //! SYMMETRIC, a clean residual and clean primitive variables while destroying MBC5's
+  //! radial fluxes by 24 orders of magnitude.  The ONLY instrument that caught it was the
+  //! per-state duplicate-node spread -- and it was implemented driver-side, so only 3 of
+  //! the 29 drivers flagged by the rank sweep could report it.  Moving it here gives every
+  //! driver the gate for free and makes "no readout" impossible rather than merely unlikely.
+  //!
+  //! Returns the worst max_pair_spread across all states, so a caller can gate on one
+  //! number:  ok &= ( oc.report_duplicate_node_spreads( x, "post solve" ) < tol );
+  double report_duplicate_node_spreads
+    ( std::vector<double> const& var, char const* label = "",
+      std::ostream* os = &std::cerr )
+    const;
+
+protected:
+  enum { CLAIM_EXACT_C0 = 0, CLAIM_EXACT_C1 = 1, CLAIM_EXACT_ROW = CLAIM_EXACT_C0 };
+
+};
+
+
+////////////////////////////////////////////////////////////////////////
+class OCFESLV
+////////////////////////////////////////////////////////////////////////
+: public OCFEBASE
+{
+
+  friend  std::ostream& operator<< ( std::ostream&, OCFESLV const& );
+  template <typename U> friend class OCVar;
+
+public:
+  //! @brief The collocation grid of direction @p dir (OCBase::colloc_dom): the grid the equations are collocated on,
+  //! onto which a nonlinear operation lifts a coarser multi-node input first (2026-09-28)
+  FFDom const* colloc_dom
+    ( FFVar const& dir )
+    const override
+    { auto const it = _mDom.find( dir );  return it == _mDom.end()? nullptr: &it->second; }
+
+
+  //! @brief OCFESLV imposes transitions through lifted auxiliaries (FFModel::_transitions_lifted): the continuity claim
+  //! of a post-jump state across tau joins x_i(tau^+) to its auxiliary w_i instead of to x_i(tau^-) -- see
+  //! _trace_claim_coeffs -- in every imposition mode (penalty under IC_WEAK, exact under IC_STRONG / IC_TRACE).
+  bool _transitions_supported() const override { return true; }
+  bool _transitions_lifted() const override { return !options.SOLVE.MARCHING; }   // marching: a transfer map (_apply_march_jumps)
+  //! @brief v1: tau on an element boundary of the evolution direction -- in monolithic AND marching solves (marching
+  //! validates against the user's DECLARED grid, as its working domain is collapsed to one window: a tau between two
+  //! seams was silently ignored before 2026-10-06, WORKPLAN 1.6)
+  bool _validate_transition_tau_unlifted() const override { return true; }
+  bool _accept_transition_tau
+    ( double const tau, std::string& why )
+    const override
+    {
+      FFDom const* pd = nullptr;
+      if( _transitions_lifted() ){
+        auto const it = _mDom.find( _evolution_dom_var );  if( it != _mDom.end() ) pd = &it->second;
+      }
+      else{
+        auto const it = _usr._mDomUsr.find( _usr._evolution_dom_varUsr );  if( it != _usr._mDomUsr.end() ) pd = &it->second;
+      }
+      if( !pd ){ why = "no evolution domain"; return false; }
+      for( size_t k = 1; k < pd->n_elem; ++k )
+        if( std::fabs( pd->elem_bnd[k] - tau ) <= 64.*DBL_EPSILON*std::max( 1., std::fabs( tau ) ) ) return true;
+      why = "tau must be an ELEMENT BOUNDARY of the evolution direction (add one there)";  return false;
+    }
+
+
+  //! @brief Build the marching transfer maps (see t_MarchJump); false with the reason printed if v1 cannot march them
+  bool _build_march_jumps
+    ()
+    {
+      _marchJumps.clear();      // frees the Jacobians (unique_ptr)
+      _marchJumpsReady = true;
+      if( _mTrn.empty() ) return true;
+      FFModel::t_TransitionJumps G;  std::string why;
+      auto is_state = [&]( FFVar const& v ){ return _mVar.count( v ) > 0; };
+      if( !_transition_jumps( _mTrn, is_state, G, why ) ){ _disp( 2 ) << "OCFESLV::solve ** TRANSITION: " << why << std::endl; return false; }
+      FFVar const t = _evolution_dom_var;
+      for( auto const& g : G ){
+        t_MarchJump M;  M.tau = g.tau;  M.xs = g.jump;
+        for( auto const& [x, dm] : _mVar ) if( dm.count( t ) ) M.evo.push_back( x );   // v1.5: profiles, node by node
+        std::vector<FFVar> tgt, rep;
+        for( auto const& x : M.xs ){ std::ostringstream nm; nm << "Xp_" << x.name() << "@" << g.tau; M.xp.push_back( _dag->add_var( nm.str() ) ); tgt.push_back( x ); rep.push_back( M.xp.back() ); }
+        for( size_t const k : g.comp ){
+          auto const& tr = _mTrn[ k / 65536 ];  size_t const c = k % 65536;
+          M.R.push_back( tr.left[c] - _dag->compose( std::vector<FFVar>{ tr.right[c] }, tgt, rep )[0] );
+        }
+        FFSubgraph sg = _dag->subgraph( M.R.size(), M.R.data() );
+        for( auto const* op : sg.l_op ){
+          if( !op || op->type != FFOp::VAR || !op->varout[0] ) continue;
+          FFVar const& v = *op->varout[0];
+          if( _mDom.count( v ) ){ _disp( 2 ) << "OCFESLV::solve ** TRANSITION at tau = " << g.tau << ": a marching map may not read the"
+                                              " domain variable " << v.name() << " (v1.5: its node coordinates are not available at the seam)" << std::endl; return false; }
+          auto const ii = _mInp.find( v );
+          if( ii == _mInp.end() ) continue;
+          if( !ii->second.empty() ){ _disp( 2 ) << "OCFESLV::solve ** TRANSITION at tau = " << g.tau << ": marching v1 transfers maps whose inputs"
+                                                  " are time-invariant (" << v.name() << " is distributed)" << std::endl; return false; }
+          M.inp.push_back( v );
+        }
+        M.J .reset( _dag->FAD( M.R.size(), M.R.data(), M.xp.size(),  M.xp.data() ) );
+        M.Jx.reset( _dag->FAD( M.R.size(), M.R.data(), M.evo.size(), M.evo.data() ) );
+        if( !M.inp.empty() ) M.Jp.reset( _dag->FAD( M.R.size(), M.R.data(), M.inp.size(), M.inp.data() ) );
+        _marchJumps.push_back( std::move( M ) );
+      }
+      return true;
+    }
+
+  //! @brief At window k's seam tau = _marchGrid[k]: if transitions sit there, solve R( x-, x+, p ) = 0 for x+ (Newton;
+  //! one step for an explicit map) from the previous window's terminals x-, and hand x+ on instead of the terminal --
+  //! into the IC input (data path) or _marchICTerminal (general-IC override path).  False if Newton fails.
+  bool _apply_march_jumps
+    ( size_t const k, double const* var, double* pinp, double const* cst )
+    {
+      if( !_marchJumpsReady && !_build_march_jumps() ) return false;
+      double const tau = _marchGrid[k];
+      for( auto& M : _marchJumps ){
+        if( std::fabs( M.tau - tau ) > 64.*DBL_EPSILON*std::max( 1., std::fabs( tau ) ) ) continue;
+        size_t const m = M.xs.size(), ne = M.evo.size();
+        // the previous window's terminals, node by node (a scalar state is broadcast)
+        auto const prof = terminal_profile( var, pinp, cst );
+        std::vector< std::vector<double> > xe( ne );  size_t nn = 1;
+        for( size_t e = 0; e < ne; ++e ){
+          auto const ip = prof.find( M.evo[e] );
+          xe[e] = ( ip != prof.end() && !ip->second.empty() )? ip->second: std::vector<double>{ terminal_value( M.evo[e], t_Coord{}, var, pinp, cst ) };
+          if( xe[e].size() > 1 ){
+            if( nn > 1 && xe[e].size() != nn ){ _disp( 2 ) << "OCFESLV::solve ** TRANSITION at tau = " << tau << ": profiles with different"
+                                                           " node counts in one marching map (v1.5)" << std::endl; return false; }
+            nn = xe[e].size(); }
+        }
+        std::vector<FFVar> vv;  for( auto const& x : M.evo ) vv.push_back( x );  for( auto const& u : M.xp ) vv.push_back( u );
+        std::vector<double> tail;
+        for( auto const& u : M.inp ){ vv.push_back( u ); tail.push_back( pinp[ pos_input( u, std::map<FFVar,size_t,lt_FFVar>() ) ] ); }
+        for( size_t c = 0; c < _vCst.size(); ++c ){ vv.push_back( _vCst[c] ); tail.push_back( cst? cst[c]: 0. ); }
+        M.vars = vv;  M.at_n.assign( nn, std::vector<double>() );
+        std::vector< std::vector<double> > wprof( m, std::vector<double>( nn ) );
+        for( size_t j = 0; j < nn; ++j ){
+          std::vector<double> vl( ne + m );
+          for( size_t e = 0; e < ne; ++e ) vl[e] = xe[e].size() > 1? xe[e][j]: xe[e][0];
+          std::vector<double> xp( m );
+          for( size_t i = 0; i < m; ++i ) for( size_t e = 0; e < ne; ++e ) if( M.evo[e].id() == M.xs[i].id() ) xp[i] = vl[e];   // guess: x-
+          vl.insert( vl.end(), tail.begin(), tail.end() );
+          bool conv = false;
+          for( int it = 0; it < 30 && !conv; ++it ){
+            for( size_t i = 0; i < m; ++i ) vl[ne+i] = xp[i];
+            std::vector<double> r( m ), a( m*m );
+            _dag->eval( m, M.R.data(), r.data(), vv.size(), vv.data(), vl.data() );
+            _dag->eval( m*m, M.J.get(), a.data(), vv.size(), vv.data(), vl.data() );
+            double rn = 0.;  for( double const q : r ) rn = std::max( rn, std::fabs( q ) );
+            double xn = 1.;  for( double const q : xp ) xn = std::max( xn, std::fabs( q ) );
+            if( rn <= 1e-14 * xn ){ conv = true; break; }
+            std::vector<double> b( m );  for( size_t i = 0; i < m; ++i ) b[i] = -r[i];
+            if( !_small_solve( a, b, m ) ){ _disp( 2 ) << "OCFESLV::solve ** TRANSITION at tau = " << tau << ": singular dR/dx+" << std::endl; return false; }
+            for( size_t i = 0; i < m; ++i ) xp[i] += b[i];
+          }
+          if( !conv ){ _disp( 2 ) << "OCFESLV::solve ** TRANSITION at tau = " << tau << ": the jump map did not converge" << std::endl; return false; }
+          for( size_t i = 0; i < m; ++i ){ vl[ne+i] = xp[i];  wprof[i][j] = xp[i]; }
+          M.at_n[j] = vl;
+        }
+        M.at = M.at_n[0];
+        for( size_t i = 0; i < m; ++i ){                 // hand x+ on through the state's own transfer path
+          FFVar const& st = M.xs[i];
+          for( auto const& [s2, ic] : _marchTransfers ){
+            if( s2.id() != st.id() ) continue;
+            if( ic.dag() ){
+              // the canonical IC-input path: terminal_profile() and set_input_values() share the element-major /
+              // node-inner layout, so a post-jump profile on the SAME spatial grid as the input is written directly
+              if( nn > 1 ){
+                size_t ndof = 1;  auto const ii = _mInp.find( ic );
+                if( ii != _mInp.end() ) for( auto const& d : ii->second ){ auto const& od = _mDom.at( d ); ndof *= od.n_elem * od.n_node; }
+                if( ii == _mInp.end() || ndof != nn ){
+                  _disp( 2 ) << "OCFESLV::solve ** TRANSITION at tau = " << tau << ": the IC input of " << st.name() << " is not on the"
+                               " state's spatial grid (" << ndof << " vs " << nn << " nodes) -- v1.5 does not resample" << std::endl; return false; }
+                set_input_values( ic, wprof[i], pinp );
+              }
+              else set_input_values( ic, std::vector<double>{ wprof[i][0] }, pinp );
+            }
+            else{
+              auto itt = _marchICTerminal.find( st );
+              if( itt != _marchICTerminal.end() ){
+                if( nn > 1 && itt->second.size() == nn ) itt->second = wprof[i];
+                else std::fill( itt->second.begin(), itt->second.end(), wprof[i][0] );
+              }
+            }
+          }
+        }
+      }
+      return true;
+    }
+
+  //! @brief Solve a x = b in place for a small dense m x m system (partial pivoting); false if singular
+  static bool _small_solve
+    ( std::vector<double> a, std::vector<double>& b, size_t const m, bool const transpose = false )
+    {
+      if( transpose ) for( size_t i = 0; i < m; ++i ) for( size_t j = i+1; j < m; ++j ) std::swap( a[i*m+j], a[j*m+i] );
+      for( size_t c = 0; c < m; ++c ){
+        size_t pr = c;  for( size_t i = c+1; i < m; ++i ) if( std::fabs( a[i*m+c] ) > std::fabs( a[pr*m+c] ) ) pr = i;
+        if( std::fabs( a[pr*m+c] ) < 1e-300 ) return false;
+        if( pr != c ){ for( size_t j = 0; j < m; ++j ) std::swap( a[c*m+j], a[pr*m+j] ); std::swap( b[c], b[pr] ); }
+        for( size_t i = c+1; i < m; ++i ){ double const f = a[i*m+c]/a[c*m+c]; for( size_t j = c; j < m; ++j ) a[i*m+j] -= f*a[c*m+j]; b[i] -= f*b[c]; }
+      }
+      for( size_t c = m; c-- > 0; ){ double q = b[c]; for( size_t j = c+1; j < m; ++j ) q -= a[c*m+j]*b[j]; b[c] = q/a[c*m+c]; }
+      return true;
+    }
+
+  //! @brief ADJOINT through the jump at window k's seam -- the transpose of _march_jump_fsens.  With y = J^{-T} mu+ (mu+
+  //! the adjoint on the post-jump initial values, from @p lam_term), the costate handed to window k-1 is
+  //!   mu-_e = [e continuous] mu+_e - ( dR/dx-^T y )_e,   and the input-space gradient gains  - dR/dinp^T y.
+  bool _march_jump_asens
+    ( size_t const k, std::map<FFVar,std::vector<double>,lt_FFVar>& lam_term, std::vector<double>& ldinp )
+    {
+      double const tau = _marchGrid[k];
+      for( auto const& M : _marchJumps ){
+        if( std::fabs( M.tau - tau ) > 64.*DBL_EPSILON*std::max( 1., std::fabs( tau ) ) || M.at_n.empty() ) continue;
+        size_t const m = M.xs.size(), ne = M.evo.size(), ni = M.inp.size(), nn = M.at_n.size();
+        std::map<FFVar,std::vector<double>,lt_FFVar> incoming = lam_term;   // mu+ as handed back from window k
+        for( size_t i = 0; i < m; ++i ){ auto& v = lam_term[ M.xs[i] ]; if( v.empty() ) v.assign( nn, 0. ); else std::fill( v.begin(), v.end(), 0. ); }
+        for( size_t e = 0; e < ne; ++e ){ auto& v = lam_term[ M.evo[e] ]; if( v.empty() ) v.assign( nn, 0. ); }
+        for( size_t j = 0; j < nn; ++j ){                // node by node (v1.5 profiles; nn = 1 for scalars)
+          std::vector<double> a( m*m ), ax( m*ne ), ap( m*ni );
+          _dag->eval( m*m,  M.J.get(),  a.data(),  M.vars.size(), M.vars.data(), M.at_n[j].data() );
+          _dag->eval( m*ne, M.Jx.get(), ax.data(), M.vars.size(), M.vars.data(), M.at_n[j].data() );
+          if( ni ) _dag->eval( m*ni, M.Jp.get(), ap.data(), M.vars.size(), M.vars.data(), M.at_n[j].data() );
+          std::vector<double> y( m, 0. );
+          for( size_t i = 0; i < m; ++i ){ auto it = incoming.find( M.xs[i] );
+            if( it != incoming.end() && !it->second.empty() ) y[i] = it->second.size() > j? it->second[j]: it->second[0]; }
+          if( !_small_solve( a, y, m, /*transpose=*/true ) ) return false;
+          for( size_t e = 0; e < ne; ++e ){
+            double q = 0.;  for( size_t i = 0; i < m; ++i ) q -= ax[i*ne+e]*y[i];
+            auto& v = lam_term[ M.evo[e] ];
+            if( v.size() > j ) v[j] += q; else for( auto& z : v ) z += q;
+          }
+          for( size_t qi = 0; qi < ni; ++qi ){
+            double q = 0.;  for( size_t i = 0; i < m; ++i ) q -= ap[i*ni+qi]*y[i];
+            ldinp[ pos_input( M.inp[qi], std::map<FFVar,size_t,lt_FFVar>() ) ] += q;
+          }
+        }
+      }
+      return true;
+    }
+
+  //! @brief FORWARD sensitivity through the jump at window k's seam: for the post-jump states,
+  //!   s+ = -J^{-1} ( dR/dx- . s- + dR/dinp . dinp )      (implicit function theorem; J = dR/dx+)
+  //! replaces the terminal sensitivity carried in @p sens_term.  @p dinp: the direction, input layout.
+  bool _march_jump_fsens
+    ( size_t const k, std::map<FFVar,std::vector<double>,lt_FFVar>& sens_term, std::vector<double> const& dinp )
+    {
+      double const tau = _marchGrid[k];
+      for( auto const& M : _marchJumps ){
+        if( std::fabs( M.tau - tau ) > 64.*DBL_EPSILON*std::max( 1., std::fabs( tau ) ) || M.at_n.empty() ) continue;
+        size_t const m = M.xs.size(), ne = M.evo.size(), ni = M.inp.size(), nn = M.at_n.size();
+        std::vector< std::vector<double> > out( m, std::vector<double>( nn ) );
+        for( size_t j = 0; j < nn; ++j ){                // node by node (v1.5 profiles; nn = 1 for scalars)
+          std::vector<double> a( m*m ), ax( m*ne ), ap( m*ni );
+          _dag->eval( m*m,  M.J.get(),  a.data(),  M.vars.size(), M.vars.data(), M.at_n[j].data() );
+          _dag->eval( m*ne, M.Jx.get(), ax.data(), M.vars.size(), M.vars.data(), M.at_n[j].data() );
+          if( ni ) _dag->eval( m*ni, M.Jp.get(), ap.data(), M.vars.size(), M.vars.data(), M.at_n[j].data() );
+          std::vector<double> b( m, 0. );
+          for( size_t i = 0; i < m; ++i ){
+            for( size_t e = 0; e < ne; ++e ){ auto it = sens_term.find( M.evo[e] ); double se = 0.;
+              if( it != sens_term.end() && !it->second.empty() ) se = it->second.size() > j? it->second[j]: it->second[0];
+              b[i] -= ax[i*ne+e]*se; }
+            for( size_t q = 0; q < ni; ++q ) b[i] -= ap[i*ni+q]*dinp[ pos_input( M.inp[q], std::map<FFVar,size_t,lt_FFVar>() ) ];
+          }
+          if( !_small_solve( a, b, m ) ) return false;
+          for( size_t i = 0; i < m; ++i ) out[i][j] = b[i];
+        }
+        for( size_t i = 0; i < m; ++i ){ auto& v = sens_term[ M.xs[i] ];
+          if( v.size() == nn ) v = out[i]; else if( v.empty() ) v = out[i]; else std::fill( v.begin(), v.end(), out[i][0] ); }
+      }
+      return true;
+    }
+
+
+  //! @brief W-test the claims dropped by the redundancy pass on the built system, and restore as explicit the subset
+  //! that is needed (one re-derive, revert-guarded).  Default on; (The CRONOS_DROP_WDECIDE variable is retired, 2026-10-07.)
+  static bool _knob_DROP_WDECIDE
+    ()
+    { return true; }
+
+
+  //! @brief Tier-0 skip policy on interface-augmented systems.  ALWAYS (default): skip plain Newton whenever the
+  //! system carries trace variables under SPQR.  AUTO consults the setup audit's right-deficiency for the window and
+  //! attempts tier-0 only on an affirmative full-rank verdict -- no verdict, or a deficiency, keeps the skip.  NEVER attempts
+  //! tier-0 regardless; a dead tier-0 falls through to the QR tier, so a wrong NEVER costs one failed factorization, not
+  //! correctness.  Environment: CRONOS_SKIP_NT_ON_TRACE = always|auto|never (or 0|1|2), applied at its single use site.
+  static int _knob_SKIP_NT_ON_TRACE
+    ()
+    { return Options::NT_SKIP_ALWAYS; }
+
+  //! @brief Diagonal regularisation added to the TAU BLOCK ONLY of the
+  //! sensitivity Jacobian before factorisation, as a MULTIPLE of
+  //! ||J||_inf.  0 (default) = off.
+  //! WHY.  An interface-augmented Jacobian is STRUCTURALLY SINGULAR
+  //! (see the note at the SPQR tier-0 skip): the primal never
+  //! factorises it, it uses the QR min-norm tier.  The sensitivity
+  //! path uses a dense LU, which reports rcond ~1e-17 and falls back
+  //! to an approximate solve that does not terminate usefully --
+  //! measured on MMPDE10 at nel_xi=8, IC_TRACE (18202^2) while
+  //! IC_WEAK at the same mesh (15360^2) is clean.  The 2842 tau
+  //! columns are the whole difference.
+  //! WHAT IT ASSUMES.  Orphan multiplier columns are a GAUGE
+  //! freedom: null(J) lies in the tau block and dF/dvar is zero
+  //! there, so the tau components of the sensitivity solution do not
+  //! enter dF/dp.  Pinning them to zero IS the min-norm choice, and
+  //! dF/dp is unchanged to O(delta).
+  //! THE ASSUMPTION IS NOT PROVEN.  It has two parts and they are
+  //! different claims:
+  //! (1) dF/dvar _|_ null(J)      -> the gradient is well defined;
+  //! (2) null(J) subset tau span  -> pinning s_tau removes ALL of
+  //! it, so J_reg is actually nonsingular.
+  //! (1) follows from the physical solution being unique under
+  //! IC_TRACE (its tau-table matches IC_WEAK at every tau).  (2)
+  //! does NOT follow from (1), and the fixed ~2.4e-09 near-null
+  //! direction recorded in the roadmap is unexplained and may have a
+  //! physical component.  _knob_AUDIT_SENS_NULL (CRONOS_AUDIT_SENS)
+  //! measures (1); a sweep of this knob's delta measures (2).
+  static double _knob_SENS_TAU_REG
+    ()
+    { return 0.0; }
+
+  //! @brief Solve the sensitivity systems with a dense pseudo-inverse
+  //! (arma::pinv) instead of LU.  DIAGNOSTIC ONLY -- O(n^3) dense SVD,
+  //! usable only at nel small enough to fit (a few thousand columns).
+  //! WHY IT EXISTS.  The interface-augmented Jacobian is structurally
+  //! singular, so J s = b determines s only up to null(J).  The
+  //! reduced gradient is nonetheless WELL DEFINED -- measured: with
+  //! AUDIT_SENS_NULL, dF/dvar has ZERO nonzero entries on the tau
+  //! columns, so dF/dvar _|_ null(J) and every solution s gives the
+  //! same dF/dvar . s.  What is needed is a solver that returns ANY
+  //! valid solution rather than failing; the min-norm one is the
+  //! natural choice and is what the primal's QR tier already returns.
+  //! WHAT IT IS FOR.  pinv is the cheap STAND-IN for SPQR: if the
+  //! min-norm solution reproduces the finite-difference gradient at a
+  //! small mesh, then adopting SPQR in the sensitivity path will
+  //! reproduce it at scale -- and that is worth knowing BEFORE paying
+  //! for the factorization-ownership work SPQR needs (a handle in
+  //! FSensBlock, destructor/move semantics, and a SECOND
+  //! factorization for J^T since QR does not transpose the way LU
+  //! does).
+  //! NOT A PRODUCTION PATH.  Dense SVD of an 18202^2 system is ~2.6 GB
+  //! and O(n^3); use nel_xi 2-3.
+  static bool _knob_SENS_MINNORM_PINV
+    ()
+    { return false; }
+
+
+  //! return false from setup() immediately after the audit reports,
+  //! without
+  //! building the derivative/linear caches or running any solve.
+  //! For structural corpus sweeps: every audited quantity is fixed
+  //! at setup time.  Environment: CRONOS_AUDIT_SETUP_ONLY.
+  static bool _knob_AUDIT_SETUP_ONLY
+    ()
+    { return Options::_env_flag( "CRONOS_AUDIT_SETUP_ONLY", false ); }
+
+
+  //! @brief Report ||dF/dvar|| restricted to the tau columns, once per sensitivity setup -- claim (1) of
+  //! _knob_SENS_TAU_REG, and cheap: dF/dvar is already assembled as B.gfct/B.cfct, so no factorisation is involved.
+  //! Off by default; CRONOS_AUDIT_SENS.
+  static bool _knob_AUDIT_SENS_NULL
+    ()
+    { return Options::_env_flag( "CRONOS_AUDIT_SENS", false ); }
+
+  //! after every solve(), report per-state duplicate-node
+  //! spreads (report_duplicate_node_spreads).  Nodes that coincide
+  //! geometrically but belong to different elements carry separate
+  //! unknowns, so the spread over each coincidence group measures
+  //! the interface conditions ACTUALLY satisfied by the solution --
+  //! independently of rank, residual, verdict or convergence, all
+  //! four of which were clean when Stage A destroyed MBC5's radial
+  //! fluxes by 24 orders.  Off by default; CRONOS_DUP_SPREAD=1.
+  //! NOT under the CRONOS_AUDIT umbrella: it changes driver output.
+  static bool _knob_AUDIT_DUP_SPREAD
+    ()
+    { return Options::_env_flag( "CRONOS_DUP_SPREAD", false ); }
+
+  //! warn (non-fatally) when the worst max_pair spread
+  //! exceeds this under an EXACT imposition mode, where continuity
+  //! is round-off limited (~1e-17 at any mesh) rather than
+  //! truncation limited.  Default 1e-10.  REPORT ONLY -- promoting
+  //! it to a failure is a correctness gate and needs an over-fire
+  //! scan across the corpus first; see the detect-then-promote
+  //! discipline that governed every other gate in this arc.
+  static double _knob_DUP_SPREAD_WARN
+    ()
+    { return Options::_env_dbl( "CRONOS_DUP_SPREAD_WARN", 1e-10 ); }
+
+  //! a gap at the cut below this triggers the re-evaluation at 1.3x the
+  //! reference point (1e2).  A cut of 1e6 fires on nearly every
+  //! DETERMINED instance in the corpus (sigma_min/tol ~ 1e3-1e5 is ordinary
+  //! conditioning for a discretised PDE) and doubles the audit cost at n > 1e4
+  //! for nothing; the genuinely marginal cases sit at 6-20.  Environment:
+  //! CRONOS_DETERMINACY_GAP_MIN (an AUDIT parameter, kept as a diagnostic).
+  static double _knob_DETERMINACY_GAP_MIN
+    ()
+    { return Options::_env_dbl( "CRONOS_DETERMINACY_GAP_MIN", 1e2 ); }
+
+  //! largest dimension the dense-SVD fallback backend accepts (3000).
+  //! (The CRONOS_DETERMINACY_MAX_DENSE variable is retired, 2026-10-07: a measured constant.)
+  static size_t _knob_DETERMINACY_MAX_DENSE
+    ()
+    { return 3000; }
+
+
+  //! @brief the model's rules, then the solver's on the solver's own fields.
+  void _normalise_equation_options
+    ( FFModel::EqnOptions& opt, std::map<FFVar,int,lt_FFVar> const& eqndom )
+    const override
+    {
+      FFModel::_normalise_equation_options( opt, eqndom );
+      auto* p = dynamic_cast<EqnOptions*>( &opt );
+      if( !p ) throw std::logic_error( "OCFESLV::_normalise_equation_options ** not the solver's options type" );
+      if( p->role == EqnRole::DIAGNOSTIC ){ p->receive_sat = false; p->donate_for_state_continuity = false; }
+      if( p->role == EqnRole::LINK ) p->donate_for_state_continuity = false;
+    }
+
+  //! @brief slice the requested configuration into the applied one, and host the imposition
+  //! instrument that used to live inside the model.
+  void _apply_options
+    ()
+    override
+    {
+      // 2026-10-12: the CRONOS_DISPLAY_LEVEL floor is applied to the SOLVER's object first, so the slice below
+      // carries it into FFModel::options too and both layers report at the same level.
+      FFModel::Options::_force_display_from_env( options.DISPLAY_LEVEL );
+      // slice the requested configuration into the APPLIED one (FFModel::options is the member the
+      // model layer reads; `options` here is the solver's richer, shadowing object).
+      FFModel::options = static_cast<FFModel::Options const&>( options );
+
+      // IC_TRACE system instead -- the instrument for the MBC-family TRACE defect
+      // analysis (pre-existing upstream: MBC3/MBC5 fail under IC_TRACE while
+      // legacy IC_STRONG passes).  Off by default: rev144 behaviour untouched.
+      // (CRONOS_STRONG_VIA_TRACE (retired 2026-10-07, WORKPLAN 3.B batch 2b): a driver wanting the trace system sets IC_TRACE)
+
+    }
+
+
+  //! @brief Physical equation-node metadata after interface filtering.
+  //!
+  //! `retained` is true when the physical equation row is present in the
+  //! residual system.  Under IC_STRONG, `interface_donor` marks rows removed
+  //! because exact interface continuity rows replace them.  This metadata is
+  //! intended for diagnostics so they do not check equations at rows that OCFESLV
+  //! intentionally replaced by interface constraints.
+  struct t_EqnNode
+  {
+    size_t eqn_index = 0;
+    size_t flat_index = 0;
+    t_Coord coord;
+    std::map<FFVar,size_t,lt_FFVar> elem;
+    std::map<FFVar,size_t,lt_FFVar> inode;
+    bool base_keep = false;
+    bool interface_donor = false;
+    bool retained = false;
+  };
+
+  //! @brief Return physical nodes for equation `eqn_index`; optionally only rows retained by OCFESLV.
+  std::vector<t_EqnNode> equation_nodes
+    ( size_t eqn_index, bool retained_only=false )
+    const;
+
+  //! @brief Return physical nodes for equation expression `eqn`; optionally only rows retained by OCFESLV.
+  std::vector<t_EqnNode> equation_nodes
+    ( FFVar const& eqn, bool retained_only=false )
+    const;
+
+
+  //! @brief Reason for the most recent setup() call (OK if it succeeded).
+
+  // setup_status() and setup_status_str() live in FFModel (shared with ODESLV).
+
+protected:
+
+
+protected:
+
+
+  // ---------------------------------------------------------------------------
+  // rev107 [taucol]: observation state for the direct named-column instrument.
+  // ---------------------------------------------------------------------------
+  // All MUTABLE for the same reason _stage2PreflightReported is: _eval_eqn() is
+  // const and these record only what a diagnostic has seen.  NO BEHAVIOUR READS
+  // THEM -- grep for each name before changing that.  Deliberately NOT propagated
+  // by deep_copy_from(): a copied environment observes its own assembly.
+  //
+  // _tauHostRows is written ONCE, by the plan half, and only READ by the assembly
+  // half.  That direction matters: the assembly half must not re-derive which rows
+  // host a tau or the two halves stop being independent observations.
+
+
+  //! @brief vector of output-function dependencies
+  std::vector<FFDep>                 _depFct;
+
+
+  //! @brief vector of output-function subgraphs
+  mutable std::vector<FFSubgraph>    _sgFct;
+
+
+  //! @brief Count of scalar output functions during setup
+  size_t                             _nCollFct = 0;
+
+
+  // ------------------------------------------------------------------
+  // Interface plan — owned by OCPlan, driven by OCFESLV::setup()
+  // ------------------------------------------------------------------
+
+
+  //! @brief Internal exact-interface claim occurrence key.
+  struct t_InterfaceClaimOccurrenceKey {
+    int    block_id;
+    size_t eqn_id;
+    size_t dom_id;
+    size_t iel_lo;
+    size_t face;
+    int    kind;
+    bool operator<( t_InterfaceClaimOccurrenceKey const& o ) const
+    {
+      if( block_id != o.block_id ) return block_id < o.block_id;
+      if( eqn_id   != o.eqn_id   ) return eqn_id   < o.eqn_id;
+      if( dom_id   != o.dom_id   ) return dom_id   < o.dom_id;
+      if( iel_lo   != o.iel_lo   ) return iel_lo   < o.iel_lo;
+      if( face     != o.face     ) return face     < o.face;
+      return kind < o.kind;
+    }
+  };
+
+
+public:
+
+
+protected:
+
+  void _store_frozen_interface_plan
+    ( std::map<t_InterfaceClaimKey,size_t> const& claims,
+      InterfacePlanDraft& draft,
+      PlanInput const& in ) const;   // rev152b: decision layer reads through the contract
+
+  //! @brief pack everything the plan decision layer reads into a
+  //! PlanInput.  Called before _store_frozen_interface_plan; the plan decision layer reads
+  //! the result.
+  PlanInput _pack_plan_input
+    ( std::map<t_InterfaceClaimKey,size_t> const& claims,
+      InterfacePlanDraft const& draft ) const;
+
+
+  //! @brief Build or load the setup-frozen IC_TRACE/IC_STRONG claim basis.
+  //!
+  //! This method derives retained trace claims and receiver edges from the
+  //! IC_WEAK SAT receiver graph.  _eval_eqn() only consumes executable frozen
+  //! vectors built from this setup-owned plan.
+  void _prepare_interface_plan_tables
+    ( std::map<t_InterfaceClaimKey,size_t>& claims,
+      InterfacePlanDraft& draft,
+      bool store_plan = true ) const;
+
+
+  //! @brief Build the complete interface plan into a transactional draft.
+  bool _build_interface_plan_draft
+    ( InterfacePlanDraft& draft );
+
+
+  //! @brief Build the frozen receiver graph used by exact-row and tau consumers.
+  bool _build_interface_receiver_graph
+    ( InterfacePlanDraft& draft ) const;
+
+  //! @brief Build the frozen weak-SAT consumer list from the receiver graph.
+  bool _build_frozen_weak_sat_terms
+    ( InterfacePlanDraft& draft ) const;
+
+
+  //! @brief Count and freeze IC_TRACE exact constraints and tau columns.
+  bool _build_frozen_trace_constraints_and_tau_terms
+    ( InterfacePlanDraft& draft ) const;
+
+
+  //! @brief Forward-AD DAG work vector used by deriv()
+  mutable std::vector<OCVar<t_FAD>>  _wrkOCF;
+
+
+  //! @brief Forward-AD output function values used by deriv()
+  mutable std::vector<t_FAD>         _FFct;
+
+
+  //! @brief Cached row-wise sparsity pattern of the equation Jacobian. Columns are stacked as [collocated states, collocated inputs]. Thus columns 0.._nCollVar-1 correspond to state coefficients and columns _nCollVar.._nCollVar+_nCollInp-1 correspond to input coefficients.
+  std::vector< std::vector<size_t> > _jacPatternEqn;
+
+  //! @brief Cached row-wise sparsity pattern of the output-function Jacobian. Columns are stacked as [collocated states, collocated inputs]. Thus columns 0.._nCollVar-1 correspond to state coefficients and columns _nCollVar.._nCollVar+_nCollInp-1 correspond to input coefficients.
+  std::vector< std::vector<size_t> > _jacPatternFct;
+
+  //! @brief Per-row linearity flags derived from FFDep.
+  std::vector<bool>                  _jacLinearEqn;
+  std::vector<bool>                  _jacLinearFct;
+  bool                               _jacAllEqnLinear = false;
+  bool                               _jacAllFctLinear = false;
+
+
+  //! @brief Cached output evaluation domains used by eval_fct().
+  std::vector< std::set<FFVar,lt_FFVar> > _fctEvalDom;
+
+
+  //! @brief Cached sparse affine residual/output map for purely linear rows.
+  struct t_LinearRow
+  {
+    double                           offset = 0.;
+    std::vector<double>              val;
+  };
+  mutable std::vector<t_LinearRow>   _linEqn;
+  mutable std::vector<t_LinearRow>   _linFct;
+  mutable std::vector<double>        _linCstVal;
+  mutable bool                       _linEqnReady = false;
+  mutable bool                       _linFctReady = false;
+
+  //! @brief Cached color assigned to each stacked derivative column
+  std::vector<unsigned>              _jacColor;
+
+  //! @brief Number of colors in the cached compressed-forward seed matrix
+  unsigned                           _jacNColor = 0;
+
+  //! @brief True when _jacPattern/_jacColor match the current setup/options
+  bool                               _jacReady = false;
+
+  //! @brief Option/classification signature used to build the derivative cache
+  Options::InterfaceType             _jacInterfaceType  = Options::IC_AUTO;
+  Options::ImpositionType            _jacImpositionType = Options::IC_STRONG;
+  bool                               _jacClassified     = false;
+
+
+  //! @brief Clear what a re-setup invalidates on the solver side (derivative caches, the interface plan, the
+  //! per-block symbol/classification/face caches).  Overrides FFModel::_on_setup_begin().
+  bool _on_setup_begin
+    ()
+    override;
+
+  //! @brief Preflight the declared model before it is imported (overrides FFModel::_validate_model): the
+  //! solver's check, which also validates against the marching grid.
+  //! @brief Under SOLVE.MARCHING the working evolution domain is collapsed to its first element, but the march covers
+  //! the full recorded grid: an output point on the evolution coordinate is checked against [t_0, t_N].
+  void _output_point_bounds
+    ( FFVar const& var, double& lo, double& up )
+    const override
+    {
+      if( options.SOLVE.MARCHING && !_marchGrid.empty() && _evolution_dom_var.dag()
+          && var.id().second == _evolution_dom_var.id().second ){
+        lo = _marchGrid.front();
+        up = _marchGrid.back();
+      }
+    }
+
+  bool _validate_model
+    ()
+    override;
+
+  //! @brief Before order reduction: hoist the evolution structure and, when marching, collapse the evolution
+  //! domain to the first window -- reduction then runs against the horizon actually being solved.
+  bool _on_before_reduction
+    ()
+    override;
+
+  //! @brief After reduction: build the collocation arrays and the node cache.  The cache must exist before
+  //! classification, whose mesh-wavenumber probe reads it.
+  bool _on_model_discretise
+    ()
+    override;
+
+  //! @brief Opt-in validation of user-supplied incoming BCs at hyperbolic boundary faces (count and
+  //! characteristic direction), so a mis-placed inflow condition fails setup cleanly instead of producing a
+  //! rank-deficient solve.  Always on (unconditional).
+  bool _on_before_closures
+    ()
+    override;
+
+  //! @brief After classification, the reduction plan and the closures: counts and subgraph caches, dependency
+  //! map and evaluation plans, SAT coupling, the interface plan, the collocated caches and the audits.
+  bool _on_model_ready
+    ()
+    override;
+
+  //! @brief The declared model has been imported onto a new working DAG: derive the working input collocation
+  //! from FFModel's declaration (the input shares its domains' grid and differs only in local order and node
+  //! type).  @p vAllVarsLoc / @p ndxAllVars are the positional index the import produced.
+  void _on_model_imported
+    ( std::vector<FFVar> const& vAllVarsLoc,
+      std::map<FFVar::pt_idVar,size_t> const& ndxAllVars )
+    override
+    {
+    // The input shares its domains' grid: take each domain's FFDom and apply the input's declared
+    // collocation.  (Through rev192 the FFDom was captured when add_input() ran; deriving it here means a
+    // domain REDECLARED after its inputs now governs them too -- NOTES_20260911m Sec.3.)
+    _mInpDisc.clear();
+    for( auto const& [inp, decl] : _usr._mInpDiscUsr ){
+      t_Dom disc;
+      for( auto const& [dvar, ic] : decl ){
+        auto itdom = _usr._mDomUsr.find( dvar );
+        if( itdom == _usr._mDomUsr.end() )
+          throw Exceptions( Exceptions::INDEX );
+        FFDom opt = itdom->second;
+        opt.type = ic.type;
+        if( ic.n_node ) opt.n_node = ic.n_node;
+        if( opt.n_node == 0 )
+          throw FFDom::Exceptions( FFDom::Exceptions::NODES );
+        disc[ _local( dvar, vAllVarsLoc, ndxAllVars ) ] = opt;
+      }
+      _mInpDisc[ _local( inp, vAllVarsLoc, ndxAllVars ) ] = std::move( disc );
+    }
+    }
+
+  //! @brief The declared model was replaced: drop the moving-mesh specifications, which name variables of the
+  //! model that has just been discarded.
+  void _on_model_replaced
+    ()
+    override
+    { _adaptDomUsr.clear(); }
+
+
+  //! @brief The classification is determined but not yet published: derive the per-(primitive,direction) symbol
+  //! interface reads (cached in _blockInterfaceRead, consumed by the symbol-AUTO resolver).  Only needed when the
+  //! interface type is actually derived (IC_AUTO); the balance probe forces it on as a diagnostic.
+  void _on_classify_ready
+    ( std::vector<double> const& state_ref, std::vector<double> const& input_ref,
+      std::vector<double> const& cst_ref, std::vector<double> const& dom_ref )
+    override
+    {
+      bool want_reads = ( options.INTERFACE.TYPE == Options::IC_AUTO );
+#ifdef MC__OCFESLV_SYMBOL_BALANCE_PROBE
+      want_reads = true;
+#endif
+      if( want_reads )
+        _compute_interface_reads( state_ref, cst_ref, dom_ref, input_ref );
+    }
+
+  //! @brief The classification is published: it can change IC_AUTO dispatch and therefore the residual
+  //! ordering/pattern for strong interface rows, so invalidate the derivative and linear-evaluation caches;
+  //! rebuild now only in eager mode.
+  //! @return false if an eager rebuild fails
+  bool _on_classify_published
+    ()
+    override
+    {
+    // Classification can change IC_AUTO dispatch and therefore the residual
+    // ordering/pattern for strong interface rows.  Invalidate derivative and
+    // linear-evaluation caches; rebuild now only in eager mode.
+    if( _issetup ){
+      _jacReady = false;
+      _linEqnReady = _linFctReady = false;
+      _reset_colloc( _OCFVar, _OCFInp, _OCFDom, _OCFCst );
+      _OCFEqn = OCVar<t_FAD>();
+      _wrkOCF.clear();
+      if( options.SOLVE.DERIV_CACHE == Options::DERIV_EAGER
+       || options.SOLVE.LINEAR_EVAL_CACHE == Options::LINEAR_EAGER ){
+        if( !_setup_deriv_cache() ) return false;
+        _reset_autodiff( _FVar, _FInp, _FEqn, _FFct );
+        if( options.SOLVE.LINEAR_EVAL_CACHE == Options::LINEAR_EAGER
+         && !_setup_linear_cache( true, true, _vCstVal.empty()? nullptr: _vCstVal.data() ) )
+          return false;
+      }
+    }
+      return true;
+    }
+
+  //! @brief Invalidate the derivative/Jacobian caches after a model change (the FFModel mutators call this
+  //! hook).
+  void _on_model_changed( ModelChange const chg ) override
+  {
+    switch( chg ){
+     case ModelChange::DERIVATIVES:  _jacReady = false; break;
+    }
+  }
+
+  //! @brief Build cached Jacobian sparsity pattern and column coloring
+  bool _setup_deriv_cache
+    ();
+
+  //! @brief Ensure cached Jacobian sparsity/coloring match current setup/options.
+  bool _ensure_deriv_cache
+    ();
+
+  //! @brief Build dependency update plans for residual and output evaluation.
+  void _setup_eval_plans
+    ();
+
+
+  //! @brief Build cached sparse affine maps for purely linear rows and fixed setup constants.
+  bool _setup_linear_cache
+    ( bool need_eqn, bool need_fct, double const* cst )
+    const;
+
+  //! @brief Try to evaluate rows through cached sparse affine maps.
+  bool _eval_linear_cache
+    ( double* eqn, double* fct, double const* var, double const* inp, double const* cst )
+    const;
+
+  //! @brief Check whether supplied constants match setup constants.
+  bool _linear_cache_constants_match
+    ( double const* cst )
+    const;
+
+  //! @brief Greedy coloring of the column-intersection graph induced by pattern
+  std::vector<unsigned> _color_jacobian_columns
+    ( std::vector< std::vector<size_t> > const& pattern, size_t const ncol, unsigned& ncolor )
+    const;
+
+
+  //! @brief Whether an equation-node trace is retained after exact interface replacement.
+  bool _keep_eqn_node
+    ( FFVar const& eqn, FFModel::EqnOptions const& opt, FFVar const& dom, FFDom const& pdom,
+      size_t iel, size_t inode, int lim, bool weak, size_t eqn_ndx = std::numeric_limits<size_t>::max() )
+    const;
+
+
+  //! @brief Reset local working environment: the solver's state, then FFModel's (overrides FFModel::_reset).
+  void _reset
+    ()
+    override;
+
+  //! @brief Test whether a variable is part of the vector of constants
+  bool _constant
+    ( FFVar const& var )
+    const;
+
+
+  //! @brief Generate vector of adjacent-above block to current block ndx_el corresponding to the variable domain var_dom
+  std::vector< std::pair< std::map<FFVar, size_t, lt_FFVar>, FFVar const* > > _above_block
+    ( std::map<FFVar, size_t, lt_FFVar> const& ndx_el, std::set< FFVar, lt_FFVar > const& var_dom )
+    const;
+
+
+  //! @brief Templated initialization of AD variable vectors
+  template <typename U>
+  void _reset_autodiff
+    ( std::vector<FADType<U>>& Fvar, std::vector<FADType<U>>& Finp,
+      std::vector<FADType<U>>& Feqn, std::vector<FADType<U>>& Ffct )
+    const;
+
+
+  //! @brief Templated evaluation of collocated equation residuals
+  template <typename U>
+  void _eval_fct
+    ( U* fct, U const* var, U const* inp,
+      OCVar<U>& OCres, std::vector<OCVar<U>>& OCvar,  std::vector<OCVar<U>>& OCinp,
+      std::vector<OCVar<U>>& OCdom, std::vector<OCVar<U>>& OCcst, std::vector<OCVar<U>>& OCwrk )
+    const;
+
+  //! @brief Helper for copying derivative sparsity pattern
+  static void _deriv_copy_pattern
+    ( std::vector<std::vector<size_t>> const& pattern, size_t* nnz, size_t** colnz );
+
+  //! @brief Helper for extracting results from AD arrays
+  template <typename U>
+  static void _deriv_extract_rows
+    ( FADType<U> const* val, std::vector< std::vector<size_t> > const& pattern,
+      std::vector<unsigned> const& color, size_t const ncol, U* res, U** grad );
+
+  //! @brief Templated sparse derivative evaluation of collocated equation residuals in compressed FADBAD forward mode
+  template <typename U>
+  void _deriv_eqn
+    ( U* eqn, U** gradeqn, size_t* nnzeqn, size_t** colnzeqn,
+      OCVar<FADType<U>>& OCFeqn, std::vector<OCVar<FADType<U>>>& OCFvar,
+      std::vector<OCVar<FADType<U>>>& OCFinp, std::vector<OCVar<FADType<U>>>& OCFdom,
+      std::vector<OCVar<FADType<U>>>& OCFcst, std::vector<OCVar<FADType<U>>>& OCFwrk,
+      FADType<U>* Feqn, FADType<U>* Fvar, FADType<U>* Finp )
+    const;
+
+  //! @brief Templated sparse derivative evaluation of collocated output functions in compressed FADBAD forward mode
+  template <typename U>
+  void _deriv_fct
+    ( U* fct, U** gradfct, size_t* nnzfct, size_t** colnzfct,
+      OCVar<FADType<U>>& OCFfct, std::vector<OCVar<FADType<U>>>& OCFvar,
+      std::vector<OCVar<FADType<U>>>& OCFinp, std::vector<OCVar<FADType<U>>>& OCFdom,
+      std::vector<OCVar<FADType<U>>>& OCFcst, std::vector<OCVar<FADType<U>>>& OCFwrk,
+      FADType<U>* Ffct, FADType<U>* Fvar, FADType<U>* Finp )
+    const;
+
+
+public:
+
+  //! @brief Default Constructor
+  OCFESLV
+    ( FFGraph* dag = nullptr )
+    {
+      set( dag );
+    }
+
+  //! @brief Copy constructor: rebuild the working DAG from the source OC model.  A copy of an environment that
+  //! is not set up is itself an empty, not-set-up environment (is_setup() reports which).
+  OCFESLV
+    ( OCFESLV const& src )
+    {
+      deep_copy_from( src );
+    }
+
+  //! @brief Assignment: rebuild the working DAG from the source OC model.  Assigning a not-set-up source leaves
+  //! this environment empty and not set up (see the copy constructor).
+  OCFESLV& operator=
+    ( OCFESLV const& src )
+    {
+      if( this != &src ) deep_copy_from( src );
+      return *this;
+    }
+
+  //! @brief Destructor: clears the solver state; FFModel's destructor then releases the declared model and
+  //! the working DAG.
+  virtual ~OCFESLV
+    ()
+    {
+      _reset();
+    }
+
+  //! @brief The working domain map, as OCBase's collocation layer reads it: FFModel's (owner) map.  Always the
+  //! working one -- the collocation layer runs during setup(), before _issetup is set.
+  t_Dom const& _dom_colloc
+    ()
+    const
+    override
+    { return _mDom; }
+
+  //! @brief Deep copy from another set-up environmentred and working model, options, analyses and the homotopy settings (parameters,
+  //! remapped to this DAG, and per-stage step caps); the last continuation report is not copied.
+  //! @return false if @p src is not set up, or if the DAG import fails; this environment is then left empty
+  //! (not set up), never half-built.
+  bool deep_copy_from
+    ( OCFESLV const& src );
+
+
+  //! @brief Human-readable name for an interface receiver-edge source.
+
+//==========================================================================================================
+// INTERFACE PLAN -- claims -> realisations -> rows and columns.  The DECISIONS live in ocplan.hpp; what is here
+// is the assembly: which claims exist, which rows receive them, and how the chosen realisation becomes
+// matrix structure.
+// (banner placed from the definitions themselves: this region is lines 1459-1889 of the pre-rev268 file)
+//==========================================================================================================
+
 
   //! @brief Attach the user DAG @p dag, clearing the solver state and the model (FFModel::set()).
   void set
@@ -3705,18 +4550,6 @@ public:
   void terminal_profile_adjoint
     ( std::map<FFVar,std::vector<double>,lt_FFVar> const& lam, double* gvar ) const;
 
-  //! @brief Flat state-DOF (column) indices belonging to evolution element
-  //! @p iel_evo -- every evolution-domain-bearing state, over all spatial
-  //! elements and nodes.  pos_state flattens the element multi-index in
-  //! lt_FFVar (DAG-creation) order, so which domain is innermost depends on
-  //! variable creation order, NOT on being the evolution direction (drivers
-  //! create t before z, so t is currently innermost => strided slabs).  This
-  //! accessor does NOT depend on that ordering: it fixes the evolution element,
-  //! enumerates the spatial multi-index, and delegates flattening to pos_state,
-  //! so the returned set is correct whether a slab is contiguous or strided.
-  //! States NOT on the evolution domain are excluded (they are not slab-local).
-  std::vector<size_t> _evolution_slab_cols
-    ( size_t iel_evo ) const;
 
   public:
   //! @brief Whether the most-recent setup recorded a marchable evolution grid AND marching
@@ -3906,12 +4739,6 @@ public:
       for( auto const& [w,vals] : _usr._mInpFixUsr ) set_input_values( w, vals, buf.data() );
       return buf.data();
     }
-
-  //! @brief Read the collocated DOF values of distributed input @p input from @p inp
-  //! in the same element-major / node-inner ordering set_input_values() writes.  The
-  //! inverse of set_input_values(); returns an empty vector on unknown input.
-  std::vector<double> get_input_values
-    ( FFVar const& input, double const* inp ) const;
 
 
   //! @brief Exact marching transfer: seed distributed input @p input (in inp[]) with
@@ -4225,9 +5052,6 @@ public:
   void protect_interface_claims( std::set<t_FrozenInterfaceClaimKey> const& claims )
     { _strong_protected_claims.insert( claims.begin(), claims.end() ); }
 
-  //! @brief Clear the protected-claims set (call before a fresh problem/run).
-  void clear_protected_interface_claims()
-    { _strong_protected_claims.clear(); }
 
   //! @brief The continuity claims currently pinned against dropping.
   std::set<t_FrozenInterfaceClaimKey> const& protected_interface_claims() const
@@ -4355,36 +5179,6 @@ public:
   // variable declarations that follow.
   // ======================================================================
 
-
-  //! @brief sparse residual Jacobian assembled at a supplied var vector by
-  //! assemble() / assemble_window().  Solver-independent; the sparsity pattern is
-  //! cached inside so repeated calls at new points pay only the value evaluation.
-  struct t_JacAssembly
-  {
-    size_t n = 0, m = 0;          //!< equation rows, variable columns (states + trace/tau)
-    size_t n_tau = 0, tau0 = 0;   //!< tau column count and offset (n_tau = 0 under IC_WEAK)
-    size_t nnz = 0;               //!< pattern nonzeros (state + input columns, as deriv() reports)
-    arma::sp_mat J;               //!< n x m; = diag(rw)*J*diag(cw) iff equilibrated
-    arma::vec    r;               //!< residual at the point (row-scaled iff equilibrated)
-    std::vector<double> rw, cw;   //!< equilibration weights (all 1 unless equilibrated)
-    bool   equilibrated = false;
-    bool   ic_override  = false;  //!< marching window k>0 continuity-pin rows applied
-    size_t window       = 0;      //!< marching window index the assembly corresponds to
-    double ms_deriv = 0., ms_asm = 0.;
-    // cached sparsity pattern (filled on first use)
-    bool pattern_ready = false;
-    std::vector<size_t> rownnz;
-    std::vector<std::vector<size_t>> rowcol;
-    std::vector<double> grad;
-    std::vector<double*> gradptr;
-    // rev137: the drop mask (rows = claim rows, cols = tau columns) applied at assembly;
-    // empty in rev137, set by the plan in rev138.
-    std::vector<size_t> mask_rows, mask_cols;
-    // rev137: cached IC_WEAK SAT re-injection stencil for the marching override rows
-    std::map<size_t,std::vector<std::pair<size_t,double>>> ic_sat;
-    bool   ic_sat_ready = false; size_t ic_sat_window = 0; bool ic_sat_override = false;
-    void clear() { *this = t_JacAssembly{}; }
-  };
 
   //! @brief result of numeric_rank().
   struct t_RankResult
@@ -4797,23 +5591,6 @@ protected:
   size_t      _evoCoreCols         = 0;      //!< ... and differentiated states
 
 
-  //! @brief differential-core SHAPE from the USER-side structures.
-  //!
-  //! Rows   = equations carrying at least one d/d(evolution) of a state.
-  //! Cols   = distinct states so differentiated ( _states_with_evolution_derivative ).
-  //! Square <=> rows == cols, which is the classifier's own marchability criterion
-  //! (the retired DIFFERENTIAL_RECTANGULAR was marchable only when the domain was
-  //! user-supplied), replicated where it can actually be consulted.
-  //!
-  //! IT WILL NOT ALWAYS AGREE WITH THE [classify] LINE'S sym=RxC, and that is expected:
-  //! this runs on _usr._mEqnUsr BEFORE localisation and BEFORE _reduce_order, while the
-  //! classifier counts RETAINED rows after both.  Both numbers are reported so a
-  //! disagreement is visible rather than assumed away.  A model where they differ is a
-  //! finding about the replica, not a licence to trust it.
-  void _differential_core_shape
-    ( size_t& rows, size_t& cols ) const;
-
-
   //! @brief Resolve, from the residual-row provenance (_rowEqnNdx) and the DAE decomposition, the
   //! INITIAL-closure rows + LB column for each override-path transfer state (null ic_input).  Builds
   //! _marchICRows; requires _rowProvenanceReady (one eval must have run).  Idempotent via _marchICRowsReady.
@@ -4840,11 +5617,6 @@ protected:
   //! reduces to {c, 1} on LGL/LGR by construction.
   bool _march_ic_lb_trace( FFVar const& st, size_t& stride_evo, std::vector<double>& w ) const;
 
-  //! @brief True if output expression @p fctvar contains an OpI (FFIntegral) quadrature
-  //! over the evolution variable -- i.e. an evolution-direction integral whose per-element
-  //! contributions must be SUMMED across the march.  All other outputs (terminal /
-  //! final-time / spatial-only) take the last element's value.
-  bool _fct_is_evolution_integral( FFVar const& fctvar ) const;
 
   //! @brief Fill captured-reduction INPUTS from a converged solution, writing into @p inp.
   //! ACCUM: cap += INT R over the CURRENT evolution domain (an explicit LGR element quadrature
@@ -4863,21 +5635,6 @@ protected:
   void _fill_capture_sens( double const* s_var, int k,
                            std::vector<int> const& cap_window, double* dcap ) const;
 
-  //! @brief Adjoint of the capture quadrature (Stage 1b): given lam_cap[R] (the adjoint on each cap's
-  //! value, indexed like R's spatial dofs), scatter it onto the state adjoint @p ls at R's collocation
-  //! dofs with the SAME LGR weights jac*w_ref[m] used by _fill_capture_sens, summed over evolution
-  //! elements.  Transpose of d(cap)/dp = INT jac*w_ref*s[R].  ACCUM only (LATCH handled inline).
-  void _fill_capture_sens_adjoint( std::map<FFVar,std::vector<double>,lt_FFVar> const& lam_cap,
-                                   double* ls ) const;
-
-  //! @brief LATCH transpose of the forward latch d(cap)/dp = eval_colloc(src,tau): scatter ONE latch
-  //! capture's cap-adjoint @p lamC onto @p ls at TAU's evolution element with the value Lagrange
-  //! weights L_m(tau) (NOT the ACCUM quadrature jac*w_ref).  Per-capture (tau not lost to
-  //! source-aggregation).  No-ops unless tau lies in the current evolution domain (window under
-  //! marching, full horizon monolithic).
-  void _fill_capture_sens_adjoint_latch( FFVar const& src, double tau,
-                                         std::vector<double> const& lamC, double* ls,
-                                         int const side = FFDom::MINUS ) const;
 
   //! @brief Evaluate output functions into _valFct, first filling captured-reduction inputs over
   //! the (full-domain) solution on a mutable copy of @p inp -- the monolithic analogue of the
@@ -4902,114 +5659,6 @@ protected:
       return nullptr; }
 
   bool _wdecide_restore();
-  //! @brief null basis of sparse M at tolerance tol_abs via SPQR dead-column
-  //! back-substitution + deflated inverse iteration for refinement demotions.
-  static bool _null_basis( arma::sp_mat const& M, double tol_abs, size_t& rank_out, arma::mat& N );
-
-
-  //! @brief Resolve the effective interface type for one equation/block/domain.
-  Options::InterfaceType _resolve_interface_type
-    ( FFModel::EqnOptions const* eqnopt, FFVar const* pdom, bool weak, int block_id )
-    const;
-
-
-  //! @brief Orientation of IC_TRACE multiplier receiver terms.
-  //!
-  //! Exact trace rows use the canonical orientation g = u_left(+1)-u_right(-1).
-  //! Receiver rows on the left/low element get +lambda and rows on the
-  //! right/high element get -lambda, matching the transpose saddle-point pair.
-  static double _trace_receiver_orient
-    ( bool current_element_is_right_of_interface )
-    { return current_element_is_right_of_interface ? -1.0 : 1.0; }
-
-  //! @brief Canonical block id for a physical IC_TRACE claim slot.
-  int _trace_claim_block
-    ( size_t state_id, size_t dom_id ) const;
-
-
-  //! @brief Validate user-supplied incoming BCs at hyperbolic boundary faces:
-  //! the count must equal rank of the incoming projector (A+ at LB / A- at UB)
-  //! and each BC's state coupling must lie in the incoming characteristic space,
-  //! rejecting outgoing-direction / mis-placed BCs (e.g. an inflow condition put
-  //! on the wrong end).  Returns false on violation so setup() fails cleanly
-  //! instead of producing a rank-deficient solve.  Always on (unconditional).
-  bool _validate_hyperbolic_incoming_bcs();
-
-
-  //! @brief Default SAT spectral penalty parameter for domain d.
-  //! Returns tau = (n_node - 1)^2 / element_width.
-  //! The effective C0 penalty coefficient is  INTERFACE.SAT_SIGMA0 * tau,
-  //! and the effective C1 penalty coefficient is  CRONOS_SAT_SIGMA1 * tau / element_width.
-  double _sat_tau
-    ( FFDom const& dom, size_t const iel )
-    const
-    { double const nm1 = static_cast<double>( dom.n_node - 1 );
-      return nm1 * nm1 / dom.elem_width( iel ); }
-
-  //! @brief Default SAT spectral penalty parameter using representative width; retained for setup paths without a block index.
-  double _sat_tau
-    ( FFDom const& dom )
-    const
-    { double const nm1 = static_cast<double>( dom.n_node - 1 );
-      return nm1 * nm1 / dom.w_elem; }
-
-  //! @brief Interface-symmetric finite-element width shared by elements
-  //! iel_lo and iel_lo+1.  Returns the harmonic mean of the two adjoining
-  //! element widths, so that both elements bordering an internal interface
-  //! evaluate an identical SAT penalty parameter.  This is what makes the
-  //! two-sided IC_WEAK / IC_VALUE penalty discretely conservative on
-  //! nonuniform finite-element grids.
-  double _sat_iface_width
-    ( FFDom const& dom, size_t const iel_lo )
-    const
-    { double const wL = dom.elem_width( iel_lo );
-      double const wR = dom.elem_width( iel_lo + 1 );
-      double const s  = wL + wR;
-      return ( s > 0. ) ? ( 2. * wL * wR / s ) : 0.; }
-
-  //! @brief Interface-symmetric SAT penalty parameter for the interface
-  //! between elements iel_lo and iel_lo+1.  Returns (n_node-1)^2 divided by
-  //! the interface-symmetric width, so the value is identical whether the
-  //! interface is reached from its low- or high-side element.  Equal-and-
-  //! opposite SAT contributions from the two elements then telescope exactly.
-  double _sat_tau_face
-    ( FFDom const& dom, size_t const iel_lo )
-    const
-    { double const nm1 = static_cast<double>( dom.n_node - 1 );
-      double const w   = _sat_iface_width( dom, iel_lo );
-      return ( w > 0. ) ? ( nm1 * nm1 / w ) : 0.; }
-
-
-  //! @brief Build _satCoupling for the current classification signature.
-  //! Called by setup immediately after classification; evaluation must not
-  //! rely on this as a hidden topology-building fallback.
-  void _ensure_sat_coupling
-    () const;
-
-  //! @brief Principal-symbol SAT coupling for (symbolic equation ndx, state
-  //! _vVar[state_pos], domain dom).  Returns the cached classified coupling
-  //! when available, or 1.0 (identity) for unclassified models / uncoupled
-  //! rows.  O(small) linear scan; cheaper than the prior inline triple loop.
-  double _sat_coupling
-    ( size_t const ndx, size_t const state_pos, FFVar const& dom )
-    const;
-
-  //! @brief Dry structural pass of the residual assembler that verifies the
-  //! strong-imposition interface/corner logic keeps the collocation system
-  //! square: LOOP 1 interface rows + LOOP 2 equation nodes == _nCollEqn,
-  //! and LOOP 1 emissions == LOOP 2 interface-replacement drops.  Index-based and value-
-  //! independent.  Surfaces a squareness violation at setup()/classify_pde()
-  //! time instead of at the first eval()/deriv() call.
-  bool _audit_strong_interface_rows
-    ();
-
-  //! @brief Post-classification suitability + consistent-IC validator for the
-  //! evolution/marching domain.  Runs at end of setup() (needs classification +
-  //! reduction + DOF-audit results).  Standalone setup-hardening and the future
-  //! marching/MOL applicability gate.  Warn-by-default; fatal only under
-  //! Options::FATAL.EVOLUTION_DOMAIN.  Returns false only on a fatal violation.
-  bool _validate_evolution_domain
-    () const;
 
 
   //! @brief Helper for copying optional input discretisation maps
@@ -5182,13 +5831,6 @@ public:
       "  REPORTING: classification stamped unconditionally once per block; [cov1] no longer"
       " repeats the full header string.";
 
-  //! @brief Name of a state by its variable id (empty when not a state).
-  std::string state_name_of_id
-    ( size_t sid )
-    const
-    { for( auto const& kv : _mVar )
-        if( static_cast<size_t>( kv.first.id().second ) == sid ) return kv.first.name();
-      return std::string(); }
 
   //! @brief Print the eN -> equation legend consumed by every audit that reports "by eqn eN".
   //!
@@ -5486,80 +6128,6 @@ public:
       os << "\n";
     }
 
-  //! @brief Sparse modified Gram-Schmidt column rank, 1e-9 relative cut.
-  //!
-  //! Same algorithm and tolerance as the rank_of() lambda in interface_rank_symmetry, which
-  //! additionally reports the dependent indices.  Used by the projection phase so that the
-  //! k it computes is the k the audit reports.
-  static size_t _sparse_column_rank
-    ( std::vector<std::vector<std::pair<size_t,double>>> V )
-    {
-      typedef std::vector<std::pair<size_t,double>> SpV;
-      std::vector<SpV> basis;
-      size_t rank = 0;
-      for( size_t j = 0; j < V.size(); ++j ){
-        SpV c = V[j];
-        std::sort( c.begin(), c.end(),
-                   []( std::pair<size_t,double> const& a,
-                       std::pair<size_t,double> const& b ){ return a.first < b.first; } );
-        double n0 = 0.;
-        for( size_t k = 0; k < c.size(); ++k ) n0 += c[k].second * c[k].second;
-        n0 = std::sqrt( n0 );
-        if( n0 <= 64. * DBL_EPSILON ) continue;
-        for( size_t bi = 0; bi < basis.size(); ++bi ){
-          SpV const& q = basis[bi];
-          double d = 0.;
-          size_t a = 0, b = 0;
-          while( a < c.size() && b < q.size() ){
-            if     ( c[a].first < q[b].first ) ++a;
-            else if( c[a].first > q[b].first ) ++b;
-            else { d += c[a].second * q[b].second; ++a; ++b; }
-          }
-          if( d == 0. ) continue;
-          SpV out;
-          out.reserve( c.size() + q.size() );
-          a = 0; b = 0;
-          while( a < c.size() && b < q.size() ){
-            if     ( c[a].first < q[b].first ){ out.push_back( c[a] ); ++a; }
-            else if( c[a].first > q[b].first ){ out.push_back(
-                       std::make_pair( q[b].first, -d * q[b].second ) ); ++b; }
-            else { out.push_back( std::make_pair(
-                     c[a].first, c[a].second - d * q[b].second ) ); ++a; ++b; }
-          }
-          for( ; a < c.size(); ++a ) out.push_back( c[a] );
-          for( ; b < q.size(); ++b )
-            out.push_back( std::make_pair( q[b].first, -d * q[b].second ) );
-          c.swap( out );
-        }
-        double nr = 0.;
-        for( size_t k = 0; k < c.size(); ++k ) nr += c[k].second * c[k].second;
-        nr = std::sqrt( nr );
-        if( nr <= 1e-9 * std::max( 1.0, n0 ) ) continue;
-        double const inv = 1.0 / nr;
-        for( size_t k = 0; k < c.size(); ++k ) c[k].second *= inv;
-        basis.push_back( c );
-        ++rank;
-      }
-      return rank;
-    }
-
-  //! @brief assembled interface blocks B and C.
-  //!
-  //! B = multiplier columns over receiver rows; C = continuity rows over state columns.
-  //! Shared by interface_rank_symmetry() and by the trace-projection phase, which must see
-  //! the SAME blocks: two copies of this assembly that can drift is the defect class this
-  //! whole arc diagnosed (a claim made in one pass about an object built in another, with
-  //! no verification between).
-  struct InterfaceBlocks {
-    std::map<t_FrozenInterfaceClaimKey,size_t>    tau_ndx;   //!< claim -> dense tau index
-    std::vector<t_FrozenInterfaceClaimKey>        tau_key;   //!< dense tau index -> claim
-    std::map<FrozenPhysicalResidualRowKey,size_t> brow_ndx;  //!< receiver row -> dense index
-    std::vector<std::map<size_t,double>>          bcol;      //!< B, by tau: row index -> coeff
-    std::map<size_t,std::map<size_t,double>>      crow;      //!< C, by row: state col -> coeff
-    std::map<size_t,t_FrozenInterfaceClaimKey>    ckey;      //!< C row -> claim
-    size_t n_tau_col_in_C = 0;   //!< continuity coefficients that referenced a multiplier column
-    size_t ntau() const noexcept { return tau_ndx.size(); }
-  };
 
   //! @brief Canonical trace-slot form of a claim key, identical to the plan builder's.
 
@@ -5570,65 +6138,6 @@ public:
 // (banner placed from the definitions themselves: this region is lines 4167-5948 of the pre-rev268 file)
 //==========================================================================================================
 
-  t_FrozenInterfaceClaimKey _trace_slot_key( t_InterfaceClaimKey key ) const
-    {
-      key.block_id = _trace_claim_block( key.state_id, key.dom_id );
-      key.eqn_id   = std::numeric_limits<size_t>::max();
-      if( key.kind == CLAIM_EXACT_ROW ) key.kind = CLAIM_EXACT_C0;
-      return _freeze_interface_claim_key( key );
-    }
-
-  //! @brief Assemble B and C.  Takes its inputs explicitly so it serves the committed
-  //!        _plan (audit, end of setup) and the draft (projection phase, mid-build) alike.
-  void build_interface_blocks
-    ( std::map<t_FrozenInterfaceClaimKey,std::vector<size_t>> const& tau_claims,
-      std::vector<FrozenWeakSatTerm>         const& weak_sat_terms,
-      std::vector<FrozenTraceConstraintTerm> const& trace_constraints,
-      size_t trace_var_offset,
-      InterfaceBlocks& out ) const
-    {
-      out = InterfaceBlocks{};
-
-      // Dense tau index.  Covers BOTH the Schur-eliminated and the IC_STRONG keep-explicit
-      // taus, so the count matches n_trace_var in either mode.
-      for( auto const& kv : tau_claims ){
-        if( kv.second.empty() ) continue;
-        size_t const n = out.tau_ndx.size();
-        out.tau_ndx.emplace( kv.first, n );
-      }
-      out.tau_key.assign( out.tau_ndx.size(), t_FrozenInterfaceClaimKey{} );
-      for( auto const& kv : out.tau_ndx ) out.tau_key[ kv.second ] = kv.first;
-
-      // B: multiplier columns over receiver rows.  Row indices are assigned in
-      // weak_sat_terms order -- do not reorder, several reports quote these indices.
-      out.bcol.assign( out.tau_ndx.size(), std::map<size_t,double>{} );
-      for( auto const& term : weak_sat_terms ){
-        if( !term.trace_tau_allowed ) continue;
-        if( std::fabs( term.trace_prefactor ) <= 64. * DBL_EPSILON ) continue;
-        auto const it = out.tau_ndx.find( _trace_slot_key( term.claim_key ) );
-        if( it == out.tau_ndx.end() ) continue;
-        FrozenPhysicalResidualRowKey rk;
-        rk.row_id   = term.row_id;
-        rk.block_el = term.receiver_block_el;
-        rk.flat     = term.receiver_emit_flat;
-        auto ir = out.brow_ndx.find( rk );
-        if( ir == out.brow_ndx.end() ){
-          size_t const n = out.brow_ndx.size();
-          ir = out.brow_ndx.emplace( rk, n ).first;
-        }
-        out.bcol[ it->second ][ ir->second ] += term.trace_prefactor;
-      }
-
-      // C: continuity rows over state columns only.
-      for( auto const& t : trace_constraints ){
-        auto& r = out.crow[ t.row ];
-        for( auto const& cv : t.coeff ){
-          if( cv.first >= trace_var_offset ){ ++out.n_tau_col_in_C; continue; }
-          r[ cv.first ] += cv.second;
-        }
-        out.ckey[ t.row ] = _trace_slot_key( t.edge );
-      }
-    }
 
   // =====================================================================
   // rev107 [taucol] -- DIRECT NAMED-COLUMN INSTRUMENT.  Instrument only.
@@ -5678,58 +6187,11 @@ public:
   // itself, so the corpus is byte-identical.
   // =====================================================================
 
-  //! @brief 2026-10-15 (WORKPLAN 4R.21): the DEFINING ROW of each state, state id -> equation index.
-  //! A declaration (EqnOptions::defines) always wins.  Otherwise INFERRED: among the participating rows that are
-  //! not evolution rows, those whose FFInv letter in the state is L or S -- linear, or separably linear (the state
-  //! appears once, multiplied by a coefficient that may involve other states).  The FFPartial overload types its
-  //! OPERAND U, so a row that differentiates the state can never be L/S in it: "pointwise in the state" comes for
-  //! free, and no proxy substitution is needed.  Tie-break: a unique L beats any S; a unique S is taken; otherwise
-  //! the state is AMBIGUOUS and gets no inferred row (declare it).  Measured on OCFE_Burger_move --form q:
-  //! q -> QDEF (S; the PDE is excluded as an evolution row), g -> DEF (L), xg -> XGDEF (L over DEF's S).
-  std::map<size_t,size_t> _defining_rows() const;
 
-  //! @brief true once CRONOS_AUDIT_TAUCOL has been read.  Static so the
-  //! getenv cost is paid once per process, matching kEvoFace / kEvoFaceH.
-  //! @brief report-format revision, embedded in the [taucol/plan] banner so a
-  //! binary can be checked for the FORMAT it emits, not merely for having the instrument.
-  static char const* taucol_instrument_rev() { return "instrument rev108"; }
   //! The returned string must be CONTIGUOUS in .rodata -- the build oracle greps the
   //! linked binary for it.  Streaming the instrument name and its tag separately would put
   //! the two halves in different literals and the grep would silently never match.
 
-
-  //! @brief resolve a state id to its printed name (same lookup the
-  //! IC_TRACE detail report uses; duplicated rather than shared because that one
-  //! is a lambda local to a print_details branch).
-  std::string _taucol_state_name( size_t const sid ) const
-    {
-      for( auto const& kv : _mVar )
-        if( static_cast<size_t>( kv.first.id().second ) == sid ){
-          std::ostringstream osn; osn << kv.first; return osn.str();
-        }
-      std::ostringstream osn; osn << "state#" << sid; return osn.str();
-    }
-
-  //! @brief resolve a domain id to its printed name.
-  std::string _taucol_dom_name( size_t const did ) const
-    {
-      for( auto const& kv : _mDom )
-        if( static_cast<size_t>( kv.first.id().second ) == did ){
-          std::ostringstream osn; osn << kv.first; return osn.str();
-        }
-      std::ostringstream osn; osn << "dom#" << did; return osn.str();
-    }
-
-  //! @brief printable form of a physical residual row key.
-  std::string _taucol_row_str( FrozenPhysicalResidualRowKey const& rk ) const
-    {
-      std::ostringstream o;
-      o << "row_id=" << rk.row_id << " blk=[";
-      for( size_t i = 0; i < rk.block_el.size(); ++i )
-        o << ( i ? "," : "" ) << rk.block_el[i].first << ":" << rk.block_el[i].second;
-      o << "] flat=" << rk.flat;
-      return o.str();
-    }
 
   //! @brief [taucol/plan]: per-column receiver census off the COMMITTED plan,
   //! plus the per-seam multiplier-capacity census.
@@ -7412,277 +7874,6 @@ public:
       return ok;
     }
 
-  //! @brief Decode a state-coefficient column index into "state[el=..](nd=..)@coord".
-  //!
-  //! Layout mirrors pos_state(): each state owns a contiguous range starting at its
-  //! _blkVar offset; within it, element blocks of blk_size coefficients are strided with
-  //! the FIRST domain direction fastest, and within a block the node multi-index is
-  //! flattened the same way (see the receiver_flat construction).  Returns "?" for a
-  //! column outside every state range (a trace/tau column under IC_TRACE).
-  std::string decode_state_column
-    ( size_t col )
-    const
-    {
-      for( auto const& [v, dom] : _mVar ){
-        auto itb = _blkVar.find( v );
-        if( itb == _blkVar.end() ) continue;
-        size_t const base     = std::get<0>( itb->second );
-        size_t const blk_size = std::get<1>( itb->second );
-        if( !blk_size ) continue;
-        size_t span = blk_size;
-        for( auto const& d : dom ){
-          auto itd = _mDom.find( d );
-          if( itd == _mDom.end() ){ span = 0; break; }
-          span *= itd->second.n_elem;
-        }
-        if( !span || col < base || col >= base + span ) continue;
-
-        size_t local = col - base;
-        size_t blkid = local / blk_size, nodeoff = local % blk_size;
-
-        std::ostringstream ss;
-        ss << v.name() << "[";
-        std::ostringstream nn, cc;
-        bool first = true;
-        for( auto const& d : dom ){
-          auto const& dd = _mDom.at( d );
-          size_t const iel = blkid % ( dd.n_elem ? dd.n_elem : 1 );
-          blkid /= ( dd.n_elem ? dd.n_elem : 1 );
-          size_t const ind = nodeoff % ( dd.n_node ? dd.n_node : 1 );
-          nodeoff /= ( dd.n_node ? dd.n_node : 1 );
-          if( !first ){ ss << ","; nn << ","; cc << ","; }
-          first = false;
-          ss << d.name() << "=" << iel;
-          nn << ind;
-          // Physical coordinate of the node: reference nodes live in [-1,1].
-          auto const& xr = dd.lgnodes();
-          if( ind < xr.size() && iel < dd.n_elem )
-            cc << d.name() << "="
-               << std::setprecision(4) << ( dd.elem_lo( iel )
-                  + 0.5 * ( xr[ind] + 1.0 ) * dd.elem_width( iel ) );
-          else
-            cc << d.name() << "=?";
-        }
-        ss << "](nd=" << nn.str() << ")@" << cc.str();
-        return ss.str();
-      }
-      return std::string( "?col" ) + std::to_string( col );
-    }
-
-  // =====================================================================
-  // rev150c [statenull]: census of the STATE-SIDE null directions of the audited
-  // Jacobian, i.e. the def_right - k' directions that are not pure-tau.
-  //
-  // WHY.  MBC3 under IC_WEAK is STATE_CONTENT (defR=8, growing 8->11->17 with
-  // refinement) with no taus in the system; under IC_TRACE the same model reports
-  // defR=k' -- every null direction pure-tau, the 8 state directions CLOSED.  TRACE
-  // only adds tau columns, C rows and exact-replacement rows to the WEAK plan, so
-  // one of those supplies rank the weak realisation lacks.  The record attributed
-  // the 8 to mesh/boundary DOFs (Defect-A pattern) from the growth law alone;
-  // nobody had looked at the vectors.  This census does.
-  //
-  // WHAT IT PRINTS.  The rev140 QR dead-column basis of the full J (orthonormal,
-  // original column coordinates, un-equilibrated through cw).  The PER-DIRECTION
-  // lines are basis-dependent (any rotation of the null space is another basis) and
-  // exist for localisation only.  The MASS AGGREGATES are not: for an orthonormal
-  // basis, sum_d v[c,d]^2 is the diagonal of the null-space projector, a property of
-  // the space, and the state-block share of it is the number of state-side null
-  // directions.  Read the aggregates first.
-  //
-  // NODE CLASS per column, per dimension of the state's domain:
-  //   seam      first node of a non-first element, or last node of a non-last one
-  //   boundary  first node of the first element, or last node of the last one
-  //   interior  anything else
-  // A column is 'seam' if any dimension is a seam, else 'boundary' if any is a
-  // boundary, else 'interior'.  Mass on seam nodes of claimed states says
-  // "interface realisation"; mass on boundary/interior says "not the interface plan".
-  //
-  // Gated on CRONOS_STATENULL_CENSUS=1; default off.  Runs one extra SPQR on the
-  // audited J when def_right > k'.  det-inert: prints only.
-  // =====================================================================
-  void _statenull_census( t_JacAssembly const& A, double tol_abs, size_t k_prime ) const
-    {
-      size_t rk = 0; arma::mat NB;
-      if( !_null_basis( A.J, tol_abs, rk, NB ) || !NB.n_cols ){
-        _disp( 3 ) << "  [statenull] null basis unavailable (no SPQR, or empty)" << std::endl;
-        return;
-      }
-      size_t const m    = (size_t)A.J.n_cols;
-      size_t const tau0 = A.n_tau ? A.tau0 : m;          // state columns are [0,tau0)
-      size_t const K    = (size_t)NB.n_cols;
-
-      // ---- decode every state column once --------------------------------------
-      struct ColInfo { int state = -1; int cls = -1; std::string seam; };   // cls 0 int,1 bnd,2 seam
-      std::vector<ColInfo> info( tau0 );
-      std::vector<std::string> sname;
-      { int sid = 0;
-        for( auto const& [v, dom] : _mVar ){
-          { std::ostringstream o; o << v; sname.push_back( o.str() ); }
-          auto itb = _blkVar.find( v );
-          if( itb == _blkVar.end() ){ ++sid; continue; }
-          size_t const base = std::get<0>( itb->second );
-          size_t const bsz  = std::get<1>( itb->second );
-          size_t span = bsz;
-          for( auto const& d : dom ){ auto itd = _mDom.find( d ); if( itd == _mDom.end() ){ span = 0; break; } span *= itd->second.n_elem; }
-          for( size_t col = base; span && bsz && col < base + span && col < tau0; ++col ){
-            size_t local = col - base, blkid = local / bsz, nodeoff = local % bsz;
-            int cls = 0; std::string seam;
-            for( auto const& d : dom ){
-              auto const& dd = _mDom.at( d );
-              size_t const ne = dd.n_elem ? dd.n_elem : 1, nn = dd.n_node ? dd.n_node : 1;
-              size_t const iel = blkid % ne;  blkid /= ne;
-              size_t const ind = nodeoff % nn; nodeoff /= nn;
-              bool const lo = ( ind == 0 ), hi = ( ind + 1 == nn );
-              if( ( lo && iel > 0 ) || ( hi && iel + 1 < ne ) ){
-                cls = 2; if( !seam.empty() ) seam += "+"; seam += d.name() + ( lo ? "-lo" : "-hi" );
-              }
-              else if( ( lo && iel == 0 ) || ( hi && iel + 1 == ne ) ){ if( cls < 1 ) cls = 1; }
-            }
-            info[col].state = sid; info[col].cls = cls; info[col].seam = seam;
-          }
-          ++sid;
-        } }
-
-      // ---- per-direction state/tau split; un-equilibrate through cw --------------
-      std::vector<double> smass( K, 0. );
-      std::vector<arma::vec> vv( K );
-      size_t n_state_side = 0;
-      for( size_t d = 0; d < K; ++d ){
-        arma::vec v = NB.col( (arma::uword)d );
-        if( A.equilibrated && A.cw.size() == m )
-          for( size_t c = 0; c < m; ++c ) v( (arma::uword)c ) *= A.cw[c];
-        double const nrm = arma::norm( v ); if( nrm > 0. ) v /= nrm;
-        double s = 0.; for( size_t c = 0; c < tau0; ++c ) s += v( (arma::uword)c ) * v( (arma::uword)c );
-        smass[d] = s; vv[d] = std::move( v );
-        if( s > 0.5 ) ++n_state_side;
-      }
-
-      std::ios::fmtflags const cf = std::cerr.flags(); auto const cp = std::cerr.precision();
-      _disp( 3 ) << "  [statenull] J " << A.J.n_rows << "x" << m << " rank=" << rk
-                << " null_dim=" << K << " state-side=" << n_state_side
-                << " (expected def_right-k'=" << ( K > k_prime ? K - k_prime : 0 ) << ")"
-                << " tau0=" << tau0 << " equilibrated=" << ( A.equilibrated ? 1 : 0 )
-                << "  [aggregates are basis-independent; dir# lines are not]" << std::endl;
-
-      // ---- aggregates over the state-side directions ---------------------------
-      std::map<int,double> by_state; std::map<int,double> by_cls; std::map<std::string,double> by_seam;
-      double tot = 0.;
-      for( size_t d = 0; d < K; ++d ){
-        if( smass[d] <= 0.5 ) continue;
-        for( size_t c = 0; c < tau0; ++c ){
-          double const w = vv[d]( (arma::uword)c ) * vv[d]( (arma::uword)c );
-          if( w == 0. ) continue;
-          tot += w;
-          by_state[ info[c].state ] += w; by_cls[ info[c].cls ] += w;
-          if( info[c].cls == 2 ) by_seam[ info[c].seam ] += w;
-        }
-      }
-      _disp( 3 ) << std::fixed << std::setprecision(3);
-      _disp( 3 ) << "  [statenull] state-side mass total=" << tot << "  by state:";
-      { std::vector<std::pair<double,int>> srt; for( auto const& kv : by_state ) srt.push_back( { kv.second, kv.first } );
-        std::sort( srt.rbegin(), srt.rend() );
-        for( auto const& [w, s] : srt ) _disp( 3 ) << "  " << ( s >= 0 && (size_t)s < sname.size() ? sname[s] : "?" ) << "=" << w; }
-      _disp( 3 ) << std::endl;
-      _disp( 3 ) << "  [statenull] by node class:  seam=" << by_cls[2] << "  boundary=" << by_cls[1]
-                << "  interior=" << by_cls[0] << std::endl;
-      if( !by_seam.empty() ){
-        _disp( 3 ) << "  [statenull] seam mass by direction:";
-        for( auto const& kv : by_seam ) _disp( 3 ) << "  " << kv.first << "=" << kv.second;
-        _disp( 3 ) << std::endl;
-      }
-
-      // ---- per-direction detail (localisation only) ----------------------------
-      size_t shown = 0;
-      for( size_t d = 0; d < K && shown < 24; ++d ){
-        if( smass[d] <= 0.5 ) continue;
-        ++shown;
-        arma::vec const av = arma::abs( vv[d] );
-        arma::uvec const idx = arma::sort_index( av, "descend" );
-        _disp( 3 ) << "  [statenull] dir#" << d << " state_mass=" << smass[d] << ":";
-        for( size_t j = 0; j < idx.n_elem && j < 6; ++j ){
-          size_t const c = (size_t)idx(j);
-          if( av( idx(j) ) < 1e-6 ) break;
-          _disp( 3 ) << "  " << std::setprecision(3) << vv[d]( idx(j) ) << "@"
-                    << ( c < tau0 ? decode_state_column( c ) : ( "tau" + std::to_string( c - tau0 ) ) )
-                    << ( c < tau0 && info[c].cls == 2 ? "[" + info[c].seam + "]" : "" );
-        }
-        _disp( 3 ) << std::endl;
-      }
-      if( n_state_side > shown )
-        _disp( 3 ) << "  [statenull] ... (" << n_state_side << " state-side directions total)" << std::endl;
-
-      // ---- rev150d [statenull/rows]: who sees the direction, and who cancels whom ---
-      // The net J*v is zero by definition.  The GROSS row mass sum_c |J_rc v_c| is
-      // nonzero exactly on the rows that see the direction; within such a row the
-      // signed contributions J_rc*v_c, grouped by column state, name the cancellation.
-      // Computed on the EQUILIBRATED J and its null vector (columns folded through cw,
-      // rows through rw), so row ranking is by scaled row -- the right scale for "does
-      // this row see it" since that is the scale the rank decision was taken at.
-      // Row provenance: _rowEqnNdx[r] = source equation index (row_id in taucol keys),
-      // -1 for plan-owned rows; only used when its length matches J.
-      // CRONOS_STATENULL_ROWS=1; default off.
-      { static bool const kRows = Options::_env_flag( "CRONOS_STATENULL_ROWS", false );
-        if( kRows ){
-          bool const have_prov = ( _rowProvenanceReady && _rowEqnNdx.size() == (size_t)A.J.n_rows );
-          size_t const nr = (size_t)A.J.n_rows;
-          size_t rshown = 0;
-          for( size_t d = 0; d < K && rshown < 8; ++d ){
-            if( smass[d] <= 0.5 ) continue;
-            ++rshown;
-            arma::vec const vs = NB.col( (arma::uword)d );      // equilibrated coordinates
-            std::vector<double> gross( nr, 0. ), net( nr, 0. );
-            for( arma::sp_mat::const_iterator it = A.J.begin(); it != A.J.end(); ++it ){
-              double const t = (*it) * vs( it.col() );
-              if( t == 0. ) continue;
-              gross[ it.row() ] += std::fabs( t ); net[ it.row() ] += t;
-            }
-            std::map<int,double> by_rowid; double gtot = 0.;
-            std::vector<size_t> order; order.reserve( nr );
-            for( size_t r = 0; r < nr; ++r ){
-              if( gross[r] <= 0. ) continue;
-              gtot += gross[r]; order.push_back( r );
-              by_rowid[ have_prov ? _rowEqnNdx[r] : -2 ] += gross[r];
-            }
-            std::sort( order.begin(), order.end(), [&]( size_t a, size_t b ){ return gross[a] > gross[b]; } );
-            _disp( 3 ) << "  [statenull/rows] dir#" << d << " rows-seeing=" << order.size()
-                      << " gross-total=" << gtot << "  gross by row_id:";
-            { std::vector<std::pair<double,int>> srt; for( auto const& kv : by_rowid ) srt.push_back( { kv.second, kv.first } );
-              std::sort( srt.rbegin(), srt.rend() ); size_t n = 0;
-              for( auto const& [w, id] : srt ){ if( ++n > 6 ) break; _disp( 3 ) << "  row_id=" << id << ":" << w; } }
-            _disp( 3 ) << std::endl;
-            for( size_t q = 0; q < order.size() && q < 6; ++q ){
-              size_t const r = order[q];
-              // signed contributions of this row, by column
-              std::vector<std::pair<double,size_t>> contrib;
-              std::map<int,double> by_state;
-              for( arma::sp_mat::const_row_iterator it = A.J.begin_row( r ); it != A.J.end_row( r ); ++it ){
-                double const t = (*it) * vs( it.col() );
-                if( t == 0. ) continue;
-                contrib.push_back( { t, (size_t)it.col() } );
-                by_state[ it.col() < tau0 ? info[ it.col() ].state : -3 ] += t;
-              }
-              std::sort( contrib.begin(), contrib.end(),
-                         []( auto const& a, auto const& b ){ return std::fabs( a.first ) > std::fabs( b.first ); } );
-              _disp( 3 ) << "      r=" << r << " row_id=" << ( have_prov ? _rowEqnNdx[r] : -2 )
-                        << " gross=" << gross[r] << " net=" << std::scientific << std::setprecision(1) << net[r]
-                        << std::fixed << std::setprecision(3) << "  by state:";
-              for( auto const& kv : by_state )
-                _disp( 3 ) << "  " << ( kv.first >= 0 && (size_t)kv.first < sname.size() ? sname[kv.first] : ( kv.first == -3 ? "tau" : "?" ) )
-                          << "=" << std::showpos << kv.second << std::noshowpos;
-              _disp( 3 ) << std::endl << "          ";
-              for( size_t j = 0; j < contrib.size() && j < 6; ++j ){
-                size_t const c = contrib[j].second;
-                _disp( 3 ) << "  " << std::showpos << contrib[j].first << std::noshowpos << "@"
-                          << ( c < tau0 ? decode_state_column( c ) : ( "tau" + std::to_string( c - tau0 ) ) )
-                          << ( c < tau0 && info[c].cls == 2 ? "[" + info[c].seam + "]" : "" );
-              }
-              _disp( 3 ) << std::endl;
-            }
-          }
-        } }
-      std::cerr.flags( cf ); std::cerr.precision( cp );
-    }
-
 
   //! @brief Total number of collocation state coefficients (valid after setup())
   size_t n_colloc_sta
@@ -7783,88 +7974,6 @@ public:
                                            : std::make_pair( std::numeric_limits<size_t>::max(), size_t(0) );
     }
   
-  //! @brief Ordered vector of state variables as registered after setup()
-  //! Includes auxiliary variables introduced by reduce_order().
-  std::vector<FFVar> const& states_colloc
-    ()
-    const
-    { return _vVar; }
-
-  //! @brief Return vector of node coordinates for the domain of variable var
-  std::vector<std::vector<double>> node_colloc
-    ( FFVar const& var )
-    const;
-
-  //! @brief Per-state duplicate-node spread at an element interface.
-  //!
-  //! Nodes that coincide geometrically but belong to different elements carry SEPARATE
-  //! collocation unknowns.  Continuity means those unknowns agree; the spread hi-lo over
-  //! each geometric coincidence group is therefore a DIRECT measurement of the interface
-  //! conditions actually being satisfied by the solution, independent of any rank, residual
-  //! or convergence report.
-  struct DuplicateNodeSpread
-  {
-    double max_pair_spread   = 0.0;  //!< over groups of multiplicity >= 2 (faces)
-    double max_corner_spread = 0.0;  //!< over groups of multiplicity >= 4 (corners)
-    size_t max_multiplicity  = 0;    //!< largest coincidence group seen
-    size_t n_group           = 0;    //!< number of coincidence groups with multiplicity >= 2
-  };
-
-  //! @brief Duplicate-node spread for one state, over the flat collocation vector `var`.
-  //!
-  //! `off` is the state's base offset into `var`.  OMIT IT: the default derives it from
-  //! pos_state(), which is the only correct source.  Computing it by walking states and
-  //! accumulating node_colloc().size() is WRONG in the presence of scalar states -- see the
-  //! note in report_duplicate_node_spreads().  The parameter is retained only for
-  //! callers that already hold a verified offset.
-  DuplicateNodeSpread duplicate_node_spread
-    ( FFVar const& st, std::vector<double> const& var,
-      size_t off = std::numeric_limits<size_t>::max() )
-    const;
-
-  //! @brief Report per-state duplicate-node spreads and return the worst max_pair.
-  //!
-  //! WHY THIS LIVES IN THE HEADER.  The withdrawn Stage A interface rule passed k=0,
-  //! SYMMETRIC, a clean residual and clean primitive variables while destroying MBC5's
-  //! radial fluxes by 24 orders of magnitude.  The ONLY instrument that caught it was the
-  //! per-state duplicate-node spread -- and it was implemented driver-side, so only 3 of
-  //! the 29 drivers flagged by the rank sweep could report it.  Moving it here gives every
-  //! driver the gate for free and makes "no readout" impossible rather than merely unlikely.
-  //!
-  //! Returns the worst max_pair_spread across all states, so a caller can gate on one
-  //! number:  ok &= ( oc.report_duplicate_node_spreads( x, "post solve" ) < tol );
-  double report_duplicate_node_spreads
-    ( std::vector<double> const& var, char const* label = "",
-      std::ostream* os = &std::cerr )
-    const;
-
-
-  //! @brief 2026-10-02: the ROW-level causal design is active -- every element's first time node is an initial node:
-  //! the `ALL - LB` rows are not collocated there and each state with an evolution derivative gets an exact
-  //! continuity row against the previous element (as a marching window's start).  For now under the option /
-  //! environment only (the jumping-input gate keeps the claims-based causal block).
-  //! @brief The gate that admits the causal evolution-direction treatment: an INPUT distributed in the evolution
-  //! direction with an interior evolution interface whose declared continuity is below C0 (undeclared: may jump).
-  bool _evolution_input_may_jump() const
-  {
-    if( !_evolution_dom_set || !_evolution_dom_var.dag() ) return false;
-    for( auto const& kv : _mInp ){
-      FFVar const& inp = kv.first;
-      bool here = false;
-      for( auto const& dv : kv.second )
-        if( dv.id() == _evolution_dom_var.id() ){ here = true; break; }
-      if( !here ) continue;                                          // not distributed in t
-      if( _input_dom( inp, _evolution_dom_var ).n_elem < 2 ) continue; // no interior t-interface
-      int level = static_cast<int>( DISCONTINUOUS );                 // default when undeclared
-      auto itc = _mInpCont.find( inp );
-      if( itc != _mInpCont.end() ){
-        auto itd = itc->second.find( _evolution_dom_var );
-        if( itd != itc->second.end() ) level = static_cast<int>( itd->second );
-      }
-      if( level < static_cast<int>( CONTINUOUS_C0 ) ) return true;   // may jump -> kinked
-    }
-    return false;
-  }
 
 
   //! @brief factorise (or store) the sensitivity Jacobian for a block.
@@ -8030,37 +8139,6 @@ public:
       return jinf;
     }
 
-  //! @brief base offset of a state's data in the flat collocation vector.
-  //!
-  //! THREE WRONG ANSWERS PRECEDED THIS ONE; do not replace it without reading them.
-  //!
-  //!  1. Walking the state list, accumulating `node_colloc( st ).size()`.  That adds
-  //!     ZERO for a SCALAR state (node_colloc returns an empty vector) even though the state
-  //!     owns a var[] slot, so every state after the first scalar one was read short.  It
-  //!     produced plausible numbers, not errors: OCFE_scalar_nest reported a 2.5e-01
-  //!     "continuity violation" that was really a'(z) sampled at the wrong two nodes.
-  //!
-  //!  2. Using `pos_state( st, {} )`.  pos_state does `ndx_el.at(v)` for EVERY domain
-  //!     of the state, so an empty index map throws std::out_of_range for every DISTRIBUTED
-  //!     state.  The empty-map idiom is only valid for scalars -- which is the branch it was
-  //!     copied from (_init_var_block's `if( dom.empty() )` path).  This aborted PDE38 and
-  //!     scalar_nest after a successful solve.
-  //!
-  //!  3. Taking _blkVar's blk_pos directly would be correct today but duplicates pos_state's
-  //!     contract, so a change to the layout would silently desynchronise the two.
-  //!
-  //! Correct: pos_state with every domain of the state pinned to element 0, which is block 0
-  //! for scalars and distributed states alike, and delegates the layout entirely.
-  size_t _state_base_offset
-    ( FFVar const& st )
-    const
-    {
-      std::map<FFVar,size_t,lt_FFVar> ndx0;
-      auto const itv = _mVar.find( st );
-      if( itv != _mVar.end() )
-        for( auto const& d : itv->second ) ndx0[d] = 0;
-      return pos_state( st, ndx0 );
-    }
 
   //! @brief internal wrapper used by solve() when AUDIT_DUP_SPREAD is set.
   //!
@@ -8245,29 +8323,6 @@ protected:
   //! deterministic reference point.
   void _audit_determinacy( double const* var_user=nullptr, double const* inp_user=nullptr );
 
-  //! @brief condition estimate on the retained R11 block of a weak
-  //! rank-revealing QR; deflates the rank by the number of sigma(R11) below tol_abs.
-  static void _refine_rank_from_R
-    ( arma::sp_mat const& R11, arma::sp_mat const& R12, double tol_abs,
-      size_t& rank, double& gap, double& sigma_cut );
-
-  //! @brief live (staircase-pivot) columns of a SQUEEZED SPQR R, in column
-  //! order.  ONE definition for both callers (numeric_rank and _null_basis once ran two
-  //! textual copies of the same loop); `sorted` selects the O(1)
-  //! last-entry test, everything else takes the column scan.  Pointers are the
-  //! raw CSC triple of the cholmod R (no cholmod types here, so the declaration needs
-  //! no SPQR guard).
-  static void _staircase_live_columns
-    ( int64_t const* rp, int64_t const* rI, double const* rx,
-      size_t ncol, size_t r, bool sorted, std::vector<size_t>& live );
-
-  //! @brief dense-SVD rank oracle (CRONOS_RANK_ORACLE=1, default OFF).  Below
-  //! CRONOS_RANK_ORACLE_MAXN it factorizes the SAME matrix densely at the SAME
-  //! tol_abs and prints AGREE/DISAGREE against the refined rank.  Report-only: it
-  //! never changes a rank, a verdict, or a plan.
-  static void _rank_oracle_check
-    ( arma::sp_mat const& M, double tol_abs, size_t rank_backend, size_t rank_refined,
-      char const* backend );
 
   //! @brief does each kept-explicit tau column actually HAVE a row?
   //! The header has carried this suspicion -- "the promised explicit tau
@@ -8278,22 +8333,6 @@ protected:
   //! two halves of the question -- WHICH keep-explicit route, and WHETHER the row was
   //! delivered -- appear on one line.  CRONOS_KEEP_EXPLICIT_AUDIT=1, default off.
   void _keep_explicit_audit( arma::sp_mat const& T, size_t tau0, size_t rank_T ) const;
-
-  //! @brief what SPQR reports about the factorization it just did.  Plain
-  //! types only, so the declaration needs no CRONOS__WITH_SPQR guard.
-  struct t_SpqrStat
-  {
-    size_t  nrow = 0, ncol = 0, nnzA = 0, rank = 0;
-    int64_t nnzR = 0;          //!< cc.SPQR_istat[0] -- nonzeros in R, THE fill measure
-    int64_t ncolsing = 0;      //!< cc.SPQR_istat[5]
-    int64_t nrowsing = 0;      //!< cc.SPQR_istat[6]
-    int     ordering = -1;     //!< cc.SPQR_istat[7] -- the ordering ACTUALLY used, which
-                               //!< under SPQR_ORDERING_BEST names the concrete winner
-    double  flops = 0., t_analyze = 0., t_factorize = 0.;
-  };
-  //! @brief one line of SPQR's own statistics (CRONOS_SPQR_STAT=1, or under
-  //! CRONOS_DEBUG_RANK).  Report-only; default off.
-  static void _spqr_stat_report( t_SpqrStat const& S, char const* tag );
 
 
   //! @brief Item 11 Part-2: compute per-(primitive,direction) symbol interface
@@ -8559,7 +8598,7 @@ OCFESLV::_reset
 
 
 inline OCFESLV::Options::InterfaceType
-OCFESLV::_resolve_interface_type
+OCFEBASE::_resolve_interface_type
 ( FFModel::EqnOptions const* eqnopt, FFVar const* pdom, bool weak, int block_id )
 const
 {
@@ -9101,7 +9140,7 @@ const
 }
 
 inline bool
-OCFESLV::_block_has_aux_link_in_direction
+OCFEBASE::_block_has_aux_link_in_direction
 ( int block_id, FFVar const& dom )
 const
 {
@@ -9115,7 +9154,7 @@ const
 
 
 inline bool
-OCFESLV::_auxiliary_state_in_direction
+OCFEBASE::_auxiliary_state_in_direction
 ( FFVar const& state, FFVar const& dom )
 const
 {
@@ -9130,7 +9169,7 @@ const
 
 
 inline bool
-OCFESLV::_link_equation_in_direction
+OCFEBASE::_link_equation_in_direction
 ( FFVar const& eqn, int block_id, FFVar const& dom )
 const
 {
@@ -9139,7 +9178,7 @@ const
 
 
 inline bool
-OCFESLV::_equation_has_aux_link_in_direction
+OCFEBASE::_equation_has_aux_link_in_direction
 ( FFVar const& eqn, int block_id, FFVar const& dom )
 const
 {
@@ -9196,7 +9235,7 @@ const
 }
 
 inline bool
-OCFESLV::_block_receive_interface_in_direction
+OCFEBASE::_block_receive_interface_in_direction
 ( int block_id, FFVar const& dom )
 const
 {
@@ -9214,7 +9253,7 @@ const
 }
 
 inline bool
-OCFESLV::_weak_exact_reduced_interface_in_direction
+OCFEBASE::_weak_exact_reduced_interface_in_direction
 ( int block_id, FFVar const& dom )
 const
 {
@@ -9226,7 +9265,7 @@ const
 }
 
 inline bool
-OCFESLV::_block_has_initial_face
+OCFEBASE::_block_has_initial_face
 ( int block_id, FFVar const& dom, int lim )
 const
 {
@@ -9241,7 +9280,7 @@ const
 
 
 inline bool
-OCFESLV::_validate_evolution_domain
+OCFEBASE::_validate_evolution_domain
 ()
 const
 {
@@ -9415,7 +9454,7 @@ const
 
 
 inline bool
-OCFESLV::_block_has_trace_face
+OCFEBASE::_block_has_trace_face
 ( int block_id, FFVar const& dom, int lim )
 const
 {
@@ -9432,7 +9471,7 @@ const
 
 
 inline bool
-OCFESLV::_state_has_value_trace_face
+OCFEBASE::_state_has_value_trace_face
 ( int block_id, size_t state_id, FFVar const& dom, int lim )
 const
 {
@@ -9962,7 +10001,7 @@ const
 }
 
 inline bool
-OCFESLV::_check_consistency
+OCFEBASE::_check_consistency
 ( FFGraph* dag, std::vector<FFVar> const& vCst, std::vector<double> const* vCstVal,
   t_Dom const& mDom, t_Var const& mVar, t_Var const& mInp,
   t_Eqns const& mEqn, t_Fcts const& mFct,
@@ -10484,7 +10523,7 @@ OCFESLV::deep_copy_from
 // [6] singleton rows, [7] ordering used.  The analyze/factorize timers are assigned
 // unconditionally there, not behind a TIMING build flag.
 inline void
-OCFESLV::_spqr_stat_report
+OCFEBASE::_spqr_stat_report
 ( t_SpqrStat const& S, char const* tag )
 {
   static bool const kStat = Options::_env_flag( "CRONOS_SPQR_STAT", false )
@@ -11721,7 +11760,7 @@ OCFESLV::_ensure_deriv_cache
 }
 
 inline void
-OCFESLV::_setup_node_cache
+OCFEBASE::_setup_node_cache
 ()
 {
   _nodeBlockCache.clear();
@@ -12225,7 +12264,7 @@ const
 // OCFESLV::_differential_core_shape        (rev94, USER-side, pre-reduction)
 // ======================================================================
 inline void
-OCFESLV::_differential_core_shape
+OCFEBASE::_differential_core_shape
 ( size_t& rows, size_t& cols )
 const
 {
@@ -12690,7 +12729,7 @@ OCFESLV::assemble_window
 //    subset only (the [drop-null] test) and the kept candidates are reported
 //    UNTESTED -- resolving them under STRONG needs the TRACE twin.
 inline bool
-OCFESLV::_null_basis
+OCFEBASE::_null_basis
 ( arma::sp_mat const& M, double tol_abs, size_t& rank_out, arma::mat& N )
 {
   rank_out = 0; N.reset();
@@ -13170,7 +13209,7 @@ OCFESLV::_reference_point
 // proposed, it must be validated against (1)-(3) on the corpus BEFORE it ships, not
 // argued from the structure of the code.
 inline void
-OCFESLV::_refine_rank_from_R
+OCFEBASE::_refine_rank_from_R
 ( arma::sp_mat const& R11, arma::sp_mat const& R12, double tol_abs,
   size_t& rank, double& gap, double& sigma_cut )
 {
@@ -13277,7 +13316,7 @@ OCFESLV::_refine_rank_from_R
 // (AGREE or MISMATCH, never silence), returning the SCAN result so a verify run cannot
 // itself change a verdict.
 inline void
-OCFESLV::_staircase_live_columns
+OCFEBASE::_staircase_live_columns
 ( int64_t const* rp, int64_t const* rI, double const* rx,
   size_t ncol, size_t r, bool sorted, std::vector<size_t>& live )
 {
@@ -13349,7 +13388,7 @@ OCFESLV::_staircase_live_columns
 // tolerance is in the wrong place".  Capped by CRONOS_RANK_ORACLE_MAXN (default 2000)
 // because the dense factorization is O(n^3): at the cap it is seconds per call.
 inline void
-OCFESLV::_rank_oracle_check
+OCFEBASE::_rank_oracle_check
 ( arma::sp_mat const& M, double tol_abs, size_t rank_backend, size_t rank_refined,
   char const* backend )
 {
@@ -14328,7 +14367,7 @@ OCFEBASE::_classification_reference
 // (nonlocal) BCs always skip.
 //-----------------------------------------------------------------------------
 inline bool
-OCFESLV::_validate_hyperbolic_incoming_bcs()
+OCFEBASE::_validate_hyperbolic_incoming_bcs()
 {
   bool any_hyp = false;
   for( auto const& bc : _blockClassification )
@@ -14620,7 +14659,7 @@ OCFESLV::_validate_hyperbolic_incoming_bcs()
 // identity coupling 1.0 (the same fallback the legacy inline code used).
 //
 inline void
-OCFESLV::_ensure_sat_coupling
+OCFEBASE::_ensure_sat_coupling
 ()
 const
 {
@@ -14683,7 +14722,7 @@ const
 }
 
 inline double
-OCFESLV::_sat_coupling
+OCFEBASE::_sat_coupling
 ( size_t const ndx, size_t const state_pos, FFVar const& dom )
 const
 {
@@ -14861,7 +14900,7 @@ const
 }
 
 inline std::vector<std::vector<double>>
-OCFESLV::node_colloc
+OCFEBASE::node_colloc
 ( FFVar const& var )
 const
 {
@@ -14950,7 +14989,7 @@ const
 ////////////////////////////////////////////////////////////////////////////////
 
 inline OCFESLV::DuplicateNodeSpread
-OCFESLV::duplicate_node_spread
+OCFEBASE::duplicate_node_spread
 ( FFVar const& st, std::vector<double> const& var, size_t off )
 const
 {
@@ -14993,7 +15032,7 @@ const
 }
 
 inline double
-OCFESLV::report_duplicate_node_spreads
+OCFEBASE::report_duplicate_node_spreads
 ( std::vector<double> const& var, char const* label, std::ostream* os )
 const
 {
@@ -15558,7 +15597,7 @@ inline bool
 // (banner placed from the definitions themselves: this region is lines 14475-15202 of the pre-rev268 file)
 //==========================================================================================================
 
-OCFESLV::_suppress_tensor_interface_corner
+OCFEBASE::_suppress_tensor_interface_corner
 ( Options::InterfaceType type, bool exact_reduced_weak, int block_id,
   FFVar const& face_dom,
   std::vector<t_InterfaceTensorCornerDim> const& od,
@@ -15615,7 +15654,7 @@ const
 
 
 inline int
-OCFESLV::_trace_claim_block
+OCFEBASE::_trace_claim_block
 ( size_t state_id, size_t dom_id ) const
 {
   FFVar const* pst = nullptr;
@@ -15650,7 +15689,7 @@ OCFESLV::_trace_claim_block
 
 
 inline bool
-OCFESLV::_load_frozen_interface_plan
+OCFEBASE::_load_frozen_interface_plan
 ( std::map<t_InterfaceClaimKey,size_t>& claims ) const
 {
   if( !_plan.frozen() || _plan.state() != OCPlan::State::FROZEN ) return false;
@@ -16131,7 +16170,7 @@ OCFESLV::_store_frozen_interface_plan
 
 // rev152c: the single point where plan decisions enter the draft.
 inline void
-OCFESLV::_apply_plan_decisions
+OCFEBASE::_apply_plan_decisions
 ( PlanDecisions const& dec, InterfacePlanDraft& draft ) const
 {
   draft.tau_claims             = dec.tau_claims;
@@ -16147,7 +16186,7 @@ OCFESLV::_apply_plan_decisions
 }
 
 inline bool
-OCFESLV::_trace_claim_coeffs
+OCFEBASE::_trace_claim_coeffs
 ( t_InterfaceClaimKey const& claim,
   std::vector<std::pair<size_t,double>>& coeffs ) const
 {
@@ -16245,7 +16284,7 @@ OCFESLV::_trace_claim_coeffs
 }
 
 inline bool
-OCFESLV::_trace_claim_sides
+OCFEBASE::_trace_claim_sides
 ( t_InterfaceClaimKey const& claim,
   std::vector<std::pair<size_t,double>>& lo,
   std::vector<std::pair<size_t,double>>& hi ) const
@@ -16304,7 +16343,7 @@ OCFESLV::_trace_claim_sides
 }
 
 inline void
-OCFESLV::_pinned_column_pairs
+OCFEBASE::_pinned_column_pairs
 ( std::vector<PlanInput::DofEdge>& out ) const
 {
   // Bare state-id sets of the INITIAL/BOUNDARY equations, computed once.
@@ -16407,7 +16446,7 @@ inline bool
 // (banner placed from the definitions themselves: this region is lines 15300-16168 of the pre-rev268 file)
 //==========================================================================================================
 
-OCFESLV::_sat_claim_coeffs
+OCFEBASE::_sat_claim_coeffs
 ( t_InterfaceClaimKey const& claim,
   double const prefactor,
   std::vector<std::pair<size_t,double>>& coeffs ) const
@@ -16420,7 +16459,7 @@ OCFESLV::_sat_claim_coeffs
 }
 
 inline bool
-OCFESLV::_build_frozen_trace_constraint_terms
+OCFEBASE::_build_frozen_trace_constraint_terms
 ( std::map<t_InterfaceClaimKey,size_t> const& claims,
   InterfacePlanDraft& draft ) const
 {
@@ -17741,7 +17780,7 @@ OCFESLV::_build_frozen_trace_constraints_and_tau_terms
 
 
 inline bool
-OCFESLV::_block_drop_eligible
+OCFEBASE::_block_drop_eligible
 ( int block_id ) const
 {
   // Item 11 (principal-symbol block-eligibility gate).  A continuity claim is
@@ -17803,7 +17842,7 @@ inline bool
 // (banner placed from the definitions themselves: this region is lines 16481-17045 of the pre-rev268 file)
 //==========================================================================================================
 
-OCFESLV::_detect_redundant_continuity_claims
+OCFEBASE::_detect_redundant_continuity_claims
 ( InterfacePlanDraft& draft ) const
 {
   // Only the exact-imposition modes allocate continuity taus; IC_WEAK uses SAT
@@ -18610,7 +18649,7 @@ OCFESLV::_fill_capture_sens( double const* s_var, int k,
 // weights jac*w_ref[m], summed over evolution elements -- transpose of _fill_capture_sens's ACCUM sum.
 // Modelled on terminal_profile_adjoint's coordinate->dof stride map, but with the LGR quadrature weights.
 inline void
-OCFESLV::_fill_capture_sens_adjoint( std::map<FFVar,std::vector<double>,lt_FFVar> const& lam_cap,
+OCFEBASE::_fill_capture_sens_adjoint( std::map<FFVar,std::vector<double>,lt_FFVar> const& lam_cap,
                                    double* ls ) const
 {
   if( !ls || !_evolution_dom_set || !_evolution_dom_var.dag() ) return;
@@ -18664,7 +18703,7 @@ OCFESLV::_fill_capture_sens_adjoint( std::map<FFVar,std::vector<double>,lt_FFVar
 // window (the transpose of the forward cap_window==k gate); under a monolithic solve the full-horizon
 // domain locates tau's element directly.
 inline void
-OCFESLV::_fill_capture_sens_adjoint_latch( FFVar const& src, double tau,
+OCFEBASE::_fill_capture_sens_adjoint_latch( FFVar const& src, double tau,
                                          std::vector<double> const& lamC, double* ls, int const side ) const
 {
   if( !ls || lamC.empty() || !_evolution_dom_set || !_evolution_dom_var.dag() ) return;
@@ -21658,7 +21697,7 @@ inline bool
 // (banner placed from the definitions themselves: this region is lines 20165-24276 of the pre-rev268 file)
 //==========================================================================================================
 
-OCFESLV::_build_frozen_strong_tau_elimination
+OCFEBASE::_build_frozen_strong_tau_elimination
 ( InterfacePlanDraft& draft ) const
 {
   draft.strong_tau_elim.clear();
@@ -22626,7 +22665,7 @@ OCFESLV::_build_frozen_strong_tau_elimination
 
 
 inline std::map<size_t,size_t>
-OCFESLV::_defining_rows() const
+OCFEBASE::_defining_rows() const
 {
   std::map<size_t,size_t> out;
   // declared
@@ -22681,6 +22720,12 @@ OCFESLV::_prepare_interface_plan_tables
 {
   _cornerSuppressedClaims.clear();   // rev153b
   _pinSuppressedClaims.clear();      // rev153c
+  // The defining row of each state (declared, else inferred by FFInv L/S) is a MODEL-level fact,
+  // invariant for the whole plan build.  It was computed per NODE inside the per-dim loop below
+  // (10,338 calls on OCFE_PDE3), and each call evaluates every equation's DAG through FFInv:
+  // setup went 1.2 s -> 22 s between v5.0.0 and v5.1.0 on that driver, every solve-side number
+  // unchanged.  Computed once here; the loop reads it.
+  std::map<size_t,size_t> const defrow_once = _defining_rows();
   _rankImpliedClaims.clear();        // rev160
   size_t const invalid_claim_id = std::numeric_limits<size_t>::max();
 
@@ -23128,7 +23173,7 @@ OCFESLV::_prepare_interface_plan_tables
     // r = g'') went from 9 PASS to 3 with no promotion at all, purely from the extra edges.  One edge, from the row
     // that defines the state, is what the per-node matching needs and nothing else.
     bool declared_here = false;
-    { auto const dr = _defining_rows(); auto it = dr.find( static_cast<size_t>( pst->id().second ) );
+    { auto const& dr = defrow_once; auto it = dr.find( static_cast<size_t>( pst->id().second ) );
       if( it != dr.end() && it->second < _mEqn.size() && _mEqn[ it->second ].var.id() == eqnvar.id() ){
         // A DECLARATION is an instruction and admits unconditionally.  An INFERENCE admits only the population
         // that actually lacks a receiver somewhere: the state IS differentiated in this face direction, and EVERY
@@ -26656,7 +26701,7 @@ const
 // refreshed by every subsequent real evaluation.
 //
 inline bool
-OCFESLV::_audit_strong_interface_rows
+OCFEBASE::_audit_strong_interface_rows
 ()
 {
   if( !_nCollEqn ) return true;
@@ -28187,7 +28232,7 @@ const
 
 
 inline bool
-OCFESLV::_fct_is_evolution_integral
+OCFEBASE::_fct_is_evolution_integral
 ( FFVar const& fctvar )
 const
 {
@@ -28315,7 +28360,7 @@ OCFESLV::_collapse_evolution_for_marching
   // say everything gate_proposed said, at the site where it now matters.
 
 inline std::vector<size_t>
-OCFESLV::_evolution_slab_cols
+OCFEBASE::_evolution_slab_cols
 ( size_t iel_evo )
 const
 {
@@ -28599,7 +28644,7 @@ const
 }
 
 inline std::vector<double>
-OCFESLV::get_input_values
+OCFEBASE::get_input_values
 ( FFVar const& input, double const* inp )
 const
 {
@@ -28861,7 +28906,7 @@ const
 
 
 inline size_t
-OCFESLV::_apply_c0_claim_filter
+OCFEBASE::_apply_c0_claim_filter
 ( std::map<t_InterfaceClaimKey,size_t>& claims )
 const
 {
@@ -28931,7 +28976,7 @@ const
 namespace mc {
 
 inline void
-OCFESLV::_apply_interface_edge_flags_v2
+OCFEBASE::_apply_interface_edge_flags_v2
 ( InterfaceReceiverEdge& edge,
   FFModel::EqnOptions const&      eqnopt,
   bool                   aux_alg_receiver,

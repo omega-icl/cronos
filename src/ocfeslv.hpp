@@ -131,9 +131,545 @@ namespace mc
 //! tag tells you when and why it came to be that way.  A tag that only names a revision carries nothing and
 //! is being removed as the code around it is revisited.
 ////////////////////////////////////////////////////////////////////////
-class OCFESLV
+class OCFEBASE
 ////////////////////////////////////////////////////////////////////////
 : public FFModel, public OCBase
+{
+  template <typename U> friend class OCVar;
+
+public:
+  //! @brief Default constructor
+  OCFEBASE() = default;
+  virtual ~OCFEBASE() = default;
+
+public:
+  using OCBase::VarType;
+  using OCBase::Exceptions;
+  using OCBase::t_Dom;
+
+  typedef std::map< FFVar, std::tuple< size_t, size_t, std::vector<size_t> >, lt_FFVar >               t_Blk;
+  typedef std::map< long, std::pair< int, size_t > >                                                   t_Typ;
+  typedef FADType<double>                                                                              t_FAD;
+
+protected:
+  //! @brief Map of dependencies against variable type and index
+  t_Typ                              _mDep;
+
+  //! @brief vector of constant dependencies
+  std::vector<FFDep>                 _depCst;
+
+  //! @brief vector of constant collocations
+  std::vector<OCVar<double>>         _OCCst;
+
+  //! @brief vector of constant collocations
+  std::vector<OCVar<FFDep>>          _OCDepCst;
+
+  //! @brief vector of domain dependencies
+  std::vector<FFDep>                 _depDom;
+
+  //! @brief vector of domain collocations
+  std::vector<OCVar<double>>         _OCDom;
+
+  //! @brief vector of domain collocations
+  std::vector<OCVar<FFDep>>          _OCDepDom;
+
+  //! @brief Cache for row-specific auxiliary-direction expression lookups.
+  mutable std::map<std::tuple<size_t,int,size_t>,bool> _eqnAuxDirCache;
+
+  //! @brief Map from input to the FFDom of each of its domains: the domain's grid with the input's declared
+  //! collocation applied.  Derived at setup from FFModel's declaration; also pinned per window when marching.
+  typedef std::map< FFVar, t_Dom, lt_FFVar >  t_Coll;
+
+  //! @brief optional per-input collocation discretisations. Keys are input variables, values are maps from physical domain variables to the collocation rule used to parameterise that input along that domain. Missing entries mean: use the state/domain discretisation in _mDom.
+  t_Coll                             _mInpDisc;
+
+  //! @brief Moving-mesh (r-adaptive) specification for one domain direction.
+  //! A direction registered through OCFESLV::add_adaptive_domain() is discretised on a fixed uniform
+  //! computational mesh xi in [0,1] (its registered FFDom); a solved mesh state x(xi,t) maps xi onto
+  //! the physical extent [lo_dom, up_dom] of that same FFDom, and follows the equidistribution
+  //! d/dxi(M x_xi) = 0 for the monitor M.  Only an explicit monitor expression is supported.
+  //! Solver-side type, held in the model's UsrData because the declaration carries it; the discretisation
+  //! it describes is applied here.
+  struct MeshAdaptSpec {
+    FFVar monitorExpr;  //!< explicit monitor M(xi,t); used iff hasMonitorExpr
+    bool  hasMonitorExpr = false;  //!< must be true: there is no built-in monitor
+  };
+
+  //! @brief Declared moving-mesh (r-adaptive) specifications per domain direction, as given to
+  //! add_adaptive_domain(); the physical extent is read from the direction's FFDom.
+  std::map<FFVar,MeshAdaptSpec,lt_FFVar>  _adaptDomUsr;
+
+  //! @brief vector of input dependencies
+  std::vector<FFDep>                 _depInp;
+
+  //! @brief vector of input collocations
+  std::vector<OCVar<double>>         _OCInp;
+
+  //! @brief vector of input collocations
+  std::vector<OCVar<FFDep>>          _OCDepInp;
+
+  //! @brief vector of input block data
+  t_Blk                              _blkInp;
+
+  //! @brief Stage 1: k = n_trace_var - rank(B) as computed from the DRAFT by
+  //! _build_frozen_trace_projection.  Cross-checked against the value
+  //! interface_rank_symmetry computes from the COMMITTED plan; a disagreement means the
+  //! two are seeing different blocks and the projection would act on the wrong one.
+  //! @brief (state, direction, element, node) triples whose C0 claim was suppressed by
+  //! FIX 1 or FIX 3.  Keyed exactly as a claim is keyed, with no equation-row component,
+  //! so a claim emitted for a suppressed triple is detectable as a leak.
+  //! MUTABLE: the claim-emission scan that populates this runs in a const context, and
+  //! this is a diagnostic-only record that no behaviour depends on.
+  mutable std::set<std::tuple<size_t,size_t,size_t,size_t>> _pinSuppressedTriples;
+
+  //! @brief Per-state counts of C0 claims suppressed by FIX 1 (pointwise pin) and FIX 3
+  //! (closure over jointly-pinned states), summarised once per plan build.  NOTE these are
+  //! per equation-row VISIT, not per claim: a claim may be emitted from several rows, and
+  //! FIX 3 RELOCATES a claim rather than removing it, so the claim count does not move.
+  mutable std::map<size_t,size_t> _pinSuppressCount1, _pinSuppressCount3;
+
+  size_t                             _traceProjK    = 0;
+  size_t                             _traceProjNTau = 0;
+  //! @brief Stage 1: true once C_tilde=(I-P)C and the P block have been written into the
+  //! plan's continuity rows.  The rank-symmetry audit compares against rank(C_tilde)=r
+  //! rather than n_trace_var once this is set, since the projected system enforces r
+  //! conditions by design rather than by deficiency.
+  bool                               _traceProjApplied = false;
+  size_t                             _traceProjRank    = 0;
+
+  //! @brief one-shot guard for the `[stage2-preflight]` line
+  //! emitted from the _eval_eqn row-count audit.
+  //!
+  //! MUTABLE: _eval_eqn() is const and the flag records only that a diagnostic line has
+  //! already been printed for this OCFESLV instance; no behaviour depends on it.  Deliberately
+  //! NOT propagated by deep_copy_from(): a copied environment is a different process-visible
+  //! object and should emit its own line, and a duplicate diagnostic line is harmless where
+  //! a missing one is not.
+  mutable bool                       _stage2PreflightReported = false;
+
+  //! @brief receiver row -> the explicit tau column(s) injected into it (plan half).
+  //!
+  //! FULLY QUALIFIED, deliberately.  This block sits ~115 lines ABOVE the
+  //! `using FrozenPhysicalResidualRowKey = OCPlan::FrozenPhysicalResidualRowKey;`
+  //! alias, so the short name is not in scope here.  OCPlan is complete at this
+  //! point (ocplan.hpp is included before the class), and OCFESLV is a friend of
+  //! OCPlan, so the nested type is reachable.  Writing it out costs nothing and
+  //! removes any dependence on where the alias block happens to sit -- moving
+  //! this declaration and moving the alias are then independent edits.
+  mutable std::map<OCPlan::FrozenPhysicalResidualRowKey,
+                   std::vector<std::pair<size_t,double>>> _tauHostRows;
+  //! @brief pivot index -> (tau column -> its coefficient in that pivot row).
+  //! Needed to evaluate the DELIVERED coefficient: a surviving row emits
+  //! R_k - sum_p y_p * R_p, so a tau's net coefficient there is its coefficient
+  //! in row k MINUS y_p times its coefficient in each pivot row p.  Structural
+  //! survival does not imply a non-zero net (measured).
+  mutable std::map<size_t,std::map<size_t,double>>  _tauPivotCoef;
+  //! @brief tau column -> largest |net delivered coefficient| over surviving rows.
+  mutable std::map<size_t,double>                   _tauNetMax;
+  //! @brief tau column -> number of times the eval-time injection actually executed.
+  mutable std::map<size_t,size_t>            _tauInjectCount;
+  //! @brief tau column -> host rows that survived LOOP 2 / were dropped as pivot / as exact.
+  mutable std::map<size_t,size_t>            _tauFateEmit;
+  mutable std::map<size_t,size_t>            _tauFatePivot;
+  mutable std::map<size_t,size_t>            _tauFateExact;
+  //! @brief tau column -> pivot indices its dropped host rows occupy.
+  mutable std::map<size_t,std::set<size_t>>  _tauPivotOfCol;
+  //! @brief pivot index -> number of SURVIVING rows whose Schur correction references it.
+  //! This is the "after Schur substitution" half: a dropped pivot row is not necessarily
+  //! lost, because its value is subtracted into every corrected row.  Zero here means the
+  //! coupling really did leave the system.
+  mutable std::map<size_t,size_t>            _tauCorrRefs;
+  //! @brief one-shot guard for the [taucol/assembly] report.
+  mutable bool                               _tauColAssemblyReported = false;
+  //! @brief set by the PLAN half once _tauHostRows is populated.
+  //!
+  //! ORDER GUARD, and it is load-bearing.  _audit_strong_interface_rows() runs a dry
+  //! FFDep pass through _eval_eqn -- twice from setup() and once from deep_copy_from()
+  //! -- and at least one of those calls precedes the plan half in source order.  Without
+  //! this flag the assembly recorders fire on a pass where _tauHostRows is still empty,
+  //! print a report that observed nothing, and LATCH _tauColAssemblyReported, suppressing
+  //! the real one.  That is a diagnostic producing plausible output from code that was not
+  //! measuring anything -- the failure mode this instrument exists to avoid.
+  //!
+  //! Requiring it makes the call ORDER NON-LOAD-BEARING: move the plan half anywhere
+  //! after the commit and the assembly half still attaches to the first eval that follows.
+  mutable bool                               _tauColPlanReady = false;
+
+  //! @brief vector of state dependencies
+  std::vector<FFDep>                 _depVar;
+
+  //! @brief vector of state collocations
+  std::vector<OCVar<double>>         _OCVar;
+
+  //! @brief vector of state collocations
+  std::vector<OCVar<FFDep>>          _OCDepVar;
+
+  //! @brief vector of state block data
+  t_Blk                              _blkVar;
+
+  //! @brief vector of equation dependencies
+  std::vector<FFDep>                 _depEqn;
+
+  //! @brief equation/output collocation workspace
+  OCVar<double>                      _OCEqn;
+
+  //! @brief equation/output dependency collocation workspace
+  OCVar<FFDep>                       _OCDepEqn;
+
+  //! @brief equation/output forward-AD collocation workspace
+  mutable OCVar<t_FAD>               _OCFEqn;
+
+  //! @brief Number of generated trace/tau unknowns appended after state coefficients.
+  size_t                             _nTraceVar = 0;
+
+  //! @brief Offset of generated trace/tau unknowns inside the var[] vector.
+  size_t                             _traceVarOffset = 0;
+
+  //! @brief Number of setup-retained exact trace constraints.
+  size_t                             _nTraceConstraint = 0;
+
+  //! @brief Sealed frozen interface plan consumed by _eval_eqn / _eval_fct.
+  //!
+  //! All plan data (receiver edges, weak-SAT terms, exact trace rows,
+  //! IC_STRONG projection, plan dimensions) live in this object.  OCFESLV
+  //! builder methods populate a transactional OCPlan::InterfacePlanDraft,
+  //! validate it via _plan.validate_draft(), and commit it atomically via
+  //! _plan.commit_draft().  _eval_eqn() reads the plan exclusively through
+  //! OCPlan's const query interface.
+  mutable OCPlan _plan;
+
+  //! @brief True only during OCFESLV::_build_interface_plan_draft().
+  //!
+  //! Kept as a separate OCFESLV flag (not inside OCPlan) so that plan
+  //! builders — which are OCFESLV private methods — can assert the build
+  //! is active without exposing a mutable setter through OCPlan's public API.
+  mutable bool _interfacePlanBuildAllowed = false;
+
+  // Bring OCPlan nested types into OCFESLV's protected scope so that all
+  // private builder methods and inline implementations can use the short
+  // names without qualification, preserving maximum source compatibility.
+  using InterfacePlanState           = OCPlan::State;
+  using t_FrozenInterfaceClaimKey    = OCPlan::t_FrozenInterfaceClaimKey;
+  using t_InterfaceClaimKey          = OCPlan::t_InterfaceClaimKey;
+  using InterfaceReceiverEdge        = OCPlan::InterfaceReceiverEdge;
+  using FrozenWeakSatTerm            = OCPlan::FrozenWeakSatTerm;
+  using FrozenTraceConstraintTerm    = OCPlan::FrozenTraceConstraintTerm;
+  using FrozenPhysicalResidualRowKey = OCPlan::FrozenPhysicalResidualRowKey;
+  using FrozenStrongTauElimination   = OCPlan::FrozenStrongTauElimination;
+  using InterfacePlanDraft           = OCPlan::InterfacePlanDraft;
+  using InterfaceEdgeSource          = OCPlan::InterfaceEdgeSource;
+
+public:
+  //! @brief One recorded coupling decision: the value, whether it was RESCUED (source is not the
+  //! principal symbol, i.e. the number was substituted rather than read from the model), and how many edges.
+  struct t_CouplingRecord { double value = 0.; bool refused = false; size_t n = 0; };
+
+protected:
+  mutable std::map<std::pair<size_t,size_t>,t_CouplingRecord> _couplingLog;
+
+  //! @brief Two-pass IC_STRONG DROP (explicit-tau hybrid): redundant
+  //! (column-dependent / implied) continuity claim keys found in pass 1 and
+  //! excluded from allocation in pass 2.  Empty for every column-rank-full plan
+  //! (PDE2/3/4), so the two-pass is a no-op there.
+  mutable std::set<t_FrozenInterfaceClaimKey> _strong_dropped_claims;
+  //! @brief C2b: claims whose rescued receivers must NOT be silenced under EXACT_NATURAL, because the
+  //! redundancy pass found their multiplier column dependent with only the natural receiver -- restored on the
+  //! two-pass re-run ("silence where rank allows").  Cleared with _strong_dropped_claims.
+  mutable std::set<t_FrozenInterfaceClaimKey> _exact_natural_restored;
+  //! @brief 2026-10-16: claims whose natural receiver was PROMOTED from a defining row by the per-node matching.
+  //! Natural for the pivot, NOT for the exact-natural silencing of their other edges: on OCFE_zchain silencing
+  //! those edges removed the projector's support (9 PASS -> 3), so a promoted claim keeps its duplicates live.
+  mutable std::set<t_FrozenInterfaceClaimKey> _promotedNatural;
+
+  //! @brief Why each IC_STRONG claim was kept as an EXPLICIT tau rather than eliminated.
+  //!
+  //! 1 = verify-protected AND rank-extending  (item 10 step 3, DROP_REDERIVE): a needed
+  //!     continuity the receiver-B proxy mis-flagged as redundant.  Eliminating it through
+  //!     the Schur would demand a corner copy the joint tau/geometric-C0 assignment cannot
+  //!     supply, so it is realised the IC_TRACE way instead.
+  //! 2 = every replacement candidate is an auxiliary LINK row: exact-replacing would consume
+  //!     that auxiliary's defining equation and turn the auxiliary into a null direction.
+  //! 3 = verify-protected but NOT rank-extending (same reason as 1, different branch).
+  //!
+  //! NOTE: none of these is "no pivot was available" -- an earlier version of the census
+  //! said that and it was wrong.  These are DELIBERATE keep-explicit routes chosen to avoid
+  //! a worse failure elsewhere.  What is NOT deliberate is that the promised "explicit tau
+  //! unknown PLUS a real continuity row" appears to deliver the column but not the row.
+  mutable std::map<t_FrozenInterfaceClaimKey,int> _keepExplicitReason;
+  //! @brief Set when pass 1 identifies droppable redundant claims; signals
+  //! _build_interface_plan_draft to re-run the pipeline excluding them.
+  mutable bool                       _strong_redundancy_pending = false;
+  //! @brief A RESTORE rebuild is pending (2026-10-06, WORKPLAN 1.5): EXACT_NATURAL returned silenced claims to their
+  //! natural receivers and the plan must be re-derived with them -- no claim dropped.  Booked on its own retry, so
+  //! that a DROP (a genuinely redundant claim excluded) can still follow it: a model whose pass 0 restores and whose
+  //! pass 1 flags redundant claims (OCFE_zindex's chain, high-index in z, under IC_STRONG) used to exhaust the single
+  //! DROP retry on the restore and fail at the exclusion it needed.
+  mutable bool                       _strong_restore_pending    = false;
+
+  //! @brief one-shot guard so the promotion requester cannot re-fire on its own
+  //! rebuild pass.  Cleared once per `_build_interface_plan_draft` call, alongside
+  //! `_strong_dropped_claims`.
+  mutable bool                       _promotionRequested = false;
+
+  //! @brief state retained so the post-solve audit can evaluate the
+  //! violation IC_TRACE absorbs into beta.  Populated ONLY under IC_TRACE with the projection
+  //! applied and CRONOS_AUDIT_BETA set, so production pays nothing.
+  //!
+  //! THE IDENTITY BEING MEASURED.  The applied form appends eps*P coefficients to the
+  //! continuity rows, so row i reads  (C x)_i + eps*(P lambda)_i + r_c,i = 0.  With P = Z Z^T
+  //! and Z^T Z = I, projecting on Z^T gives
+  //!
+  //!     eps * beta  =  - Z^T ( C x + r_c )  =  - Z^T r_c^raw ,      beta = Z^T lambda
+  //!
+  //! i.e. `eps*||beta||` IS the norm of the UNPROJECTED continuity violation lying in
+  //! null(B) -- the part of the claim set IC_TRACE does not enforce but absorbs.  Roadmap B5
+  //! proves that block imposes nothing on x; this measures how much it is carrying.
+  //!
+  //! FALSIFIABLE SELF-TEST, and it should be run before the number is believed: sweep
+  //! INTERFACE.TRACE_PROJ_EPS.  `eps*||beta||` must be eps-INDEPENDENT (it equals a fixed violation)
+  //! while `||beta||` scales as 1/eps.  If it does not, the instrument is wrong, not the model.
+  mutable arma::mat                  _betaZ;         //!< m x k null basis of B
+  mutable std::vector<size_t>        _betaColOf;     //!< dense tau index -> var[] column
+  mutable double                     _betaEps = 0.;  //!< eps actually applied
+  mutable bool                       _betaReady = false;
+
+  //! @brief per-null-direction class, CROSS-domain (true) or intra-domain (false),
+  //! so the absorbed violation can be split between the two kernel families.
+  //!
+  //! WHY THE SPLIT IS WELL DEFINED.  A basis of null(B) is not unique, so "which direction"
+  //! is generally basis-dependent.  Here it is not: Z is built COMPONENT-WISE over the
+  //! connected components of the claim/receiver-row bipartite graph, so every column has
+  //! support inside ONE component, and the cross/intra label is a property of the component
+  //! rather than of the basis chosen inside it.
+  //!
+  //! MEASURED DECOMPOSITION (MMPDE13, confirmed by forward prediction at two t-meshes):
+  //!     intra = (nel_xi - 1)                     -- NEL_T-independent; the lifting-alias
+  //!                                                 family that PDE2/PDE5/PDE9 also carry
+  //!     cross = 2*(nel_xi - 1)*(NEL_T - 1)       -- two per interior t-seam node; no
+  //!                                                 counterpart in any fixed-mesh control
+  mutable std::vector<char>          _betaDirCross;
+
+  //! @brief Continuity claim keys the redundancy detector must NOT drop, kept
+  //! explicit instead (item 10 step 3, DROP_REDERIVE).  Populated by the driver
+  //! from verify_interface_drop's over-drop set between re-derive iterations and
+  //! consumed by _detect_redundant_continuity_claims.  Unlike _strong_dropped_-
+  //! claims it is NOT cleared at build start (it must persist across the
+  //! re-setup of a re-derive sequence); it is cleared only on a full reset /
+  //! deep_copy / via clear_protected_interface_claims().
+  mutable std::set<t_FrozenInterfaceClaimKey> _strong_protected_claims;
+  //! @brief IC_STRONG taus the trace projector reaches; kept explicit on the promotion rebuild.
+  mutable std::set<t_FrozenInterfaceClaimKey> _strong_promoted_claims;
+  mutable bool                                _strong_promotion_pending = false;
+
+  //! @brief Structural determinacy numbers of the last applied GLOBAL plan build (C4): the tau-block rank
+  //! deficit the builder predicts, and the cluster count.  Measured corpus-wide to equal the
+  //! SPQR defR on 96 of 101 programs and to over-report on the other 5 -- never the reverse.
+  mutable long _structDeficit = -1;
+  mutable long _structDeficientClusters = -1;
+
+  //! @brief per state, [0] edges whose coupling was DERIVED from the receiving row's constant c0,
+  //! [1] edges REFUSED because that coefficient is not constant (forced value kept, edge labelled undefined).
+  mutable std::map<size_t,std::array<size_t,2>> _rescueC2;
+  //! @brief per state, WHY C2 refused -- 1 the receiving row is in no symbol table (boundary or
+  //! demoted), 2 that table was not computed, 3 the state is not one of its columns, 4 the coefficient is not
+  //! constant, 5 it is the CONSTANT ZERO (the state enters the row only differentiated: no c0 exists).
+  mutable std::map<size_t,std::array<size_t,8>> _rescueC2Why;
+  //! @brief per state, for each zero-absent refusal, what the receiving row contains -- whether the
+  //! claimed state occurs in it at all, in which directions it is differentiated there, and the claim's own
+  //! direction.  Report-only; it decides whether those edges are a coupling question or a receiver-graph one.
+  mutable std::map<size_t,std::map<std::string,size_t>> _rescueC2Zero;
+
+  //! @brief Per-state receiver-edge audit for the SAT-coupling path (diagnostic only).
+  //!
+  //! A receiver edge acquires a nonzero coupling in one of three ways: from the block
+  //! principal symbol (states present in sym.vState), or -- when _sat_coupling returns
+  //! numerically ZERO -- by one of two rescues, auxiliary_algebraic_receiver_state or
+  //! geometric_c0_receiver_state, each of which forces coupling = 1.  If the SAT coupling
+  //! is zero and NEITHER rescue fires, the edge keeps coupling = 0 and its DEFAULT label
+  //! PRINCIPAL_SYMBOL: a null row in the augmented interface system, i.e. exactly the
+  //! "tier-0 Newton singular on the augmented interface system" failure.
+  //!   Counters per state id: [0] edges on the SAT path, [1] SAT coupling was zero,
+  //! [2] rescued as AUXILIARY_ALGEBRAIC, [3] rescued as GEOMETRIC_C0, [4] LEFT AT ZERO.
+  //! a[4] > 0 is the defect.
+  mutable std::map<size_t,std::array<size_t,5>> _ifaceEdgeAudit;
+  mutable std::map<size_t,double>               _ifaceEdgeMaxSat;
+
+  //! @brief Work vector for collocation propagataion through DAG
+  std::vector<OCVar<double>>         _wrkOC;
+
+  //! @brief Work vector for collocation propagataion through DAG
+  std::vector<OCVar<FFDep>>          _wrkOCDep;
+
+  //! @brief Forward-AD state collocation cache used by deriv()
+  mutable std::vector<OCVar<t_FAD>>  _OCFVar;
+
+  //! @brief Forward-AD input collocation cache used by deriv()
+  mutable std::vector<OCVar<t_FAD>>  _OCFInp;
+
+  //! @brief Forward-AD domain collocation cache used by deriv()
+  mutable std::vector<OCVar<t_FAD>>  _OCFDom;
+
+  //! @brief Forward-AD constant collocation cache used by deriv()
+  mutable std::vector<OCVar<t_FAD>>  _OCFCst;
+
+  //! @brief Forward-AD equation residual values used by deriv()
+  mutable std::vector<t_FAD>         _FEqn;
+
+  //! @brief Forward-AD state seeds used by deriv()
+  mutable std::vector<t_FAD>         _FVar;
+
+  //! @brief Forward-AD input seeds used by deriv()
+  mutable std::vector<t_FAD>         _FInp;
+
+  //! @brief Lightweight dependency-update plan used by eval() to avoid map lookups in every element block.
+  struct t_DepUpdate
+  {
+    int                              typ = 0;
+    size_t                           pos = 0;
+  };
+  std::vector< std::vector<t_DepUpdate> > _depPlanEqn;
+  std::vector< std::vector<t_DepUpdate> > _depPlanFct;
+
+  //! @brief Per-equation evaluation domain: the distributed directions each equation's residual
+  //! touches (state/input domains referenced by its subgraph).  Equation analogue of _fctEvalDom.
+  //! For a domain-less equation these are the FFIntegral-reduced ("free") directions accumulated
+  //! over in _eval_eqn LOOP 2 (section 4).
+  std::vector< std::set<FFVar,lt_FFVar> > _eqnEvalDom;
+  //! @brief Per-equation OpEval (FFEval) point reductions: direction -> target physical coordinate.
+  std::vector< std::map<FFVar,double,lt_FFVar> > _eqnEvalPoint;
+  std::vector< std::map<FFVar,int,lt_FFVar> > _eqnEvalSide;   //!< per equation, the SIDE of each _eqnEvalPoint direction
+
+  //! @brief Cached physical node coordinates by domain variable and element.
+  std::map<FFVar,std::vector<std::vector<double>>,lt_FFVar> _nodeBlockCache;
+
+public:
+  //! @brief Post-index-reduction structural DOF audit (max-bipartite matching on
+  //! the reduced collocation sparsity).  Filled by _audit_reduced_dof() at end of
+  //! setup(); a nonzero deficiency is a genuine structural rank deficiency.
+  struct t_DofAudit
+  {
+    bool   ran        = false;  //!< audit executed (reduction happened)
+    bool   trace      = false;  //!< ran on an interface-trace augmented pattern (advisory verdict)
+    size_t rows       = 0;      //!< collocation equation rows
+    size_t cols       = 0;      //!< variable columns (max sparsity index + 1)
+    size_t rank       = 0;      //!< structural (max-matching) rank
+    size_t deficiency = 0;      //!< min(rows,cols) - rank  (0 => full structural rank)
+    bool   square     = false;  //!< rows == cols
+    bool   ok() const { return ran && square && deficiency == 0; }
+    void   clear() { *this = t_DofAudit{}; }
+  };
+
+protected:
+  //! @brief Cached structural reduced dependency pattern (reduced_dependency_pattern()).  Computed
+  //! once on first access and reused by reference; invalidated by setup(), register_control(),
+  //! clear_controls() and deep_copy_from() -- anything that changes the model structure or the
+  //! control registry.
+  std::vector<std::vector<bool>>            _reducedDepPattern;
+  bool                                      _reducedDepValid = false;
+
+  //! @brief Cached residual-row provenance: _rowEqnNdx[out_row] = source equation index into _mEqn
+  //! (or -1 for plan-owned interface/trace rows).  Built once by _eval_eqn (the frozen plan makes it
+  //! eval-invariant) behind _rowProvenanceReady; invalidated by setup()/deep_copy_from().  Used to
+  //! resolve each marching-transfer state's INITIAL-closure rows for the k>0 continuity override.
+  mutable std::vector<int>                  _rowEqnNdx;
+  mutable bool                              _rowProvenanceReady = false;
+  //! @brief claim keys the legacy corner rule suppressed in the last receiver
+  //! synthesis (recorded at the suppression point; no behavioural effect).  Packed into
+  //! PlanInput::corner_suppressed_edges for the GLOBAL builder's shadow check.
+  mutable std::set<t_InterfaceClaimKey>    _cornerSuppressedClaims;
+  //! @brief claim keys suppressed as "pinned pointwise by an ALL-mask IC/BC"
+  //! (never realised by a claim); packed as PlanInput::unrealised_claims.
+  mutable std::set<t_InterfaceClaimKey>    _pinSuppressedClaims;
+  //! @brief claims whose exact trace row the tensor-corner MGS rank filter REJECTED
+  //! as linearly dependent on the accepted rows.  Homogeneous continuity rows, so dependence
+  //! means the condition is IMPLIED by rows the plan imposes -- enforced, not missing.  Packed
+  //! as PlanInput::rank_implied_claims and consumed by design §3.5.  NOT the same category as
+  //! _pinSuppressedClaims (those are genuinely unenforced).
+  mutable std::set<t_InterfaceClaimKey>    _rankImpliedClaims;
+  //! @brief true iff the plan being materialised carries GLOBAL decisions
+  //! (set when they are applied, cleared at each plan build).  The STRONG-side matcher
+  //! keys on THIS, never on the environment (keying on the environment breaks legacy
+  //! STRONG plans whenever CRONOS_PLAN_APPLY_GLOBAL is set).
+  mutable bool                             _planIsGlobal = false;
+
+  mutable bool                              _sampleOwnElement = false;   //!< sample_input: element-boundary nodes from their own element (transfer_terminal)
+
+  t_DofAudit                                _dofAudit;
+
+  // rev139 (uniform-rule step 1): W-verdict restore
+  bool                                      _wdecideRetry = false;   //!< inside the one restore/revert re-derive
+  mutable bool                              _auditQuiet = false;     //!< audit stores, defers printing (restore-attempt recursion)
+
+  //! @brief Item-11 Part-2 per-(primitive,direction) symbol interface read.
+  //! order/magnitude balance used by the symbol-AUTO resolver.  `order` is the
+  //! detected operator order in the direction (1 or 2); `order_gt2` flags a
+  //! nested aux chain (order>2, not handled — resolver must guard).  `via_aux`
+  //! is true when order>=2 was detected through a reduce_order auxiliary link
+  //! (i.e. a reduced direction).  `advection_dominated` is true when the
+  //! top-order (diffusive) term is sub-grid (k_h < k* = adv/diff), i.e. the
+  //! singular-perturbation corrector fires.
+  struct t_DirRead {
+    int    prim_col   = -1;
+    int    dir_idx    = -1;
+    int    order      = 0;
+    bool   order_gt2  = false;
+    bool   via_aux    = false;
+    double adv   = 0.;
+    double diff  = 0.;
+    double kstar = std::numeric_limits<double>::quiet_NaN();
+    double eps   = std::numeric_limits<double>::quiet_NaN();
+    double kh    = std::numeric_limits<double>::quiet_NaN();
+    bool   advection_dominated = false;
+  };
+  //! @brief Symbol interface reads per block id.  Populated read-only by
+  //! _compute_interface_reads() at classify time; consumed by the symbol-AUTO
+  //! resolver and the optional balance probe.  Always compiled.
+  std::map<int, std::vector<t_DirRead>>     _blockInterfaceRead;
+
+  //! @brief One cached principal-symbol SAT coupling entry.
+  struct t_SatCoupling
+  {
+    size_t state_pos;   //!< Position of the coupled state in _vVar.
+    long   dom_id;      //!< Identity (.id().second) of the coupled domain variable.
+    double value;       //!< Classified coupling A_dom[eqn_row, state_col].
+  };
+
+  //! @brief Per-equation SAT coupling table, indexed by position in _mEqn.
+  //! Built during setup after PDE classification has fixed the principal
+  //! symbols.  It is then consumed by the frozen interface-plan builders and
+  //! residual evaluation.  Empty when the model is not classified, in which
+  //! case _sat_coupling() falls back to structural derivative incidence.
+  mutable std::vector< std::vector<t_SatCoupling> > _satCoupling;
+  mutable bool                                      _satCouplingBuilt      = false;
+  mutable bool                                      _satCouplingClassified = false;
+  mutable size_t                                    _satCouplingSerial     = 0;
+
+protected:
+
+  //! @brief The marching context as seen by the DIRECTION-AGNOSTIC code (the OCVar environment,
+  //! the interface plan, the determinacy audits).  Those are built over the collocated
+  //! directions and must not read the marching driver's state directly: they ask this.  Phase 1
+  //! of the MoL work moves them into OCFEBASE, where this declaration goes with a "not marching"
+  //! default; OCFESLV then answers it from the members below.  Introduced as C0 so that every
+  //! later commit of that phase is a pure move.
+  struct MarchContext {
+    bool   in_march = false;   //!< a resident marching window is being assembled
+    size_t window   = 0;       //!< its index (meaningful when in_march)
+    size_t n_grid   = 0;       //!< size of the recorded march grid (N+1 for N steps; 0: none)
+    size_t n_steps  = 0;       //!< n_march_steps(): 0 when monolithic
+    bool   active   = false;   //!< SOLVE.MARCHING with a recorded grid of at least one step
+  };
+  //! @brief Default: not marching.  OCFESLV answers from its marching state.
+  virtual MarchContext _march_context
+    () const
+    { return MarchContext(); }
+};
+
+
+////////////////////////////////////////////////////////////////////////
+class OCFESLV
+////////////////////////////////////////////////////////////////////////
+: public OCFEBASE
 {
 
   friend  std::ostream& operator<< ( std::ostream&, OCFESLV const& );
@@ -756,25 +1292,6 @@ public:
       bool   EVOLUTION_DOMAIN;  //!< setup() returns false on an unsuitable evolution domain or an IC that cannot be set consistently (true); false (default) downgrades to a DISPLAY_LEVEL warning and proceeds
       bool   REDUCED_DOF; //!< setup() returns false on a structurally IC/BC-inconsistent reduced system (true); false downgrades to a warning and proceeds (rank-revealing solve)
     } FATAL;
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
     Options
@@ -1408,27 +1925,6 @@ public:
     }
 
 
-  using OCBase::VarType;
-  using OCBase::Exceptions;
-  using OCBase::t_Dom;
-
-
-
-
-
-
-
-
-
-
-
-  typedef std::map< FFVar, std::tuple< size_t, size_t, std::vector<size_t> >, lt_FFVar >               t_Blk;
-  typedef std::map< long, std::pair< int, size_t > >                                                   t_Typ;
-  typedef FADType<double>                                                                              t_FAD;
-
-
-
-
   //! @brief Physical equation-node metadata after interface filtering.
   //!
   //! `retained` is true when the physical equation row is present in the
@@ -1476,116 +1972,6 @@ protected:
 protected:
 
 
-
-
-
-  //! @brief Map of dependencies against variable type and index
-  t_Typ                              _mDep;
-
-
-  //! @brief vector of constant dependencies
-  std::vector<FFDep>                 _depCst;
-
-  //! @brief vector of constant collocations
-  std::vector<OCVar<double>>         _OCCst;
-
-  //! @brief vector of constant collocations
-  std::vector<OCVar<FFDep>>          _OCDepCst;
-
-
-
-  //! @brief vector of domain dependencies
-  std::vector<FFDep>                 _depDom;
-
-  //! @brief vector of domain collocations
-  std::vector<OCVar<double>>         _OCDom;
-
-  //! @brief vector of domain collocations
-  std::vector<OCVar<FFDep>>          _OCDepDom;
-
-
-
-
-  //! @brief Cache for row-specific auxiliary-direction expression lookups.
-  mutable std::map<std::tuple<size_t,int,size_t>,bool> _eqnAuxDirCache;
-
-
-
-  //! @brief Map from input to the FFDom of each of its domains: the domain's grid with the input's declared
-  //! collocation applied.  Derived at setup from FFModel's declaration; also pinned per window when marching.
-  typedef std::map< FFVar, t_Dom, lt_FFVar >  t_Coll;
-
-  //! @brief optional per-input collocation discretisations. Keys are input variables, values are maps from physical domain variables to the collocation rule used to parameterise that input along that domain. Missing entries mean: use the state/domain discretisation in _mDom.
-  t_Coll                             _mInpDisc;
-
-  //! @brief Moving-mesh (r-adaptive) specification for one domain direction.
-  //! A direction registered through OCFESLV::add_adaptive_domain() is discretised on a fixed uniform
-  //! computational mesh xi in [0,1] (its registered FFDom); a solved mesh state x(xi,t) maps xi onto
-  //! the physical extent [lo_dom, up_dom] of that same FFDom, and follows the equidistribution
-  //! d/dxi(M x_xi) = 0 for the monitor M.  Only an explicit monitor expression is supported.
-  //! Solver-side type, held in the model's UsrData because the declaration carries it; the discretisation
-  //! it describes is applied here.
-  struct MeshAdaptSpec {
-    FFVar monitorExpr;  //!< explicit monitor M(xi,t); used iff hasMonitorExpr
-    bool  hasMonitorExpr = false;  //!< must be true: there is no built-in monitor
-  };
-
-  //! @brief Declared moving-mesh (r-adaptive) specifications per domain direction, as given to
-  //! add_adaptive_domain(); the physical extent is read from the direction's FFDom.
-  std::map<FFVar,MeshAdaptSpec,lt_FFVar>  _adaptDomUsr;
-
-
-
-  //! @brief vector of input dependencies
-  std::vector<FFDep>                 _depInp;
-
-  //! @brief vector of input collocations
-  std::vector<OCVar<double>>         _OCInp;
-
-  //! @brief vector of input collocations
-  std::vector<OCVar<FFDep>>          _OCDepInp;
-
-  //! @brief vector of input block data
-  t_Blk                              _blkInp;
-
-
-
-  //! @brief Stage 1: k = n_trace_var - rank(B) as computed from the DRAFT by
-  //! _build_frozen_trace_projection.  Cross-checked against the value
-  //! interface_rank_symmetry computes from the COMMITTED plan; a disagreement means the
-  //! two are seeing different blocks and the projection would act on the wrong one.
-  //! @brief (state, direction, element, node) triples whose C0 claim was suppressed by
-  //! FIX 1 or FIX 3.  Keyed exactly as a claim is keyed, with no equation-row component,
-  //! so a claim emitted for a suppressed triple is detectable as a leak.
-  //! MUTABLE: the claim-emission scan that populates this runs in a const context, and
-  //! this is a diagnostic-only record that no behaviour depends on.
-  mutable std::set<std::tuple<size_t,size_t,size_t,size_t>> _pinSuppressedTriples;
-
-  //! @brief Per-state counts of C0 claims suppressed by FIX 1 (pointwise pin) and FIX 3
-  //! (closure over jointly-pinned states), summarised once per plan build.  NOTE these are
-  //! per equation-row VISIT, not per claim: a claim may be emitted from several rows, and
-  //! FIX 3 RELOCATES a claim rather than removing it, so the claim count does not move.
-  mutable std::map<size_t,size_t> _pinSuppressCount1, _pinSuppressCount3;
-
-  size_t                             _traceProjK    = 0;
-  size_t                             _traceProjNTau = 0;
-  //! @brief Stage 1: true once C_tilde=(I-P)C and the P block have been written into the
-  //! plan's continuity rows.  The rank-symmetry audit compares against rank(C_tilde)=r
-  //! rather than n_trace_var once this is set, since the projected system enforces r
-  //! conditions by design rather than by deficiency.
-  bool                               _traceProjApplied = false;
-  size_t                             _traceProjRank    = 0;
-
-  //! @brief one-shot guard for the `[stage2-preflight]` line
-  //! emitted from the _eval_eqn row-count audit.
-  //!
-  //! MUTABLE: _eval_eqn() is const and the flag records only that a diagnostic line has
-  //! already been printed for this OCFESLV instance; no behaviour depends on it.  Deliberately
-  //! NOT propagated by deep_copy_from(): a copied environment is a different process-visible
-  //! object and should emit its own line, and a duplicate diagnostic line is harmless where
-  //! a missing one is not.
-  mutable bool                       _stage2PreflightReported = false;
-
   // ---------------------------------------------------------------------------
   // rev107 [taucol]: observation state for the direct named-column instrument.
   // ---------------------------------------------------------------------------
@@ -1598,84 +1984,9 @@ protected:
   // half.  That direction matters: the assembly half must not re-derive which rows
   // host a tau or the two halves stop being independent observations.
 
-  //! @brief receiver row -> the explicit tau column(s) injected into it (plan half).
-  //!
-  //! FULLY QUALIFIED, deliberately.  This block sits ~115 lines ABOVE the
-  //! `using FrozenPhysicalResidualRowKey = OCPlan::FrozenPhysicalResidualRowKey;`
-  //! alias, so the short name is not in scope here.  OCPlan is complete at this
-  //! point (ocplan.hpp is included before the class), and OCFESLV is a friend of
-  //! OCPlan, so the nested type is reachable.  Writing it out costs nothing and
-  //! removes any dependence on where the alias block happens to sit -- moving
-  //! this declaration and moving the alias are then independent edits.
-  mutable std::map<OCPlan::FrozenPhysicalResidualRowKey,
-                   std::vector<std::pair<size_t,double>>> _tauHostRows;
-  //! @brief pivot index -> (tau column -> its coefficient in that pivot row).
-  //! Needed to evaluate the DELIVERED coefficient: a surviving row emits
-  //! R_k - sum_p y_p * R_p, so a tau's net coefficient there is its coefficient
-  //! in row k MINUS y_p times its coefficient in each pivot row p.  Structural
-  //! survival does not imply a non-zero net (measured).
-  mutable std::map<size_t,std::map<size_t,double>>  _tauPivotCoef;
-  //! @brief tau column -> largest |net delivered coefficient| over surviving rows.
-  mutable std::map<size_t,double>                   _tauNetMax;
-  //! @brief tau column -> number of times the eval-time injection actually executed.
-  mutable std::map<size_t,size_t>            _tauInjectCount;
-  //! @brief tau column -> host rows that survived LOOP 2 / were dropped as pivot / as exact.
-  mutable std::map<size_t,size_t>            _tauFateEmit;
-  mutable std::map<size_t,size_t>            _tauFatePivot;
-  mutable std::map<size_t,size_t>            _tauFateExact;
-  //! @brief tau column -> pivot indices its dropped host rows occupy.
-  mutable std::map<size_t,std::set<size_t>>  _tauPivotOfCol;
-  //! @brief pivot index -> number of SURVIVING rows whose Schur correction references it.
-  //! This is the "after Schur substitution" half: a dropped pivot row is not necessarily
-  //! lost, because its value is subtracted into every corrected row.  Zero here means the
-  //! coupling really did leave the system.
-  mutable std::map<size_t,size_t>            _tauCorrRefs;
-  //! @brief one-shot guard for the [taucol/assembly] report.
-  mutable bool                               _tauColAssemblyReported = false;
-  //! @brief set by the PLAN half once _tauHostRows is populated.
-  //!
-  //! ORDER GUARD, and it is load-bearing.  _audit_strong_interface_rows() runs a dry
-  //! FFDep pass through _eval_eqn -- twice from setup() and once from deep_copy_from()
-  //! -- and at least one of those calls precedes the plan half in source order.  Without
-  //! this flag the assembly recorders fire on a pass where _tauHostRows is still empty,
-  //! print a report that observed nothing, and LATCH _tauColAssemblyReported, suppressing
-  //! the real one.  That is a diagnostic producing plausible output from code that was not
-  //! measuring anything -- the failure mode this instrument exists to avoid.
-  //!
-  //! Requiring it makes the call ORDER NON-LOAD-BEARING: move the plan half anywhere
-  //! after the commit and the assembly half still attaches to the first eval that follows.
-  mutable bool                               _tauColPlanReady = false;
-
-
-
-  //! @brief vector of state dependencies
-  std::vector<FFDep>                 _depVar;
-
-  //! @brief vector of state collocations
-  std::vector<OCVar<double>>         _OCVar;
-
-  //! @brief vector of state collocations
-  std::vector<OCVar<FFDep>>          _OCDepVar;
-
-  //! @brief vector of state block data
-  t_Blk                              _blkVar;
-
-
-
-  //! @brief vector of equation dependencies
-  std::vector<FFDep>                 _depEqn;
 
   //! @brief vector of output-function dependencies
   std::vector<FFDep>                 _depFct;
-
-  //! @brief equation/output collocation workspace
-  OCVar<double>                      _OCEqn;
-
-  //! @brief equation/output dependency collocation workspace
-  OCVar<FFDep>                       _OCDepEqn;
-
-  //! @brief equation/output forward-AD collocation workspace
-  mutable OCVar<t_FAD>               _OCFEqn;
 
 
   //! @brief vector of equation subgraphs
@@ -1693,49 +2004,11 @@ protected:
   //! @brief Count of collocated states and generated trace/tau unknowns during setup (constants in _vCst excluded)
   size_t                             _nCollVar = 0;
 
-  //! @brief Number of generated trace/tau unknowns appended after state coefficients.
-  size_t                             _nTraceVar = 0;
-
-  //! @brief Offset of generated trace/tau unknowns inside the var[] vector.
-  size_t                             _traceVarOffset = 0;
-
-  //! @brief Number of setup-retained exact trace constraints.
-  size_t                             _nTraceConstraint = 0;
 
   // ------------------------------------------------------------------
   // Interface plan — owned by OCPlan, driven by OCFESLV::setup()
   // ------------------------------------------------------------------
 
-  //! @brief Sealed frozen interface plan consumed by _eval_eqn / _eval_fct.
-  //!
-  //! All plan data (receiver edges, weak-SAT terms, exact trace rows,
-  //! IC_STRONG projection, plan dimensions) live in this object.  OCFESLV
-  //! builder methods populate a transactional OCPlan::InterfacePlanDraft,
-  //! validate it via _plan.validate_draft(), and commit it atomically via
-  //! _plan.commit_draft().  _eval_eqn() reads the plan exclusively through
-  //! OCPlan's const query interface.
-  mutable OCPlan _plan;
-
-  //! @brief True only during OCFESLV::_build_interface_plan_draft().
-  //!
-  //! Kept as a separate OCFESLV flag (not inside OCPlan) so that plan
-  //! builders — which are OCFESLV private methods — can assert the build
-  //! is active without exposing a mutable setter through OCPlan's public API.
-  mutable bool _interfacePlanBuildAllowed = false;
-
-  // Bring OCPlan nested types into OCFESLV's protected scope so that all
-  // private builder methods and inline implementations can use the short
-  // names without qualification, preserving maximum source compatibility.
-  using InterfacePlanState           = OCPlan::State;
-  using t_FrozenInterfaceClaimKey    = OCPlan::t_FrozenInterfaceClaimKey;
-  using t_InterfaceClaimKey          = OCPlan::t_InterfaceClaimKey;
-  using InterfaceReceiverEdge        = OCPlan::InterfaceReceiverEdge;
-  using FrozenWeakSatTerm            = OCPlan::FrozenWeakSatTerm;
-  using FrozenTraceConstraintTerm    = OCPlan::FrozenTraceConstraintTerm;
-  using FrozenPhysicalResidualRowKey = OCPlan::FrozenPhysicalResidualRowKey;
-  using FrozenStrongTauElimination   = OCPlan::FrozenStrongTauElimination;
-  using InterfacePlanDraft           = OCPlan::InterfacePlanDraft;
-  using InterfaceEdgeSource          = OCPlan::InterfaceEdgeSource;
 
   //! @brief Internal exact-interface claim occurrence key.
   struct t_InterfaceClaimOccurrenceKey {
@@ -1755,7 +2028,6 @@ protected:
       return kind < o.kind;
     }
   };
-
 
 
   struct t_InterfaceTensorCornerDim {
@@ -1810,15 +2082,11 @@ protected:
     }
 
 public:
-  //! @brief One recorded coupling decision: the value, whether it was RESCUED (source is not the
-  //! principal symbol, i.e. the number was substituted rather than read from the model), and how many edges.
-  struct t_CouplingRecord { double value = 0.; bool refused = false; size_t n = 0; };
 
   //! @brief The coupling decisions of the last setup, for a tailored driver to assert on.
   std::map<std::pair<size_t,size_t>,t_CouplingRecord> const& coupling_log() const { return _couplingLog; }
 
 protected:
-  mutable std::map<std::pair<size_t,size_t>,t_CouplingRecord> _couplingLog;
 
   bool _load_frozen_interface_plan
     ( std::map<t_InterfaceClaimKey,size_t>& claims ) const;
@@ -1987,168 +2255,14 @@ protected:
   //! @brief Count of collocated inputs during setup (constants in _vCst excluded)
   size_t                             _nCollInp = 0;
 
-  //! @brief Two-pass IC_STRONG DROP (explicit-tau hybrid): redundant
-  //! (column-dependent / implied) continuity claim keys found in pass 1 and
-  //! excluded from allocation in pass 2.  Empty for every column-rank-full plan
-  //! (PDE2/3/4), so the two-pass is a no-op there.
-  mutable std::set<t_FrozenInterfaceClaimKey> _strong_dropped_claims;
-  //! @brief C2b: claims whose rescued receivers must NOT be silenced under EXACT_NATURAL, because the
-  //! redundancy pass found their multiplier column dependent with only the natural receiver -- restored on the
-  //! two-pass re-run ("silence where rank allows").  Cleared with _strong_dropped_claims.
-  mutable std::set<t_FrozenInterfaceClaimKey> _exact_natural_restored;
-  //! @brief 2026-10-16: claims whose natural receiver was PROMOTED from a defining row by the per-node matching.
-  //! Natural for the pivot, NOT for the exact-natural silencing of their other edges: on OCFE_zchain silencing
-  //! those edges removed the projector's support (9 PASS -> 3), so a promoted claim keeps its duplicates live.
-  mutable std::set<t_FrozenInterfaceClaimKey> _promotedNatural;
-
-  //! @brief Why each IC_STRONG claim was kept as an EXPLICIT tau rather than eliminated.
-  //!
-  //! 1 = verify-protected AND rank-extending  (item 10 step 3, DROP_REDERIVE): a needed
-  //!     continuity the receiver-B proxy mis-flagged as redundant.  Eliminating it through
-  //!     the Schur would demand a corner copy the joint tau/geometric-C0 assignment cannot
-  //!     supply, so it is realised the IC_TRACE way instead.
-  //! 2 = every replacement candidate is an auxiliary LINK row: exact-replacing would consume
-  //!     that auxiliary's defining equation and turn the auxiliary into a null direction.
-  //! 3 = verify-protected but NOT rank-extending (same reason as 1, different branch).
-  //!
-  //! NOTE: none of these is "no pivot was available" -- an earlier version of the census
-  //! said that and it was wrong.  These are DELIBERATE keep-explicit routes chosen to avoid
-  //! a worse failure elsewhere.  What is NOT deliberate is that the promised "explicit tau
-  //! unknown PLUS a real continuity row" appears to deliver the column but not the row.
-  mutable std::map<t_FrozenInterfaceClaimKey,int> _keepExplicitReason;
-  //! @brief Set when pass 1 identifies droppable redundant claims; signals
-  //! _build_interface_plan_draft to re-run the pipeline excluding them.
-  mutable bool                       _strong_redundancy_pending = false;
-  //! @brief A RESTORE rebuild is pending (2026-10-06, WORKPLAN 1.5): EXACT_NATURAL returned silenced claims to their
-  //! natural receivers and the plan must be re-derived with them -- no claim dropped.  Booked on its own retry, so
-  //! that a DROP (a genuinely redundant claim excluded) can still follow it: a model whose pass 0 restores and whose
-  //! pass 1 flags redundant claims (OCFE_zindex's chain, high-index in z, under IC_STRONG) used to exhaust the single
-  //! DROP retry on the restore and fail at the exclusion it needed.
-  mutable bool                       _strong_restore_pending    = false;
-
-
-
-  //! @brief one-shot guard so the promotion requester cannot re-fire on its own
-  //! rebuild pass.  Cleared once per `_build_interface_plan_draft` call, alongside
-  //! `_strong_dropped_claims`.
-  mutable bool                       _promotionRequested = false;
-
-  //! @brief state retained so the post-solve audit can evaluate the
-  //! violation IC_TRACE absorbs into beta.  Populated ONLY under IC_TRACE with the projection
-  //! applied and CRONOS_AUDIT_BETA set, so production pays nothing.
-  //!
-  //! THE IDENTITY BEING MEASURED.  The applied form appends eps*P coefficients to the
-  //! continuity rows, so row i reads  (C x)_i + eps*(P lambda)_i + r_c,i = 0.  With P = Z Z^T
-  //! and Z^T Z = I, projecting on Z^T gives
-  //!
-  //!     eps * beta  =  - Z^T ( C x + r_c )  =  - Z^T r_c^raw ,      beta = Z^T lambda
-  //!
-  //! i.e. `eps*||beta||` IS the norm of the UNPROJECTED continuity violation lying in
-  //! null(B) -- the part of the claim set IC_TRACE does not enforce but absorbs.  Roadmap B5
-  //! proves that block imposes nothing on x; this measures how much it is carrying.
-  //!
-  //! FALSIFIABLE SELF-TEST, and it should be run before the number is believed: sweep
-  //! INTERFACE.TRACE_PROJ_EPS.  `eps*||beta||` must be eps-INDEPENDENT (it equals a fixed violation)
-  //! while `||beta||` scales as 1/eps.  If it does not, the instrument is wrong, not the model.
-  mutable arma::mat                  _betaZ;         //!< m x k null basis of B
-  mutable std::vector<size_t>        _betaColOf;     //!< dense tau index -> var[] column
-  mutable double                     _betaEps = 0.;  //!< eps actually applied
-  mutable bool                       _betaReady = false;
-
-  //! @brief per-null-direction class, CROSS-domain (true) or intra-domain (false),
-  //! so the absorbed violation can be split between the two kernel families.
-  //!
-  //! WHY THE SPLIT IS WELL DEFINED.  A basis of null(B) is not unique, so "which direction"
-  //! is generally basis-dependent.  Here it is not: Z is built COMPONENT-WISE over the
-  //! connected components of the claim/receiver-row bipartite graph, so every column has
-  //! support inside ONE component, and the cross/intra label is a property of the component
-  //! rather than of the basis chosen inside it.
-  //!
-  //! MEASURED DECOMPOSITION (MMPDE13, confirmed by forward prediction at two t-meshes):
-  //!     intra = (nel_xi - 1)                     -- NEL_T-independent; the lifting-alias
-  //!                                                 family that PDE2/PDE5/PDE9 also carry
-  //!     cross = 2*(nel_xi - 1)*(NEL_T - 1)       -- two per interior t-seam node; no
-  //!                                                 counterpart in any fixed-mesh control
-  mutable std::vector<char>          _betaDirCross;
-
-  //! @brief Continuity claim keys the redundancy detector must NOT drop, kept
-  //! explicit instead (item 10 step 3, DROP_REDERIVE).  Populated by the driver
-  //! from verify_interface_drop's over-drop set between re-derive iterations and
-  //! consumed by _detect_redundant_continuity_claims.  Unlike _strong_dropped_-
-  //! claims it is NOT cleared at build start (it must persist across the
-  //! re-setup of a re-derive sequence); it is cleared only on a full reset /
-  //! deep_copy / via clear_protected_interface_claims().
-  mutable std::set<t_FrozenInterfaceClaimKey> _strong_protected_claims;
-  //! @brief IC_STRONG taus the trace projector reaches; kept explicit on the promotion rebuild.
-  mutable std::set<t_FrozenInterfaceClaimKey> _strong_promoted_claims;
-  mutable bool                                _strong_promotion_pending = false;
-
-  //! @brief Structural determinacy numbers of the last applied GLOBAL plan build (C4): the tau-block rank
-  //! deficit the builder predicts, and the cluster count.  Measured corpus-wide to equal the
-  //! SPQR defR on 96 of 101 programs and to over-report on the other 5 -- never the reverse.
-  mutable long _structDeficit = -1;
-  mutable long _structDeficientClusters = -1;
-
-
-  //! @brief per state, [0] edges whose coupling was DERIVED from the receiving row's constant c0,
-  //! [1] edges REFUSED because that coefficient is not constant (forced value kept, edge labelled undefined).
-  mutable std::map<size_t,std::array<size_t,2>> _rescueC2;
-  //! @brief per state, WHY C2 refused -- 1 the receiving row is in no symbol table (boundary or
-  //! demoted), 2 that table was not computed, 3 the state is not one of its columns, 4 the coefficient is not
-  //! constant, 5 it is the CONSTANT ZERO (the state enters the row only differentiated: no c0 exists).
-  mutable std::map<size_t,std::array<size_t,8>> _rescueC2Why;
-  //! @brief per state, for each zero-absent refusal, what the receiving row contains -- whether the
-  //! claimed state occurs in it at all, in which directions it is differentiated there, and the claim's own
-  //! direction.  Report-only; it decides whether those edges are a coupling question or a receiver-graph one.
-  mutable std::map<size_t,std::map<std::string,size_t>> _rescueC2Zero;
-
-  //! @brief Per-state receiver-edge audit for the SAT-coupling path (diagnostic only).
-  //!
-  //! A receiver edge acquires a nonzero coupling in one of three ways: from the block
-  //! principal symbol (states present in sym.vState), or -- when _sat_coupling returns
-  //! numerically ZERO -- by one of two rescues, auxiliary_algebraic_receiver_state or
-  //! geometric_c0_receiver_state, each of which forces coupling = 1.  If the SAT coupling
-  //! is zero and NEITHER rescue fires, the edge keeps coupling = 0 and its DEFAULT label
-  //! PRINCIPAL_SYMBOL: a null row in the augmented interface system, i.e. exactly the
-  //! "tier-0 Newton singular on the augmented interface system" failure.
-  //!   Counters per state id: [0] edges on the SAT path, [1] SAT coupling was zero,
-  //! [2] rescued as AUXILIARY_ALGEBRAIC, [3] rescued as GEOMETRIC_C0, [4] LEFT AT ZERO.
-  //! a[4] > 0 is the defect.
-  mutable std::map<size_t,std::array<size_t,5>> _ifaceEdgeAudit;
-  mutable std::map<size_t,double>               _ifaceEdgeMaxSat;
-
-  //! @brief Work vector for collocation propagataion through DAG
-  std::vector<OCVar<double>>         _wrkOC;
-
-  //! @brief Work vector for collocation propagataion through DAG
-  std::vector<OCVar<FFDep>>          _wrkOCDep;
-
-  //! @brief Forward-AD state collocation cache used by deriv()
-  mutable std::vector<OCVar<t_FAD>>  _OCFVar;
-
-  //! @brief Forward-AD input collocation cache used by deriv()
-  mutable std::vector<OCVar<t_FAD>>  _OCFInp;
-
-  //! @brief Forward-AD domain collocation cache used by deriv()
-  mutable std::vector<OCVar<t_FAD>>  _OCFDom;
-
-  //! @brief Forward-AD constant collocation cache used by deriv()
-  mutable std::vector<OCVar<t_FAD>>  _OCFCst;
 
   //! @brief Forward-AD DAG work vector used by deriv()
   mutable std::vector<OCVar<t_FAD>>  _wrkOCF;
 
-  //! @brief Forward-AD equation residual values used by deriv()
-  mutable std::vector<t_FAD>         _FEqn;
 
   //! @brief Forward-AD output function values used by deriv()
   mutable std::vector<t_FAD>         _FFct;
 
-  //! @brief Forward-AD state seeds used by deriv()
-  mutable std::vector<t_FAD>         _FVar;
-
-  //! @brief Forward-AD input seeds used by deriv()
-  mutable std::vector<t_FAD>         _FInp;
 
   //! @brief Cached row-wise sparsity pattern of the equation Jacobian. Columns are stacked as [collocated states, collocated inputs]. Thus columns 0.._nCollVar-1 correspond to state coefficients and columns _nCollVar.._nCollVar+_nCollInp-1 correspond to input coefficients.
   std::vector< std::vector<size_t> > _jacPatternEqn;
@@ -2162,28 +2276,10 @@ protected:
   bool                               _jacAllEqnLinear = false;
   bool                               _jacAllFctLinear = false;
 
-  //! @brief Lightweight dependency-update plan used by eval() to avoid map lookups in every element block.
-  struct t_DepUpdate
-  {
-    int                              typ = 0;
-    size_t                           pos = 0;
-  };
-  std::vector< std::vector<t_DepUpdate> > _depPlanEqn;
-  std::vector< std::vector<t_DepUpdate> > _depPlanFct;
 
   //! @brief Cached output evaluation domains used by eval_fct().
   std::vector< std::set<FFVar,lt_FFVar> > _fctEvalDom;
-  //! @brief Per-equation evaluation domain: the distributed directions each equation's residual
-  //! touches (state/input domains referenced by its subgraph).  Equation analogue of _fctEvalDom.
-  //! For a domain-less equation these are the FFIntegral-reduced ("free") directions accumulated
-  //! over in _eval_eqn LOOP 2 (section 4).
-  std::vector< std::set<FFVar,lt_FFVar> > _eqnEvalDom;
-  //! @brief Per-equation OpEval (FFEval) point reductions: direction -> target physical coordinate.
-  std::vector< std::map<FFVar,double,lt_FFVar> > _eqnEvalPoint;
-  std::vector< std::map<FFVar,int,lt_FFVar> > _eqnEvalSide;   //!< per equation, the SIDE of each _eqnEvalPoint direction
 
-  //! @brief Cached physical node coordinates by domain variable and element.
-  std::map<FFVar,std::vector<std::vector<double>>,lt_FFVar> _nodeBlockCache;
 
   //! @brief Cached sparse affine residual/output map for purely linear rows.
   struct t_LinearRow
@@ -2414,12 +2510,10 @@ protected:
     const;
 
 
-
   //! @brief True when an auxiliary state represents a derivative in a given direction.
   bool _auxiliary_state_in_direction
     ( FFVar const& state, FFVar const& dom )
     const;
-
 
 
   //! @brief True when a specific LINK equation defines an auxiliary in a given direction.
@@ -2628,8 +2722,6 @@ public:
   //! (not set up), never half-built.
   bool deep_copy_from
     ( OCFESLV const& src );
-
-
 
 
   //! @brief Expected behaviour for built-in interface-plan diagnostics.
@@ -3121,9 +3213,6 @@ public:
     }
 
 
-
-
-
   //! @brief Flag a domain direction as MOVING-MESH (r-adaptive).
   //! Mirrors set_evolution_domain: records intent in _usr; validated at setup().
   //! The direction keeps its registered FFDom (finite-element count, collocation
@@ -3179,30 +3268,10 @@ public:
     { return _adaptDomUsr; }
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
   //! @brief Get flat index to start of block ndx_el for input var in data array
   size_t pos_input
     ( FFVar const& var, std::map<FFVar, size_t, lt_FFVar> const& ndx_el )
     const;
-
-
-
-
 
 
   //! @brief Get flat index to start of block ndx_el for state var in data array
@@ -3729,21 +3798,6 @@ public:
     ( double w );
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
   //! @brief Evaluate collocated equation residuals and post-evaluation outputs in double arithmetic
   bool eval
     ( double* eqn, double* fct, double const* var, double const* inp, double const* cst );
@@ -3800,8 +3854,6 @@ public:
   //! post-solve continuity assertion remains a separate, explicit step.
   SolveReport solve
     ( double* var, double const* inp = nullptr, double const* cst = nullptr );
-
-
 
 
   // ============================ HOMOTOPY / CONTINUATION ============================
@@ -4132,8 +4184,6 @@ public:
     }
 
 
-
-
   //! @brief Compute and cache the PDE classification using stored/default references. Uses the user-specified evolution domain, or infers one from INITIAL equations or domain names. State references default to zero, domain references to midpoints, and constant references to set_constant values when available.
   bool classify_pde
     ()
@@ -4155,25 +4205,6 @@ public:
   // variable declarations that follow.
   // ======================================================================
 
-
-
-
-
-  //! @brief Post-index-reduction structural DOF audit (max-bipartite matching on
-  //! the reduced collocation sparsity).  Filled by _audit_reduced_dof() at end of
-  //! setup(); a nonzero deficiency is a genuine structural rank deficiency.
-  struct t_DofAudit
-  {
-    bool   ran        = false;  //!< audit executed (reduction happened)
-    bool   trace      = false;  //!< ran on an interface-trace augmented pattern (advisory verdict)
-    size_t rows       = 0;      //!< collocation equation rows
-    size_t cols       = 0;      //!< variable columns (max sparsity index + 1)
-    size_t rank       = 0;      //!< structural (max-matching) rank
-    size_t deficiency = 0;      //!< min(rows,cols) - rank  (0 => full structural rank)
-    bool   square     = false;  //!< rows == cols
-    bool   ok() const { return ran && square && deficiency == 0; }
-    void   clear() { *this = t_DofAudit{}; }
-  };
 
   //! @brief sparse residual Jacobian assembled at a supplied var vector by
   //! assemble() / assemble_window().  Solver-independent; the sparsity pattern is
@@ -4240,10 +4271,7 @@ public:
   };
 
 
-
 protected:
-
-
 
 
   //! @brief Traces of all states in one classified block on an internal face.
@@ -4267,8 +4295,6 @@ protected:
   };
 
 
-
-
   //! @brief Build left/right traces for all symbolic states in a block.
   template <typename U>
   bool _interface_traces
@@ -4276,10 +4302,6 @@ protected:
       std::map<FFVar,size_t,lt_FFVar> const& ndx_left,
       std::map<FFVar,size_t,lt_FFVar> const& ndx_right,
       size_t face_stride, size_t face_outer, U const* var, bool check ) const;
-
-
-
-
 
 
   //! @brief Recorded evolution-element boundaries (the march grid) when SOLVE.MARCHING
@@ -4314,7 +4336,6 @@ protected:
   };
   std::vector<t_MarchJump> _marchJumps;
   bool                     _marchJumpsReady = false;
-
 
 
   //! @brief Marching general-IC continuity override (for transfer states designated with the
@@ -4482,37 +4503,7 @@ protected:
   std::vector<double>                       _primalVar;
   bool                                      _primalValid = false;
 
-  //! @brief Cached structural reduced dependency pattern (reduced_dependency_pattern()).  Computed
-  //! once on first access and reused by reference; invalidated by setup(), register_control(),
-  //! clear_controls() and deep_copy_from() -- anything that changes the model structure or the
-  //! control registry.
-  std::vector<std::vector<bool>>            _reducedDepPattern;
-  bool                                      _reducedDepValid = false;
 
-  //! @brief Cached residual-row provenance: _rowEqnNdx[out_row] = source equation index into _mEqn
-  //! (or -1 for plan-owned interface/trace rows).  Built once by _eval_eqn (the frozen plan makes it
-  //! eval-invariant) behind _rowProvenanceReady; invalidated by setup()/deep_copy_from().  Used to
-  //! resolve each marching-transfer state's INITIAL-closure rows for the k>0 continuity override.
-  mutable std::vector<int>                  _rowEqnNdx;
-  mutable bool                              _rowProvenanceReady = false;
-  //! @brief claim keys the legacy corner rule suppressed in the last receiver
-  //! synthesis (recorded at the suppression point; no behavioural effect).  Packed into
-  //! PlanInput::corner_suppressed_edges for the GLOBAL builder's shadow check.
-  mutable std::set<t_InterfaceClaimKey>    _cornerSuppressedClaims;
-  //! @brief claim keys suppressed as "pinned pointwise by an ALL-mask IC/BC"
-  //! (never realised by a claim); packed as PlanInput::unrealised_claims.
-  mutable std::set<t_InterfaceClaimKey>    _pinSuppressedClaims;
-  //! @brief claims whose exact trace row the tensor-corner MGS rank filter REJECTED
-  //! as linearly dependent on the accepted rows.  Homogeneous continuity rows, so dependence
-  //! means the condition is IMPLIED by rows the plan imposes -- enforced, not missing.  Packed
-  //! as PlanInput::rank_implied_claims and consumed by design §3.5.  NOT the same category as
-  //! _pinSuppressedClaims (those are genuinely unenforced).
-  mutable std::set<t_InterfaceClaimKey>    _rankImpliedClaims;
-  //! @brief true iff the plan being materialised carries GLOBAL decisions
-  //! (set when they are applied, cleared at each plan build).  The STRONG-side matcher
-  //! keys on THIS, never on the environment (keying on the environment breaks legacy
-  //! STRONG plans whenever CRONOS_PLAN_APPLY_GLOBAL is set).
-  mutable bool                             _planIsGlobal = false;
   //! @brief Per-element block solutions captured when OUTPUT.MARCH_STORE is set.
   std::vector<MarchBlock>                   _marchTrajectory;
 
@@ -4569,21 +4560,9 @@ protected:
   // The control registry (_controls, _nControlDof) is FFModel's -- see the note by
   // _on_controls_changed() above.  The uses below resolve to the inherited members unchanged.
 
-  //! @brief The marching context as seen by the DIRECTION-AGNOSTIC code (the OCVar environment,
-  //! the interface plan, the determinacy audits).  Those are built over the collocated
-  //! directions and must not read the marching driver's state directly: they ask this.  Phase 1
-  //! of the MoL work moves them into OCFEBASE, where this declaration goes with a "not marching"
-  //! default; OCFESLV then answers it from the members below.  Introduced as C0 so that every
-  //! later commit of that phase is a pure move.
-  struct MarchContext {
-    bool   in_march = false;   //!< a resident marching window is being assembled
-    size_t window   = 0;       //!< its index (meaningful when in_march)
-    size_t n_grid   = 0;       //!< size of the recorded march grid (N+1 for N steps; 0: none)
-    size_t n_steps  = 0;       //!< n_march_steps(): 0 when monolithic
-    bool   active   = false;   //!< SOLVE.MARCHING with a recorded grid of at least one step
-  };
-  virtual MarchContext _march_context
-    () const
+  //! @brief OCFEBASE::_march_context(), answered from the marching members below.
+  MarchContext _march_context
+    () const override
     {
       MarchContext m;
       m.in_march = _inMarch;  m.window = _marchWindow;
@@ -4594,7 +4573,6 @@ protected:
 
   //! @brief Reentrancy guard: true while _solve_marching() drives per-element solve()s.
   bool                                      _inMarch = false;
-  mutable bool                              _sampleOwnElement = false;   //!< sample_input: element-boundary nodes from their own element (transfer_terminal)
   size_t                                    _marchWindow = 0;      //!< resident window index during a marching solve; a distributed input matched to the evolution direction remaps its evolution element to this window (see the INPUT cases in the assembly)
   bool                                      _lastSolveMarched = false; //!< last solve() marched with a stored trajectory -> route eval_colloc reads through it
 
@@ -4757,15 +4735,7 @@ protected:
   void _eval_functions_captured( double const* var, double const* inp, double const* cst );
 
 
-
-
-
-
-  t_DofAudit                                _dofAudit;
   std::vector<t_Determinacy>                _determinacy;   //!< one entry per audited window
-  // rev139 (uniform-rule step 1): W-verdict restore
-  bool                                      _wdecideRetry = false;   //!< inside the one restore/revert re-derive
-  mutable bool                              _auditQuiet = false;     //!< audit stores, defers printing (restore-attempt recursion)
   //! @brief emit one stored [determinacy] line (verbatim the audit print;
   //! used by the audit itself and by the w-decide replay after a kept restore).
   void _print_determinacy_window( t_Determinacy const& D, size_t w ) const;
@@ -4787,34 +4757,6 @@ protected:
   static bool _null_basis( arma::sp_mat const& M, double tol_abs, size_t& rank_out, arma::mat& N );
 
 
-  //! @brief Item-11 Part-2 per-(primitive,direction) symbol interface read.
-  //! order/magnitude balance used by the symbol-AUTO resolver.  `order` is the
-  //! detected operator order in the direction (1 or 2); `order_gt2` flags a
-  //! nested aux chain (order>2, not handled — resolver must guard).  `via_aux`
-  //! is true when order>=2 was detected through a reduce_order auxiliary link
-  //! (i.e. a reduced direction).  `advection_dominated` is true when the
-  //! top-order (diffusive) term is sub-grid (k_h < k* = adv/diff), i.e. the
-  //! singular-perturbation corrector fires.
-  struct t_DirRead {
-    int    prim_col   = -1;
-    int    dir_idx    = -1;
-    int    order      = 0;
-    bool   order_gt2  = false;
-    bool   via_aux    = false;
-    double adv   = 0.;
-    double diff  = 0.;
-    double kstar = std::numeric_limits<double>::quiet_NaN();
-    double eps   = std::numeric_limits<double>::quiet_NaN();
-    double kh    = std::numeric_limits<double>::quiet_NaN();
-    bool   advection_dominated = false;
-  };
-  //! @brief Symbol interface reads per block id.  Populated read-only by
-  //! _compute_interface_reads() at classify time; consumed by the symbol-AUTO
-  //! resolver and the optional balance probe.  Always compiled.
-  std::map<int, std::vector<t_DirRead>>     _blockInterfaceRead;
-
-
-
   //! @brief Resolve the effective interface type for one equation/block/domain.
   Options::InterfaceType _resolve_interface_type
     ( FFModel::EqnOptions const* eqnopt, FFVar const* pdom, bool weak, int block_id )
@@ -4833,8 +4775,6 @@ protected:
   //! @brief Canonical block id for a physical IC_TRACE claim slot.
   int _trace_claim_block
     ( size_t state_id, size_t dom_id ) const;
-
-
 
 
   //! @brief Validate user-supplied incoming BCs at hyperbolic boundary faces:
@@ -4911,23 +4851,6 @@ protected:
       double const w   = _sat_iface_width( dom, iel_lo );
       return ( w > 0. ) ? ( nm1 * nm1 / w ) : 0.; }
 
-  //! @brief One cached principal-symbol SAT coupling entry.
-  struct t_SatCoupling
-  {
-    size_t state_pos;   //!< Position of the coupled state in _vVar.
-    long   dom_id;      //!< Identity (.id().second) of the coupled domain variable.
-    double value;       //!< Classified coupling A_dom[eqn_row, state_col].
-  };
-
-  //! @brief Per-equation SAT coupling table, indexed by position in _mEqn.
-  //! Built during setup after PDE classification has fixed the principal
-  //! symbols.  It is then consumed by the frozen interface-plan builders and
-  //! residual evaluation.  Empty when the model is not classified, in which
-  //! case _sat_coupling() falls back to structural derivative incidence.
-  mutable std::vector< std::vector<t_SatCoupling> > _satCoupling;
-  mutable bool                                      _satCouplingBuilt      = false;
-  mutable bool                                      _satCouplingClassified = false;
-  mutable size_t                                    _satCouplingSerial     = 0;
 
   //! @brief Build _satCoupling for the current classification signature.
   //! Called by setup immediately after classification; evaluation must not
@@ -4959,11 +4882,6 @@ protected:
   //! Options::FATAL.EVOLUTION_DOMAIN.  Returns false only on a fatal violation.
   bool _validate_evolution_domain
     () const;
-
-
-
-
-
 
 
   //! @brief Helper for copying optional input discretisation maps
@@ -5024,8 +4942,6 @@ protected:
   bool _check_input_continuity
     ( double const* var, double const* inp, double const* cst,
       double tol = 1e-6 ) const;
-
-
 
 
   //! @brief Count nonzero entries in a sparse row pattern
@@ -8160,10 +8076,6 @@ public:
     const;
 
 
-
-
-
-
   //! @brief The reduction auxiliary representing d(@p parent)/d(@p dom), or nullptr when
   //! order reduction created no such auxiliary for that (state, direction) pair.
   //!
@@ -8288,15 +8200,6 @@ protected:
 */
 
 
-
-
-
-
-
-
-
-
-
   //! @brief Stage-4: post-index-reduction structural DOF audit (max-bipartite
   //! matching on _jacPatternEqn); fills _dofAudit.  See t_DofAudit.
   void _audit_reduced_dof();
@@ -8375,9 +8278,6 @@ protected:
   //! @brief one line of SPQR's own statistics (CRONOS_SPQR_STAT=1, or under
   //! CRONOS_DEBUG_RANK).  Report-only; default off.
   static void _spqr_stat_report( t_SpqrStat const& S, char const* tag );
-
-
-
 
 
   //! @brief Item 11 Part-2: compute per-(primitive,direction) symbol interface
@@ -8578,8 +8478,6 @@ operator<<
 
   return os;
 }
-
-
 
 
 inline void
@@ -8824,11 +8722,6 @@ const
     return Options::IC_UPWIND;
   return Options::IC_VALUE;
 }
-
-
-
-
-
 
 
 inline bool
@@ -9218,7 +9111,6 @@ const
   }
   return false;
 }
-
 
 
 inline bool
@@ -10215,11 +10107,6 @@ const
 }
 
 
-
-
-
-
-
 inline OCFESLV::t_Coll
 OCFESLV::_copy_inp_disc
 ( t_Coll const& in, std::vector<FFVar> const& all,
@@ -10239,9 +10126,6 @@ OCFESLV::_copy_inp_disc
   }
   return out;
 }
-
-
-
 
 
 inline bool
@@ -10307,7 +10191,6 @@ OCFESLV::deep_copy_from
   for( auto& [inp, disc] : _mInpDisc )
     for( auto& [dom, opt] : disc )
       if( !opt.set_nodes() ) return false;
-
 
 
   
@@ -10560,7 +10443,6 @@ OCFESLV::deep_copy_from
 }
 
 
-
 // ===========================================================================
 // rev142c: SPQR's own accounting of the factorization, which we were already paying for
 // and then discarding.
@@ -10672,8 +10554,6 @@ OCFESLV::_keep_explicit_audit
        << ": the tau block holds more than the kept-explicit claims **";
   os << std::endl;
 }
-
-
 
 
 // ======================================================================
@@ -12325,15 +12205,6 @@ const
 }
 
 
-
-
-
-
-
-
-
-
-
 // ======================================================================
 // OCFESLV::_differential_core_shape        (rev94, USER-side, pre-reduction)
 // ======================================================================
@@ -12361,10 +12232,6 @@ const
   }
   cols = states.size();
 }
-
-
-
-
 
 
 // ======================================================================
@@ -12441,7 +12308,6 @@ OCFESLV::_audit_reduced_dof()
                  " with the reduced degrees of freedom.\n";
   }
 }
-
 
 
 // ======================================================================
@@ -14036,7 +13902,6 @@ OCFESLV::_audit_determinacy
 }
 
 
-
 // ======================================================================
 // OCFESLV::_compute_interface_reads   (item 11 Part-2: per-direction symbol read)
 // ======================================================================
@@ -14338,7 +14203,6 @@ OCFESLV::_compute_interface_reads
 }
 
 
-
 inline void
 OCFESLV::_classification_reference
 ( std::vector<double>& state_ref,
@@ -14399,13 +14263,8 @@ OCFESLV::_classification_reference
 // ======================================================================
 
 
-
 #ifdef MC__OCFESLV_REFERENCE_ROBUSTNESS_PROBE
 #endif // MC__OCFESLV_REFERENCE_ROBUSTNESS_PROBE
-
-
-
-
 
 
 //-----------------------------------------------------------------------------
@@ -14731,8 +14590,6 @@ OCFESLV::_validate_hyperbolic_incoming_bcs()
   }
   return ok;
 }
-
-
 
 
 // ======================================================================
@@ -17865,7 +17722,6 @@ OCFESLV::_build_frozen_trace_constraints_and_tau_terms
 
   return true;
 }
-
 
 
 inline bool
@@ -22949,13 +22805,11 @@ OCFESLV::_prepare_interface_plan_tables
   };
 
 
-
   // IC_STRONG row ownership and IC_TRACE exact-claim discovery are derived
   // from the IC_WEAK SAT receiver graph.  The structural donor taxonomy below
   // is deliberately secondary: it ranks admissible weak-SAT receiver rows, but
   // it is not allowed to create strong donors or trace claims that the weak
   // formulation would not have penalised in the same (row,state,direction) slot.
-
 
 
   auto state_by_id = [&]( size_t sid ) -> FFVar const*
@@ -28988,9 +28842,6 @@ const
     if( var.id() == cst.id() ) return true;
   return false;
 }
-
-
-
 
 
 inline size_t

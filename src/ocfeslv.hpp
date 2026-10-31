@@ -143,6 +143,316 @@ class OCFESLV
   template <typename U> friend class OCVar;
 
 public:
+  //! @brief The solver's options: OCFEBASE::Options -- INTERFACE, OUTPUT, AUDIT, DETERMINACY, FATAL, the
+  //! groups the collocation base reads -- plus SOLVE, SENSITIVITY and HOMOTOPY, which only the monolithic /
+  //! marching solver reads.  OCFEMOL carries none of these three (MoL phase 3, 31 Oct 2026).
+  struct Options
+  : public OCFEBASE::Options
+  {
+    enum DerivCacheType
+    {
+      DERIV_LAZY  = 0,
+      DERIV_EAGER = 1
+    };
+    enum LinearEvalCacheType
+    {
+      LINEAR_NONE  = 0,
+      LINEAR_LAZY  = 1,
+      LINEAR_EAGER = 2
+    };
+    //! @brief Sparse linear factorization backend for the internal LM/Newton solve.
+    //! SOLVE_SUPERLU uses arma::spsolve with SuperLU (requires the Armadillo build to
+    //! define ARMA_USE_SUPERLU); when it is not linked the solver transparently falls
+    //! back to a densifying LAPACK solve (one-time notice).  SOLVE_LAPACK forces the
+    //! densifying dense-LU path (small/debug systems).  The enum is left extensible for
+    //! a future UMFPACK/other direct backend without touching call sites.
+    enum SolveFactorization
+    {
+      SOLVE_SUPERLU = 0,  //!< sparse SuperLU (arma::spsolve), default. The solver only ever
+                          //!< factorizes the SPD/nonsingular damped operator (Js^T Js + lambda*D),
+                          //!< so there are no zero-pivot issues even on rank-deficient interface
+                          //!< Jacobians; sparse + fast on the large multi-block systems. Falls
+                          //!< back to dense LAPACK (with a one-time notice) if not linked.
+      SOLVE_LAPACK  = 1,  //!< densify the damped operator and use dense LU (debug / small systems)
+      SOLVE_SPQR    = 2   //!< sparse rank-revealing QR (SuiteSparseQR) min-2-norm least squares on
+                          //!< Js directly -- no Js^T Js, so no fill/condition squaring, and the
+                          //!< rank-revealing factor resolves the singular interface-augmented saddle
+                          //!< natively (the sparse analogue of the dense min-norm tier).  Requires a build
+                          //!< with SuiteSparseQR (-DCRONOS__WITH_SPQR, the GPL build); otherwise setup()
+                          //!< REFUSES it (BACKEND_UNAVAILABLE).  Always defined (2026-10-09), so a model
+                          //!< compiles -- and Python lists it -- in every build.
+    };
+    //! @brief Warm-start strategy for the per-element step of a SOLVE.MARCHING solve.
+    enum SolveWarmstart
+    {
+      REUSE       = 0,  //!< reuse the previous element's converged state as the next guess (free; default)
+      BROADCAST_IC = 1, //!< seed every evolution node of the next element with the transferred IC profile
+      EXTRAPOLATE = 2   //!< linear/quadratic extrapolation from the last one/two elements' terminals
+    };
+    enum NT_SKIP_MODE { NT_SKIP_ALWAYS=0, NT_SKIP_AUTO=1, NT_SKIP_NEVER=2 };
+
+    //! @brief The nonlinear solve: Newton/Levenberg-Marquardt control, linear backend, marching, reuse, evaluation caches, and the solver's own verbosity.
+    struct t_Solve
+    {
+      SolveFactorization FACTORIZATION;  //!< linear backend (default SOLVE_SUPERLU; see note)
+      bool   MARCHING;       //!< auto-march when AVAILABLE (evolution domain + >=1 differential state); else monolithic (default true)
+      double RES_TOL;        //!< accept on max|r| (1e-9)
+      //! @name Internal nonlinear-solve (LM/Newton) controls — see OCFESLV::solve().
+      //! Defaults reproduce the legacy driver harness numerics.
+      //!@{
+      int    MAX_ITER;       //!< max LM/Newton iterations (30)
+      SolveWarmstart WARMSTART; //!< per-element warm-start strategy for a SOLVE.MARCHING solve (default REUSE)
+      bool   VERBOSE;        //!< per-iteration LM/Newton trace to stdout (true)
+      bool   REUSE;          //!< reuse last converged monolithic solution at the same input (default true)
+      double LAMBDA0;        //!< initial LM damping (1e-8)
+      double LAMBDA_DROP;    //!< lambda *= this on an accepted LM step (0.25)
+      double LAMBDA_RAISE;   //!< lambda *= this on a failed factorization/step (10.0)
+      double LAMBDA_MIN;     //!< lambda floor (1e-14)
+      int    LS_MAX;         //!< backtracking line-search steps (24)
+      double ARMIJO_C;       //!< Armijo sufficient-decrease constant (1e-4)
+      bool   EQUILIBRATE;    //!< row/col inf-norm equilibration (true)
+      //! @brief Derivative sparsity/coloring cache policy.
+      //! DERIV_LAZY postpones FFDep sparsity propagation and coloring until a
+      //! derivative/sparsity query needs them; DERIV_EAGER preserves the older
+      //! setup-time behaviour.
+      DerivCacheType DERIV_CACHE;
+      //! @brief Linear residual cache policy.
+      //! When enabled, purely linear rows are evaluated by a cached sparse
+      //! affine map r = A z + b whenever the supplied constants match the
+      //! setup constants.  Nonlinear rows and changing constants fall back to
+      //! normal OCVar evaluation.
+      LinearEvalCacheType LINEAR_EVAL_CACHE;
+      //! @brief Solver-side verbosity, independent of the inherited DISPLAY_LEVEL: the model reports its plan,
+      //! claims and classification, the solver its iterations, factorisation and marching.  The default, -1,
+      //! follows the model's DISPLAY_LEVEL, resolved each time it is read (so a driver may set DISPLAY_LEVEL after
+      //! construction); set it in code to make the two differ.  Not an environment knob.  MAXTHREAD is deliberately not
+      //! duplicated -- it is a process-global RAII cap.
+      int DISPLAY_LEVEL;
+    } SOLVE;
+
+    //! @brief The linear solve inside the forward/adjoint sensitivity computation.
+    struct t_Sensitivity
+    {
+      bool   SPARSE;          //!< assemble the sensitivity Jacobian SPARSELY and solve with
+                                   //!< arma::spsolve (SuperLU) instead of a dense arma::mat + arma::lu.
+                                   //!<
+                                   //!< WHY.  The dense Jacobian is ~2.6 GB at 18202^2 and O(n^3) to
+                                   //!< factorise -- a scalability wall INDEPENDENT of the singularity
+                                   //!< question, and one that affects IC_WEAK fixed-mesh models too.
+                                   //!< It has simply not bitten yet because every fsens/asens driver in
+                                   //!< the corpus is small.  The primal path has been sparse throughout.
+                                   //!<
+                                   //!< WHAT IT DOES NOT DO.  Sparse LU is still LU.  It does NOT make
+                                   //!< the interface-augmented systems that fail today succeed -- it
+                                   //!< reports the same singularity, though it fails cleanly (SuperLU
+                                   //!< throws) instead of falling into a dense approximate solve that
+                                   //!< does not terminate usefully.  That is better DIAGNOSABILITY, not
+                                   //!< better capability.  Reliability is tier 1 (SPQR).
+                                   //!<
+                                   //!< This is TIER 0 of the eventual design, mirroring the primal:
+                                   //!< SuperLU normally, rank-revealing QR when nTrace > 0.
+                                   //!< Default ON; set false for the dense path.
+    } SENSITIVITY;
+
+    //! @brief Continuation in the parameters registered with add_homotopy().
+    struct t_Homotopy
+    {
+      bool   ENABLE;           //!< honour homotopy parameters registered with add_homotopy() (true).
+                                   //!< When false the schedule is IGNORED and solve() runs directly at the
+                                   //!< current input values -- useful for with/without contrast runs
+                                   //!< without unregistering the model's parameters.
+      bool   SOLVE_S0;         //!< solve the s = 0 problem BEFORE the ramp, so every trial restarts from an actual
+                               //!< solution rather than from the caller's initial vector (false: the ramp takes
+                               //!< that vector as its start, as always).  A failure at s = 0 is reported as "the
+                               //!< continuation has no starting point".  Costs one solve; on a model whose initial
+                               //!< vector is already near the s = 0 solution it can shift the path (MBC5fig_ebal:
+                               //!< one extra backtrack).  (false)
+      double STEP_CAP;         //!< max homotopy step in s, and the step the ramp STARTS at (0.1).
+                                   //!< PATH FIDELITY KNOB, and the one that matters: a converged step is
+                                   //!< NOT evidence of correctness -- too large a cap can move the
+                                   //!< corrector onto a different solution branch with no warning.
+      double STEP_GROW;        //!< step growth after an accepted step (1.4).  Only acts as the
+                                   //!< RECOVERY rate after a backtrack, since the ramp starts at the cap.
+      double STEP_SHRINK;      //!< step shrink after a failed step (0.5).
+                                   //!< *** REQUIRED: HOMOTOPY.STEP_GROW * HOMOTOPY.STEP_SHRINK < 1. ***  Otherwise a
+                                   //!< step near the critical size alternates fail/succeed forever (shrink
+                                   //!< then grow returns it above the failing value), wasting one solve per
+                                   //!< accepted step.  The asymmetry -- shrink fast, grow slowly -- is what
+                                   //!< makes the step ratchet down and settle.
+      double STEP_MIN;         //!< abandon stage below this step (1e-5)
+      bool   AUTO_DESTAGE;     //!< when a multi-parameter stage fails, split it into sequential
+                                   //!< single-parameter sub-stages from the point it reached, rather than
+                                   //!< giving up (true).  Announced LOUDLY on stderr and recorded in
+                                   //!< StageReport::destaged: needing it usually says something about the
+                                   //!< MODEL -- those parameters interact too strongly to move together --
+                                   //!< so it should be noticed, not silently absorbed.
+      bool   PREDICT;          //!< guarded extrapolation predictor (true)
+      int    PREDICT_ORDER;    //!< max order of the extrapolation from accepted points (2).
+                                   //!< 0 = plain reuse, 1 = secant (2 points), 2 = quadratic (3 points).
+                                   //!< Every candidate up to this order is TRIED and the smallest-residual
+                                   //!< one is kept, so raising it can only help: a worse extrapolation is
+                                   //!< discarded for the price of one residual evaluation.
+                                   //!< NOTE a TANGENT predictor is deliberately ABSENT.  It is redundant
+                                   //!< with the corrector's first Newton step: at a converged x(s) with the
+                                   //!< parameters moved to s+ds, r(x,p(s+ds)) ~ ds*dr/ds, so the first
+                                   //!< Newton step is -J^-1 r ~ ds*dx/ds -- the tangent itself.  Computing
+                                   //!< it explicitly would cost a Jacobian and a factorization to save the
+                                   //!< very iteration that produces it.  Extrapolation from already-accepted
+                                   //!< points needs neither.
+    } HOMOTOPY;
+
+
+    Options
+      ()
+      { reset(); }
+
+    Options& operator=
+      ( Options const& opt )
+      {
+        OCFEBASE::Options::operator=( opt );
+        SOLVE.DISPLAY_LEVEL = opt.SOLVE.DISPLAY_LEVEL;
+        SOLVE.DERIV_CACHE         = opt.SOLVE.DERIV_CACHE;
+        SOLVE.LINEAR_EVAL_CACHE   = opt.SOLVE.LINEAR_EVAL_CACHE;
+        SOLVE.MAX_ITER      = opt.SOLVE.MAX_ITER;
+        SOLVE.RES_TOL       = opt.SOLVE.RES_TOL;
+        SOLVE.LAMBDA0       = opt.SOLVE.LAMBDA0;
+        SOLVE.LAMBDA_DROP   = opt.SOLVE.LAMBDA_DROP;
+        SOLVE.LAMBDA_RAISE  = opt.SOLVE.LAMBDA_RAISE;
+        SOLVE.LAMBDA_MIN    = opt.SOLVE.LAMBDA_MIN;
+        SOLVE.LS_MAX        = opt.SOLVE.LS_MAX;
+        SOLVE.ARMIJO_C      = opt.SOLVE.ARMIJO_C;
+        SOLVE.EQUILIBRATE   = opt.SOLVE.EQUILIBRATE;
+        SOLVE.FACTORIZATION = opt.SOLVE.FACTORIZATION;
+        SOLVE.VERBOSE       = opt.SOLVE.VERBOSE;
+        _force_verbose_from_env( SOLVE.VERBOSE );   // rev115: AFTER the driver, not only before
+        SENSITIVITY.SPARSE      = opt.SENSITIVITY.SPARSE;
+        HOMOTOPY.ENABLE          = opt.HOMOTOPY.ENABLE;
+        HOMOTOPY.STEP_CAP        = opt.HOMOTOPY.STEP_CAP;
+        HOMOTOPY.STEP_GROW       = opt.HOMOTOPY.STEP_GROW;
+        HOMOTOPY.STEP_SHRINK     = opt.HOMOTOPY.STEP_SHRINK;
+        HOMOTOPY.STEP_MIN        = opt.HOMOTOPY.STEP_MIN;
+        HOMOTOPY.AUTO_DESTAGE    = opt.HOMOTOPY.AUTO_DESTAGE;
+        HOMOTOPY.SOLVE_S0        = opt.HOMOTOPY.SOLVE_S0;
+        HOMOTOPY.PREDICT         = opt.HOMOTOPY.PREDICT;
+        HOMOTOPY.PREDICT_ORDER   = opt.HOMOTOPY.PREDICT_ORDER;
+        SOLVE.MARCHING      = opt.SOLVE.MARCHING;
+        SOLVE.REUSE         = opt.SOLVE.REUSE;
+        SOLVE.WARMSTART     = opt.SOLVE.WARMSTART;
+        return *this;
+      }
+
+    void apply_environment_defaults
+      ()
+      {
+        OCFEBASE::Options::apply_environment_defaults();
+        // 2026-10-07 (WORKPLAN 3.A): the environment no longer sets an option that changes what is computed or decided --
+        // CRONOS_DETERMINACY_FATAL, _TOL, _BACKEND, CRONOS_SOLVE_FACTORIZATION, CRONOS_TRACE_PROJ_EPS, CRONOS_SAT_SIGMA0
+        // (and FFModel's CRONOS_CLASSIFY_ROBUST) are retired: the option is the interface.  The print-only switches above
+        // (audit reports, forced verbosity) remain, as diagnostics that instrument a whole sweep without editing drivers.
+        SOLVE.VERBOSE       = true;
+      }
+
+    void reset
+      ()
+      {
+        OCFEBASE::Options::reset();
+        SOLVE.DERIV_CACHE         = DERIV_LAZY;
+        SOLVE.LINEAR_EVAL_CACHE   = LINEAR_NONE;
+        SOLVE.MAX_ITER      = 30;
+        SOLVE.RES_TOL       = 1e-9;
+        SOLVE.LAMBDA0       = 1e-8;
+        SOLVE.LAMBDA_DROP   = 0.25;
+        SOLVE.LAMBDA_RAISE  = 10.0;
+        SOLVE.LAMBDA_MIN    = 1e-14;
+        SOLVE.LS_MAX        = 24;
+        SOLVE.ARMIJO_C      = 1e-4;
+        SOLVE.EQUILIBRATE   = true;
+        // rev113: run-time selection of the linear backend.
+        //
+        // SOLVE_SPQR is the sparse rank-revealing QR min-norm solve on Js DIRECTLY -- no
+        // Js^T Js, so no condition squaring -- and item 13 already skips the doomed tier-0
+        // SuperLU factorization a priori when _nTraceVar > 0.  That is precisely the
+        // configuration a gauge-singular interface-augmented system wants, and until now
+        // it could only be selected by editing a driver.
+        //
+        // WHY IT MATTERS (measured, OCFE_DAE5 --nomarch, IC_STRONG):
+        //   the kernel is 100% multiplier-block, so the primal is DETERMINED and the answer
+        //   is correct (2.56e-07 / 2.07e-08 / 1.51e-09, the most accurate of every
+        //   configuration tried).  What fails is the CONVERGENCE TEST: Js is numerically
+        //   singular, solve_linear refuses, nt_dead latches PERMANENTLY, tier 1 forms the
+        //   damped normal equations and squares cond 2.5e16 into ~6e32, and LM stalls.
+        //   Perturbing the singular directions above machine precision fixes convergence
+        //   (IC_TRACE eps=1e-14 converges; eps=1e-20 and eps=0 do not) but costs 17%
+        //   accuracy: 2.56e-07 -> 2.99e-07.  A rank-tolerant solve should need no
+        //   perturbation and keep the better answer.  UNVERIFIED -- this hook exists to
+        //   test it.
+        SOLVE.FACTORIZATION = SOLVE_SUPERLU;
+
+        // rev114: let the environment FORCE solver verbosity on.
+        //
+        // The [step-fail] attribution -- step energy by state, dominant components, merit
+        // vs alpha -- is the instrument that says WHICH STATES carry a failing step.  It is
+        // gated on SOLVE.VERBOSE, which several drivers set false (MMPDE27, MBC5, ...), so
+        // on exactly the models where a step failure is hard to explain the attribution is
+        // unavailable without editing the driver.
+        //
+        // Measured need: OCFE_MBC5 at CONSTANT dP reports "LM/Newton step failed at
+        // iteration 28" and nothing else, while the z-varying case does not fail at all.
+        // The difference is that constant dP makes omega(z) constant -- omega[min,max] =
+        // [0.0405,0.0405] against [0.0405,0.1596] -- so the hypothesis is a degeneracy from
+        // the lost z-dependence.  That is a statement about WHICH STATES go singular, and
+        // [step-fail] is the only thing that reports it.
+        //
+        // Force-on only.  A driver that sets SOLVE.VERBOSE=false does so to keep its own
+        // output readable; the variable overrides that for a diagnostic run and never the
+        // other way, so no driver loses output it expects.
+        _force_verbose_from_env( SOLVE.VERBOSE );
+        // rev42: warn threshold for the automatic duplicate-node spread report.  Exact
+        // imposition is round-off limited at any mesh; weak is truncation limited.  1e-10 sits
+        // far above the former and far below the latter, so it separates them without firing
+        // on IC_WEAK.  Report-only -- see the declaration.
+        // rev49: REFUTED, kept only so the dead end is documented at the point of temptation.
+        // Measured on MMPDE10 nel_xi=8 IC_TRACE, delta-sweep at fixed h_rel:
+        //     delta_rel 1e-5 -> analytic 4.14230536 (ratio 1.2434 vs FD)
+        //     delta_rel 1e-6 -> analytic 3.49817529 (ratio 1.0501 vs FD)
+        //     delta_rel 1e-7 -> SINGULAR (rcond 3.06e-17), no result
+        // The answer drifts strongly with delta and would need roughly delta_rel 1e-7 to reach
+        // the FD value 3.3314 -- which is exactly where the factorization fails.  THE WINDOW IS
+        // EMPTY.  Worse, rcond is NON-MONOTONE in delta (3.06e-17 at 2.165e-03 but 1.43e-16 at
+        // 2.165e-04), which a shift that genuinely lifted sigma_min could not produce: the null
+        // directions are COMBINATIONS spanning tau columns, not aligned with individual tau
+        // coordinates, so a diagonal shift perturbs the spectrum without removing the kernel.
+        // Do not re-enable this expecting a usable delta.  Use SENS_MINNORM_PINV / SPQR.
+        SENSITIVITY.SPARSE     = true;     // rev50: ON by default -- the dense path is a memory wall
+        // Stage 3: extend the pointwise-pin suppressor to states pinned through OTHER states
+        // pinned at the same node.  Default ON: unlike Stage A this rests on a row implication
+        // by physical rows, the same footing as FIX 1.  CRONOS_NO_PIN_CLOSURE=1 disables it
+        // for before/after comparison without a rebuild.
+        HOMOTOPY.ENABLE          = true;   //!< honour registered homotopy parameters inside solve()
+        HOMOTOPY.STEP_CAP        = 0.1;    //!< max homotopy step in s; also the STARTING step (path fidelity: larger steps can SKIP BRANCHES)
+        HOMOTOPY.STEP_GROW       = 1.4;    //!< step growth after an accepted step (recovery rate after a backtrack)
+        HOMOTOPY.STEP_SHRINK     = 0.5;    //!< step shrink after a failed step; GROW*SHRINK MUST BE < 1
+        HOMOTOPY.STEP_MIN        = 1e-5;   //!< abandon the stage below this step
+        HOMOTOPY.AUTO_DESTAGE    = true;   //!< on stage failure, retry its parameters one at a time (LOUD)
+        HOMOTOPY.SOLVE_S0        = false;  //!< the ramp starts from the caller's vector (2026-10-10: option, 4R.18)
+        HOMOTOPY.PREDICT         = true;   //!< guarded extrapolation predictor (kept only when it beats plain reuse)
+        HOMOTOPY.PREDICT_ORDER   = 2;  //!< max order of the extrapolation from accepted points
+        SOLVE.MARCHING      = true;   //!< auto-march when AVAILABLE (evolution domain + >=1 differential state); else monolithic
+        SOLVE.REUSE         = true;   //!< reuse the last converged monolithic solution when solved again at the same input (skips the redundant primal Newton across value+gradient at one iterate)
+        SOLVE.WARMSTART     = REUSE;  //!< per-element warm-start for a SOLVE.MARCHING solve
+        SOLVE.DISPLAY_LEVEL = -1;   // rev314: follow DISPLAY_LEVEL -- see _solve_display_level()
+        apply_environment_defaults();
+      }
+  };
+
+  Options options;
+
+  //! @brief OCFEBASE::_solve_display_level(): SOLVE.DISPLAY_LEVEL when set, else the model's.
+  int _solve_display_level() const override
+    { return options.SOLVE.DISPLAY_LEVEL < 0 ? options.DISPLAY_LEVEL : options.SOLVE.DISPLAY_LEVEL; }
+  //! @brief OCFEBASE::_march_requested(): SOLVE.MARCHING.
+  bool _march_requested() const override { return options.SOLVE.MARCHING; }
+
   //! @brief The collocation grid of direction @p dir (OCBase::colloc_dom): the grid the equations are collocated on,
   //! onto which a nonlinear operation lifts a coarser multi-node input first (2026-09-28)
   FFDom const* colloc_dom
@@ -918,6 +1228,7 @@ public:
   //! @brief Default Constructor
   OCFESLV
     ( FFGraph* dag = nullptr )
+    : OCFEBASE( options )
     {
       set( dag );
     }
@@ -926,6 +1237,7 @@ public:
   //! is not set up is itself an empty, not-set-up environment (is_setup() reports which).
   OCFESLV
     ( OCFESLV const& src )
+    : OCFEBASE( options )
     {
       deep_copy_from( src );
     }

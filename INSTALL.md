@@ -14,7 +14,7 @@ of factorable functions provide the model representation and automatic different
   with forward and adjoint sensitivities.
 * **`DAESLV`** (`daeslv_idas.hpp`) integrates DAE models with SUNDIALS IDAS, on the undivided form -- a mass
   matrix and a residual -- with consistent initialisation and the same sensitivities and interface as `ODESLV`.
-* **`OCFESLV`** (`ocfeslv.hpp`) solves PDE/DAE models by orthogonal collocation on finite elements, either as one
+* **`OCFESLV`** (`ocfeslv.hpp`, deriving from the direction-agnostic collocation base `OCFEBASE` in `ocfebase.hpp`) solves PDE/DAE models by orthogonal collocation on finite elements, either as one
   monolithic system or by marching through the time elements, with forward and adjoint sensitivities and state
   transitions (jumps); the monolithic time discretisation is causal, so both modes solve the same discretisation.
 * **`FFODESLV`, `FFDAESLV`, `FFOCFESLV`, `FFOCFERES`** embed a solver -- or the collocation residuals -- in an MC++ DAG as an

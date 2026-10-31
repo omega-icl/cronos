@@ -24,33 +24,33 @@ Print reports at setup; none changes what is computed.  Those marked "default of
 
 | variable | what it does | read in |
 |---|---|---|
-| `CRONOS_AUDIT` | Umbrella for the cheap setup reports: default of `AUDIT.EQN_LEGEND`, `AUDIT.COVERAGE` and `AUDIT.RANK_SYMMETRY` (not the spectrum, which runs a dense SVD). | `ocfeslv.hpp` |
-| `CRONOS_AUDIT_AUXRECV` | Report the auxiliary-receiver test of the weak-SAT receiver states. | `ocfeslv.hpp` |
-| `CRONOS_AUDIT_COVERAGE` | Default of `AUDIT.COVERAGE`: the coverage report. | `ocfeslv.hpp` |
-| `CRONOS_AUDIT_DEPDUMP` | Dump each equation's dependency map (key, resolved name, type). | `ocfeslv.hpp` |
-| `CRONOS_AUDIT_DETERMINACY` | Default of `DETERMINACY.AUDIT`: the numeric (SPQR) determinacy audit, in place of the structural determinacy line. | `ocfeslv.hpp` |
+| `CRONOS_AUDIT` | Umbrella for the cheap setup reports: default of `AUDIT.EQN_LEGEND`, `AUDIT.COVERAGE` and `AUDIT.RANK_SYMMETRY` (not the spectrum, which runs a dense SVD). | `ocfebase.hpp` |
+| `CRONOS_AUDIT_AUXRECV` | Report the auxiliary-receiver test of the weak-SAT receiver states. | `ocfebase.hpp` |
+| `CRONOS_AUDIT_COVERAGE` | Default of `AUDIT.COVERAGE`: the coverage report. | `ocfebase.hpp` |
+| `CRONOS_AUDIT_DEPDUMP` | Dump each equation's dependency map (key, resolved name, type). | `ocfebase.hpp` |
+| `CRONOS_AUDIT_DETERMINACY` | Default of `DETERMINACY.AUDIT`: the numeric (SPQR) determinacy audit, in place of the structural determinacy line. | `ocfebase.hpp` |
 | `CRONOS_AUDIT_DROPNULL` | Report the W-test of dropped claims: how many must be restored (rank W) and which (the pivot rows). | `ocfeslv.hpp` |
 | `CRONOS_AUDIT_DROPSET` | Name the claims the redundancy pass drops, beside the rank deficiency they address. | `ocfeslv.hpp` |
-| `CRONOS_AUDIT_EVOFACE` | Evolution-face probes: the hoisted evolution-domain detection and the claims on evolution faces. | `ocfeslv.hpp` |
+| `CRONOS_AUDIT_EVOFACE` | Evolution-face probes: the hoisted evolution-domain detection and the claims on evolution faces. | `ocfebase.hpp`, `ocfeslv.hpp` |
 | `CRONOS_AUDIT_IFACEPLAN` | Print the interface-plan report at setup, without a driver edit. | `ocfeslv.hpp` |
-| `CRONOS_AUDIT_LEGEND` | Default of `AUDIT.EQN_LEGEND`: the equation legend. | `ocfeslv.hpp` |
+| `CRONOS_AUDIT_LEGEND` | Default of `AUDIT.EQN_LEGEND`: the equation legend. | `ocfebase.hpp` |
 | `CRONOS_AUDIT_MAX_N` | Budget of the determinacy audit: above this many rows or columns it reports SKIPPED instead of factorising (default unlimited). | `ocfeslv.hpp` |
-| `CRONOS_AUDIT_MINT` | Report why candidate continuity claims were not minted (e.g. no continuity row could be built). | `ocfeslv.hpp` |
-| `CRONOS_AUDIT_RANK` | Default of `AUDIT.RANK_SYMMETRY`: the rank-symmetry report. | `ocfeslv.hpp` |
-| `CRONOS_AUDIT_RECVSCAN` | Static scan at setup: for each claim, whether a consuming row carries a face-direction derivative. | `ocfeslv.hpp` |
+| `CRONOS_AUDIT_MINT` | Report why candidate continuity claims were not minted (e.g. no continuity row could be built). | `ocfebase.hpp` |
+| `CRONOS_AUDIT_RANK` | Default of `AUDIT.RANK_SYMMETRY`: the rank-symmetry report. | `ocfebase.hpp` |
+| `CRONOS_AUDIT_RECVSCAN` | Static scan at setup: for each claim, whether a consuming row carries a face-direction derivative. | `ocfebase.hpp` |
 | `CRONOS_AUDIT_SETUP_ONLY` | `setup()` returns false right after the audit reports, before the derivative caches and any solve -- for structural corpus sweeps. | `ocfeslv.hpp` |
-| `CRONOS_AUDIT_SITESTATES` | Report the states at each claim site, with the reduced-flux continuity predicate. | `ocfeslv.hpp` |
-| `CRONOS_AUDIT_SPECTRUM` | Default of `AUDIT.SPECTRUM`: the spectrum report (a dense SVD; not implied by `CRONOS_AUDIT`). | `ocfeslv.hpp` |
+| `CRONOS_AUDIT_SITESTATES` | Report the states at each claim site, with the reduced-flux continuity predicate. | `ocfebase.hpp` |
+| `CRONOS_AUDIT_SPECTRUM` | Default of `AUDIT.SPECTRUM`: the spectrum report (a dense SVD; not implied by `CRONOS_AUDIT`). | `ocfebase.hpp` |
 | `CRONOS_AUDIT_SYMROW` | Model layer: report the value-slaved states of the principal-symbol row pass. | `ffmodel.hpp` |
 | `CRONOS_AUDIT_TAG` | A one-line machine-readable `[cov1]` summary per setup, for corpus sweeps. | `ocfeslv.hpp` |
-| `CRONOS_AUDIT_TAUCOL` | The `[taucol/plan]` report: the plan's tau columns. | `ocfeslv.hpp` |
-| `CRONOS_DETERMINACY_GAP_MIN` | Determinacy audit: a gap at the rank cut below this triggers a re-evaluation at 1.3x the reference point (default 1e2). | `ocfeslv.hpp` |
+| `CRONOS_AUDIT_TAUCOL` | The `[taucol/plan]` report: the plan's tau columns. | `ocfebase.hpp` |
+| `CRONOS_DETERMINACY_GAP_MIN` | Determinacy audit: a gap at the rank cut below this triggers a re-evaluation at 1.3x the reference point (default 1e2). | `ocfebase.hpp` |
 | `CRONOS_DISPLAY_LEVEL` | Default for `DISPLAY_LEVEL`, an integer `0`..`9`: applies wherever a driver has NOT set it -- a value the driver sets, `0` included, stands -- and does nothing when unset (the default is then `0`).  Resolved in the solvers' Options constructors and at setup; a floor until 2026-10-25, which raised a driver's explicit `0`. | `ffmodel.hpp` |
 | `CRONOS_HEADER_FULL` | Print the solver header's revision summary at setup (display level 2). | `ocfeslv.hpp` |
-| `CRONOS_KEEP_EXPLICIT_AUDIT` | Check that every explicit tau column arrives with its row (the keep-explicit invariant). | `ocfeslv.hpp` |
+| `CRONOS_KEEP_EXPLICIT_AUDIT` | Check that every explicit tau column arrives with its row (the keep-explicit invariant). | `ocfebase.hpp` |
 | `CRONOS_KPRIME_STRUCTURAL` | With the numeric determinacy audit on, print the structural determinacy line beside it (a corpus-wide equality check). | `ocfeslv.hpp` |
 | `CRONOS_REF_AUDIT` | Report the reference point each audit assembles at (setup, or the W-decide re-derivation). | `ocfeslv.hpp` |
-| `CRONOS_SPECTRUM_MAX` | Size cap of the spectrum report (`AUDIT.SPECTRUM_MAX`). | `ocfeslv.hpp` |
+| `CRONOS_SPECTRUM_MAX` | Size cap of the spectrum report (`AUDIT.SPECTRUM_MAX`). | `ocfebase.hpp` |
 
 ## Interface-plan dumps
 
@@ -58,11 +58,11 @@ Print the interface plan's decisions, at display level 3.
 
 | variable | what it does | read in |
 |---|---|---|
-| `CRONOS_PLAN_DUMP_CLAIMS` | `=<state>`: claim census for one state -- which seam nodes carry a claim, and its fate (dropped, unrealised, forest-redundant). | `ocfeslv.hpp` |
-| `CRONOS_PLAN_DUMP_DETCOLS` | Report each determinacy-column invocation of the plan builder (its columns). | `ocfeslv.hpp` |
-| `CRONOS_PLAN_DUMP_DROPPED` | List the claims the plan drops (block, state, direction, element, face, kind). | `ocfeslv.hpp` |
-| `CRONOS_PLAN_DUMP_STATE` | `=<state>`: dump the plan's decisions for one state. | `ocfeslv.hpp` |
-| `CRONOS_PLAN_RECV_CENSUS` | Receiver census by row role, per (state, direction) of the kept claims; for an auxiliary, how many receivers are its own LINK row. | `ocfeslv.hpp` |
+| `CRONOS_PLAN_DUMP_CLAIMS` | `=<state>`: claim census for one state -- which seam nodes carry a claim, and its fate (dropped, unrealised, forest-redundant). | `ocfebase.hpp` |
+| `CRONOS_PLAN_DUMP_DETCOLS` | Report each determinacy-column invocation of the plan builder (its columns). | `ocfebase.hpp` |
+| `CRONOS_PLAN_DUMP_DROPPED` | List the claims the plan drops (block, state, direction, element, face, kind). | `ocfebase.hpp` |
+| `CRONOS_PLAN_DUMP_STATE` | `=<state>`: dump the plan's decisions for one state. | `ocfebase.hpp` |
+| `CRONOS_PLAN_RECV_CENSUS` | Receiver census by row role, per (state, direction) of the kept claims; for an auxiliary, how many receivers are its own LINK row. | `ocfebase.hpp` |
 
 ## Rank and factorisation diagnostics
 
@@ -70,16 +70,16 @@ Cross-check or report the numerical rank decisions; print only.
 
 | variable | what it does | read in |
 |---|---|---|
-| `CRONOS_DEBUG_RANK` | Umbrella: `CRONOS_SPQR_STAT` and `CRONOS_KEEP_EXPLICIT_AUDIT` together. | `ocfeslv.hpp` |
-| `CRONOS_DUMP_COLS` | `=c1,c2,...`: dump the nonzeros of selected columns of the audited Jacobian. | `ocfeslv.hpp` |
-| `CRONOS_DUMP_J` | `=<file>`: write the audited Jacobian in coordinate form. | `ocfeslv.hpp` |
-| `CRONOS_RANK_ORACLE` | Cross-check each numeric rank against a dense SVD of the same matrix at the same tolerance: both ranks and the singular values at the cut. | `ocfeslv.hpp` |
-| `CRONOS_RANK_ORACLE_MAXN` | Size cap of the rank oracle (default 2000). | `ocfeslv.hpp` |
-| `CRONOS_SPQR_STAT` | SPQR's statistics per factorisation: nnz(R), rank estimate, singletons, ordering used. | `ocfeslv.hpp` |
-| `CRONOS_STAIRCASE_VERIFY` | Run both live-column scans of the rank refinement (the fast one and its fallback) and report any disagreement. | `ocfeslv.hpp` |
-| `CRONOS_STATENULL_CENSUS` | Name the state-side null directions (def_right > k'). | `ocfeslv.hpp` |
-| `CRONOS_STATENULL_ROWS` | With the state-null census: the rows that see each null direction. | `ocfeslv.hpp` |
-| `CRONOS_TAUNULL_CENSUS` | Name the collective null directions of the tau block when k' > 0. | `ocfeslv.hpp` |
+| `CRONOS_DEBUG_RANK` | Umbrella: `CRONOS_SPQR_STAT` and `CRONOS_KEEP_EXPLICIT_AUDIT` together. | `ocfebase.hpp`, `ocfeslv.hpp` |
+| `CRONOS_DUMP_COLS` | `=c1,c2,...`: dump the nonzeros of selected columns of the audited Jacobian. | `ocfebase.hpp` |
+| `CRONOS_DUMP_J` | `=<file>`: write the audited Jacobian in coordinate form. | `ocfebase.hpp` |
+| `CRONOS_RANK_ORACLE` | Cross-check each numeric rank against a dense SVD of the same matrix at the same tolerance: both ranks and the singular values at the cut. | `ocfebase.hpp` |
+| `CRONOS_RANK_ORACLE_MAXN` | Size cap of the rank oracle (default 2000). | `ocfebase.hpp` |
+| `CRONOS_SPQR_STAT` | SPQR's statistics per factorisation: nnz(R), rank estimate, singletons, ordering used. | `ocfebase.hpp` |
+| `CRONOS_STAIRCASE_VERIFY` | Run both live-column scans of the rank refinement (the fast one and its fallback) and report any disagreement. | `ocfebase.hpp` |
+| `CRONOS_STATENULL_CENSUS` | Name the state-side null directions (def_right > k'). | `ocfebase.hpp` |
+| `CRONOS_STATENULL_ROWS` | With the state-null census: the rows that see each null direction. | `ocfebase.hpp` |
+| `CRONOS_TAUNULL_CENSUS` | Name the collective null directions of the tau block when k' > 0. | `ocfebase.hpp` |
 
 ## Solve diagnostics
 
@@ -87,7 +87,7 @@ Report on solutions and sensitivities; print only.
 
 | variable | what it does | read in |
 |---|---|---|
-| `CRONOS_AUDIT_BETA` | After each IC_TRACE solve with the projection applied: beta = Z^T lambda and the violation it absorbs. | `ocfeslv.hpp` |
+| `CRONOS_AUDIT_BETA` | After each IC_TRACE solve with the projection applied: beta = Z^T lambda and the violation it absorbs. | `ocfebase.hpp` |
 | `CRONOS_AUDIT_SENS` | ||dF/dvar|| restricted to the tau columns, once per sensitivity setup. | `ocfeslv.hpp` |
 | `CRONOS_DUP_SPREAD` | After every solve, per-state spreads over duplicate nodes: the interface conditions the solution actually satisfies. | `ocfeslv.hpp` |
 | `CRONOS_DUP_SPREAD_WARN` | Warning threshold of those spreads (default 1e-10; a report, not a failure). | `ocfeslv.hpp` |
@@ -99,11 +99,11 @@ Change behaviour; kept ONLY for the corpus drivers that exercise them.  A model 
 
 | variable | what it does | read in |
 |---|---|---|
-| `CRONOS_DROP_POLICY` | Override of `INTERFACE.DROP_POLICY` for every model: `0`, `1` or `2` for DROP_VERIFY, DROP_REDERIVE or DROP_OFF (the default since 2026-10-14).  `0` restores the redundant-continuity drop.  Unset leaves each driver's own value.  For sweeping the corpus with the redundant-continuity drop disabled without editing drivers (WORKPLAN 4R.28). | `ocfeslv.hpp` |
-| `CRONOS_FORCE_BAD_KEEP_EXPLICIT` | Fault injector for `OCFE_hybrid_adequacy`: makes the tau elimination stall, which is that driver's PASS condition. | `ocfeslv.hpp` |
-| `CRONOS_RESCUE_C2` | Receiver policy of the C2/C2b study (default on; 0 forces the original +1 everywhere).  Kept for `OCFE_receiver` until the receiver-policy study concludes. | `ocfeslv.hpp` |
+| `CRONOS_DROP_POLICY` | Override of `INTERFACE.DROP_POLICY` for every model: `0`, `1` or `2` for DROP_VERIFY, DROP_REDERIVE or DROP_OFF (the default since 2026-10-14).  `0` restores the redundant-continuity drop.  Unset leaves each driver's own value.  For sweeping the corpus with the redundant-continuity drop disabled without editing drivers (WORKPLAN 4R.28). | `ocfebase.hpp` |
+| `CRONOS_FORCE_BAD_KEEP_EXPLICIT` | Fault injector for `OCFE_hybrid_adequacy`: makes the tau elimination stall, which is that driver's PASS condition. | `ocfebase.hpp` |
+| `CRONOS_RESCUE_C2` | Receiver policy of the C2/C2b study (default on; 0 forces the original +1 everywhere).  Kept for `OCFE_receiver` until the receiver-policy study concludes. | `ocfebase.hpp` |
 | `CRONOS_SYMROW_B2` | Restores the pre-4R.26 value-slaved row routing, in which rule (b2) exempted a materialised order-reduction auxiliary from the (b1) uniqueness test, so a row could be routed out of the principal symbol even when it was the LAST provider of a derivative.  For bisection; `OCFE_intermediate_dae` reproduces the old verdict under it. | `ffmodel.hpp` |
-| `CRONOS_WEAK_NATURAL_PENALTY` | IC_WEAK receiver policy for continuity claims: 0, 1 or 2 (default).  Kept for `OCFE_receiver`, as above. | `ocfeslv.hpp` |
+| `CRONOS_WEAK_NATURAL_PENALTY` | IC_WEAK receiver policy for continuity claims: 0, 1 or 2 (default).  Kept for `OCFE_receiver`, as above. | `ocfebase.hpp` |
 
 ## Read by MC++
 

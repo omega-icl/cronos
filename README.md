@@ -29,7 +29,7 @@ for model development and analysis -- can compose, evaluate and differentiate.
   only its free initial data), forward sensitivities, adjoint sensitivities of several outputs in one backward
   sweep, dense or sparse (KLU) linear algebra, and the same stage structure, transitions, recording and
   parallel embedding as ODESLV.  The two solvers expose the same interface and share their base (`BASE_DE`).
-* **Orthogonal collocation on finite elements** (`OCFESLV`, header `ocfeslv.hpp`): PDE/DAE models on tensor
+* **Orthogonal collocation on finite elements** (`OCFESLV`, header `ocfeslv.hpp`, on the shared collocation base `OCFEBASE` in `ocfebase.hpp`): PDE/DAE models on tensor
   domains, solved either as one monolithic system or by marching through the time elements -- both solve the
   same discretisation, since the monolithic time discretisation is causal -- with strong, weak (penalty) or
   trace imposition of the interface conditions, forward and adjoint sensitivities, and state transitions.

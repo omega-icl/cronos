@@ -797,18 +797,6 @@ class BASE_DE
   //! DIFFERENTIAL entries are read, since an algebraic state is re-determined by its own rows.
   std::vector<double>                  _icLeft;
 
-  //! @brief Read @p res as L * @p tgt + R, both as EXPRESSIONS, so a state-dependent coefficient is carried
-  //! rather than refused.  L comes from differentiating a fresh leaf put in the target's place -- taking
-  //! res|tgt=1 - res|tgt=0 instead mixes two substitutions into a graph that crashes on evaluation.
-  bool _split_in
-    ( FFVar const& res, FFVar const& tgt, FFVar& L, FFVar& R );
-
-  //! @brief @p v, guaranteed to live in the model's dag: a constant extracted from a row carries none of its own.
-  FFVar _in_model_dag
-    ( FFVar const& v )
-    const
-    { return v.dag()? v: FFVar( FFModel::_dag, v.num().val() ); }
-
 
 
   //! @brief Record results in file <a>bndrec</a>, with accuracy of <a>iprec</a> digits
@@ -1112,27 +1100,11 @@ BASE_DE::_extract_from_model
   std::vector<FFVar> rhs( _nx, FFVar( 0. ) );
   std::vector<FFVar> lhs( _nx, FFVar( 1. ) );   // kept undivided; _mLHS is filled per stage below
   std::vector<bool> got( _nx, false );
-  // Which states' TIME DERIVATIVES does a row contain?  One subgraph walk per row answers it; the
-  // alternative -- trying _split_in( row, d x_i/dt ) for EVERY state i -- is n_eqn x n_x symbolic
-  // differentiations.  At 200 mesh points of DAESLV_scaling that was 800 x 798 compose+FAD+compose,
-  // TWICE (divided form, then the undivided peel): 12.3 s of a 15.8 s setup, super-quadratic beyond
-  // (2026-10-25).  A row of a discretised PDE contains one derivative, occasionally two.
-  auto derivs_in = [&]( FFVar const& row ) -> std::vector<size_t> {
-    std::vector<size_t> out;
-    auto sg = FFModel::_dag->subgraph( 1, &row );
-    for( auto const* op : sg.l_op ){
-      if( !op || op->varout.empty() ) continue;
-      // a time derivative d x_i / dt is an FFPartial node: ONE operand, the state x_i, with the
-      // direction carried in the op's name ("Partial[t]"), not as an operand
-      if( op->type < FFOp::EXTERN || op->varin.size() != 1 || !op->varin[0] ) continue;
-      if( op->name() != "Partial[" + tvar.name() + "]" ) continue;
-      FFVar const* a = op->varin[0];
-      for( size_t i = 0; i < _nx; ++i )
-        if( a->id() == _mX[i].id() ){ out.push_back( i ); break; }
-    }
-    std::sort( out.begin(), out.end() );  out.erase( std::unique( out.begin(), out.end() ), out.end() );
-    return out;
-  };
+  // Which states' TIME DERIVATIVES does a row contain: FFModel::_derivs_in, one subgraph walk per row
+  // (the alternative, trying _split_in for EVERY state, was 12.3 s of a 15.8 s setup at 200 mesh points,
+  // 2026-10-25).  The peel itself is FFModel's since phase 2 of the MoL work: OCFEMOL reads a PDE row the
+  // same way along its evolution direction, with the spatial derivatives left in the remainder.
+  auto derivs_in = [&]( FFVar const& row ){ return _derivs_in( row, tvar, _mX ); };
   for( auto const& eqn : var_equation() ){
     if( !eqn.opt || eqn.opt->role != EqnRole::INTERIOR ) continue;
     for( size_t i : derivs_in( eqn.var ) ){
@@ -1153,14 +1125,8 @@ BASE_DE::_extract_from_model
     for( auto const& eqn : var_equation() ){
       if( !eqn.opt || eqn.opt->role != EqnRole::INTERIOR ) continue;
       std::vector< std::pair<size_t,FFVar> > row;
-      FFVar rest = eqn.var;
-      for( size_t i : derivs_in( rest ) ){
-        FFVar L, R;
-        if( !_split_in( rest, OpP( _mX[i], tvar ), L, R ) ) continue;
-        if( L.cst() && L.num().val() == 0. ) continue;
-        row.emplace_back( i, L );
-        rest = R;
-      }
+      FFVar rest;
+      _peel_row( eqn.var, tvar, _mX, row, rest );
       mass_raw.push_back( row );
       res_raw.push_back( _in_model_dag( rest ) );
     }
@@ -1536,33 +1502,6 @@ BASE_DE::_extract_from_model
   _xlap( "H: ic placeholder vars" );
   if( !_build_ic_system() ) return false;
   _xlap( "I: _build_ic_system" );
-  return true;
-}
-
-inline
-bool
-BASE_DE::_split_in
-( FFVar const& res, FFVar const& tgt, FFVar& L, FFVar& R )
-{
-  // Put a fresh LEAF where the target stands, then differentiate with respect to it for L and set it to zero for
-  // R, so both come from ONE graph.  A LEAF target (a state, for an INITIAL row) belongs to compose(); a NON-LEAF
-  // one (the derivative node) to substitute().
-  FFVar d( FFModel::_dag );
-  std::vector<FFVar> const dep{ res }, tar{ tgt }, rep{ d };
-  std::vector<FFVar> rd;
-  bool const leaf = ( tgt.id().first == FFVar::VAR );
-  try{
-    rd = leaf? FFModel::_dag->compose( dep, tar, rep ): FFModel::_dag->substitute( dep, tar, rep );
-    if( rd.empty() ) return false;
-    std::vector<FFVar> const dRdd = FFModel::_dag->FAD( rd, std::vector<FFVar>{ d } );
-    if( dRdd.empty() ) return false;
-    L = _in_model_dag( dRdd[0] );
-    std::vector<FFVar> const r0 = FFModel::_dag->compose( rd, std::vector<FFVar>{ d },
-                                                          std::vector<FFVar>{ FFVar( 0. ) } );
-    if( r0.empty() ) return false;
-    R = _in_model_dag( r0[0] );
-  }
-  catch( ... ){ return false; }
   return true;
 }
 

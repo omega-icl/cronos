@@ -2891,6 +2891,41 @@ public:
     const
     { return _structural_index_analysis_uncached( block_id, &dir ); }
 
+  //! @brief One row of this model read along a direction (see peel_evolution): sum_i mass[i].second *
+  //! d_dir x_{mass[i].first} + rest = 0.  Derivatives along OTHER directions stay inside @p rest.
+  struct t_PeelRow
+  {
+    size_t      eqn  = 0;                      //!< index into var_equation()
+    EqnRole     role = EqnRole::AUTO;
+    std::vector< std::pair<size_t,FFVar> > mass;  //!< (state index into t_Peel::states, coefficient); empty: algebraic
+    FFVar       rest;                          //!< the remainder
+  };
+
+  //! @brief This model read along one direction as  M(x) d_dir x = R  -- the form the method of lines hands an
+  //! integrator after collocating the other directions.  Row classes: INTERIOR and BOUNDARY rows are peeled (a
+  //! BOUNDARY row may carry a mass entry: a dynamic boundary condition); INITIAL rows are the Ini stream and may not
+  //! carry a derivative along @p dir; LINK, INTERFACE and SURFACE rows may not either (a mass entry in a
+  //! continuity or order-reduction row has no integrator reading); DIAGNOSTIC rows are skipped.
+  struct t_Peel
+  {
+    std::vector<FFVar>      states;            //!< the states, in var_state() order (the indices of t_PeelRow::mass)
+    std::vector<t_PeelRow>  rows;              //!< the INTERIOR and BOUNDARY rows
+    std::vector<size_t>     initial;           //!< INITIAL rows, by equation index
+    std::vector<size_t>     link;              //!< LINK, INTERFACE and SURFACE rows, by equation index
+    std::vector<bool>       differential;      //!< per state: some row carries its derivative along the direction
+    int                     index = 0;         //!< the structural index along the direction, max over blocks
+    std::string             blocker;           //!< why this model cannot be marched along the direction; empty: accepted
+    size_t n_differential() const { size_t n = 0; for( bool b : differential ) n += b; return n; }
+  };
+
+  //! @brief Read this (set-up) model as M(x) d_dir x = R along @p dir.  False, with t_Peel::blocker set, when a row
+  //! class forbids it (above), when a row mixes derivatives along @p dir and another direction (d_dir d_z x: refused
+  //! in the first scope), when a role is still AUTO, or when the structural index along @p dir exceeds 1 (reduction
+  //! on the PDE is phase 8 of the MoL plan).  Spatial derivatives are left in each row's remainder: the collocation
+  //! that discretises them is the consumer's business.  The peel is the one _extract_from_model uses for time.
+  bool peel_evolution
+    ( FFVar const& dir, t_Peel& out );
+
   //! @brief What one FACE of one spatial direction of one block asks for, and what the model puts there.
   //! @a outgoing is the number of characteristic directions LEAVING the domain at this face -- the number of
   //! conditions it requires; @a covered how many of those the block's own rows already supply; @a appended how many
@@ -3021,6 +3056,41 @@ protected:
   //! variable is pinned by an algebraic constraint (one elimination closes it);
   //! high-index <=> some algebraic variable is unpinned (Stage-2 differentiation
   //! needed).  Order-reduction (LINK) auxiliaries are excluded.  (Stage 1a)
+  //! @brief The states of @p states whose derivative along @p dir a row contains: the Partial[dir] nodes
+  //! of its subgraph with ONE operand that is one of them.  One subgraph walk per row.  Sorted, unique.
+  std::vector<size_t> _derivs_in
+    ( FFVar const& row, FFVar const& dir, std::vector<FFVar> const& states )
+    const;
+
+  //! @brief The first mixed derivative involving @p dir in @p row -- a Partial node along @p dir whose operand is
+  //! itself a Partial node, or a Partial node along another direction whose operand is a Partial along @p dir --
+  //! as the two direction names, or an empty pair if there is none.
+  std::pair<std::string,std::string> _mixed_derivative_in
+    ( FFVar const& row, FFVar const& dir )
+    const;
+
+  //! @brief Read @p res as L * @p tgt + R, both as EXPRESSIONS, so a state-dependent coefficient is carried
+  //! rather than refused.  L comes from differentiating a fresh leaf put in the target's place -- taking
+  //! res|tgt=1 - res|tgt=0 instead mixes two substitutions into a graph that crashes on evaluation.
+  bool _split_in
+    ( FFVar const& res, FFVar const& tgt, FFVar& L, FFVar& R );
+
+  //! @brief @p v, guaranteed to live in the model's dag: a constant extracted from a row carries none of its own.
+  FFVar _in_model_dag
+    ( FFVar const& v )
+    const
+    { return v.dag()? v: FFVar( _dag, v.num().val() ); }
+
+  //! @brief Peel every derivative along @p dir off @p row in turn: _split_in returns the row with that derivative
+  //! SET TO ZERO, so feeding the remainder back exposes the next, and what is left when every state has been
+  //! tried is @p rest.  @p mass holds the (state, coefficient) pairs; a coefficient that is the constant zero is
+  //! dropped.  Row-centric: nothing here assumes a row belongs to one state.  Derivatives along OTHER directions
+  //! (a spatial d_z u in a PDE row) stay in @p rest untouched, which is what the method of lines needs.
+  //! False only if @p row has no derivative along @p dir (then @p rest is @p row).
+  bool _peel_row
+    ( FFVar const& row, FFVar const& dir, std::vector<FFVar> const& states,
+      std::vector< std::pair<size_t,FFVar> >& mass, FFVar& rest );
+
   t_IndexResult _structural_index_analysis
     ( int const block_id )
     const;
@@ -5684,6 +5754,169 @@ const
 // Memoise the per-block analysis so the classify pass, the structural probe,
 // and the Stage-2 reduction-plan builder share ONE computation.  See _idxCache.
 // ======================================================================
+inline std::vector<size_t>
+FFModel::_derivs_in
+( FFVar const& row, FFVar const& dir, std::vector<FFVar> const& states )
+const
+{
+  std::vector<size_t> out;
+  auto sg = _dag->subgraph( 1, &row );
+  for( auto const* op : sg.l_op ){
+    if( !op || op->varout.empty() ) continue;
+    // a derivative d x_i / d dir is an FFPartial node: ONE operand, the state x_i, with the direction
+    // carried in the op's name ("Partial[t]"), not as an operand
+    if( op->type < FFOp::EXTERN || op->varin.size() != 1 || !op->varin[0] ) continue;
+    if( op->name() != "Partial[" + dir.name() + "]" ) continue;
+    FFVar const* a = op->varin[0];
+    for( size_t i = 0; i < states.size(); ++i )
+      if( a->id() == states[i].id() ){ out.push_back( i ); break; }
+  }
+  std::sort( out.begin(), out.end() );  out.erase( std::unique( out.begin(), out.end() ), out.end() );
+  return out;
+}
+
+
+inline
+bool
+FFModel::_split_in
+( FFVar const& res, FFVar const& tgt, FFVar& L, FFVar& R )
+{
+  // Put a fresh LEAF where the target stands, then differentiate with respect to it for L and set it to zero for
+  // R, so both come from ONE graph.  A LEAF target (a state, for an INITIAL row) belongs to compose(); a NON-LEAF
+  // one (the derivative node) to substitute().
+  FFVar d( _dag );
+  std::vector<FFVar> const dep{ res }, tar{ tgt }, rep{ d };
+  std::vector<FFVar> rd;
+  bool const leaf = ( tgt.id().first == FFVar::VAR );
+  try{
+    rd = leaf? _dag->compose( dep, tar, rep ): _dag->substitute( dep, tar, rep );
+    if( rd.empty() ) return false;
+    std::vector<FFVar> const dRdd = _dag->FAD( rd, std::vector<FFVar>{ d } );
+    if( dRdd.empty() ) return false;
+    L = _in_model_dag( dRdd[0] );
+    std::vector<FFVar> const r0 = _dag->compose( rd, std::vector<FFVar>{ d },
+                                                          std::vector<FFVar>{ FFVar( 0. ) } );
+    if( r0.empty() ) return false;
+    R = _in_model_dag( r0[0] );
+  }
+  catch( ... ){ return false; }
+  return true;
+}
+
+
+inline bool
+FFModel::_peel_row
+( FFVar const& row, FFVar const& dir, std::vector<FFVar> const& states,
+  std::vector< std::pair<size_t,FFVar> >& mass, FFVar& rest )
+{
+  FFPartial OpP;
+  mass.clear();
+  rest = row;
+  bool any = false;
+  for( size_t i : _derivs_in( row, dir, states ) ){
+    FFVar L, R;
+    if( !_split_in( rest, OpP( states[i], dir ), L, R ) ) continue;
+    any = true;
+    if( L.cst() && L.num().val() == 0. ) continue;
+    mass.emplace_back( i, L );
+    rest = R;
+  }
+  return any;
+}
+
+inline std::pair<std::string,std::string>
+FFModel::_mixed_derivative_in
+( FFVar const& row, FFVar const& dir )
+const
+{
+  std::string const mine = "Partial[" + dir.name() + "]";
+  auto partial_dir = []( FFOp const* op ) -> std::string {   // the direction name of a Partial op, else ""
+    if( !op || op->type < FFOp::EXTERN || op->varin.size() != 1 ) return "";
+    std::string const n = op->name();
+    return ( n.size() > 9 && n.compare( 0, 8, "Partial[" ) == 0 && n.back() == ']' )? n.substr( 8, n.size()-9 ): "";
+  };
+  auto sg = _dag->subgraph( 1, &row );
+  for( auto const* op : sg.l_op ){
+    std::string const outer = partial_dir( op );
+    if( outer.empty() || !op->varin[0] ) continue;
+    std::string const inner = partial_dir( op->varin[0]->opdef().first );
+    if( inner.empty() ) continue;
+    if( outer == dir.name() || inner == dir.name() ) return { outer, inner };
+  }
+  return {};
+}
+
+inline bool
+FFModel::peel_evolution
+( FFVar const& dir, t_Peel& out )
+{
+  out = t_Peel();
+  static char const* const ROLE[] = { "AUTO", "INTERIOR", "INITIAL", "BOUNDARY", "INTERFACE", "LINK", "SURFACE", "DIAGNOSTIC" };
+  auto role_name = []( EqnRole r ){ int const i = (int)r; return ( i >= 0 && i < 8 )? ROLE[i]: "?"; };
+
+  if( !is_setup() ){ out.blocker = "the model has not been set up"; return false; }
+  if( !dir.dag() || !var_domain().count( dir ) ){ out.blocker = "the direction has no domain"; return false; }
+
+  for( auto const& [x, dm] : _mVar ) out.states.push_back( x );
+  out.differential.assign( out.states.size(), false );
+
+  std::set<int> blocks;
+  size_t k = 0;
+  for( auto const& eqn : var_equation() ){
+    EqnRole const r = eqn.opt? eqn.opt->role: EqnRole::AUTO;
+    if( eqn.opt && eqn.opt->participate_in_classification ) blocks.insert( eqn.opt->block_id );
+    if( r == EqnRole::AUTO ){
+      out.blocker = "equation #" + std::to_string( k ) + " still has role AUTO: setup() resolves roles first";
+      return false;
+    }
+    if( r == EqnRole::DIAGNOSTIC ){ ++k; continue; }
+
+    auto const mixed = _mixed_derivative_in( eqn.var, dir );
+    if( !mixed.first.empty() ){
+      out.blocker = "equation #" + std::to_string( k ) + " (" + role_name( r ) + ") mixes derivatives along "
+                  + mixed.first + " and " + mixed.second + ": d_" + dir.name() + " of a spatial derivative is not"
+                    " in the first scope of the method of lines";
+      return false;
+    }
+    std::vector<size_t> const der = _derivs_in( eqn.var, dir, out.states );
+
+    if( r == EqnRole::INITIAL ){
+      if( !der.empty() ){
+        out.blocker = "INITIAL row #" + std::to_string( k ) + " carries a derivative along " + dir.name()
+                    + ": an initial condition fixes a value, not a rate";
+        return false;
+      }
+      out.initial.push_back( k ); ++k; continue;
+    }
+    if( r == EqnRole::LINK || r == EqnRole::INTERFACE || r == EqnRole::SURFACE ){
+      if( !der.empty() ){
+        out.blocker = std::string( role_name( r ) ) + " row #" + std::to_string( k ) + " carries a derivative along "
+                    + dir.name() + ": a mass entry in a continuity or order-reduction row has no integrator reading";
+        return false;
+      }
+      out.link.push_back( k ); ++k; continue;
+    }
+    // INTERIOR or BOUNDARY: peel
+    t_PeelRow row; row.eqn = k; row.role = r;
+    _peel_row( eqn.var, dir, out.states, row.mass, row.rest );
+    for( auto const& [i, co] : row.mass ) out.differential[i] = true;
+    out.rows.push_back( std::move( row ) );
+    ++k;
+  }
+
+  // the structural index along the direction, per block
+  for( int bid : blocks ){
+    t_IndexResult const ir = _structural_index_analysis_uncached( bid, &dir );
+    out.index = std::max( out.index, ir.index );
+    if( ir.index > 1 ){
+      out.blocker = "structural index " + std::to_string( ir.index ) + " along " + dir.name() + " in block "
+                  + std::to_string( bid ) + ": index reduction on the PDE is not in the first scope (MoL phase 8)";
+      return false;
+    }
+  }
+  return true;
+}
+
 inline FFModel::t_IndexResult
 FFModel::_structural_index_analysis
 ( int const block_id )

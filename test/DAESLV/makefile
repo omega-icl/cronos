@@ -5,7 +5,7 @@ include $(PATH_CRONOS)/src/makeoptions.mk
 
 #####
 
-all: DAESLV_test1 DAESLV_test2 DAESLV_switched DAESLV_jacobian DAESLV_inputs DAESLV_outputs DAESLV_restart DAESLV_hidden DAESLV_icseed DAESLV_trans DAESLV_icsens DAESLV_fsens DAESLV_asens DAESLV_asensmulti DAESLV_jypprobe DAESLV_fdiff DAESLV_ffdae DAESLV_record DAESLV_eqnrole DAESLV_threads DAESLV_dummy DAESLV_reduction DAESLV_scaling DAESLV_mol DAESLV_molpeel
+all: DAESLV_test1 DAESLV_test2 DAESLV_switched DAESLV_jacobian DAESLV_inputs DAESLV_outputs DAESLV_restart DAESLV_hidden DAESLV_icseed DAESLV_trans DAESLV_icsens DAESLV_fsens DAESLV_asens DAESLV_asensmulti DAESLV_jypprobe DAESLV_fdiff DAESLV_ffdae DAESLV_record DAESLV_eqnrole DAESLV_threads DAESLV_dummy DAESLV_reduction DAESLV_scaling DAESLV_mol DAESLV_molpeel DAESLV_molsetup
 
 DAESLV_test1 : DAESLV_test1.o
 	$(LINK) $(FLAG_LINK) -o $@ $< $(LIB_CRONOS) $(LIB_DEP)
@@ -82,11 +82,14 @@ DAESLV_mol : DAESLV_mol.o
 DAESLV_molpeel : DAESLV_molpeel.o
 	$(LINK) $(FLAG_LINK) -o $@ $< $(LIB_CRONOS) $(LIB_DEP)
 
+DAESLV_molsetup : DAESLV_molsetup.o
+	$(LINK) $(FLAG_LINK) -o $@ $< $(LIB_CRONOS) $(LIB_DEP)
+
 %.o : %.cpp
 	$(CPP) -c $(FLAG_CPP) $(FLAG_CRONOS) $(INC_CRONOS) $(INC_DEP) $< -o $@
 
 #####
 
 clean :
-	rm -f DAESLV_test1 DAESLV_test2 DAESLV_switched DAESLV_jacobian DAESLV_inputs DAESLV_outputs DAESLV_restart DAESLV_hidden DAESLV_icseed DAESLV_trans DAESLV_icsens DAESLV_fsens DAESLV_asens DAESLV_asensmulti DAESLV_jypprobe DAESLV_fdiff DAESLV_ffdae DAESLV_record DAESLV_eqnrole DAESLV_threads DAESLV_dummy DAESLV_reduction DAESLV_scaling DAESLV_mol DAESLV_molpeel
+	rm -f DAESLV_test1 DAESLV_test2 DAESLV_switched DAESLV_jacobian DAESLV_inputs DAESLV_outputs DAESLV_restart DAESLV_hidden DAESLV_icseed DAESLV_trans DAESLV_icsens DAESLV_fsens DAESLV_asens DAESLV_asensmulti DAESLV_jypprobe DAESLV_fdiff DAESLV_ffdae DAESLV_record DAESLV_eqnrole DAESLV_threads DAESLV_dummy DAESLV_reduction DAESLV_scaling DAESLV_mol DAESLV_molpeel DAESLV_molsetup
 	rm -f *.o *.out *.dat *.eps *.dot *.png *.lp *.gp *.log *~

@@ -564,6 +564,17 @@ protected:
   //! eval-invariant) behind _rowProvenanceReady; invalidated by setup()/deep_copy_from().  Used to
   //! resolve each marching-transfer state's INITIAL-closure rows for the k>0 continuity override.
   mutable std::vector<int>                  _rowEqnNdx;
+  //! @brief Row provenance, the node half (MoL phase 3, P3f): for each emitted row, the collocation node it stands at --
+  //! per direction of the equation's domain, (direction id, element, node within the element, the mask limit the
+  //! direction was collocated under).  Empty for a plan-owned row (_rowEqnNdx == -1).  Built with _rowEqnNdx, on the
+  //! first evaluation.  OCFEMOL places Mc's entries with it: the row's equation has a mass entry for a field, the field's
+  //! value at THIS node is the column.
+  struct t_RowNode
+  {
+    struct Dim { long dir_id; size_t iel; size_t node; int lim; };
+    std::vector<Dim> dims;
+  };
+  mutable std::vector<t_RowNode>            _rowNode;
   mutable bool                              _rowProvenanceReady = false;
   //! @brief claim keys the legacy corner rule suppressed in the last receiver
   //! synthesis (recorded at the suppression point; no behavioural effect).  Packed into
@@ -4957,6 +4968,47 @@ protected:
       std::vector<double> const& dom_ref,
       std::vector<double> const& input_ref );
 
+protected:
+  // -------------------------------------------------------------- MoL phase 3 (P3d): the function-side layout
+  // and buffers, the counterparts of _depEqn / _nCollEqn / _sgEqn, and the two setup routines both solvers share
+  //! @brief vector of output-function dependencies
+  std::vector<FFDep>                 _depFct;
+  //! @brief vector of output-function subgraphs
+  mutable std::vector<FFSubgraph>    _sgFct;
+  //! @brief Count of scalar output functions during setup
+  size_t                             _nCollFct = 0;
+  //! @brief Forward-AD DAG work vector used by deriv()
+  mutable std::vector<OCVar<t_FAD>>  _wrkOCF;
+  //! @brief Cached output evaluation domains used by eval_fct().
+  std::vector< std::set<FFVar,lt_FFVar> > _fctEvalDom;
+  //! @brief Build dependency update plans for residual and output evaluation.
+  void _setup_eval_plans
+    ();
+  //! @brief Test whether a variable is part of the vector of constants
+  bool _constant
+    ( FFVar const& var )
+    const;
+
+  //! @brief The collocated layout: states, inputs, constants and domains counted, blocked and given their
+  //! dependencies; the domains' nodes set; the inputs' own discretisations validated against the domains; the
+  //! node cache built.  Everything FFModel::setup needs from _on_model_discretise, shared by the solvers.  A
+  //! marching solver validates a distributed input on the evolution direction against ITS grid through the two
+  //! virtuals below.
+  bool _discretise_colloc_model();
+  //! @brief Marching hook: validate input @p v's discretisation @p d on a direction the solver has collapsed.
+  //! Returns true when it handled (validated) the input; the default never does.
+  virtual bool _validate_input_grid_marching( FFVar const& v, FFDom const& d ) const { (void)v; (void)d; return false; }
+  //! @brief Marching hook: (re)build input @p dvar's own node cache @p idom against the solver's grid.
+  //! Returns 0 when not handled, 1 when handled, -1 when handled and node setup failed (status set).
+  virtual int _init_input_nodes_marching( FFVar const& dvar, FFDom& idom ) { (void)dvar; (void)idom; return 0; }
+  //! @brief The plan over the collocated layout: consistency count, dependency maps, eval plans, SAT coupling, the
+  //! interface plan (draft, validate, commit), the collocation buffers, the tau-column report and the FFDep audit
+  //! of the strong interface rows.  The generic head of _on_model_ready, shared by the solvers.
+  bool _build_colloc_plan();
+  //! @brief The collocation base's state reset -- domains, classification, SAT coupling, auxiliaries, eval plans,
+  //! buffers, counts, the plan.  Each solver's _reset calls it before its own state.
+  void _reset_colloc_state();
+
 };
 
 inline OCFEBASE::Options::InterfaceType
@@ -5997,9 +6049,10 @@ const
   bool const causal_rows = _causal_rows_active();
   // The set belongs to the WORKING model: filled only by the counting call (_on_model_ready), never by the user-model
   // validation (_validate_model, nCollEqn == nullptr), which FFOCFESLV embeddings also run after setup.
-  if( nCollEqn ) _evoDerivRows.clear();
-  // When t is not collocated (causal_rows false under OCFEMOL) nothing below fills the set: OCFEMOL fills it
-  // AFTER this call from peel_evolution()'s rows with a mass entry, which is the same set by another route.
+  if( nCollEqn && _evoCollocated ) _evoDerivRows.clear();
+  // When t is not collocated (OCFEMOL) nothing below fills the set, and the clear is skipped: OCFEMOL filled it
+  // BEFORE the plan is built, from peel_evolution()'s rows with a mass entry -- the same set by another route,
+  // and _defining_rows reads it during the plan build.
   if( causal_rows && nCollEqn )
     for( size_t ie = 0; ie < mEqn.size(); ++ie ){
       auto const& eqn = mEqn[ie];
@@ -15086,7 +15139,7 @@ const
   // (or -1 for plan-owned interface/trace rows).  emit_eqn is the single sink for every row, so
   // tagging it captures the true final row order across IC_WEAK/TRACE/STRONG.
   bool const build_prov = !_rowProvenanceReady;
-  if( build_prov ) _rowEqnNdx.clear();
+  if( build_prov ){ _rowEqnNdx.clear(); _rowNode.clear(); }
 
   auto emit_eqn = [&]( U const& val, int src_ndx = -1 )
   {
@@ -15100,7 +15153,7 @@ const
                 << std::endl;
       throw Exceptions( Exceptions::INTERNAL );
     }
-    if( build_prov ) _rowEqnNdx.push_back( src_ndx );
+    if( build_prov ){ _rowEqnNdx.push_back( src_ndx ); _rowNode.emplace_back(); }
     *eqn++ = val;
   };
 
@@ -15583,7 +15636,18 @@ const
         // path emits, in the same order.
         bool const need_kept_flat = strong
           || ( trace && ( !_plan.exact_replacement_rows().empty()
-                       || ( _taucol_enabled() && _tauColPlanReady ) ) );
+                       || ( _taucol_enabled() && _tauColPlanReady ) ) )
+          || build_prov;   // the node half of the row provenance needs the surviving flat indices
+        // the node a surviving flat index stands at, into the last provenance record
+        auto prov_node = [&]( size_t flat ){
+          if( !build_prov || _rowNode.empty() ) return;
+          auto& rec = _rowNode.back();  rec.dims.clear();  rec.dims.reserve( cdims.size() );
+          size_t rem = flat;
+          for( size_t d = 0; d < cdims.size(); ++d ){
+            size_t const m = rem % cdims[d].cur_n;  rem /= cdims[d].cur_n;
+            rec.dims.push_back({ cdims[d].pvar->id().second, cdims[d].iel, m, cdims[d].lim });
+          }
+        };
         std::vector<size_t> kept_flat;
         if( need_kept_flat ) kept_flat.reserve( ntot );
 
@@ -15728,7 +15792,11 @@ const
               continue;
             }
             emit_eqn( newbuf[i], (int)ndx );
+            prov_node( kept_flat[i] );
           }
+        }
+        else if( build_prov ){   // the bulk path, on the first run: one record per row
+          for( size_t i = 0; i < newbuf.size(); ++i ){ emit_eqn( newbuf[i], (int)ndx ); prov_node( kept_flat[i] ); }
         }
         else{
           for( U const& val : newbuf ) emit_eqn( val, (int)ndx );
@@ -16622,6 +16690,463 @@ OCFEBASE::_apply_interface_edge_flags_v2
     edge.weak_sat_allowed  = has_coupling;
     edge.trace_tau_allowed = has_coupling && !is_bc_row;
   }
+}
+
+inline void
+OCFEBASE::_setup_eval_plans
+()
+{
+  auto build_plan = [&]( std::vector< std::vector<t_DepUpdate> >& plan,
+                         std::vector<FFDep> const& dep_rows )
+  {
+    plan.clear();
+    plan.resize( dep_rows.size() );
+    for( size_t k = 0; k < dep_rows.size(); ++k ){
+      plan[k].reserve( dep_rows[k].dep().size() );
+      for( auto const& [id, dep] : dep_rows[k].dep() ){
+        (void)dep;
+        auto it = _mDep.find( id );
+        if( it == _mDep.end() ) continue;
+        plan[k].push_back( { it->second.first, it->second.second } );
+      }
+    }
+  };
+
+  build_plan( _depPlanEqn, _depEqn );
+  build_plan( _depPlanFct, _depFct );
+
+  // section 4: per-equation evaluation domain -- the distributed directions each equation's
+  // residual touches.  Built exactly like _fctEvalDom below, but over the equation subgraphs
+  // _sgEqn (so it is inherently consistent with _depPlanEqn, same DAG source).  A domain-less
+  // equation reduces every touched direction via FFIntegral; the residual assembler loops over
+  // these "free" elements and accumulates (see _eval_eqn LOOP 2).
+  _eqnEvalDom.clear();
+  _eqnEvalDom.resize( _sgEqn.size() );
+  for( size_t ne = 0; ne < _sgEqn.size(); ++ne ){
+    auto& evaldom = _eqnEvalDom[ne];
+    for( auto itop = _sgEqn[ne].l_op.cbegin(); itop != _sgEqn[ne].l_op.cend(); ++itop ){
+      auto const& op = *itop;
+      if( op->type != FFOp::VAR || _constant( *op->varout[0] ) ) continue;
+      auto it_state = _mVar.find( *op->varout[0] );
+      if( it_state != _mVar.end() ){
+        evaldom.insert( it_state->second.cbegin(), it_state->second.cend() );
+        continue;
+      }
+      auto it_input = _mInp.find( *op->varout[0] );
+      if( it_input != _mInp.end() ){
+        evaldom.insert( it_input->second.cbegin(), it_input->second.cend() );
+        continue;
+      }
+    }
+  }
+
+  // section 4 (OpEval): collect the point reductions carried by FFEval nodes in each equation's
+  // residual -- direction -> target coordinate.  An FFEval consumes its direction during the DAG
+  // eval (the operator does the eval_lagrange collapse internally), so the direction is a POINT,
+  // not a free integrated direction: it is excluded from free_dom below and its resident element
+  // is pinned to contain the target coordinate.
+  _eqnEvalPoint.assign( _sgEqn.size(), {} );
+  _eqnEvalSide .assign( _sgEqn.size(), {} );
+  for( size_t ne = 0; ne < _sgEqn.size(); ++ne ){
+    for( auto const& op : _sgEqn[ne].l_op ){
+      if( !op || !op->sameid( typeid( FFEval ) ) ) continue;
+      auto const* fe = mc::type_cast<FFEval const>( op );
+      if( !fe ) continue;
+      for( auto const& [dv, z0] : fe->Coord() ){
+        _eqnEvalPoint[ne][dv] = z0;
+        _eqnEvalSide [ne][dv] = fe->side( dv );
+      }
+    }
+  }
+
+  // section 4: augment each domain-less equation's plan with DOMAIN updates for its free
+  // (FFIntegral-reduced) directions.  build_plan derives updates from the residual's FFDep, but
+  // OpI CONSUMES the integrated direction -- it drops out of the dependency set -- so no DOMAIN
+  // entry is emitted and OCdom[dir] would never advance per free element in the LOOP-2 free
+  // accumulate.  _mDep already carries the {DOMAIN,pos} entry for each direction; add any that
+  // the plan is missing.  (Domain-less equations only; distributed equations already carry the
+  // DOMAIN updates for their declared domain via the FFDep.)
+  for( size_t ne = 0; ne < _eqnEvalDom.size(); ++ne ){
+    if( ne >= _mEqn.size() || !_mEqn[ne].dom.empty() ) continue;
+    for( auto const& dv : _eqnEvalDom[ne] ){
+      auto itdep = _mDep.find( dv.id().second );
+      if( itdep == _mDep.end() || itdep->second.first != DOMAIN ) continue;  // _mDep value: {typ,pos}
+      bool present = false;
+      for( auto const& upd : _depPlanEqn[ne] )
+        if( upd.typ == DOMAIN && upd.pos == itdep->second.second ){ present = true; break; }
+      if( !present )
+        _depPlanEqn[ne].push_back( t_DepUpdate{ DOMAIN, itdep->second.second } );
+    }
+  }
+
+  _fctEvalDom.clear();
+  _fctEvalDom.resize( _mFct.size() );
+  for( size_t nfct = 0; nfct < _mFct.size(); ++nfct ){
+    auto& evaldom = _fctEvalDom[nfct];
+    for( auto itop = _sgFct[nfct].l_op.cbegin(); itop != _sgFct[nfct].l_op.cend(); ++itop ){
+      auto const& op = *itop;
+      if( op->type != FFOp::VAR || _constant( *op->varout[0] ) ) continue;
+      auto it_state = _mVar.find( *op->varout[0] );
+      if( it_state != _mVar.end() ){
+        evaldom.insert( it_state->second.cbegin(), it_state->second.cend() );
+        continue;
+      }
+      auto it_input = _mInp.find( *op->varout[0] );
+      if( it_input != _mInp.end() ){
+        evaldom.insert( it_input->second.cbegin(), it_input->second.cend() );
+        continue;
+      }
+    }
+    for( auto const& [dvar, val] : _mFct[nfct].point ){
+      (void)val;
+      evaldom.insert( dvar );
+    }
+    for( auto const& [dvar, lim] : _mFct[nfct].grid ){
+      (void)lim;
+      evaldom.insert( dvar );
+    }
+  }
+}
+
+inline bool
+OCFEBASE::_constant
+( FFVar const& var )
+const
+{
+  if( !var.dag() ) return false;
+  for( auto const& cst : _vCst )
+    if( var.id() == cst.id() ) return true;
+  return false;
+}
+
+inline bool
+OCFEBASE::_discretise_colloc_model
+()
+{
+  // A deferred value's source is an EXPRESSION (FFModel::t_DeferredValue).  THIS solver evaluates it from the
+  // collocated solution, so a source that is not already a state is materialised as one here -- with a defining row
+  // and an auxiliary record, before the classification sees the system.  An integrator with a quadrature
+  // right-hand side needs none of this, which is why the model no longer does it.
+  for( auto& C : _deferredValue ){
+    if( !C.source.dag() || _mVar.count( C.source ) ) continue;
+    std::vector<FFVar> dom( C.source_dom.cbegin(), C.source_dom.cend() );
+    std::string base = C.input.name();
+    if( base.size() > 2 && base[base.size()-2] == '_' ) base.resize( base.size()-2 );
+    FFVar w = _dag->add_var( base + "_R" );
+    _add_working_state( w, dom );
+    _register_aux_def( w, C.source, dom, std::set<FFVar,lt_FFVar>(), C.block_id );
+    std::map<FFVar,int,lt_FFVar> ld;
+    for( auto const& d : dom ) ld[d] = FFDom::ALL;
+    _mEqn.push_back( { C.source - w, ld, _make_equation_options( _link_eqn_options( C.block_id, true ) ) } );
+    C.source = w;
+  }
+  // A materialised source that reads a state jumping at a transition jumps with it (see _derive_transition_lifts)
+  if( !_derive_transition_lifts() ){ _setupStatus = SetupStatus::INCONSISTENT_MODEL;  return false; }
+
+
+  _issetup = false;
+  _mDep.clear(); // dependency map for participating variables
+
+  // Collocated state count, blocks and dependencies
+  size_t ndx = 0;
+  _nCollVar = 0; // total number of states after discretization
+  _vVar.clear(); _vVar.reserve( _mVar.size() );
+  _depVar.resize( _mVar.size() );
+  _blkVar.clear();
+  ndx = 0;
+  for( auto const& [var,dom] : _mVar ){
+    _vVar.push_back( var );
+
+    // Set dependency
+    _depVar[ndx].indep( var.id().second );
+    _mDep[var.id().second] = {STATE, ndx};
+
+    // Track collocated coefficient count and blocks
+    size_t blk_size = 1;
+    std::vector<size_t> blk_dim( dom.size() );
+    size_t blk = 0;
+    size_t cnt = 1;
+    for( auto const& v : dom ){
+      auto const& d = _mDom[v];
+      blk_size *= d.n_node;
+      blk_dim[blk++] = d.n_node;
+      cnt *= d.n_elem * d.n_node;
+    }
+    _blkVar[var] = {_nCollVar, blk_size, std::move(blk_dim)};
+    _nCollVar += cnt;
+    
+    ndx++;
+  }
+
+  // Collocated parameter count, blocks and dependencies
+  _nCollInp = 0; // total number of inputs after discretization
+  _vInp.clear(); _vInp.reserve( _mInp.size() );
+  _depInp.resize( _mInp.size() );
+  _blkInp.clear();
+  ndx = 0;
+  for( auto const& [var, dom] : _mInp ){
+    _vInp.push_back( var );
+
+    // Set dependency
+    _depInp[ndx].indep( var.id().second );
+    _mDep[var.id().second] = {INPUT, ndx};
+
+    // Track collocated coefficient count and blocks
+    size_t blk_size = 1;
+    std::vector<size_t> blk_dim( dom.size() );
+    size_t blk = 0;
+    size_t cnt = 1;
+    for( auto const& v : dom ){
+      auto const& d = _input_dom( var, v );
+      auto const& dphys = _mDom.at( v );
+      if( _validate_input_grid_marching( v, d ) ){}   // a marching solver validated it against its march grid
+      else if( d.n_elem != dphys.n_elem
+       || std::fabs( d.lo_dom - dphys.lo_dom ) > 64.*DBL_EPSILON
+       || std::fabs( d.up_dom - dphys.up_dom ) > 64.*DBL_EPSILON )
+        throw Exceptions( Exceptions::INDEX );
+      blk_size *= d.n_node;
+      blk_dim[blk++] = d.n_node;
+      cnt *= d.n_elem * d.n_node;
+    }
+    _blkInp[var] = {_nCollInp, blk_size, std::move(blk_dim)};
+    _nCollInp += cnt;
+    
+    ndx++;
+  }
+
+  // Constants
+  _depCst.resize( _vCst.size() );
+  ndx = 0;
+  for( auto const& var : _vCst ){
+    // Set dependency
+    _depCst[ndx].indep( var.id().second );
+    _mDep[var.id().second] = {CONSTANT, ndx};
+    
+    ndx++;
+  }
+
+  // Setup domain collocation
+  _vDom.clear(); _vDom.reserve( _mDom.size() );
+  _depDom.resize( _mDom.size() );
+  ndx = 0;
+  for( auto& [var, dom] : _mDom ){
+    _vDom.push_back( var );
+
+    // Set dependency
+    _depDom[ndx].indep( var.id().second );
+    _mDep[var.id().second] = {DOMAIN, ndx};
+
+    // Initialize collocation nodes
+    dom.set_nodes();
+#ifdef CRONOS__FFCOLLOC_DEBUG
+    _disp( 3 ) << var << ": ";
+    _disp( 3 ) << std::scientific << std::setprecision(6);
+    for( auto const& x : dom.lgnodes() )
+      _disp( 3 ) << x << "  ";
+    _disp( 3 ) << std::endl;
+#endif
+    ndx++;
+  }
+
+  // Initialize optional input collocation nodes and verify matching element partitions
+  for( auto& [inp, disc] : _mInpDisc ){
+    auto itin = _mInp.find( inp );
+    if( itin == _mInp.end() ) throw Exceptions( Exceptions::INDEX );
+    for( auto& [dvar, idom] : disc ){
+      if( itin->second.find( dvar ) == itin->second.end() )
+        throw Exceptions( Exceptions::INDEX );
+
+      { int const h = _init_input_nodes_marching( dvar, idom );   // a marching solver: against its march grid
+        if( h < 0 ) return false;                                   // handled, node setup failed (status set)
+        if( h > 0 ) continue; }                                     // handled: keep the full input partition
+
+      auto const& pdom = _mDom.at( dvar );
+      if( idom.n_elem != pdom.n_elem
+       || idom.elem_bnd.size() != pdom.elem_bnd.size()
+       || idom.elem_len.size() != pdom.elem_len.size()
+       || std::fabs( idom.lo_dom - pdom.lo_dom ) > 64.*DBL_EPSILON
+       || std::fabs( idom.up_dom - pdom.up_dom ) > 64.*DBL_EPSILON )
+        throw Exceptions( Exceptions::INDEX );
+      for( size_t ie=0; ie<pdom.elem_bnd.size(); ++ie )
+        if( std::fabs( idom.elem_bnd[ie] - pdom.elem_bnd[ie] ) > 64.*DBL_EPSILON )
+          throw Exceptions( Exceptions::INDEX );
+      idom.w_elem   = pdom.w_elem;
+      idom.elem_bnd = pdom.elem_bnd;
+      idom.elem_len = pdom.elem_len;
+      if( !idom.set_nodes() ){ _setupStatus = SetupStatus::NODE_SETUP_FAILED; return false; }
+    }
+  }
+
+  // Cache physical nodes for every domain element.  Must precede _classify_pde():
+  // the classify-phase mesh-wavenumber probe (k_h = pi/dx_min) reads
+  // _nodeBlockCache, so it has to be populated before classification runs.
+  _setup_node_cache();
+
+  return true;
+}
+
+inline bool
+OCFEBASE::_build_colloc_plan
+()
+{
+  size_t ndx = 0;
+
+  // Reuse the same consistency helper on the local, possibly order-reduced
+  // model, and populate setup's equation/output row counts and subgraph caches.
+  if( !_check_consistency( _dag, _vCst, &_vCstVal, _mDom, _mVar, _mInp,
+                           _mEqn, _mFct, &_nCollEqn, &_sgEqn,
+                           &_nCollFct, &_sgFct ) )
+    { _setupStatus = SetupStatus::INCONSISTENT_MODEL; return false; }
+
+  _phase( "consistency + counts" );
+
+  // Map dependencies
+  _depEqn.resize( _mEqn.size() );
+  ndx = 0;
+  for( auto const& eqn : _mEqn ){
+    _dag->eval( _sgEqn[ndx], 1, &eqn.var, &_depEqn[ndx], _vVar.size(), _vVar.data(), _depVar.data(),
+                _vInp.size(), _vInp.data(), _depInp.data(), _vCst.size(), _vCst.data(), _depCst.data(),
+                _vDom.size(), _vDom.data(), _depDom.data() );
+    ndx++;
+  }
+
+#ifdef MC__OCFESLV_DEPEQN_PROBE
+  // [depeqn] per-equation state-dependency dump (OPT-IN, compile flag).  For each equation, list its
+  // domain variables and the STATES that _depEqn recorded it depends on.  Localizes cross-domain
+  // coefficient-state registration (e.g. a {z}-state used in the coefficients of {rwc,z} equations):
+  // if such a state is absent here, the drop is in the dependency eval; if present, look downstream.
+  {
+    size_t pndx = 0;
+    for( auto const& eqnp : _mEqn ){
+      _disp( 3 ) << "  [depeqn] eqn#" << pndx << " dom={";
+      for( auto const& [dv,b] : eqnp.dom ){ (void)b; _disp( 3 ) << " " << dv; }
+      _disp( 3 ) << " } states:";
+      for( auto const& [id,d] : _depEqn[pndx].dep() ){
+        (void)d;
+        auto it = _mDep.find( id );
+        if( it != _mDep.end() && it->second.first == STATE )
+          _disp( 3 ) << " " << _vVar[ it->second.second ];
+      }
+      _disp( 3 ) << "\n";
+      ++pndx;
+    }
+  }
+#endif // MC__OCFESLV_DEPEQN_PROBE
+
+  // Map output dependencies
+  _depFct.resize( _mFct.size() );
+  ndx = 0;
+  for( auto const& fct : _mFct ){
+    _dag->eval( _sgFct[ndx], 1, &fct.var, &_depFct[ndx], _vVar.size(), _vVar.data(), _depVar.data(),
+                _vInp.size(), _vInp.data(), _depInp.data(), _vCst.size(), _vCst.data(), _depCst.data(),
+                _vDom.size(), _vDom.data(), _depDom.data() );
+    ndx++;
+  }
+
+  // Build compact dependency-update plans used during repeated eval() calls.
+  _setup_eval_plans();
+  _phase( "dependency_map + eval_plans" );
+
+  // Build the principal-symbol SAT coupling table as a setup-time input to
+  // both IC_WEAK and IC_TRACE.  From this point onward, evaluation must only
+  // consume the resulting coupling/plan data, not rebuild interface topology.
+  _ensure_sat_coupling();
+  _phase( "sat_coupling" );
+
+  // IC_TRACE appends one multiplier unknown per exact trace/interface row and
+  // keeps all physical residual rows.  The complete interface plan is built
+  // transactionally into a local draft, validated, and committed only once.
+  // Thus a setup failure cannot leave stale or half-built receiver/claim/tau
+  // structures behind, and eval()/deriv() can only consume a sealed plan.
+  InterfacePlanDraft interface_plan_draft;
+  if( !_build_interface_plan_draft( interface_plan_draft )
+   || !_validate_interface_plan_draft( interface_plan_draft ) ){
+    _issetup = false;
+    { _setupStatus = SetupStatus::INTERFACE_PLAN_INVALID; return false; }
+  }
+  _commit_interface_plan_draft( std::move( interface_plan_draft ) );
+  _phase( "interface_plan (build+validate+commit)" );
+
+  // Reset collocation variables
+  _reset_colloc( _OCVar, _OCInp, _OCDom, _OCCst );
+  _reset_colloc( _OCDepVar, _OCDepInp, _OCDepDom, _OCDepCst );
+  _reset_colloc( _OCFVar, _OCFInp, _OCFDom, _OCFCst );
+  _OCFEqn = OCVar<t_FAD>();
+  _wrkOCF.clear();
+  _phase( "reset_colloc" );
+
+  // ---------------------------------------------------------------------------
+  // rev107 [taucol/plan] -- direct named-column instrument, plan half.
+  // ---------------------------------------------------------------------------
+  // Placed HERE, between the plan commit and the FFDep structural pass below, and the
+  // position is a decision rather than a convenience:
+  //
+  //   * it must be AFTER _commit_interface_plan_draft -- it reads the committed plan;
+  //   * putting it BEFORE the FFDep pass makes THAT pass the assembly observation.
+  //     The pass runs _eval_eqn end to end and every quantity the assembly half records
+  //     is INDEX-BASED and value-independent (row keys, pivot tags, correction indices),
+  //     so FFDep gives the same answer a double run gives.  [stage2-preflight] already
+  //     reports from this pass for exactly that reason.
+  //   * and therefore the instrument produces its rows under CRONOS_AUDIT_SETUP_ONLY,
+  //     which returns false further down without ever reaching a real eval().  Placed
+  //     after PLAN METRIC instead, the assembly half would print nothing in a corpus
+  //     sweep -- the configuration it most needs to cover.
+  //
+  // CONSEQUENCE FOR READING A LOG: [taucol/*] now precedes [evoface] PLAN METRIC, so k
+  // arrives AFTER the trace that is supposed to account for it.  Scroll down for k; do
+  // not read the trace as self-contained.
+  //
+  // Deliberately NOT folded into the kEvoFace block: that flag already gates several
+  // reports and a reader cannot tell which of them a line came from.  A diagnostic
+  // sharing a gate with another diagnostic is one deletion away from disappearing
+  // silently -- n_elem@plan shared a std::cerr with the predicate-(ii) report and went
+  // with it in rev101.
+  if( _taucol_enabled() ) _report_tau_column_plan( _disp( 3 ) );
+
+  // Structural self-check (Part 2): a dry FFDep residual pass verifies that
+  // Frozen exact interface rows and surviving physical equation nodes emitted
+  // by _eval_eqn() jointly produce exactly _nCollEqn rows for the active
+  // interface and imposition options.  Index-based and value-independent; surfaces a
+  // squareness violation here rather than at the first eval()/deriv() call.
+  if( !_audit_strong_interface_rows() )
+    { _setupStatus = SetupStatus::AUDIT_NONSQUARE; return false; }
+  _phase( "audit_strong_interface_rows (FFDep pass)" );
+  return true;
+}
+
+inline void
+OCFEBASE::_reset_colloc_state
+()
+{
+  _mDom.clear();
+  _mInpDisc.clear();
+  _blockSymbol.clear();
+  _blockClassification.clear();
+  _blockFaceData.clear();
+  _satCoupling.clear();
+  _satCouplingBuilt      = false;
+  _satCouplingClassified = false;
+  _satCouplingSerial     = 0;
+  _auxDef.clear();
+  _auxVarID.clear();
+  _eqnAuxDirCache.clear();
+  _evolution_dom_user = false;
+  _evolution_dom_set  = false;
+  _depPlanEqn.clear();
+  _depPlanFct.clear();
+  _fctEvalDom.clear();
+  _nodeBlockCache.clear();
+  _OCFVar.clear();
+  _OCFInp.clear();
+  _OCFDom.clear();
+  _OCFCst.clear();
+  _wrkOCF.clear();
+  _classificationSerial = 0;
+  _nCollEqn = _nCollVar = _nCollInp = _nCollFct = 0;
+  _nTraceVar = _traceVarOffset = _nTraceConstraint = 0;
+  _plan.reset();
+  _interfacePlanBuildAllowed = false;
+  _evoDerivRows.clear();
 }
 
 } // namespace mc

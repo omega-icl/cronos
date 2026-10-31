@@ -937,6 +937,7 @@ INPUT                  = CRONOS.txt \
                          ENVIRONMENT.md \
                          ../src/ffmodel.hpp \
                          ../src/ocfebase.hpp \
+                         ../src/ocfemol.hpp \
                          ../src/ocfeslv.hpp \
                          ../src/ocplan.hpp \
                          ../src/odeslv_base.hpp \

@@ -2924,7 +2924,8 @@ public:
   //! on the PDE is phase 8 of the MoL plan).  Spatial derivatives are left in each row's remainder: the collocation
   //! that discretises them is the consumer's business.  The peel is the one _extract_from_model uses for time.
   bool peel_evolution
-    ( FFVar const& dir, t_Peel& out );
+    ( FFVar const& dir, t_Peel& out )
+    { return _peel_evolution( dir, out, true, true ); }
 
   //! @brief What one FACE of one spatial direction of one block asks for, and what the model puts there.
   //! @a outgoing is the number of characteristic directions LEAVING the domain at this face -- the number of
@@ -3061,6 +3062,13 @@ protected:
   std::vector<size_t> _derivs_in
     ( FFVar const& row, FFVar const& dir, std::vector<FFVar> const& states )
     const;
+
+  //! @brief peel_evolution's worker, on the WORKING model (_mEqn, _mVar, _mDom -- what var_equation() returns once
+  //! set up, and what a solver sees inside setup).  @p require_setup false lets a solver peel from inside
+  //! setup (after reduce_order, before classification); @p check_index false skips the structural-index hook,
+  //! which needs the classification's block ids.  OCFEMOL uses both (MoL phase 3).
+  bool _peel_evolution
+    ( FFVar const& dir, t_Peel& out, bool require_setup, bool check_index );
 
   //! @brief The first mixed derivative involving @p dir in @p row -- a Partial node along @p dir whose operand is
   //! itself a Partial node, or a Partial node along another direction whose operand is a Partial along @p dir --
@@ -5847,22 +5855,22 @@ const
 }
 
 inline bool
-FFModel::peel_evolution
-( FFVar const& dir, t_Peel& out )
+FFModel::_peel_evolution
+( FFVar const& dir, t_Peel& out, bool require_setup, bool check_index )
 {
   out = t_Peel();
   static char const* const ROLE[] = { "AUTO", "INTERIOR", "INITIAL", "BOUNDARY", "INTERFACE", "LINK", "SURFACE", "DIAGNOSTIC" };
   auto role_name = []( EqnRole r ){ int const i = (int)r; return ( i >= 0 && i < 8 )? ROLE[i]: "?"; };
 
-  if( !is_setup() ){ out.blocker = "the model has not been set up"; return false; }
-  if( !dir.dag() || !var_domain().count( dir ) ){ out.blocker = "the direction has no domain"; return false; }
+  if( require_setup && !is_setup() ){ out.blocker = "the model has not been set up"; return false; }
+  if( !dir.dag() || !_mDom.count( dir ) ){ out.blocker = "the direction has no domain"; return false; }
 
   for( auto const& [x, dm] : _mVar ) out.states.push_back( x );
   out.differential.assign( out.states.size(), false );
 
   std::set<int> blocks;
   size_t k = 0;
-  for( auto const& eqn : var_equation() ){
+  for( auto const& eqn : _mEqn ){
     EqnRole const r = eqn.opt? eqn.opt->role: EqnRole::AUTO;
     if( eqn.opt && eqn.opt->participate_in_classification ) blocks.insert( eqn.opt->block_id );
     if( r == EqnRole::AUTO ){
@@ -5905,7 +5913,7 @@ FFModel::peel_evolution
   }
 
   // the structural index along the direction, per block
-  for( int bid : blocks ){
+  if( check_index ) for( int bid : blocks ){
     t_IndexResult const ir = _structural_index_analysis_uncached( bid, &dir );
     out.index = std::max( out.index, ir.index );
     if( ir.index > 1 ){

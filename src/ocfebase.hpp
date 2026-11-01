@@ -15208,6 +15208,7 @@ const
     int pivot_idx;   //!< >= 0 pivot, -1 ordinary, -2 exact-replacement
     std::vector<std::pair<size_t,double>> const* correction;  //!< nullptr or &frozen projection
     int ndx;         //!< source equation index into _mEqn (row-provenance tag), -1 if none
+    t_RowNode node;  //!< the node half of the provenance, recorded at buffering time (the emit comes after the loop)
   };
   std::vector<StrongRow> strong_rows;
   auto make_strong_row_key = [&]( size_t eqn_id,
@@ -15639,15 +15640,15 @@ const
                        || ( _taucol_enabled() && _tauColPlanReady ) ) )
           || build_prov;   // the node half of the row provenance needs the surviving flat indices
         // the node a surviving flat index stands at, into the last provenance record
-        auto prov_node = [&]( size_t flat ){
-          if( !build_prov || _rowNode.empty() ) return;
-          auto& rec = _rowNode.back();  rec.dims.clear();  rec.dims.reserve( cdims.size() );
+        auto node_rec = [&]( size_t flat, t_RowNode& rec ){
+          rec.dims.clear();  rec.dims.reserve( cdims.size() );
           size_t rem = flat;
           for( size_t d = 0; d < cdims.size(); ++d ){
             size_t const m = rem % cdims[d].cur_n;  rem /= cdims[d].cur_n;
             rec.dims.push_back({ cdims[d].pvar->id().second, cdims[d].iel, m, cdims[d].lim });
           }
         };
+        auto prov_node = [&]( size_t flat ){ if( build_prov && !_rowNode.empty() ) node_rec( flat, _rowNode.back() ); };
         std::vector<size_t> kept_flat;
         if( need_kept_flat ) kept_flat.reserve( ntot );
 
@@ -15760,7 +15761,8 @@ const
                 }
               }
             }
-            strong_rows.push_back({ newbuf[i], piv_idx, p_corr, (int)ndx });
+            strong_rows.push_back({ newbuf[i], piv_idx, p_corr, (int)ndx, {} });
+            if( build_prov ) node_rec( kept_flat[i], strong_rows.back().node );
           }
         }
         else if( trace && !kept_flat.empty() ){
@@ -15837,6 +15839,7 @@ const
           val -= U( coeff ) * pivot_vals[ pidx ];
       }
       emit_eqn( val, sr.ndx );
+      if( build_prov && !_rowNode.empty() ) _rowNode.back() = sr.node;
     }
   }
 

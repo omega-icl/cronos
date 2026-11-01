@@ -918,6 +918,7 @@ set(CRONOS_HEADERS
     ffmodel.hpp
     ffocfe.hpp
     ffde.hpp
+    ffocfemol.hpp
     ocfebase.hpp
     ocfemol.hpp
     ocfeslv.hpp

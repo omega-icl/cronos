@@ -155,6 +155,29 @@ public:
     ( double t, double const* xc, double* rc, std::vector<size_t>& jac_ptr, std::vector<size_t>& jac_col,
       std::vector<double>& jac_val, double* drdt );
 
+  //! @brief One entry of the Ini stream: INITIAL row @p row evaluated at a node -- the fields it reads take their values
+  //! from xc at @p cols (field id -> column), the spatial coordinates are @p coord (direction -> value), and the
+  //! unknown it fixes is @p target (the column of the field this entry is the initial condition of).
+  struct t_IniEntry
+  {
+    size_t row = 0;                                     //!< index into ini_rows()
+    size_t target = 0;                                  //!< the differential unknown this condition fixes
+    std::vector< std::pair<FFVar,size_t> > cols;        //!< (field, column of its value at the node)
+    std::vector< std::pair<FFVar,double> > coord;       //!< (direction, coordinate of the node)
+    bool dropped = false;                               //!< at an algebraic node: not in the stream, checked for consistency at t0
+  };
+  //! @brief The Ini stream (entries with dropped == false) and the dropped pairs (dropped == true), after setup.
+  std::vector<t_IniEntry> const& ini_stream() const { return _iniStream; }
+
+  //! @brief The INITIAL rows at the stream's nodes: @p ini has ini_stream().size() entries in that order (the dropped
+  //! ones included, so the consistency check at t0 reads the same array).  Each is one small DAG evaluation.
+  bool eval_initial
+    ( double t, double const* xc, double* ini );
+
+  //! @brief The derivative of eval_initial with respect to xc, in CSR over the entries (a few columns each).
+  bool deriv_initial
+    ( double t, double const* xc, double* ini, std::vector<size_t>& ptr, std::vector<size_t>& col, std::vector<double>& val );
+
   //! @brief The Jacobian pattern over xc alone (CSR row pointers and columns), valid after setup; the values come
   //! from deriv_residual, in the same order.
   void jacobian_pattern
@@ -166,6 +189,7 @@ protected:
   t_Peel                _peel;      //!< the peel along t (working model)
   std::vector< std::vector< std::pair<size_t,FFVar> > > _massByEqn;   //!< per row of the rewritten _mEqn: (field, coefficient)
   std::vector<t_MassEntry> _mass;    //!< Mc as data
+  std::vector<t_IniEntry>  _iniStream;   //!< the Ini stream and the dropped pairs
   std::vector<bool>     _colDiff;    //!< per unknown of xc
   std::vector<bool>     _rowAlg;     //!< per row of Rc
   std::vector<t_Eqn>    _iniEqn;    //!< the INITIAL rows, kept aside from the collocated system
@@ -191,7 +215,7 @@ protected:
       _reset_colloc_state();
       _peel = t_Peel();
       _iniEqn.clear();
-      _massByEqn.clear(); _mass.clear(); _colDiff.clear(); _rowAlg.clear();
+      _massByEqn.clear(); _mass.clear(); _colDiff.clear(); _rowAlg.clear(); _iniStream.clear();
       _evoLo = _evoHi = 0.;
       _shape = t_SemiDiscrete();
     }
@@ -223,7 +247,7 @@ protected:
       _face_data.clear();
       _peel = t_Peel();
       _iniEqn.clear();
-      _massByEqn.clear(); _mass.clear(); _colDiff.clear(); _rowAlg.clear();
+      _massByEqn.clear(); _mass.clear(); _colDiff.clear(); _rowAlg.clear(); _iniStream.clear();
       _shape = t_SemiDiscrete();
       return true;
     }
@@ -477,6 +501,47 @@ OCFEMOL::deriv_residual
   return true;
 }
 
+inline bool
+OCFEMOL::eval_initial
+( double t, double const* xc, double* ini )
+{
+  if( !_shape.ran || !xc || !ini ) return false;
+  for( size_t k = 0; k < _iniStream.size(); ++k ){
+    auto const& e = _iniStream[k];
+    std::vector<FFVar> vars; std::vector<double> vals;
+    for( auto const& [y, c] : e.cols ){ vars.push_back( y ); vals.push_back( xc[c] ); }
+    for( auto const& [d, z] : e.coord ){ vars.push_back( d ); vals.push_back( z ); }
+    if( _evolution_dom_set ){ vars.push_back( _evolution_dom_var ); vals.push_back( t ); }
+    for( size_t i = 0; i < _vCst.size() && i < _vCstVal.size(); ++i ){ vars.push_back( _vCst[i] ); vals.push_back( _vCstVal[i] ); }
+    std::vector<double> out( 1 );
+    try{ _dag->eval( std::vector<FFVar>{ _iniEqn[e.row].var }, out, vars, vals ); } catch( ... ){ return false; }
+    ini[k] = out[0];
+  }
+  return true;
+}
+
+inline bool
+OCFEMOL::deriv_initial
+( double t, double const* xc, double* ini, std::vector<size_t>& ptr, std::vector<size_t>& col, std::vector<double>& val )
+{
+  if( !_shape.ran || !xc ) return false;
+  ptr.assign( 1, 0 ); col.clear(); val.clear();
+  for( size_t k = 0; k < _iniStream.size(); ++k ){
+    auto const& e = _iniStream[k];
+    std::vector<FFVar> vars; std::vector<t_FAD> vals;
+    for( size_t j = 0; j < e.cols.size(); ++j ){ vars.push_back( e.cols[j].first ); t_FAD f = xc[ e.cols[j].second ]; f.diff( j, e.cols.size() ); vals.push_back( f ); }
+    for( auto const& [d, z] : e.coord ){ vars.push_back( d ); vals.push_back( t_FAD( z ) ); }
+    if( _evolution_dom_set ){ vars.push_back( _evolution_dom_var ); vals.push_back( t_FAD( t ) ); }
+    for( size_t i = 0; i < _vCst.size() && i < _vCstVal.size(); ++i ){ vars.push_back( _vCst[i] ); vals.push_back( t_FAD( _vCstVal[i] ) ); }
+    std::vector<t_FAD> out( 1 );
+    try{ _dag->eval( std::vector<FFVar>{ _iniEqn[e.row].var }, out, vars, vals ); } catch( ... ){ return false; }
+    if( ini ) ini[k] = out[0].val();
+    for( size_t j = 0; j < e.cols.size(); ++j ){ col.push_back( e.cols[j].second ); val.push_back( e.cols.size()? out[0].deriv( j ): 0. ); }
+    ptr.push_back( col.size() );
+  }
+  return true;
+}
+
 inline FFDep
 OCFEMOL::_deps_of
 ( FFVar const& expr )
@@ -559,8 +624,16 @@ OCFEMOL::_audit_initial_coverage
       bool const diff = col < _colDiff.size() && _colDiff[col];
       bool covered = false;
       for( size_t q = 0; q < _iniEqn.size() && !covered; ++q ) covered = ini_dep[q].dep().count( x.id().second ) > 0;
-      if( diff && covered ) ++_shape.n_ini_stream;
-      else if( !diff && covered ) ++_shape.n_ini_dropped;
+      if( covered ){
+        if( diff ) ++_shape.n_ini_stream; else ++_shape.n_ini_dropped;
+        for( size_t q = 0; q < _iniEqn.size(); ++q ){
+          if( !ini_dep[q].dep().count( x.id().second ) ) continue;
+          t_IniEntry e; e.row = q; e.target = col; e.dropped = !diff;
+          for( auto const& y : _peel.states ) if( ini_dep[q].dep().count( y.id().second ) && _mVar.count( y ) && _mVar.at( y ).empty() )
+            e.cols.emplace_back( y, pos_state( y, {} ) );
+          _iniStream.push_back( std::move( e ) );
+        }
+      }
       else if( diff ){ os << "OCFEMOL::setup [mol] DOF audit: differential state " << x << " has no INITIAL row\n"; ++bad; }
       continue;
     }
@@ -591,9 +664,36 @@ OCFEMOL::_audit_initial_coverage
         }
         covered = ok;
       }
-      if( diff && covered ) ++_shape.n_ini_stream;
-      else if( !diff && covered ) ++_shape.n_ini_dropped;
-      else if( diff && !covered ) ++n_missing;
+      if( covered ){
+        if( diff ) ++_shape.n_ini_stream; else ++_shape.n_ini_dropped;
+        // every INITIAL row reading x and admitting this node is an entry; its other fields' values at the same node
+        for( size_t q = 0; q < _iniEqn.size(); ++q ){
+          if( !ini_dep[q].dep().count( x.id().second ) ) continue;
+          bool ok = true;
+          for( size_t d = 0; d < dirs.size() && ok; ++d ){
+            auto itm = _iniEqn[q].dom.find( dirs[d] );
+            int const m = itm == _iniEqn[q].dom.end()? FFDom::ALL: itm->second;
+            bool const atLB = iel[d] == 0 && ind[d] == 0, atUB = iel[d] + 1 == nel[d] && ind[d] + 1 == nnd[d];
+            if( m == FFDom::LB ) ok = atLB; else if( m == FFDom::UB ) ok = atUB; else ok = !( ( atLB && ( m & 1 ) ) || ( atUB && ( m & 2 ) ) );
+          }
+          if( !ok ) continue;
+          t_IniEntry e; e.row = q; e.target = col; e.dropped = !diff;
+          for( size_t d = 0; d < dirs.size(); ++d ){
+            FFDom const& dm = _mDom.at( dirs[d] );
+            double const lo = dm.elem_lo( iel[d] ), hi = dm.elem_up( iel[d] ), xi = dm.lgnodes().at( ind[d] );
+            e.coord.emplace_back( dirs[d], 0.5*( lo + hi ) + 0.5*( hi - lo )*xi );
+          }
+          for( size_t i2 = 0; i2 < _peel.states.size(); ++i2 ){
+            FFVar const& y = _peel.states[i2];
+            if( !ini_dep[q].dep().count( y.id().second ) ) continue;
+            auto ity = _mVar.find( y ); auto itby = _blkVar.find( y );
+            if( ity == _mVar.end() || itby == _blkVar.end() || ity->second != var_dom ) continue;   // same grid only
+            e.cols.emplace_back( y, pos_state( y, ndx_el ) + ( col - pos_state( x, ndx_el ) ) );
+          }
+          _iniStream.push_back( std::move( e ) );
+        }
+      }
+      else if( diff ) ++n_missing;
       // next node
       size_t d = 0;
       for( ; d < dirs.size(); ++d ){

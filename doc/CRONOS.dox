@@ -938,6 +938,7 @@ INPUT                  = CRONOS.txt \
                          ../src/ffmodel.hpp \
                          ../src/ocfebase.hpp \
                          ../src/ocfemol.hpp \
+                         ../src/ffocfemol.hpp \
                          ../src/ocfeslv.hpp \
                          ../src/ocplan.hpp \
                          ../src/odeslv_base.hpp \

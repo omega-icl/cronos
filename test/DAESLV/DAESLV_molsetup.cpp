@@ -3,7 +3,7 @@
 #include <iomanip>
 #include <iostream>
 #include <random>
-#include "ocfemol.hpp"
+#include "ffocfemol.hpp"
 using namespace mc;
 static int n_pass = 0, n_fail = 0;
 static void check( std::string const& w, bool ok )
@@ -82,6 +82,19 @@ int main()
       check( "rod/ALGEBRAIC: Ini stream covers every differential unknown", S.n_ini_stream == S.n_diff_cols );
       check( "rod/ALGEBRAIC: the u-INITIAL row is dropped at the 4 algebraic u-nodes", S.n_ini_dropped == 4 );
       check_jacobian( "rod", oc );
+      // the Ini stream as data: 11 stream + 4 dropped entries of the row  u - 0  at u's nodes; evaluated, each equals u there
+      {
+        auto const& IS = oc.ini_stream(); size_t nd = 0; for( auto const& e : IS ) nd += e.dropped;
+        check( "rod: Ini table has 15 entries (11 stream + 4 dropped)", IS.size() == 15 && nd == 4 );
+        std::vector<double> xc( S.n_states ), ini( IS.size() ); std::mt19937 rng( 5 ); std::uniform_real_distribution<double> U( 0., 1. );
+        for( auto& v : xc ) v = U( rng );
+        check( "rod: eval_initial runs", oc.eval_initial( 0., xc.data(), ini.data() ) );
+        double dm = 0.; for( size_t k = 0; k < IS.size(); ++k ) dm = std::max( dm, std::fabs( ini[k] - xc[ IS[k].target ] ) );
+        check( "rod: each INITIAL evaluation (u - 0) equals u at its node",   dm < 1e-14 );
+        std::vector<size_t> ptr, col; std::vector<double> val; bool okd = oc.deriv_initial( 0., xc.data(), nullptr, ptr, col, val ) && col.size() == IS.size();
+        for( size_t k = 0; okd && k < IS.size(); ++k ) okd = ( col[k] == IS[k].target && std::fabs( val[k] - 1. ) < 1e-14 );
+        check( "rod: deriv_initial is the identity on the targets",           okd );
+      }
       std::cout << "      shape: " << S.n_states << " unknowns (" << S.n_tau << " tau), " << S.n_rows << " rows\n";
     }
   }
@@ -215,6 +228,11 @@ int main()
   }
 
   // ---- G. the index-2 PDE of E, REDUCED by hand at the PDE level (what phase 8 would produce): the constraint
+  //         (On the plan's three passes here and in H: the PDE row enters MoL's plan as its remainder -u_zz - lambda,
+  //          the hidden constraint IS u_zz + lambda, so the spatial rows receiving the interface claims are dependent
+  //          (k=1); the trace projector promotes two Schur-eliminated taus to explicit and rebuilds, the exact-natural
+  //          restore rebuilds once more, and 3 explicit taus survive.  OCFESLV's row carries u_t and is independent, so
+  //          its plan takes one pass.  A property of reduced models under MoL, not a defect -- 1 Nov 2026.)
   //         0 = u - g is differentiated once along t and u_t substituted from the PDE row -> the HIDDEN constraint
   //         0 = u_zz + lambda pins lambda; the original constraint survives only as the initial condition u(0,z) = g.
   {
@@ -373,6 +391,55 @@ int main()
       check( "2-D: structural index along t <= 1",                           P.index <= 1 );
       check_jacobian( "2-D", oc );
     }
+  }
+
+  // ---- L. the operation: Rc as a DAG external operation in a SEPARATE graph (the integrator's), evaluated in double
+  //         through the DAG and differentiated by MC++'s sparse forward mode -- the path _extract_from_model takes.
+  {
+    std::cout << "\n  L. FFMOLRES: Rc(t, xc) as an external operation in the integrator's DAG (rod)\n";
+    FFGraph G; OCFEMOL oc( &G ); FFPartial OpP;
+    FFVar t = G.add_var("t"), z = G.add_var("z"), u = G.add_var("u");
+    oc.add_domain( t, FFDom( 0., 1., 1, FFDom::LGR, 2 ) ); oc.add_domain( z, FFDom( 0., 1., 3, FFDom::LGL, 5 ) );
+    oc.set_evolution_domain( t ); oc.add_state( u, {t,z} ); oc.update_ref( u, 0. );
+    int const TI = FFDom::ALL - FFDom::LB, ZI = FFDom::ALL - FFDom::LB - FFDom::UB;
+    OCFEMOL::EqnOptions io( OCFEMOL::EqnRole::INTERIOR, 0 ), ib( OCFEMOL::EqnRole::BOUNDARY, 0 ), ii( OCFEMOL::EqnRole::INITIAL, 0 );
+    oc.add_equation( OpP(u,t) - OpP( 0.1*OpP(u,z), z ), {t,z}, {TI, ZI}, io );
+    oc.add_equation( u, {t,z}, {TI, FFDom::LB}, ib ); oc.add_equation( 0.1*OpP(u,z) - 1., {t,z}, {TI, FFDom::UB}, ib );
+    oc.add_equation( u, {t,z}, {FFDom::LB, FFDom::ALL}, ii );
+    oc.options.DISPLAY_LEVEL = 0;
+    check( "op: OCFEMOL::setup", oc.setup() );
+    size_t const n = oc.semi_discrete().n_states, m = oc.semi_discrete().n_rows;
+    FFGraph H; std::vector<FFVar> xc( n ); for( auto& v : xc ) v = H.add_var(); FFVar tt = H.add_var("t");
+    FFMOLRES RES; std::vector<FFVar> rc = RES( xc, tt, &oc );
+    check( "op: n_rows outputs inserted", rc.size() == m );
+    std::mt19937 rng( 3 ); std::uniform_real_distribution<double> U( 0., 1. );
+    std::vector<double> x( n+1 ); for( auto& v : x ) v = U( rng );
+    std::vector<FFVar> leaves = xc; leaves.push_back( tt );
+    std::vector<double> r1( m ), r2( m ); H.eval( rc, r1, leaves, x ); oc.eval_residual( x[n], x.data(), r2.data() );
+    double d = 0.; for( size_t i = 0; i < m; ++i ) d = std::max( d, std::fabs( r1[i] - r2[i] ) );
+    check( "op: double evaluation through the DAG equals eval_residual", d == 0. );
+    auto J = H.SFAD( rc, leaves ); auto const& Jr = std::get<0>(J); auto const& Jc = std::get<1>(J); auto const& Je = std::get<2>(J);
+    std::vector<double> jv( Je.size() ); H.eval( Je, jv, leaves, x );
+    std::vector<size_t> ptr, col; std::vector<double> val, drdt( m ); oc.deriv_residual( x[n], x.data(), nullptr, ptr, col, val, drdt.data() );
+    size_t matched = 0; double dj = 0.;
+    for( size_t k = 0; k < Je.size(); ++k ){
+      unsigned const r = Jr[k], c = Jc[k]; double ref = 0.; bool found = false;
+      if( c == n ){ ref = drdt[r]; found = true; } else for( size_t j = ptr[r]; j < ptr[r+1]; ++j ) if( col[j] == c ){ ref = val[j]; found = true; break; }
+      if( found ){ ++matched; dj = std::max( dj, std::fabs( jv[k] - ref ) ); }
+    }
+    std::cout << "      SFAD: " << Je.size() << " nonzeros, " << matched << " matched to deriv_residual, max diff " << dj << "\n";
+    check( "op: MC++'s sparse forward mode through the DAG reproduces deriv_residual exactly", matched == Je.size() && dj == 0. );
+    // the Ini stream as an operation in the same DAG: values and MC++'s derivative against eval_initial/deriv_initial
+    FFMOLINI INI; std::vector<FFVar> ini = INI( xc, tt, &oc );
+    auto const& IS = oc.ini_stream();
+    std::vector<double> i1( ini.size() ), i2( ini.size() ); H.eval( ini, i1, leaves, x ); oc.eval_initial( x[n], x.data(), i2.data() );
+    double di = 0.; for( size_t k = 0; k < ini.size(); ++k ) di = std::max( di, std::fabs( i1[k] - i2[k] ) );
+    check( "op: FFMOLINI has one output per Ini entry and evaluates like eval_initial", ini.size() == IS.size() && di == 0. );
+    auto JI = H.SFAD( ini, leaves ); auto const& Ir = std::get<0>(JI); auto const& Ic = std::get<1>(JI); auto const& Ie = std::get<2>(JI);
+    std::vector<double> iv( Ie.size() ); H.eval( Ie, iv, leaves, x );
+    bool okI = Ie.size() == IS.size(); double dI = 0.;
+    for( size_t k = 0; okI && k < Ie.size(); ++k ){ okI = ( Ic[k] == IS[ Ir[k] ].target ); dI = std::max( dI, std::fabs( iv[k] - 1. ) ); }
+    check( "op: SFAD of FFMOLINI is the identity on the targets (rod: u - 0)", okI && dI == 0. );
   }
 
   std::cout << "\n==========  DAESLV_molsetup: " << n_pass << " passed, " << n_fail << " failed -- " << ( n_fail? "FAIL": "ALL PASS" ) << "  ==========\n\n";

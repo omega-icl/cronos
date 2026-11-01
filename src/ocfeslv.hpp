@@ -938,21 +938,6 @@ protected:
   mutable std::vector<t_FAD>         _FFct;
 
 
-  //! @brief Cached row-wise sparsity pattern of the equation Jacobian. Columns are stacked as [collocated states, collocated inputs]. Thus columns 0.._nCollVar-1 correspond to state coefficients and columns _nCollVar.._nCollVar+_nCollInp-1 correspond to input coefficients.
-  std::vector< std::vector<size_t> > _jacPatternEqn;
-
-  //! @brief Cached row-wise sparsity pattern of the output-function Jacobian. Columns are stacked as [collocated states, collocated inputs]. Thus columns 0.._nCollVar-1 correspond to state coefficients and columns _nCollVar.._nCollVar+_nCollInp-1 correspond to input coefficients.
-  std::vector< std::vector<size_t> > _jacPatternFct;
-
-  //! @brief Per-row linearity flags derived from FFDep.
-  std::vector<bool>                  _jacLinearEqn;
-  std::vector<bool>                  _jacLinearFct;
-  bool                               _jacAllEqnLinear = false;
-  bool                               _jacAllFctLinear = false;
-
-
-
-
   //! @brief Cached sparse affine residual/output map for purely linear rows.
   struct t_LinearRow
   {
@@ -965,19 +950,6 @@ protected:
   mutable bool                       _linEqnReady = false;
   mutable bool                       _linFctReady = false;
 
-  //! @brief Cached color assigned to each stacked derivative column
-  std::vector<unsigned>              _jacColor;
-
-  //! @brief Number of colors in the cached compressed-forward seed matrix
-  unsigned                           _jacNColor = 0;
-
-  //! @brief True when _jacPattern/_jacColor match the current setup/options
-  bool                               _jacReady = false;
-
-  //! @brief Option/classification signature used to build the derivative cache
-  Options::InterfaceType             _jacInterfaceType  = Options::IC_AUTO;
-  Options::ImpositionType            _jacImpositionType = Options::IC_STRONG;
-  bool                               _jacClassified     = false;
 
 
   //! @brief Clear what a re-setup invalidates on the solver side (derivative caches, the interface plan, the
@@ -1159,9 +1131,13 @@ protected:
     }
   }
 
-  //! @brief Build cached Jacobian sparsity pattern and column coloring
+  //! @brief The solver's Jacobian cache: the linear-residual cache reset, then OCFEBASE::_build_jacobian_pattern.
   bool _setup_deriv_cache
     ();
+  //! @brief OCFEBASE::_eval_fct_dep: the output functions' dependence pass.
+  void _eval_fct_dep
+    ( std::vector<FFDep>& fct_dep, std::vector<FFDep> const& var_dep, std::vector<FFDep> const& inp_dep )
+    override;
 
   //! @brief Ensure cached Jacobian sparsity/coloring match current setup/options.
   bool _ensure_deriv_cache
@@ -1184,10 +1160,6 @@ protected:
     ( double const* cst )
     const;
 
-  //! @brief Greedy coloring of the column-intersection graph induced by pattern
-  std::vector<unsigned> _color_jacobian_columns
-    ( std::vector< std::vector<size_t> > const& pattern, size_t const ncol, unsigned& ncolor )
-    const;
 
 
   //! @brief Reset local working environment: the solver's state, then FFModel's (overrides FFModel::_reset).
@@ -1213,25 +1185,8 @@ protected:
       std::vector<OCVar<U>>& OCdom, std::vector<OCVar<U>>& OCcst, std::vector<OCVar<U>>& OCwrk )
     const;
 
-  //! @brief Helper for copying derivative sparsity pattern
-  static void _deriv_copy_pattern
-    ( std::vector<std::vector<size_t>> const& pattern, size_t* nnz, size_t** colnz );
 
-  //! @brief Helper for extracting results from AD arrays
-  template <typename U>
-  static void _deriv_extract_rows
-    ( FADType<U> const* val, std::vector< std::vector<size_t> > const& pattern,
-      std::vector<unsigned> const& color, size_t const ncol, U* res, U** grad );
 
-  //! @brief Templated sparse derivative evaluation of collocated equation residuals in compressed FADBAD forward mode
-  template <typename U>
-  void _deriv_eqn
-    ( U* eqn, U** gradeqn, size_t* nnzeqn, size_t** colnzeqn,
-      OCVar<FADType<U>>& OCFeqn, std::vector<OCVar<FADType<U>>>& OCFvar,
-      std::vector<OCVar<FADType<U>>>& OCFinp, std::vector<OCVar<FADType<U>>>& OCFdom,
-      std::vector<OCVar<FADType<U>>>& OCFcst, std::vector<OCVar<FADType<U>>>& OCFwrk,
-      FADType<U>* Feqn, FADType<U>* Fvar, FADType<U>* Finp )
-    const;
 
   //! @brief Templated sparse derivative evaluation of collocated output functions in compressed FADBAD forward mode
   template <typename U>
@@ -5462,191 +5417,7 @@ const
   return true;
 }
 
-inline std::vector<unsigned>
-OCFESLV::_color_jacobian_columns
-( std::vector< std::vector<size_t> > const& pattern,
-  size_t const ncol, unsigned& ncolor )
-const
-{
-  // Column-intersection coloring: columns that appear in a common residual row
-  // must receive distinct colors.  We do not need to materialize the full
-  // column-intersection graph.  Instead, keep the row incidence of each column
-  // and, during greedy coloring, scan only the rows containing the current
-  // column to find already colored conflicts.
-  std::vector< std::vector<size_t> > rows_of_col( ncol );
-  std::vector<size_t> degree_proxy( ncol, 0 );
 
-  for( size_t k = 0; k < pattern.size(); ++k ){
-    auto const& row = pattern[k];
-    size_t const rowdeg = row.empty()? 0: row.size() - 1;
-    for( size_t col : row ){
-      if( col >= ncol ) throw Exceptions( Exceptions::INTERNAL );
-      rows_of_col[col].push_back( k );
-      degree_proxy[col] += rowdeg;
-    }
-  }
-
-  std::vector<size_t> order( ncol );
-  std::iota( order.begin(), order.end(), 0 );
-  std::sort( order.begin(), order.end(),
-             [&]( size_t a, size_t b ){
-               if( degree_proxy[a] != degree_proxy[b] )
-                 return degree_proxy[a] > degree_proxy[b];
-               return a < b;
-             } );
-
-  std::vector<unsigned> color( ncol, std::numeric_limits<unsigned>::max() );
-  std::vector<unsigned char> used;
-  ncolor = 0;
-
-  for( size_t col : order ){
-    if( used.size() < ncolor ) used.resize( ncolor, 0 );
-    std::vector<unsigned> touched;
-
-    for( size_t k : rows_of_col[col] ){
-      for( size_t nb : pattern[k] ){
-        if( nb == col ) continue;
-        unsigned const cnb = color[nb];
-        if( cnb == std::numeric_limits<unsigned>::max() ) continue;
-        if( cnb >= used.size() ) used.resize( cnb+1, 0 );
-        if( !used[cnb] ){
-          used[cnb] = 1;
-          touched.push_back( cnb );
-        }
-      }
-    }
-
-    unsigned c = 0;
-    while( c < used.size() && used[c] ) ++c;
-    color[col] = c;
-    if( c + 1 > ncolor ){
-      ncolor = c + 1;
-      if( used.size() < ncolor ) used.resize( ncolor, 0 );
-    }
-
-    for( unsigned ct : touched ) used[ct] = 0;
-  }
-
-#ifdef CRONOS__FFCOLLOC_CHECK
-  std::vector<unsigned char> seen( ncolor, 0 );
-  for( auto const& row : pattern ){
-    std::vector<unsigned> touched;
-    touched.reserve( row.size() );
-    for( size_t col : row ){
-      unsigned const c = color[col];
-      if( c >= ncolor ) throw Exceptions( Exceptions::INTERNAL );
-      if( seen[c] ) throw Exceptions( Exceptions::INTERNAL );
-      seen[c] = 1;
-      touched.push_back( c );
-    }
-    for( unsigned c : touched ) seen[c] = 0;
-  }
-#endif
-
-  return color;
-}
-
-inline bool
-OCFESLV::_setup_deriv_cache
-()
-{
-  _jacReady = false;
-  _jacPatternEqn.clear();
-  _jacPatternFct.clear();
-  _jacLinearEqn.clear();
-  _jacLinearFct.clear();
-  _jacColor.clear();
-  _jacNColor = 0;
-  _linEqnReady = _linFctReady = false;
-  _linEqn.clear();
-  _linFct.clear();
-  _linCstVal.clear();
-  _jacAllEqnLinear = false;
-  _jacAllFctLinear = false;
-
-  try{
-    size_t const ncol = _nCollVar + _nCollInp;
-    if( ncol > static_cast<size_t>( std::numeric_limits<int>::max() ) )
-      throw Exceptions( Exceptions::INTERNAL );
-
-    std::vector<FFDep> var_dep( _nCollVar );
-    std::vector<FFDep> inp_dep( _nCollInp );
-    for( size_t i = 0; i < _nCollVar; ++i )
-      var_dep[i].indep( static_cast<int>( i ) );
-    for( size_t i = 0; i < _nCollInp; ++i )
-      inp_dep[i].indep( static_cast<int>( _nCollVar + i ) );
-
-    std::vector<FFDep> eqn_dep( _nCollEqn );
-    std::vector<FFDep> fct_dep( _nCollFct );
-
-    _reset_colloc( _OCDepVar, _OCDepInp, _OCDepDom, _OCDepCst );
-    if( _nCollEqn )
-      _eval_eqn( eqn_dep.data(), var_dep.empty()? nullptr: var_dep.data(),
-                 inp_dep.empty()? nullptr: inp_dep.data(),
-                 _OCDepEqn, _OCDepVar, _OCDepInp, _OCDepDom, _OCDepCst, _wrkOCDep );
-    if( _nCollFct )
-      _eval_fct( fct_dep.data(), var_dep.empty()? nullptr: var_dep.data(),
-                 inp_dep.empty()? nullptr: inp_dep.data(),
-                 _OCDepEqn, _OCDepVar, _OCDepInp, _OCDepDom, _OCDepCst, _wrkOCDep );
-
-    _jacPatternEqn.assign( _nCollEqn, std::vector<size_t>() );
-    _jacPatternFct.assign( _nCollFct, std::vector<size_t>() );
-    _jacLinearEqn.assign( _nCollEqn, true );
-    _jacLinearFct.assign( _nCollFct, true );
-
-    auto fill = [&]( std::vector<FFDep> const& dep_rows,
-                     std::vector<std::vector<size_t>>& pat,
-                     std::vector<bool>& lin )
-    {
-      for( size_t k = 0; k < dep_rows.size(); ++k ){
-        auto const& dep = dep_rows[k].dep();
-        pat[k].reserve( dep.size() );
-        bool islin = true;
-        for( auto const& kv : dep ){
-          if( kv.first >= 0 && static_cast<size_t>( kv.first ) < ncol )
-            pat[k].push_back( static_cast<size_t>( kv.first ) );
-          if( kv.second != FFDep::L ) islin = false;
-        }
-        // FFDep::dep() is ordered by column, but keep this robust if FFDep's
-        // internal container changes in the future.
-        std::sort( pat[k].begin(), pat[k].end() );
-        pat[k].erase( std::unique( pat[k].begin(), pat[k].end() ), pat[k].end() );
-        lin[k] = islin;
-      }
-    };
-    fill( eqn_dep, _jacPatternEqn, _jacLinearEqn );
-    fill( fct_dep, _jacPatternFct, _jacLinearFct );
-
-    if( _jacPatternEqn.size() != _nCollEqn || _jacPatternFct.size() != _nCollFct )
-      throw Exceptions( Exceptions::INTERNAL );
-
-    _jacAllEqnLinear = true;
-    for( bool b : _jacLinearEqn ) if( !b ){ _jacAllEqnLinear = false; break; }
-    _jacAllFctLinear = true;
-    for( bool b : _jacLinearFct ) if( !b ){ _jacAllFctLinear = false; break; }
-
-    std::vector< std::vector<size_t> > all_pattern( _jacPatternEqn );
-    all_pattern.insert( all_pattern.end(), _jacPatternFct.begin(), _jacPatternFct.end() );
-    _jacColor = _color_jacobian_columns( all_pattern, ncol, _jacNColor );
-    _jacInterfaceType  = options.INTERFACE.TYPE;
-    _jacImpositionType = options.INTERFACE.IMPOSITION;
-    _jacClassified     = _classified;
-    _jacReady          = true;
-    return true;
-  }
-  catch(...){
-    _jacPatternEqn.clear();
-    _jacPatternFct.clear();
-    _jacLinearEqn.clear();
-    _jacLinearFct.clear();
-    _jacAllEqnLinear = false;
-    _jacAllFctLinear = false;
-    _jacColor.clear();
-    _jacNColor = 0;
-    _jacReady = false;
-    return false;
-  }
-}
 
 template <typename U>
 inline void
@@ -10851,78 +10622,8 @@ OCFESLV::eval
   }
 }
 
-inline void
-OCFESLV::_deriv_copy_pattern
-( std::vector<std::vector<size_t>> const& pattern, size_t* nnz, size_t** colnz )
-{
-  for( size_t k = 0; k < pattern.size(); ++k ){
-    auto const& row = pattern[k];
-    if( nnz ) nnz[k] = row.size();
-    if( colnz ){
-      if( !row.empty() && !colnz[k] )
-        throw Exceptions( Exceptions::INTERNAL );
-      for( size_t j = 0; j < row.size(); ++j )
-        colnz[k][j] = row[j];
-    }
-  }
-}
 
-template <typename U>
-inline void
-OCFESLV::_deriv_extract_rows
-( FADType<U> const* val, std::vector< std::vector<size_t> > const& pattern,
-  std::vector<unsigned> const& color, size_t const ncol, U* res, U** grad )
-{
-  for( size_t k = 0; k < pattern.size(); ++k ){
-    if( res ) res[k] = val[k].val();
 
-    if( !grad ) continue;
-    auto const& row = pattern[k];
-    if( !row.empty() && !grad[k] )
-      throw Exceptions( Exceptions::INTERNAL );
-
-    for( size_t j = 0; j < row.size(); ++j ){
-      size_t const col = row[j];
-      if( col >= ncol )
-        throw Exceptions( Exceptions::INTERNAL );
-      unsigned const c = color[col];
-      grad[k][j] = val[k].deriv( c );
-    }
-  }
-}
-
-template <typename U>
-inline void
-OCFESLV::_deriv_eqn
-( U* eqn, U** gradeqn, size_t* nnzeqn, size_t** colnzeqn,
-  OCVar<FADType<U>>& OCFeqn, std::vector<OCVar<FADType<U>>>& OCFvar,
-  std::vector<OCVar<FADType<U>>>& OCFinp, std::vector<OCVar<FADType<U>>>& OCFdom,
-  std::vector<OCVar<FADType<U>>>& OCFcst, std::vector<OCVar<FADType<U>>>& OCFwrk,
-  FADType<U>* Feqn, FADType<U>* Fvar, FADType<U>* Finp )
-const
-{
-  if( !_jacReady
-   || _jacInterfaceType  != options.INTERFACE.TYPE
-   || _jacImpositionType != options.INTERFACE.IMPOSITION
-   || _jacClassified     != _classified )
-    throw Exceptions( Exceptions::SETUP );
-
-  size_t const ncol = _nCollVar + _nCollInp;
-  if( gradeqn && _jacColor.size() != ncol )
-    throw Exceptions( Exceptions::INTERNAL );
-
-  // Populate the sparsity pattern. FFDep pass and coloring were completed by setup().
-  _deriv_copy_pattern( _jacPatternEqn, nnzeqn, colnzeqn );
-
-  if( !eqn && !gradeqn )
-    return;
-
-  // This is the only residual propagation performed in _deriv_eqn().
-  _eval_eqn( Feqn, Fvar, Finp, OCFeqn, OCFvar, OCFinp, OCFdom, OCFcst, OCFwrk );
-
-  // Populate the value and gradient arrays.
-  _deriv_extract_rows( Feqn, _jacPatternEqn, _jacColor, ncol, eqn, gradeqn );
-}
 
 template <typename U>
 inline void
@@ -11992,6 +11693,26 @@ OCFESLV::reset_evolution_width
 
 namespace mc {
 
+
+inline bool
+OCFESLV::_setup_deriv_cache
+()
+{
+  _linEqnReady = _linFctReady = false;
+  _linEqn.clear();
+  _linFct.clear();
+  _linCstVal.clear();
+  return _build_jacobian_pattern();
+}
+
+inline void
+OCFESLV::_eval_fct_dep
+( std::vector<FFDep>& fct_dep, std::vector<FFDep> const& var_dep, std::vector<FFDep> const& inp_dep )
+{
+  _eval_fct( fct_dep.data(), var_dep.empty()? nullptr: var_dep.data(),
+             inp_dep.empty()? nullptr: inp_dep.data(),
+             _OCDepEqn, _OCDepVar, _OCDepInp, _OCDepDom, _OCDepCst, _wrkOCDep );
+}
 
 } // namespace mc
 

@@ -2,11 +2,45 @@
 // t, the shared spatial layout and plan, the DOF audit; the semi-discrete shape asserted.  No integration yet.
 #include <iomanip>
 #include <iostream>
+#include <random>
 #include "ocfemol.hpp"
 using namespace mc;
 static int n_pass = 0, n_fail = 0;
 static void check( std::string const& w, bool ok )
 { ok? ++n_pass: ++n_fail; std::cout << "    " << std::left << std::setw(66) << w << ( ok? "PASS": "FAIL" ) << "\n"; }
+
+// The Jacobian of Rc by compressed FAD against central differences of eval_residual at a random point: the largest
+// absolute discrepancy over the pattern, and the largest entry OUTSIDE the pattern (a pattern that misses a
+// dependency would show there).
+static void check_jacobian( std::string const& tag, OCFEMOL& oc )
+{
+  auto const& S = oc.semi_discrete();
+  std::mt19937 rng( 11 ); std::uniform_real_distribution<double> U( 0.2, 0.8 );
+  std::vector<double> xc( S.n_states ), r0( S.n_rows ), rp( S.n_rows ), rm( S.n_rows ), rfad( S.n_rows );
+  for( auto& v : xc ) v = U( rng );
+  std::vector<size_t> ptr, col; std::vector<double> val;
+  bool const ok = oc.deriv_residual( 0.37, xc.data(), rfad.data(), ptr, col, val, nullptr );
+  check( tag + ": deriv_residual runs", ok );
+  if( !ok ) return;
+  oc.eval_residual( 0.37, xc.data(), r0.data() );
+  double maxres = 0.; for( size_t r = 0; r < S.n_rows; ++r ) maxres = std::max( maxres, std::fabs( rfad[r] - r0[r] ) );
+  check( tag + ": the FAD pass's residual equals eval_residual's", maxres < 1e-13 );
+  double const h = 1e-6; double maxin = 0., maxout = 0.; size_t nnz = col.size();
+  for( size_t c = 0; c < S.n_states; ++c ){
+    std::vector<double> xp = xc, xm = xc; xp[c] += h; xm[c] -= h;
+    oc.eval_residual( 0.37, xp.data(), rp.data() ); oc.eval_residual( 0.37, xm.data(), rm.data() );
+    for( size_t r = 0; r < S.n_rows; ++r ){
+      double const fd = ( rp[r] - rm[r] ) / ( 2.*h );
+      double jac = 0.; bool inpat = false;
+      for( size_t k = ptr[r]; k < ptr[r+1]; ++k ) if( col[k] == c ){ jac = val[k]; inpat = true; break; }
+      if( inpat ) maxin = std::max( maxin, std::fabs( jac - fd ) ); else maxout = std::max( maxout, std::fabs( fd ) );
+    }
+  }
+  std::cout << "      Jacobian: " << nnz << " nonzeros over " << S.n_rows << "x" << S.n_states << "; max |FAD-FD| in pattern "
+            << std::scientific << std::setprecision(2) << maxin << ", max |FD| outside pattern " << maxout << std::defaultfloat << "\n";
+  check( tag + ": FAD matches central differences on the pattern (< 1e-6)", maxin < 1e-6 );
+  check( tag + ": nothing outside the pattern (< 1e-9)",                  maxout < 1e-9 );
+}
 
 int main()
 {
@@ -47,6 +81,7 @@ int main()
       check( "rod/ALGEBRAIC: one Mc entry per differential unknown",   oc.mass().size() == S.n_diff_cols );
       check( "rod/ALGEBRAIC: Ini stream covers every differential unknown", S.n_ini_stream == S.n_diff_cols );
       check( "rod/ALGEBRAIC: the u-INITIAL row is dropped at the 4 algebraic u-nodes", S.n_ini_dropped == 4 );
+      check_jacobian( "rod", oc );
       std::cout << "      shape: " << S.n_states << " unknowns (" << S.n_tau << " tau), " << S.n_rows << " rows\n";
     }
   }
@@ -79,6 +114,7 @@ int main()
       check( "BZ: square",                                S.n_rows == S.n_states );
       check( "BZ: 80 nodal unknowns (4 fields x 4x5)",    S.n_states - S.n_tau == 80 );
       check( "BZ: the full model classifies PARABOLIC",         S.model_class.size() == 1 && S.model_class.begin()->second == OCFEMOL::PARABOLIC );
+      check_jacobian( "BZ", oc );
       std::cout << "      shape: " << S.n_states << " unknowns (" << S.n_tau << " tau), " << S.n_rows << " rows\n";
     }
   }
@@ -288,6 +324,54 @@ int main()
       check( "DAE: x differential, y algebraic",               S.n_diff_cols == 1 && S.n_alg_rows == 1 );
       check( "DAE: index 1",                                   P.index == 1 );
       check( "DAE: Ini stream 1, nothing dropped",             S.n_ini_stream == 1 && S.n_ini_dropped == 0 );
+      check_jacobian( "DAE", oc );
+    }
+  }
+
+  // ---- K. two spatial directions: PDE5's manufactured 2-D heat equation,  u_t - k (u_xx + u_yy) = f(t,x,y),  Dirichlet
+  //         on all four sides, on a 2x2-element CGL mesh with 4 nodes per direction.  Exercises the tensor column
+  //         placement, face resolution in two directions, the corner handling of the plan, the Ini coverage iteration.
+  {
+    std::cout << "\n  K. PDE5: 2-D heat equation (t, x, y)\n";
+    FFGraph G; OCFEMOL oc( &G ); FFPartial OpP;
+    FFVar t = G.add_var("t"), x = G.add_var("x"), y = G.add_var("y"), U = G.add_var("U");
+    double const kappa = 0.1, x0 = 0.3, y0 = 0.6, width0 = 0.05, spread = 0.02, A = 1., bg = 0.2;
+    FFVar DX = x - x0, DY = y - y0, S = width0 + spread*t, RR = DX*DX + DY*DY;
+    FFVar BE = A*width0*exp( -RR/S )/S, UE = bg + BE;
+    FFVar FE = BE*spread*( -1./S + RR/(S*S) ) - kappa*BE*( 4.*RR/(S*S) - 4./S );
+    FFVar PDE = OpP(U,t) - kappa*( OpP(U,{x,2}) + OpP(U,{y,2}) ) - FE, BC = U - UE;
+    size_t const NE = 2, NN = 4;
+    oc.add_domain( t, FFDom( 0., 1., 1, FFDom::LGR, 2 ) );
+    oc.add_domain( x, FFDom( 0., 1., NE, FFDom::CGL, NN ) );
+    oc.add_domain( y, FFDom( 0., 1., NE, FFDom::CGL, NN ) );
+    oc.set_evolution_domain( t );
+    oc.add_state( U, {t,x,y} ); oc.update_ref( U, bg );
+    int const TI = FFDom::ALL - FFDom::LB, XI = FFDom::ALL - FFDom::LB - FFDom::UB, YI = XI;
+    OCFEMOL::EqnOptions io( OCFEMOL::EqnRole::INTERIOR, 0 ), ib( OCFEMOL::EqnRole::BOUNDARY, 0 ), ii( OCFEMOL::EqnRole::INITIAL, 0 );
+    oc.add_equation( PDE, {t,x,y}, {TI, XI, YI}, io );
+    oc.add_equation( BC,  {t,x,y}, {FFDom::LB, FFDom::ALL, FFDom::ALL}, ii );
+    oc.add_equation( BC,  {t,x,y}, {TI, FFDom::LB, YI}, ib );  oc.add_equation( BC, {t,x,y}, {TI, FFDom::UB, YI}, ib );
+    oc.add_equation( BC,  {t,x,y}, {TI, FFDom::ALL, FFDom::LB}, ib );  oc.add_equation( BC, {t,x,y}, {TI, FFDom::ALL, FFDom::UB}, ib );
+    oc.options.DISPLAY_LEVEL = 1;
+    bool ok = false;
+    try{ ok = oc.setup(); } catch( std::exception const& e ){ std::cout << "      threw: " << e.what() << "\n"; }
+    check( "2-D: OCFEMOL::setup accepts", ok );
+    if( !ok ) std::cout << "      status " << (int)oc.setup_status() << "  blocker: " << oc.peel().blocker << "\n";
+    else {
+      auto const& P = oc.peel(); auto const& S = oc.semi_discrete();
+      std::cout << "      shape: " << S.n_states << " unknowns (" << S.n_tau << " tau), " << S.n_rows << " rows; differential "
+                << S.n_diff_cols << "; Ini stream " << S.n_ini_stream << ", dropped " << S.n_ini_dropped << "\n";
+      // fields: U and its two order-reduction auxiliaries (d_x U, d_y U); nodes per field: (2x4)^2 = 64
+      check( "2-D: 3 fields (U, dU/dx, dU/dy), 1 differential",            P.states.size() == 3 && P.n_differential() == 1 );
+      check( "2-D: the full model classifies PARABOLIC",                    S.model_class.size() == 1 && S.model_class.begin()->second == OCFEMOL::PARABOLIC );
+      check( "2-D: square",                                                 S.n_rows == S.n_states );
+      check( "2-D: 192 nodal unknowns (3 fields x 64 nodes)",               S.n_states - S.n_tau == 192 );
+      // U's interior nodes that keep their PDE row: 64 nodes - the 28 on the four sides (Dirichlet) - the pivoted
+      // duplicates of the interior faces; the exact number depends on the plan's pivots, so assert the invariants
+      check( "2-D: the Ini stream covers exactly the differential unknowns", S.n_ini_stream == S.n_diff_cols );
+      check( "2-D: differential unknowns strictly fewer than U's 64 nodes",   S.n_diff_cols > 0 && S.n_diff_cols < 64 );
+      check( "2-D: structural index along t <= 1",                           P.index <= 1 );
+      check_jacobian( "2-D", oc );
     }
   }
 

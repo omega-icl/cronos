@@ -139,6 +139,28 @@ public:
   //! @brief Whether row @p row of Rc is algebraic (no mass entry).
   bool is_algebraic_row( size_t row ) const { return row < _rowAlg.size() && _rowAlg[row]; }
 
+  //! @brief Rc(t, xc): the collocated residual, one evaluation of the interior expressions as vectors over the
+  //! nodes through the OCVar environment, with t as the scalar input and the model's constants set.  @p xc has
+  //! semi_discrete().n_states entries, @p rc semi_discrete().n_rows.  The mass term Mc(xc) d_t xc is not included:
+  //! the integrator's residual is Mc xdot - Rc, with Mc from mass().  Phase 4 of the MoL plan.
+  bool eval_residual
+    ( double t, double const* xc, double* rc );
+
+  //! @brief The Jacobian of Rc(t, xc) with respect to xc, sparse, in CSR: row r's entries are columns
+  //! jac_col[jac_ptr[r] .. jac_ptr[r+1]) with values jac_val[...]; and the derivative with respect to t in @p drdt
+  //! (may be null).  One compressed forward-mode pass per colour of the base's Jacobian pattern (built at setup from
+  //! the dependence pass), seeded as OCFESLV seeds its own; the input columns (t, lumped inputs) are kept out of the
+  //! CSR and t's reported separately.  Also fills @p rc (may be null).  Phase 4 of the MoL plan.
+  bool deriv_residual
+    ( double t, double const* xc, double* rc, std::vector<size_t>& jac_ptr, std::vector<size_t>& jac_col,
+      std::vector<double>& jac_val, double* drdt );
+
+  //! @brief The Jacobian pattern over xc alone (CSR row pointers and columns), valid after setup; the values come
+  //! from deriv_residual, in the same order.
+  void jacobian_pattern
+    ( std::vector<size_t>& jac_ptr, std::vector<size_t>& jac_col )
+    const;
+
 protected:
 
   t_Peel                _peel;      //!< the peel along t (working model)
@@ -374,6 +396,12 @@ OCFEMOL::_on_model_ready
              << _shape.t_lo << ", " << _shape.t_hi << "]\n";
 
   _build_mass();
+  if( !_build_jacobian_pattern() ){
+    std::cerr << "OCFEMOL::setup ** the Jacobian pattern of Rc could not be built" << std::endl;
+    _setupStatus = SetupStatus::INCONSISTENT_MODEL;
+    return false;
+  }
+  _disp( 1 ) << "OCFEMOL::setup [mol] Jacobian of Rc: " << _jacNColor << " colours over " << _nCollVar + _nCollInp << " columns\n";
   _shape.n_diff_cols = 0; for( bool b : _colDiff ) _shape.n_diff_cols += b;
   _shape.n_alg_rows  = 0; for( bool b : _rowAlg )  _shape.n_alg_rows  += b;
   _disp( 1 ) << "OCFEMOL::setup [mol] Mc: " << _mass.size() << " entries; " << _shape.n_diff_cols << " differential unknowns, "
@@ -386,6 +414,65 @@ OCFEMOL::_on_model_ready
     std::cerr << "OCFEMOL::setup ** " << bad << " differential unknown(s) without an initial condition (see the [mol] DOF audit)" << std::endl;
     _setupStatus = SetupStatus::INCONSISTENT_MODEL;
     return false;
+  }
+  return true;
+}
+
+inline bool
+OCFEMOL::eval_residual
+( double t, double const* xc, double* rc )
+{
+  if( !_shape.ran || !xc || !rc ) return false;
+  // the inputs of the collocated system: t, and any lumped input of the model (zero until phase 5 wires them)
+  std::vector<double> inp( _nCollInp, 0. );
+  if( _nCollInp ) inp[ pos_input( _evolution_dom_var, {} ) ] = t;
+  for( size_t i = 0; i < _vCst.size() && i < _vCstVal.size(); ++i ) _OCCst[i].set( _vCstVal[i] );
+  _eval_eqn( rc, xc, _nCollInp? inp.data(): nullptr, _OCEqn, _OCVar, _OCInp, _OCDom, _OCCst, _wrkOC );
+  return true;
+}
+
+inline void
+OCFEMOL::jacobian_pattern
+( std::vector<size_t>& jac_ptr, std::vector<size_t>& jac_col )
+const
+{
+  jac_ptr.assign( 1, 0 ); jac_col.clear();
+  for( size_t r = 0; r < _jacPatternEqn.size(); ++r ){
+    for( size_t c : _jacPatternEqn[r] ) if( c < _nCollVar ) jac_col.push_back( c );   // the xc columns only
+    jac_ptr.push_back( jac_col.size() );
+  }
+}
+
+inline bool
+OCFEMOL::deriv_residual
+( double t, double const* xc, double* rc, std::vector<size_t>& jac_ptr, std::vector<size_t>& jac_col,
+  std::vector<double>& jac_val, double* drdt )
+{
+  if( !_shape.ran || !_jacReady || !xc ) return false;
+  size_t const ncol = _nCollVar + _nCollInp;
+  // the FAD buffers, seeded by colour exactly as OCFESLV::_reset_autodiff seeds its own
+  std::vector<t_FAD> Fvar( _nCollVar ), Finp( _nCollInp ), Feqn( _nCollEqn );
+  for( size_t i = 0; i < _nCollVar; ++i ){ Fvar[i] = xc[i]; if( _jacNColor ) Fvar[i].diff( _jacColor[i], _jacNColor ); }
+  size_t const it = _nCollInp? pos_input( _evolution_dom_var, {} ): 0;
+  for( size_t i = 0; i < _nCollInp; ++i ){ Finp[i] = ( i == it? t: 0. ); if( _jacNColor ) Finp[i].diff( _jacColor[_nCollVar+i], _jacNColor ); }
+  _reset_colloc( _OCFVar, _OCFInp, _OCFDom, _OCFCst );
+  _OCFEqn = OCVar<t_FAD>();  _wrkOCF.clear();
+  std::vector<t_FAD> Fcst( _vCstVal.begin(), _vCstVal.end() );          // the model's constants, as OCFESLV passes them
+  for( size_t i = 0; i < _vCst.size() && i < Fcst.size(); ++i ) _OCFCst[i].update( &Fcst[i] );
+  _eval_eqn( Feqn.data(), Fvar.empty()? nullptr: Fvar.data(), Finp.empty()? nullptr: Finp.data(),
+             _OCFEqn, _OCFVar, _OCFInp, _OCFDom, _OCFCst, _wrkOCF );
+  // extraction into CSR over the xc columns; t's column apart
+  jac_ptr.assign( 1, 0 ); jac_col.clear(); jac_val.clear();
+  for( size_t r = 0; r < _nCollEqn; ++r ){
+    if( rc ) rc[r] = Feqn[r].val();
+    if( drdt ) drdt[r] = 0.;
+    for( size_t c : _jacPatternEqn[r] ){
+      if( c >= ncol ) continue;
+      double const d = _jacNColor? Feqn[r].deriv( _jacColor[c] ): 0.;
+      if( c < _nCollVar ){ jac_col.push_back( c ); jac_val.push_back( d ); }
+      else if( drdt && c == _nCollVar + it ) drdt[r] = d;
+    }
+    jac_ptr.push_back( jac_col.size() );
   }
   return true;
 }

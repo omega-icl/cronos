@@ -575,6 +575,12 @@ protected:
     std::vector<Dim> dims;
   };
   mutable std::vector<t_RowNode>            _rowNode;
+  //! @brief Row provenance, the fold half (MoL phase 5): an emitted IC_STRONG row is its own row MINUS a combination of
+  //! pivot rows the exact elimination dropped -- value - sum_p coeff_p * pivot_p.  For each emitted row, the pivots folded
+  //! in: (their equation index, their node, coeff_p).  Empty for an unfolded row.  OCFEMOL folds Mc the same way: the
+  //! plan's row operations act on Rc, and Mc must receive the same operations.
+  struct t_RowFold { int eqn; t_RowNode node; double coeff; };
+  mutable std::vector< std::vector<t_RowFold> > _rowFold;
   mutable bool                              _rowProvenanceReady = false;
   //! @brief claim keys the legacy corner rule suppressed in the last receiver
   //! synthesis (recorded at the suppression point; no behavioural effect).  Packed into
@@ -15199,7 +15205,7 @@ const
   // (or -1 for plan-owned interface/trace rows).  emit_eqn is the single sink for every row, so
   // tagging it captures the true final row order across IC_WEAK/TRACE/STRONG.
   bool const build_prov = !_rowProvenanceReady;
-  if( build_prov ){ _rowEqnNdx.clear(); _rowNode.clear(); }
+  if( build_prov ){ _rowEqnNdx.clear(); _rowNode.clear(); _rowFold.clear(); }
 
   auto emit_eqn = [&]( U const& val, int src_ndx = -1 )
   {
@@ -15213,7 +15219,7 @@ const
                 << std::endl;
       throw Exceptions( Exceptions::INTERNAL );
     }
-    if( build_prov ){ _rowEqnNdx.push_back( src_ndx ); _rowNode.emplace_back(); }
+    if( build_prov ){ _rowEqnNdx.push_back( src_ndx ); _rowNode.emplace_back(); _rowFold.emplace_back(); }
     *eqn++ = val;
   };
 
@@ -15881,11 +15887,13 @@ const
 
     // Pass 1: extract pivot values into a dense array.
     std::vector<U> pivot_vals( ntrace, U(0.) );
+    std::vector<StrongRow const*> pivot_row( build_prov? ntrace: 0, nullptr );   // provenance: the pivot rows themselves
     for( auto const& sr : strong_rows ){
       if( sr.pivot_idx >= 0 ){
         if( static_cast<size_t>( sr.pivot_idx ) >= ntrace )
           throw Exceptions( Exceptions::INTERNAL );
         pivot_vals[ static_cast<size_t>( sr.pivot_idx ) ] = sr.value;
+        if( build_prov ) pivot_row[ static_cast<size_t>( sr.pivot_idx ) ] = &sr;
       }
     }
 
@@ -15899,7 +15907,13 @@ const
           val -= U( coeff ) * pivot_vals[ pidx ];
       }
       emit_eqn( val, sr.ndx );
-      if( build_prov && !_rowNode.empty() ) _rowNode.back() = sr.node;
+      if( build_prov && !_rowNode.empty() ){
+        _rowNode.back() = sr.node;
+        if( sr.correction )
+          for( auto const& [pidx, coeff] : *sr.correction )
+            if( pidx < pivot_row.size() && pivot_row[pidx] )
+              _rowFold.back().push_back({ pivot_row[pidx]->ndx, pivot_row[pidx]->node, coeff });
+      }
     }
   }
 

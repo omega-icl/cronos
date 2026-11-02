@@ -23,6 +23,7 @@ namespace mc
 //! operation: the integrator's residual is  Mc(xc) d_t xc - Rc(t, xc)  with Mc from OCFEMOL::mass().
 //! MoL workplan 2026-10-31, phase 4.
 ////////////////////////////////////////////////////////////////////////
+class FFGradMOLRES;
 class FFMOLRES
 : public FFOp
 {
@@ -36,6 +37,14 @@ protected:
   size_t       _nSta = 0;         //!< n_states
   size_t       _nRow = 0;         //!< n_rows
   std::string  _name;
+  //! @brief The gradient operation's outputs, built once per operation instance and reused by every deriv call:
+  //! the derivative propagation asks for this operation's derivative once per row it differentiates through.
+  mutable std::vector<FFVar>  _gradOut;
+  mutable std::vector<long>   _gradIn;      //!< the input ids the cached gradient was built for
+
+  FFVar const* _gradient
+    ( FFVar const* vVar )
+    const;
 
   FFVar** _set
     ( size_t const nSta, FFVar const* pSta, FFVar const& t, OCFEMOL* pMOL, int policy, std::string const& name )
@@ -63,7 +72,8 @@ public:
   FFMOLRES
     ()
     : FFOp( EXTERN )
-    {}
+    { this->sparse = true; }   // MC++ calls the SPARSE deriv only when this is set; unset, it allocates a dense
+                                // n_rows x (n_states+1) array per call and calls the dense deriv (FFOCFERES sets it too)
 
   virtual ~FFMOLRES
     ()
@@ -275,7 +285,7 @@ class FFMOLINI
 protected:
   OCFEMOL* _pMOL = nullptr; size_t _nSta = 0, _nIni = 0; std::string _name;
 public:
-  FFMOLINI() : FFOp( EXTERN ) {}
+  FFMOLINI() : FFOp( EXTERN ) { this->sparse = true; }   // the sparse deriv, as for FFMOLRES
   //! @brief Insert: one output per entry of OCFEMOL::ini_stream(), in that order.
   std::vector<FFVar> operator()
     ( std::vector<FFVar> const& vSta, FFVar const& t, OCFEMOL* pMOL, std::string const& name = "" )
@@ -339,6 +349,23 @@ public:
   std::string name() const { std::ostringstream oss; oss << ( _name.empty()? "MOLINI": _name ) << "[" << _nIni << "x" << _nSta + 1 << "]"; return oss.str(); }
   bool commutative() const { return false; }
 };
+
+inline FFVar const*
+FFMOLRES::_gradient
+( FFVar const* vVar )
+const
+{
+  std::vector<long> ids( _nSta + 1 );  for( size_t i = 0; i <= _nSta; ++i ) ids[i] = vVar[i].id().second;
+  if( _gradOut.empty() || ids != _gradIn ){
+    FFGradMOLRES gop;
+    FFVar** ppG = gop( _nSta, vVar, vVar[_nSta], _pMOL, false, _name );
+    std::vector<size_t> ptr, col;  _pMOL->jacobian_pattern( ptr, col );
+    _gradOut.assign( col.size() + _nRow, FFVar() );
+    for( size_t k = 0; k < _gradOut.size(); ++k ) _gradOut[k] = *ppG[k];
+    _gradIn = ids;
+  }
+  return _gradOut.data();
+}
 
 // -------------------------------------------------------------------------------------------------------- FFMOLRES
 inline void
@@ -423,12 +450,11 @@ const
 {
   // dense: every derivative, from the sparse entries
   std::vector<size_t> ptr, col;  _pMOL->jacobian_pattern( ptr, col );
-  FFGradMOLRES gop;
-  FFVar** ppG = gop( _nSta, vVar, vVar[_nSta], _pMOL, false, _name );
+  FFVar const* ppG = _gradient( vVar );                 // one gradient operation per instance, reused
   for( unsigned k = 0; k < nRes; ++k ){
     for( unsigned i = 0; i < nVar; ++i ) vDer[k][i] = 0.;
-    for( size_t j = ptr[k]; j < ptr[k+1]; ++j ) vDer[k][ col[j] ] = *ppG[j];
-    vDer[k][_nSta] = *ppG[ col.size() + k ];
+    for( size_t j = ptr[k]; j < ptr[k+1]; ++j ) vDer[k][ col[j] ] = ppG[j];
+    vDer[k][_nSta] = ppG[ col.size() + k ];
   }
 }
 
@@ -449,14 +475,89 @@ const
     }
   }
   if( !vDer ) return;
-  FFGradMOLRES gop;
-  FFVar** ppG = gop( _nSta, vVar, vVar[_nSta], _pMOL, false, _name );
+  FFVar const* ppG = _gradient( vVar );                 // one gradient operation per instance, reused
   for( unsigned k = 0; k < nRes; ++k ){
     if( !vDer[k] ) vDer[k] = new FFVar[ nnz[k] ];
     size_t m = 0;
-    for( size_t j = ptr[k]; j < ptr[k+1]; ++j ) vDer[k][m++] = *ppG[j];
-    vDer[k][m] = *ppG[ col.size() + k ];
+    for( size_t j = ptr[k]; j < ptr[k+1]; ++j ) vDer[k][m++] = ppG[j];
+    vDer[k][m] = ppG[ col.size() + k ];
   }
+}
+
+
+//! @brief Write the semi-discrete system of a set-up OCFEMOL into a DAE solver's model.
+////////////////////////////////////////////////////////////////////////
+//! Declares into @p S, on the DAG @p dag: the unknowns xc (one per column of the semi-discrete system, with the
+//! owning field's reference as their reference) on the evolution direction @p t with the discretisation @p tdom;
+//! one INTERIOR row per row of Rc -- `sum_c Mc[r,c] d_t xc_c + Rc_r` for a row with mass entries, collocated
+//! everywhere but the initial point, and `Rc_r` elsewhere, collocated everywhere; and one INITIAL row per entry of
+//! the Ini stream, as the ordinary scalar expression it is (OCFEMOL::initial_expression).  The peel's remainder IS Rc, so the sign is a PLUS: the model row was  M d_t x + R.
+//! The Ini entries at algebraic nodes are NOT declared -- they are the consistency check at t0 (OCFEMOL::ini_stream).
+//! Mass coefficients must be CONSTANT in this first version; a state-dependent one is refused by name.
+//! The references of xc are the owning field's; for a good start call OCFEMOL::init_seed() and pass its values to
+//! update_ref() afterwards -- DAESLV's corrector then solves for the consistent state.
+//! @return false with @p err set on a state-dependent mass coefficient or a solver that is not set up.
+//! MoL workplan, phase 5.
+////////////////////////////////////////////////////////////////////////
+template <typename SOLVER>
+inline bool
+export_semidiscrete
+( OCFEMOL& mol, FFGraph& dag, SOLVER& S, FFDom const& tdom, std::vector<FFVar>& xc, FFVar& t, std::string* err = nullptr )
+{
+  auto fail = [&]( std::string const& m ){ if( err ) *err = m; return false; };
+  auto const& D = mol.semi_discrete();
+  if( !D.ran ) return fail( "the OCFEMOL is not set up" );
+  for( auto const& m : mol.mass() )
+    if( !m.coeff.cst() )
+      return fail( "the mass coefficient of row " + std::to_string( m.row ) + " is state-dependent; this hand-over takes"
+                   " constant mass coefficients only (a node-wise coefficient operation is the next step)" );
+
+  S.set_dag( &dag );
+  // The consistent initialisation is DAESLV's own KINSOL corrector (INITIAL rows with the interior rows at t0).  A
+  // semi-discrete system is large and sparse: the corrector's dense default would be O(n^3).  The user may override
+  // after the call.  (The step bound needs nothing here: its automatic default is right for any seed.)
+  S.options.INITIAL.KIN.SPARSE = true;
+  // ... and the integrator's own linear solver: with the DENSE default DAESLV builds the model's full Jacobian by dense
+  // forward mode, which through ONE operation with n inputs and n outputs is n^3 symbolic nodes (476 MB at 144
+  // unknowns, 1.8 GB at 224 -- measured).  The sparse solver asks the operation for its sparse derivative.
+  S.options.SOLVE.LINSOL = SOLVER::Options::SPARSE;
+  // ... and algebraic components out of IDAS's local error test.  The corrector gives a consistent x(t0) and the
+  // DIFFERENTIAL x_t(t0), but leaves an algebraic component's derivative at zero (it appears in no row).  A semi-
+  // discrete system has many algebraic unknowns slaved to boundary data, and where that data moves at t0 -- a ramped
+  // feed -- the first step's error estimate on them cannot pass (measured: the PSA column, h -> 4e-9 at t = 0).
+  S.options.SOLVE.SUPPRESSALG = true;
+  t = dag.add_var( "t" );
+  xc.assign( D.n_states, FFVar() );
+  for( size_t i = 0; i < D.n_states; ++i ) xc[i] = dag.add_var( "xc_" + std::to_string( i ) );
+  S.add_domain( t, tdom );
+  S.set_evolution_domain( t );
+  FFVar fld;  double ref = 0.;
+  for( size_t i = 0; i < D.n_states; ++i ){
+    S.add_state( xc[i], {t} );
+    S.update_ref( xc[i], mol.column_field( i, fld, ref )? ref: 0. );
+  }
+
+  // Rc and the Ini stream as operations over (xc, t)
+  FFMOLRES RES;  std::vector<FFVar> rc  = RES( xc, t, &mol );
+
+  // the rows: mass terms + the remainder.  A row with mass is differential and does not hold at t0 (its INITIAL
+  // rows do); an algebraic row holds everywhere, t0 included.
+  FFPartial OpP;
+  std::vector< std::vector< std::pair<size_t,double> > > mass_of_row( D.n_rows );
+  for( auto const& m : mol.mass() ) mass_of_row[ m.row ].emplace_back( m.col, m.coeff.num().val() );
+  auto const INTER = FFModel::EqnRole::INTERIOR, INIT = FFModel::EqnRole::INITIAL;
+  int const TI = FFDom::ALL - FFDom::LB;
+  for( size_t r = 0; r < D.n_rows; ++r ){
+    if( mass_of_row[r].empty() ){ S.add_equation( rc[r], {t}, {FFDom::ALL}, INTER ); continue; }
+    FFVar row = rc[r];
+    for( auto const& [c, a] : mass_of_row[r] ) row += a * OpP( xc[c], t );
+    S.add_equation( row, {t}, {TI}, INTER );
+  }
+  // the INITIAL rows as ordinary pointwise expressions, not as outputs of FFMOLINI (see OCFEMOL::initial_expression)
+  auto const& IS = mol.ini_stream();
+  for( size_t k = 0; k < IS.size(); ++k )
+    if( !IS[k].dropped ) S.add_equation( mol.initial_expression( k, xc, t ), {t}, {FFDom::LB}, INIT );
+  return true;
 }
 
 } // namespace mc

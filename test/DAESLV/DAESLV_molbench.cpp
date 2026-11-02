@@ -13,6 +13,8 @@
 #include <iomanip>
 #include <iostream>
 #include <random>
+#include <cstdlib>
+#include <sstream>
 #include "ocfemol.hpp"
 using namespace mc;
 
@@ -45,11 +47,20 @@ template <typename F> static double time_us( size_t reps, F&& f )
 int main( int argc, char* argv[] )
 {
   std::cout.setf( std::ios::unitbuf );
+  // The timings are the point of this driver, and they are also what makes its output irreproducible -- which the
+  // byte-comparison corpus cannot have.  They print normally; under the corpus (CRONOS_SNAPSHOT, set by
+  // tools/ci/snapshot_corpus.sh) the deterministic columns are printed alone, so the corpus gates the sizes and the
+  // Jacobian nonzeros and not the clock.
+  bool const show_time = std::getenv( "CRONOS_SNAPSHOT" ) == nullptr;
+  auto clk = [show_time]( double v, int prec ){                       // a clock column: the value, or "-" under the corpus
+    if( !show_time ) return std::string( "-" );
+    std::ostringstream o; o << std::fixed << std::setprecision( prec ) << v; return o.str(); };
   std::cout << "\n--- DAESLV_molbench: one evaluation of the collocated residual, OCFEMOL vs hand-expanded DAG rows ------\n\n";
   std::cout << "  " << std::setw(6) << "nel" << std::setw(6) << "nnod" << std::setw(8) << "nodes" << std::setw(9) << "unknowns"
-            << std::setw(14) << "A: OCFEMOL" << std::setw(14) << "B: DAG rows" << std::setw(9) << "B/A" << std::setw(12) << "DAG ops"
-            << std::setw(14) << "A: Jacobian" << std::setw(9) << "nnz\n";
-  std::cout << "  " << std::setw(43) << "" << std::setw(14) << "[us/eval]" << std::setw(14) << "[us/eval]" << std::setw(21) << "" << std::setw(14) << "[us/eval]\n";
+            << std::setw(14) << "Rc: OCFEMOL" << std::setw(14) << "Rc: DAG rows" << std::setw(9) << "B/A" << std::setw(12) << "DAG ops"
+            << std::setw(14) << "dRc/dxc" << std::setw(9) << "nnz" << "\n"
+            << "  " << std::setw(29) << "" << std::setw(14) << "[us/eval]" << std::setw(14) << "[us/eval]" << std::setw(21) << ""
+            << std::setw(14) << "[us/eval]" << "\n";
 
   size_t const NNOD = 5;
   std::vector<size_t> meshes = { 5, 10, 20, 40, 80, 160 };
@@ -130,10 +141,11 @@ int main( int argc, char* argv[] )
     }
 
     std::cout << "  " << std::setw(6) << nel << std::setw(6) << NNOD << std::setw(8) << NG << std::setw(9) << nA
-              << std::setw(14) << std::fixed << std::setprecision(1) << usA << std::setw(14) << usB
-              << std::setw(9) << std::setprecision(2) << ( usA > 0.? usB/usA: 0. ) << std::setw(12) << nops
-              << std::setw(14) << std::setprecision(1) << usJ << std::setw(9) << ncolour << "\n";
+              << std::setw(14) << clk( usA, 1 ) << std::setw(14) << clk( usB, 1 )
+              << std::setw(9)  << clk( usA > 0.? usB/usA: 0., 2 ) << std::setw(12) << nops
+              << std::setw(14) << clk( usJ, 1 ) << std::setw(9) << ncolour << "\n";
   }
+  if( !show_time ) std::cout << "\n  (under CRONOS_SNAPSHOT: the clock is suppressed so the corpus can gate the sizes)\n";
   std::cout << "\n  (A scales with the expression and the node count through the OCVar arithmetic; B with the expanded graph.)\n\n";
   return 0;
 }

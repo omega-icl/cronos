@@ -42,6 +42,34 @@ static void check_jacobian( std::string const& tag, OCFEMOL& oc )
   check( tag + ": nothing outside the pattern (< 1e-9)",                  maxout < 1e-9 );
 }
 
+// The INDEPENDENT check of Rc and Mc together: at a state the discretisation represents exactly, the semi-discrete
+// right-hand side must equal the PDE's.  Fields set from @p fu (the primary field) and @p fd (every other field, the
+// order-reduction auxiliary); for each differential column, the implied u_t = -sum_r Rc[r] / Mc[r,c] over its single
+// mass row must equal @p expect.  Self-consistency checks (FAD vs FD of the same Rc) cannot see a wrong Mc -- this can.
+template <typename FU, typename FD>
+static void check_rhs( std::string const& tag, OCFEMOL& oc, FFVar const& u, FU fu, FD fd, double expect )
+{
+  size_t const n = oc.semi_discrete().n_states, m = oc.semi_discrete().n_rows;
+  std::vector<double> xc( n, 0. ), rc( m );
+  for( auto const& st : oc.peel().states ){
+    auto const& cols = oc.field_columns( st ); auto const& nodes = oc.field_nodes( st );
+    for( size_t k = 0; k < cols.size(); ++k ){ double const z = nodes[k].empty()? 0.: nodes[k][0].second;
+      xc[ cols[k] ] = ( st.id() == u.id() )? fu( z ): fd( z ); }
+  }
+  oc.eval_residual( 0., xc.data(), rc.data() );
+  std::vector<int> nm( n, 0 ); double worst = 0.; size_t ndiff = 0;
+  for( auto const& e : oc.mass() ) ++nm[e.col];
+  bool single = true;  for( size_t c = 0; c < n; ++c ) if( nm[c] > 1 ) single = false;
+  check( tag + ": each differential unknown has exactly one mass row", single );
+  for( auto const& e : oc.mass() ){
+    double const ut = -rc[e.row] / e.coeff.num().val();
+    worst = std::max( worst, std::fabs( ut - expect ) ); ++ndiff;
+  }
+  std::cout << "      implied u_t at " << ndiff << " differential unknowns: max |u_t - " << expect << "| = "
+            << std::scientific << std::setprecision(2) << worst << std::defaultfloat << "\n";
+  check( tag + ": the semi-discrete RHS equals the PDE's on an exactly represented state", worst < 1e-10 );
+}
+
 int main()
 {
   std::cout.setf( std::ios::unitbuf );   // an abort inside setup must not eat the lines before it
@@ -82,6 +110,8 @@ int main()
       check( "rod/ALGEBRAIC: Ini stream covers every differential unknown", S.n_ini_stream == S.n_diff_cols );
       check( "rod/ALGEBRAIC: the u-INITIAL row is dropped at the 4 algebraic u-nodes", S.n_ini_dropped == 4 );
       check_jacobian( "rod", oc );
+      // u = z^2, flux auxiliary D = 0.1 u_z = 0.2 z  ->  u_t = 0.1 u_zz = 0.2 everywhere
+      check_rhs( "rod", oc, u, []( double z ){ return z*z; }, []( double z ){ return 0.2*z; }, 0.2 );
       // the Ini stream as data: 11 stream + 4 dropped entries of the row  u - 0  at u's nodes; evaluated, each equals u there
       {
         auto const& IS = oc.ini_stream(); size_t nd = 0; for( auto const& e : IS ) nd += e.dropped;
@@ -94,6 +124,13 @@ int main()
         std::vector<size_t> ptr, col; std::vector<double> val; bool okd = oc.deriv_initial( 0., xc.data(), nullptr, ptr, col, val ) && col.size() == IS.size();
         for( size_t k = 0; okd && k < IS.size(); ++k ) okd = ( col[k] == IS[k].target && std::fabs( val[k] - 1. ) < 1e-14 );
         check( "rod: deriv_initial is the identity on the targets",           okd );
+        // the export's INITIAL rows: initial_expression(k) in a separate DAG must evaluate exactly as eval_initial
+        FFGraph H;  std::vector<FFVar> xv( S.n_states );  for( auto& v : xv ) v = H.add_var();  FFVar th = H.add_var();
+        std::vector<FFVar> ex;  for( size_t k = 0; k < IS.size(); ++k ) ex.push_back( oc.initial_expression( k, xv, th ) );
+        std::vector<FFVar> lv = xv;  lv.push_back( th );  std::vector<double> lx = xc;  lx.push_back( 0. );
+        std::vector<double> ev( ex.size() );  H.eval( ex, ev, lv, lx );
+        double de = 0.;  for( size_t k = 0; k < IS.size(); ++k ) de = std::max( de, std::fabs( ev[k] - ini[k] ) );
+        check( "rod: initial_expression(k) evaluates exactly as eval_initial",  de == 0. );
       }
       std::cout << "      shape: " << S.n_states << " unknowns (" << S.n_tau << " tau), " << S.n_rows << " rows\n";
     }
@@ -158,6 +195,7 @@ int main()
       check( "rod/DIFFERENTIAL: 12 differential unknowns (the flux node joins)", S.n_diff_cols == 12 );
       check( "rod/DIFFERENTIAL: Ini stream covers every differential unknown",  S.n_ini_stream == S.n_diff_cols );
       check( "rod/DIFFERENTIAL: 3 INITIAL evaluations dropped",             S.n_ini_dropped == 3 );
+      check_rhs( "rod/DIFFERENTIAL", oc, u, []( double z ){ return z*z; }, []( double z ){ return 0.2*z; }, 0.2 );
     }
   }
 

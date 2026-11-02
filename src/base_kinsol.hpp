@@ -53,6 +53,13 @@ public:
     double FTOL = 1e-10;
     //! @brief stopping tolerance on the scaled step -- what stops a slowly converging iteration
     double STEPTOL = 1e-14;
+    //! @brief maximum scaled length of a Newton step (KINSetMaxNewtonStep).  0 (default) = AUTOMATIC: with the line
+    //! search on, effectively unbounded (1e8) -- the line search, not the bound, keeps a step from overshooting;
+    //! with it off, KINSOL's own default, since the bound is then the only safeguard.  KINSOL's default is
+    //! 1000 ||u0|| clamped below at 1, which from a seed near zero clips every step to length 1 and exits with
+    //! KIN_MXNEWT_5X_EXCEEDED (-7) whenever the consistent state is more than a few units away (found by the MoL
+    //! gate, 2 Nov 2026: a flux auxiliary that must move from 0 to 10).  A positive value is used as given.
+    double MAXNEWTONSTEP = 0.;
     //! @brief iteration cap
     int MAXIT = 200;
     //! @brief use the line-search globalisation (KIN_LINESEARCH) rather than plain Newton (KIN_NONE).
@@ -170,6 +177,8 @@ BASE_KINSOL::solve
   KINSetUserData( mem, &shim );
   KINSetFuncNormTol( mem, k.FTOL );
   KINSetScaledStepTol( mem, k.STEPTOL );
+  if( k.MAXNEWTONSTEP > 0. )  KINSetMaxNewtonStep( mem, k.MAXNEWTONSTEP );
+  else if( k.LINESEARCH )      KINSetMaxNewtonStep( mem, 1e8 );       // automatic: the line search governs
   KINSetNumMaxIters( mem, k.MAXIT );
   KINSetMaxSetupCalls( mem, k.MAXSETUP );
   SUNMatrix A = nullptr; SUNLinearSolver LS = nullptr;

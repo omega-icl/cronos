@@ -136,6 +136,33 @@ public:
   std::vector<t_MassEntry> const& mass() const { return _mass; }
   //! @brief Whether unknown @p col is differential (some row carries its d_t): the integrator's id vector.
   bool is_differential( size_t col ) const { return col < _colDiff.size() && _colDiff[col]; }
+  //! @brief The columns of @p field, in MESH ORDER: element-major, node within element, the directions in the
+  //! field's own order (the order a driver's own mesh loop produces).  Empty for an unknown field.
+  //! A field's columns are NOT contiguous -- the layout interleaves fields element by element -- so this is the
+  //! only correct way to collect them.
+  std::vector<size_t> const& field_columns
+    ( FFVar const& field )
+    const
+    { static std::vector<size_t> const none; auto it = _fieldCols.find( field ); return it == _fieldCols.end()? none: it->second; }
+
+  //! @brief The coordinates of @p field's nodes, in the same order as field_columns: one entry per column, each the
+  //! (direction, coordinate) pairs of that node.  A driver can plot or compare without rebuilding the mesh.
+  std::vector< std::vector< std::pair<FFVar,double> > > const& field_nodes
+    ( FFVar const& field )
+    const
+    { static std::vector< std::vector< std::pair<FFVar,double> > > const none; auto it = _fieldNodes.find( field );
+      return it == _fieldNodes.end()? none: it->second; }
+
+  //! @brief The field that owns unknown @p col and its reference value; false for an explicit tau multiplier.
+  bool column_field
+    ( size_t col, FFVar& field, double& ref )
+    const
+    {
+      if( col >= _colOwner.size() || _colOwner[col] >= _peel.states.size() ) return false;
+      field = _peel.states[ _colOwner[col] ];  ref = this->ref( field );
+      return true;
+    }
+
   //! @brief Whether row @p row of Rc is algebraic (no mass entry).
   bool is_algebraic_row( size_t row ) const { return row < _rowAlg.size() && _rowAlg[row]; }
 
@@ -169,6 +196,28 @@ public:
   //! @brief The Ini stream (entries with dropped == false) and the dropped pairs (dropped == true), after setup.
   std::vector<t_IniEntry> const& ini_stream() const { return _iniStream; }
 
+  //! @brief Ini entry @p k as an ORDINARY scalar expression in the DAG of @p xc: the model's INITIAL row with each
+  //! field it reads bound to that field's unknown at the entry's node, the coordinates as constants, the evolution
+  //! variable as @p t and the model's constants by value -- what a hand-written semi-discrete model writes.  An
+  //! integrator peels INITIAL rows one at a time by composing each with its target state; as outputs of one vectorised
+  //! operation every such compose rebuilt the whole operation (measured: 415 MB of heap at 144 unknowns, all of it
+  //! FFMOLINI re-insertions and their gradients).  Pointwise rows are evaluated once at t0 and gain nothing from
+  //! vectorisation.
+  FFVar initial_expression
+    ( size_t k, std::vector<FFVar> const& xc, FFVar const& t )
+    const
+    {
+      auto const& e = _iniStream.at( k );
+      std::vector<FFVar> vars, vals;
+      for( auto const& [y, c] : e.cols ){ vars.push_back( y ); vals.push_back( xc.at( c ) ); }
+      for( auto const& [d, z] : e.coord ){ vars.push_back( d ); vals.push_back( FFVar( z ) ); }
+      if( _evolution_dom_set ){ vars.push_back( _evolution_dom_var ); vals.push_back( t ); }
+      for( size_t i = 0; i < _vCst.size() && i < _vCstVal.size(); ++i ){ vars.push_back( _vCst[i] ); vals.push_back( FFVar( _vCstVal[i] ) ); }
+      std::vector<FFVar> out( 1 );
+      _dag->eval( std::vector<FFVar>{ _iniEqn[e.row].var }, out, vars, vals );
+      return out[0];
+    }
+
   //! @brief The INITIAL rows at the stream's nodes: @p ini has ini_stream().size() entries in that order (the dropped
   //! ones included, so the consistency check at t0 reads the same array).  Each is one small DAG evaluation.
   bool eval_initial
@@ -177,6 +226,19 @@ public:
   //! @brief The derivative of eval_initial with respect to xc, in CSR over the entries (a few columns each).
   bool deriv_initial
     ( double t, double const* xc, double* ini, std::vector<size_t>& ptr, std::vector<size_t>& col, std::vector<double>& val );
+
+  //! @brief A SEED for an integrator's own consistent initialisation, without solving anything: the base's reference
+  //! initialisation (every unknown from the model's references, the order-reduction auxiliaries from their defining
+  //! relations), then the differential unknowns set from the Ini stream.  The algebraic block is left to the
+  //! integrator -- DAESLV's KINSOL corrector solves the INITIAL rows with the interior rows at t0, sparse, which is the
+  //! consistent initialisation; OCFEMOL only makes its start good.
+  bool init_seed
+    ( double t, double* xc );
+
+  //! @brief The dropped Ini entries evaluated at @p xc: an INITIAL condition at an algebraic node is not imposed, so
+  //! it must already hold there.  Returns the largest |residual| over them (0 when none were dropped).
+  double initial_consistency_defect
+    ( double t, double const* xc );
 
   //! @brief The Jacobian pattern over xc alone (CSR row pointers and columns), valid after setup; the values come
   //! from deriv_residual, in the same order.
@@ -190,6 +252,13 @@ protected:
   std::vector< std::vector< std::pair<size_t,FFVar> > > _massByEqn;   //!< per row of the rewritten _mEqn: (field, coefficient)
   std::vector<t_MassEntry> _mass;    //!< Mc as data
   std::vector<t_IniEntry>  _iniStream;   //!< the Ini stream and the dropped pairs
+  std::map<FFVar,std::vector<size_t>,lt_FFVar> _fieldCols;  //!< per field: its columns in mesh order
+  std::map<FFVar,std::vector< std::vector< std::pair<FFVar,double> > >,lt_FFVar> _fieldNodes;  //!< ... and their coordinates
+  std::vector<size_t>      _colOwner;    //!< per column: the field's index into _peel.states (npos for a tau)
+
+  //! @brief Fill _fieldCols and _colOwner by walking each field's (element, node) grid.
+  void _build_column_map
+    ();
   std::vector<bool>     _colDiff;    //!< per unknown of xc
   std::vector<bool>     _rowAlg;     //!< per row of Rc
   std::vector<t_Eqn>    _iniEqn;    //!< the INITIAL rows, kept aside from the collocated system
@@ -216,6 +285,7 @@ protected:
       _peel = t_Peel();
       _iniEqn.clear();
       _massByEqn.clear(); _mass.clear(); _colDiff.clear(); _rowAlg.clear(); _iniStream.clear();
+      _fieldCols.clear(); _fieldNodes.clear(); _colOwner.clear();
       _evoLo = _evoHi = 0.;
       _shape = t_SemiDiscrete();
     }
@@ -419,6 +489,7 @@ OCFEMOL::_on_model_ready
              << _nTraceVar << " explicit tau), " << _shape.n_rows << " rows, " << _shape.n_ini << " INITIAL rows aside, t in ["
              << _shape.t_lo << ", " << _shape.t_hi << "]\n";
 
+  _build_column_map();
   _build_mass();
   if( !_build_jacobian_pattern() ){
     std::cerr << "OCFEMOL::setup ** the Jacobian pattern of Rc could not be built" << std::endl;
@@ -542,6 +613,43 @@ OCFEMOL::deriv_initial
   return true;
 }
 
+inline bool
+OCFEMOL::init_seed
+( double t, double* xc )
+{
+  if( !_shape.ran || !xc ) return false;
+  std::vector<double> inp( _nCollInp, 0. );
+  _init_reference( xc, _nCollInp? inp.data(): nullptr, _vCstVal.empty()? nullptr: _vCstVal.data() );
+  std::vector<double> ini( _iniStream.size() );
+  std::vector<size_t> ptr, col; std::vector<double> val;
+  for( int sweep = 0; sweep < 8; ++sweep ){
+    if( !deriv_initial( t, xc, ini.data(), ptr, col, val ) ) return false;
+    double move = 0.;
+    for( size_t k = 0; k < _iniStream.size(); ++k ){
+      if( _iniStream[k].dropped ) continue;
+      size_t const tgt = _iniStream[k].target;
+      double d = 0.;  for( size_t j = ptr[k]; j < ptr[k+1]; ++j ) if( col[j] == tgt ) d = val[j];
+      if( std::fabs( d ) < 1e-12 ) continue;
+      double const step = -ini[k] / d;
+      xc[tgt] += step;  move = std::max( move, std::fabs( step ) );
+    }
+    if( move < 1e-14 ) break;
+  }
+  return true;
+}
+
+inline double
+OCFEMOL::initial_consistency_defect
+( double t, double const* xc )
+{
+  if( !_shape.ran || !xc ) return 0.;
+  std::vector<double> ini( _iniStream.size() );
+  if( !eval_initial( t, xc, ini.data() ) ) return 1e30;
+  double worst = 0.;
+  for( size_t k = 0; k < _iniStream.size(); ++k ) if( _iniStream[k].dropped ) worst = std::max( worst, std::fabs( ini[k] ) );
+  return worst;
+}
+
 inline FFDep
 OCFEMOL::_deps_of
 ( FFVar const& expr )
@@ -584,24 +692,125 @@ const
 }
 
 inline void
+OCFEMOL::_build_column_map
+()
+{
+  _fieldCols.clear();  _fieldNodes.clear();
+  _colOwner.assign( _shape.n_states, std::string::npos == 0? 0: (size_t)-1 );
+  for( size_t i = 0; i < _peel.states.size(); ++i ){
+    FFVar const& x = _peel.states[i];
+    auto itv = _mVar.find( x );  auto itb = _blkVar.find( x );
+    if( itv == _mVar.end() || itb == _blkVar.end() ) continue;
+    auto const& var_dom = itv->second;  auto const& blk_dim = std::get<2>( itb->second );
+    std::vector<size_t>& cols = _fieldCols[x];
+    auto& nodes = _fieldNodes[x];
+    if( var_dom.empty() ){                                        // lumped: one column, no coordinates
+      size_t const c = pos_state( x, {} );
+      cols.push_back( c );  nodes.emplace_back();  if( c < _colOwner.size() ) _colOwner[c] = i;
+      continue;
+    }
+    std::vector<FFVar> dirs( var_dom.begin(), var_dom.end() );
+    std::vector<size_t> nel( dirs.size() ), nnd( dirs.size() ), iel( dirs.size(), 0 ), ind( dirs.size(), 0 );
+    for( size_t d = 0; d < dirs.size(); ++d ){ nel[d] = _mDom.at( dirs[d] ).n_elem; nnd[d] = blk_dim[d]; }
+    while( true ){
+      std::map<FFVar,size_t,lt_FFVar> ndx_el;  for( size_t d = 0; d < dirs.size(); ++d ) ndx_el[dirs[d]] = iel[d];
+      size_t c = pos_state( x, ndx_el ), stride = 1;
+      for( size_t d = 0; d < dirs.size(); ++d ){ c += ind[d]*stride; stride *= nnd[d]; }
+      cols.push_back( c );  if( c < _colOwner.size() ) _colOwner[c] = i;
+      nodes.emplace_back();
+      for( size_t d = 0; d < dirs.size(); ++d ){
+        FFDom const& dm = _mDom.at( dirs[d] );
+        double const lo = dm.elem_lo( iel[d] ), hi = dm.elem_up( iel[d] ), xi = dm.lgnodes().at( ind[d] );
+        nodes.back().emplace_back( dirs[d], 0.5*( lo + hi ) + 0.5*( hi - lo )*xi );
+      }
+      // mesh order: the LAST direction varies fastest within an element, elements likewise -- the order a driver
+      // writing  for( e ) for( i )  produces, direction by direction
+      size_t d = dirs.size();  bool done = false;
+      while( d-- > 0 ){
+        if( ++ind[d] < nnd[d] ) break;
+        ind[d] = 0;
+        if( ++iel[d] < nel[d] ) break;
+        iel[d] = 0;
+        if( d == 0 ) done = true;                 // this FIELD's grid is exhausted -- not the whole map
+      }
+      if( done ) break;
+    }
+  }
+}
+
+inline void
 OCFEMOL::_build_mass
 ()
 {
+  // Mc receives the plan's row operations exactly as Rc does: an emitted IC_STRONG row is its own row minus a
+  // combination of pivot rows the exact elimination dropped, so its mass is its own minus the same combination of the
+  // pivots' masses.  A pivot that is the OTHER duplicate of the same field at the same physical point (a continuity
+  // claim) has u_pivot = u_receiver by the continuity row, hence u_t too: its folded mass goes on the receiver's own
+  // column -- u_pivot is eliminated through its constraint and stays algebraic.  Otherwise it goes on the pivot's column.
   _mass.clear();
   _colDiff.assign( _shape.n_states, false );
   _rowAlg.assign( _shape.n_rows, true );
+  auto coord = [&]( t_RowNode const& rn ){                 // the physical coordinates of a row's node
+    std::vector<std::pair<long,double>> c;
+    for( auto const& d : rn.dims ){
+      FFDom const* dm = nullptr;  for( auto const& [v, dd] : _mDom ) if( v.id().second == d.dir_id ){ dm = &dd; break; }
+      if( !dm ) continue;
+      double const lo = dm->elem_lo( d.iel ), hi = dm->elem_up( d.iel );
+      double const xi = d.lim == FFDom::LB? -1.: d.lim == FFDom::UB? 1.: dm->lgnodes().at( d.node );
+      c.emplace_back( d.dir_id, 0.5*( lo + hi ) + 0.5*( hi - lo )*xi );
+    }
+    return c;
+  };
+  auto same_point = [&]( t_RowNode const& a, t_RowNode const& b ){
+    auto ca = coord( a ), cb = coord( b );
+    if( ca.size() != cb.size() ) return false;
+    for( size_t i = 0; i < ca.size(); ++i ) if( ca[i].first != cb[i].first || std::fabs( ca[i].second - cb[i].second ) > 1e-12 ) return false;
+    return true;
+  };
   size_t const nrow = std::min( _rowEqnNdx.size(), _shape.n_rows );
+  // which columns carry their OWN mass row (before any fold): a pivot column without one is algebraic, pinned to the
+  // receiver by its continuity row; a pivot column with one (a field with no spatial operator, hence no continuity
+  // claim -- PSA's loadings) is an independent differential unknown and keeps its folded mass
+  std::vector<bool> own_diff( _shape.n_states, false );
   for( size_t r = 0; r < nrow; ++r ){
     int const k = _rowEqnNdx[r];
-    if( k < 0 || (size_t)k >= _massByEqn.size() || _massByEqn[k].empty() ) continue;   // plan-owned or algebraic
-    for( auto const& [i, coeff] : _massByEqn[k] ){
-      size_t col = 0;
-      if( !_column_of( _peel.states[i], _rowNode[r], col ) ) continue;
-      _mass.push_back({ r, col, coeff });
+    if( k < 0 || (size_t)k >= _massByEqn.size() ) continue;
+    for( auto const& [i, coeff] : _massByEqn[k] ){ size_t col = 0; if( _column_of( _peel.states[i], _rowNode[r], col ) && col < own_diff.size() ) own_diff[col] = true; }
+  }
+  size_t n_folded = 0;
+  for( size_t r = 0; r < nrow; ++r ){
+    int const k = _rowEqnNdx[r];
+    std::map<size_t,FFVar> row;                                     // column -> coefficient (merged)
+    // merge: two CONSTANT coefficients are added as numbers -- the sum of two constant FFVars is a DAG node, not a constant
+    auto add = [&]( size_t col, FFVar const& c ){
+      auto it = row.find( col );
+      if( it == row.end() ){ row.emplace( col, c ); return; }
+      if( it->second.cst() && c.cst() ) it->second = FFVar( it->second.num().val() + c.num().val() );   // a plain constant: no DAG needed
+      else                              it->second = it->second + c; };
+    if( k >= 0 && (size_t)k < _massByEqn.size() )
+      for( auto const& [i, coeff] : _massByEqn[k] ){ size_t col = 0; if( _column_of( _peel.states[i], _rowNode[r], col ) ) add( col, coeff ); }
+    if( r < _rowFold.size() )
+      for( auto const& f : _rowFold[r] ){
+        if( f.eqn < 0 || (size_t)f.eqn >= _massByEqn.size() ) continue;
+        for( auto const& [i, coeff] : _massByEqn[f.eqn] ){
+          FFVar fc;  if( coeff.cst() ) fc = FFVar( -f.coeff * coeff.num().val() );  else fc = -f.coeff * coeff;
+          size_t col = 0, pcol = 0;
+          bool const has_pcol = _column_of( _peel.states[i], f.node, pcol );
+          bool const onto_receiver = k >= 0 && has_pcol && pcol < own_diff.size() && !own_diff[pcol]
+                                  && same_point( f.node, _rowNode[r] ) && _column_of( _peel.states[i], _rowNode[r], col );
+          if( onto_receiver ){ add( col, fc ); ++n_folded; }
+          else if( has_pcol ){ add( pcol, fc ); ++n_folded; }
+        }
+      }
+    for( auto const& [col, c] : row ){
+      if( c.cst() && c.num().val() == 0. ) continue;
+      _mass.push_back({ r, col, c });
       if( col < _colDiff.size() ) _colDiff[col] = true;
       _rowAlg[r] = false;
     }
   }
+  if( n_folded ) _disp( 1 ) << "OCFEMOL::setup [mol] Mc: " << n_folded << " mass entr" << ( n_folded == 1? "y": "ies" )
+                            << " folded from rows the exact interface elimination dropped\n";
 }
 
 inline size_t

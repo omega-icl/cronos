@@ -136,7 +136,7 @@ for name, solve in (("forward", C.solve_fsens), ("adjoint", C.solve_asens)):
     check(ok and J.shape == (1, 1) and abs(J[0, 0] + math.exp(-0.7)) < 1e-8, "%s: dx(1)/dp == -exp(-0.7) (1e-8)" % name)
 
 # %% [markdown]
-# ## D. Inputs: functions of the coordinates, and the array guards
+# ## D. Inputs: functions of the coordinates, the array guards, and the by-name solve
 
 # %%
 G = FFGraph()
@@ -168,6 +168,25 @@ for what, call, err in [
         check(False, "%s refused" % what)
     except err:
         check(True, "%s refused (%s)" % (what, err.__name__))
+
+# by name, as ODESLV and DAESLV: a number, a list over input_dofs / input_coordinates, or a callable
+# of the coordinates -- the same function sample_input took above
+check(D.solve({w: lambda coord: 2. * coord[t]}) == OCFESLV.NORMAL and abs(D.val_function()[0] - 1.) < 1e-10,
+      "solve by name {w: f(coord)}: x(1) == 1, as sample_input")
+check(np.array_equal(np.array(D.val_state()), var), "by name == in place, bit for bit (the solution)")
+check(D.last_report().converged, "last_report: the SolveReport of the by-name solve")
+f_call = list(D.val_function())
+D.solve({w: [2. * c[t] for c in D.input_coordinates(w)]})
+check(list(D.val_function()) == f_call, "a list over input_coordinates == the callable")
+for what, inputs, must in [
+        ("a missing input", {}, "missing: w(t)"),
+        ("a wrong count", {w: [1., 2.]}, "w(t) has "),
+        ("a DofIndex-style callable", {w: lambda dof: float(dof.element[t])}, "input_dofs(w(t))")]:
+    try:
+        D.solve(inputs)
+        check(False, "%s refused" % what)
+    except ValueError as e:
+        check(must in str(e), "%s refused, naming it" % what)
 
 # %% [markdown]
 # ## E. Options and equation options

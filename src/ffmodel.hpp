@@ -3851,8 +3851,12 @@ public:
     FFVar                                      input;
     std::vector<FFVar>                         dofs;
     std::function<FFVar(DofIndex const&)>      gen;
+    std::function<FFVar(t_Coord const&)>       cgen;   //!< a function of the DOF's coordinates (input_coordinates)
     InputArg( FFVar const& u, std::vector<FFVar> const& v ) : input( u ), dofs( v ) {}
     InputArg( FFVar const& u, std::function<FFVar(DofIndex const&)> g ) : input( u ), gen( std::move( g ) ) {}
+    //! A function of the DOF's COORDINATES, returning its variable -- e.g. a profile parameterised by DAG variables,
+    //! [&]( FFModel::t_Coord const& c ){ return a + b*c.at( z ); }.  A typed parameter selects this form.
+    InputArg( FFVar const& u, std::function<FFVar(t_Coord const&)> g ) : input( u ), cgen( std::move( g ) ) {}
   };
 
   //! @brief A declared input or constant and its VALUES: a flat list in input_dofs() order, or a generator called
@@ -4341,6 +4345,12 @@ const
   if( a.gen ){
     for( auto const& d : input_dofs( a.input ) ){
       try{ dofs.push_back( a.gen( d ) ); }
+      catch( std::exception const& e ){ err = "the generator for " + a.input.name() + " failed at one of its DOFs: " + e.what(); return false; }
+    }
+  }
+  else if( a.cgen ){
+    for( auto const& c : input_coordinates( a.input ) ){
+      try{ dofs.push_back( a.cgen( c ) ); }
       catch( std::exception const& e ){ err = "the generator for " + a.input.name() + " failed at one of its DOFs: " + e.what(); return false; }
     }
   }

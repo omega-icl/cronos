@@ -677,6 +677,12 @@ tau : float
           { return self.input_dofs(u); }, py::arg("var"),
           "The DOF indices of declared input ``var``, in the order of its values.")
       .def(
+          "input_coordinates", [](M const& self, mc::FFVar const& u)
+          { return self.input_coordinates(u); }, py::arg("var"),
+          "The coordinates of the DOFs of declared input ``var``, in ``input_dofs`` order: one dict "
+          "``{FFVar: coordinate}`` per DOF, at the nodes of the input's own collocation -- where a "
+          "callable in a by-name dict, or given to ``sample_input``, is evaluated.")
+      .def(
           "control_dofs", [](M const& self, mc::FFVar const& u)
           { return self.input_dofs(u); }, py::arg("var"),
           "Deprecated alias of input_dofs (renamed 3 Nov 2026).")

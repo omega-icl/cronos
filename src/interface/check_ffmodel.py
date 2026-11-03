@@ -191,13 +191,18 @@ C.add_output(OpE(x, t, 1.))
 C.register_control(p)
 check(C.setup(), "setup() succeeds  (%s)" % C.setup_status)
 n = C.n_control_dof()
-check(n == 3 * 2, "control DOFs of p(t): 3 elements x 2 nodes = %d" % n)
+check(n == 3 * 2, "input DOFs of p(t): 3 elements x 2 nodes = %d" % n)
 dofs = C.input_dofs(p)
 # dicts returned by C++ are keyed by NEW FFVar objects; FFVar compares and hashes by DAG identity, so
 # they can be indexed with the user's own variables
 print("DOF layout of p(t) (element, node):", [(d.element[t], d.node[t]) for d in dofs])
 check([(d.element[t], d.node[t]) for d in dofs] == [(e, k) for e in range(3) for k in range(2)],
       "DOFs ordered element-major, node-minor")
+coords = [c[t] for c in C.input_coordinates(p)]                   # one {t: value} per DOF, in input_dofs order
+offs = [[coords[2 * e + k] - e / 3. for k in range(2)] for e in range(3)]
+check(len(coords) == 6 and all(-1e-14 <= o <= 1. / 3. + 1e-14 for row in offs for o in row)
+      and all(abs(offs[e][k] - offs[0][k]) < 1e-14 for e in range(3) for k in range(2)) and offs[0][0] < offs[0][1],
+      "input_coordinates: each DOF's node inside its element, the same LGR nodes in every element")
 roles = {str(e.var): e.opt.role for e in C.var_equation}
 check(list(roles.values()) == [FFModel.EqnRole.INTERIOR, FFModel.EqnRole.INITIAL]
       and all(e.opt.role_auto for e in C.var_equation),

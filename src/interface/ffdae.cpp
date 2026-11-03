@@ -21,14 +21,16 @@ namespace
 {
 typedef mc::FFModel M;
 typedef mc::DAESLV_IDAS S;
-typedef std::function<mc::FFVar(M::DofIndex const&)> t_Gen;
+typedef std::function<mc::FFVar(M::t_Coord const&)> t_Gen;   // a function of the DOF's coordinates
 typedef py::typing::Dict<
     mc::FFVar,
     py::typing::Union<std::vector<mc::FFVar>,
-                      py::typing::Callable<mc::FFVar(M::DofIndex const&)>>>
+                      py::typing::Callable<mc::FFVar(M::t_Coord const&)>>>
     t_Map;
 
-// A dict {input: list of FFVar | gen(DofIndex) -> FFVar} -> the C++ InputArg
+// A dict {input: list of FFVar | f(coord) -> FFVar} -> the C++ InputArg.  A callable is always a function of the
+// DOF's coordinates {FFVar: value} (the form update_ref takes); variables by DOF index are a list built over
+// input_dofs(u).  A callable that fails is reported with that rule.
 // list, in the dict's order (map 1's order is the order of the gradient
 // columns)
 std::vector<M::InputArg>
@@ -39,7 +41,19 @@ input_args(py::dict const& d)
   {
     mc::FFVar const u = k.cast<mc::FFVar>();
     if (PyCallable_Check(val.ptr()))
-      v.emplace_back(u, val.cast<t_Gen>());
+    {
+      t_Gen const f = val.cast<t_Gen>();
+      std::string const name = u.name();
+      v.emplace_back(u, t_Gen([f, name](M::t_Coord const& c) {
+        try { return f(c); }
+        catch (py::error_already_set& e) {
+          throw std::invalid_argument(
+              "the callable given for " + name + " failed (" + std::string(e.what()) +
+              ") -- a callable in a by-name dict is a function of the DOF's coordinates "
+              "({FFVar: value}); for variables by DOF index, pass a list built over input_dofs(" + name + ")");
+        }
+      }));
+    }
     else
       v.emplace_back(u, val.cast<std::vector<mc::FFVar>>());
   }
@@ -71,7 +85,9 @@ Parameters
 diff : dict
     Map 1: the inputs the numerical gradient is taken with respect to, in the
     order of the gradient columns. Each maps to its DOFs as DAG variables: a
-    list in ``input_dofs`` order, or a generator ``gen(dof) -> FFVar``. It
+    list in ``input_dofs`` order, or a callable ``f(coord) -> FFVar`` of the
+    DOF's coordinates ``{FFVar: value}`` (variables by DOF index: a list built over
+    ``input_dofs``). It
     resets the solver's control registry to exactly these inputs.
 rest : dict
     Map 2: every other declared input and every constant (one variable each),

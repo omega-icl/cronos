@@ -30,21 +30,38 @@ namespace
 {
 typedef mc::ODESLVS_CVODES S;
 typedef mc::FFModel M;
-typedef std::function<double(M::DofIndex const&)> t_Gen;
-typedef std::variant<std::vector<double>, t_Gen> t_Val;
+// A value in a by-name dict: a list, a number (one value), or a CALLABLE -- always a function of the DOF's
+// coordinates {FFVar: value}, the form update_ref takes; values by DOF index are a list built over
+// input_dofs(u).  A callable that fails is reported with that rule, so a DofIndex-style callable is caught.
+typedef std::function<double(M::t_Coord const&)> t_Fun;
+typedef std::variant<std::vector<double>, double, t_Fun> t_Val;
 typedef std::map<mc::FFVar, t_Val, mc::lt_FFVar> t_Inputs;
 typedef py::call_guard<py::scoped_ostream_redirect, py::scoped_estream_redirect>
     t_Redirect;
 
-// {input: values or generator} -> the C++ by-name list (FFModel::InputVal)
+// {input: values} -> the C++ by-name list (FFModel::InputVal)
 std::vector<M::InputVal>
 input_vals(t_Inputs const& in)
 {
   std::vector<M::InputVal> v;
   for (auto const& [u, val] : in)
   {
-    if (std::holds_alternative<t_Gen>(val))
-      v.emplace_back(u, std::get<t_Gen>(val));
+    if (std::holds_alternative<t_Fun>(val))
+    {
+      t_Fun const f = std::get<t_Fun>(val);
+      std::string const name = u.name();
+      v.emplace_back(u, M::t_Fun([f, name](M::t_Coord const& c) {
+        try { return f(c); }
+        catch (py::error_already_set& e) {
+          throw std::invalid_argument(
+              "the callable given for " + name + " failed (" + std::string(e.what()) +
+              ") -- a callable in a by-name dict is a function of the DOF's coordinates "
+              "({FFVar: value}); for values by DOF index, pass a list built over input_dofs(" + name + ")");
+        }
+      }));
+    }
+    else if (std::holds_alternative<double>(val))
+      v.emplace_back(u, std::vector<double>{std::get<double>(val)});
     else
       v.emplace_back(u, std::get<std::vector<double>>(val));
   }
@@ -125,10 +142,14 @@ records(std::vector<std::vector<S::Results>> const& RR, size_t n1, t_Arr& t,
 
 char const* DOC_BYNAME = R"doc(
 The values are given BY NAME: a dict mapping every declared input and constant
-to its values -- a list (one value for a parameter or a constant; one per DOF
-for a distributed input, in the order of ``input_dofs``) or a generator
-``gen(dof: FFModel.DofIndex) -> float``. An incomplete or inconsistent dict
-raises ``ValueError``, naming the entry.
+to its values -- a number (one value: a parameter, a constant, a one-DOF
+input), a list (one value per DOF, in the order of ``input_dofs``), or a
+callable ``f(coord) -> float`` evaluated at each DOF, where ``coord`` is a dict
+``{FFVar: coordinate}`` (the form ``update_ref`` takes): ``coord[z]`` is the
+DOF's ``z``-coordinate, at the nodes of the input's own collocation
+(``input_coordinates``). Values by DOF index are a list built over
+``input_dofs``, e.g. ``[1. + d.element[t] for d in S.input_dofs(u)]``. An
+incomplete or inconsistent dict raises ``ValueError``, naming the entry.
 )doc";
 }  // namespace
 

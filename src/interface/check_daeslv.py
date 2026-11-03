@@ -136,6 +136,8 @@ B.options.OUTPUT.RESRECORD = 10
 check(B.setup(), "setup()")
 check(B.solve({p: [0.7]}) == DAESLV.NORMAL, "solve by name {p: [0.7]}")
 check(close(B.val_function(), [math.exp(-0.7)], 1e-8), "x(1) == exp(-0.7)")
+check(B.solve({p: 0.7}) == DAESLV.NORMAL and close(B.val_function(), [math.exp(-0.7)], 1e-8),
+      "solve by name {p: 0.7}: a bare number for a one-value input")
 check(B.solve_fsens({p: [0.7]}) == DAESLV.NORMAL and close(B.val_function_gradient(), [[-math.exp(-0.7)]], 1e-7),
       "forward: dx(1)/dp == -exp(-0.7)")
 check(B.solve_asens({p: [0.7]}) == DAESLV.NORMAL and close(B.val_function_gradient(), [[-math.exp(-0.7)]], 1e-7),
@@ -191,8 +193,8 @@ check(C.solve([]) == DAESLV.NORMAL and close(C.val_function(), [math.exp(-1.) + 
 # ## D. A distributed control
 #
 # x' = u(t), x(0) = 0, u piecewise constant on 4 elements of [0, 1]:
-# x(1) = sum of u_e / 4 and dx(1)/du_e = 1/4. The control values are given by a
-# generator of the DOF index.
+# x(1) = sum of u_e / 4 and dx(1)/du_e = 1/4. Values by DOF index are a list
+# built over input_dofs; a callable is always a function of the coordinates.
 
 # %%
 G4 = FFGraph()
@@ -210,14 +212,23 @@ D.register_control(u)
 D.options.SOLVE.RTOL = D.options.SOLVE.ATOL = D.options.SOLVE.RTOLS = D.options.SOLVE.ATOLS = 1e-10
 check(D.setup(), "setup() with a distributed control  (%s)" % (D.extract_error() or "ok"))
 check(D.n_control_dof() == 4, "4 control DOFs (one per element)")
-gen = lambda dof: 1. + dof.element[t]                       # u_e = 1, 2, 3, 4
-check(D.solve_fsens({u: gen}) == DAESLV.NORMAL and close(D.val_function(), [2.5], 1e-8),
-      "x(1) == (1+2+3+4)/4 = 2.5  (generator of the DOF index)")
+vals = [1. + d.element[t] for d in D.input_dofs(u)]          # u_e = 1, 2, 3, 4: values by DOF index
+check(D.solve_fsens({u: vals}) == DAESLV.NORMAL and close(D.val_function(), [2.5], 1e-8),
+      "x(1) == (1+2+3+4)/4 = 2.5  (values by DOF index, a list over input_dofs)")
 g = D.val_function_gradient(u)
 print("  dx(1)/du =", g)
 check(close(g, [[.25]] * 4, 1e-7), "dx(1)/du_e == 1/4 for every element (one row per DOF)")
 P = D.set_parameter_values(u, [1., 2., 3., 4.], [0.] * D.np())
 check(close(D.get_parameter_values(u, P), [1., 2., 3., 4.], 0.), "set/get_parameter_values round trip")
+mids = [c[t] for c in D.input_coordinates(u)]
+check(close(mids, [.125, .375, .625, .875], 1e-14), "input_coordinates: one LG node per element, the midpoints")
+check(D.solve({u: lambda coord: 1. + 4. * coord[t]}) == DAESLV.NORMAL and close(D.val_function(), [3.], 1e-8),
+      "a callable is a function of the coordinates: u = 1 + 4t at the midpoints, x(1) == 3")
+try:
+    D.solve({u: lambda dof: 1. + dof.element[t]})
+    check(False, "a DofIndex-style callable is refused")
+except ValueError as e:
+    check("input_dofs(" in str(e), "a DofIndex-style callable is refused, pointing to input_dofs")
 
 # %% [markdown]
 # ## E. Options

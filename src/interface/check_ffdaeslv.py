@@ -200,10 +200,14 @@ for k in ("RTOL", "ATOL", "RTOLS", "ATOLS"):
     setattr(D.options.SOLVE, k, 1e-10)
 check(D.setup(), "solver setup()")
 U = [G3.add_var("U%d" % e) for e in range(4)]
-yd = OpODE({u: lambda dof: U[dof.element[t]]}, D)   # generator: element e -> U[e]
+yd = OpODE({u: [U[d.element[t]] for d in D.input_dofs(u)]}, D)   # by DOF index: element e -> U[e]
 vals = [1., 2., 3., 4.]
-check(close(G3.eval(yd, U, vals), [2.5], 1e-8), "x(1) == (1+2+3+4)/4  (generator of the DOF index)")
+check(close(G3.eval(yd, U, vals), [2.5], 1e-8), "x(1) == (1+2+3+4)/4  (variables by DOF index, a list over input_dofs)")
 check(close(jacobian(G3, yd, U, vals), [[.25] * 4], 1e-7), "dx(1)/dU_e == 1/4")
+amp = G3.add_var("amp")                                        # (not A: that name is the solver of sections B, E)
+ya = OpODE({u: lambda coord: amp * coord[t]}, D)               # a profile parameterised by amp: u = amp t at the midpoints
+check(close(G3.eval(ya, [amp], [2.]), [1.], 1e-8), "a callable is a function of the coordinates: u = amp t, x(1) == amp/2")
+check(close(jacobian(G3, ya, [amp], [2.]), [[.5]], 1e-7), "dx(1)/damp == 1/2")
 
 # %% [markdown]
 # ## E. Copy policies

@@ -71,7 +71,7 @@ Parameters
 diff : dict
     Map 1: the inputs the numerical gradient is taken with respect to, in the
     order of the gradient columns. Each maps to its DOFs as DAG variables: a
-    list in ``control_dofs`` order, or a generator ``gen(dof) -> FFVar``. It
+    list in ``input_dofs`` order, or a generator ``gen(dof) -> FFVar``. It
     resets the solver's control registry to exactly these inputs.
 rest : dict
     Map 2: every other declared input and every constant (one variable each),

@@ -393,7 +393,7 @@ a distributed output.
           R"doc(
 Jacobian of the outputs with respect to the control DOFs, captured by the last
 solve_fsens / solve_asens: NumPy array of shape (nf, n_control_dof), columns
-in the order of the registered controls and their ``control_dofs``.
+in the order of the registered controls and their ``input_dofs``.
 )doc")
       // homotopy / continuation
       .def(

@@ -311,7 +311,7 @@ public:
         throw std::invalid_argument( "DAESLV::solve_asens ** " + err );
       return solve_asens( P, C, os ); }
 
-  //! @brief The gradient rows of control @p var: [dof][function], its DOFs in control_dofs() order, from the last
+  //! @brief The gradient rows of control @p var: [dof][function], its DOFs in input_dofs() order, from the last
   //! solve_fsens() or solve_asens().  Throws if @p var is not a registered control (it then has no
   //! sensitivity direction) or no sensitivity solve has been run.
   std::vector< std::vector< double > > val_function_gradient

@@ -358,7 +358,7 @@ class BASE_DE
       return ( itn == _mInpNodes.cend() || itn->second.empty() )? 1: itn->second.size();
     }
 
-  //! @brief Write the DOF values of declared input @p w (control_dofs order) into the flat parameter vector @p P
+  //! @brief Write the DOF values of declared input @p w (input_dofs order) into the flat parameter vector @p P
   //! (size np(), var_parameter() order) -- the ODESLV counterpart of OCFESLV::set_input_values.  Returns false if
   //! @p w is not a parameter-input, the value count is wrong, or @p P is too short.  Valid after setup().
   bool set_parameter_values
@@ -371,7 +371,7 @@ class BASE_DE
       return true;
     }
 
-  //! @brief Read the DOF values of declared input @p w (control_dofs order) from the flat parameter vector @p P.
+  //! @brief Read the DOF values of declared input @p w (input_dofs order) from the flat parameter vector @p P.
   //! Empty if @p w is not a parameter-input or @p P is too short.
   std::vector<double> get_parameter_values
     ( FFVar const& w, std::vector<double> const& P )
@@ -385,53 +385,30 @@ class BASE_DE
     }
 
   //! @brief Build the flat parameter vector @p P and constant vector @p c from values given BY NAME: every declared
-  //! input (except a fixed one) and every constant, exactly once, each a value list in control_dofs() order or a
+  //! input (except a fixed one) and every constant, exactly once, each a value list in input_dofs() order or a
   //! generator.  Returns false with the reason in @p err on an unknown or duplicate entry, a wrong count, or a
   //! missing input or constant.
   bool assemble_values
     ( std::vector<FFModel::InputVal> const& vIn, std::vector<double>& P, std::vector<double>& c, std::string& err )
     const
     {
-      err.clear();  P.assign( _np, 0. );
-      auto const& vC = var_constant();  c.assign( vC.size(), 0. );
-      std::vector<FFVar> seen;
-      for( auto const& a : vIn ){
-        for( auto const& u : seen ) if( u.id().second == a.input.id().second ){ err = a.input.name() + " is given more than once"; return false; }
-        seen.push_back( a.input );
-        int ic = -1; for( size_t k=0; k<vC.size(); ++k ) if( vC[k].id().second == a.input.id().second ){ ic = (int)k; break; }
-        if( ic >= 0 ){                                    // a constant: one value
-          double const v = a.gen? a.gen( DofIndex() ): ( a.vals.size() == 1? a.vals[0]: std::nan("") );
-          if( !a.gen && a.vals.size() != 1 ){ err = "constant " + a.input.name() + " takes exactly one value"; return false; }
-          c[ic] = v;  continue;
-        }
-        if( parameter_index( a.input ).empty() ){
-          err = a.input.name() + " is neither a parameter-input nor a constant of the extracted model"
-              + std::string( fixed_input( a.input )? " (it is fixed)": "" );
-          return false;
-        }
-        std::vector<double> v;
-        if( a.gen ){ for( auto const& d : control_dofs( a.input ) ) v.push_back( a.gen( d ) ); }
-        else v = a.vals;
-        if( !set_parameter_values( a.input, v, P ) ){
-          err = a.input.name() + " has " + std::to_string( parameter_index( a.input ).size() ) + " DOFs, but "
+      P.assign( _np, 0. );  c.assign( var_constant().size(), 0. );
+      return resolve_values( vIn,
+        [&]( FFVar const& u, std::vector<double> const& v, std::string& e ){
+          if( parameter_index( u ).empty() ){
+            e = u.name() + " is neither a parameter-input nor a constant of the extracted model"
+              + std::string( fixed_input( u )? " (it is fixed)": "" );
+            return false;
+          }
+          if( !set_parameter_values( u, v, P ) ){
+            e = u.name() + " has " + std::to_string( parameter_index( u ).size() ) + " DOFs, but "
               + std::to_string( v.size() ) + " values were given";
-          return false;
-        }
-      }
-      std::string missing;
-      for( auto const& [w,dom] : var_declared_input() ){
-        if( fixed_input( w ) ) continue;
-        bool in = false; for( auto const& u : seen ) if( u.id().second == w.id().second ){ in = true; break; }
-        if( !in ) missing += " " + w.name();
-      }
-      for( auto const& k : vC ){
-        bool in = false; for( auto const& u : seen ) if( u.id().second == k.id().second ){ in = true; break; }
-        if( !in ) missing += " " + k.name();
-      }
-      if( !missing.empty() ){ err = "every declared input and constant must be given; missing:" + missing; return false; }
-      return true;
+            return false;
+          }
+          return true; },
+        [&]( size_t k, double v ){ c[k] = v; },
+        err );
     }
-
   //! @brief The declared input a parameter @p p belongs to, and p's DOF index within it (element-major for
   //! a distributed input, 0 for a time-invariant one): the inverse of parameter_index().  Returns false if
   //! @p p is not a parameter of the extracted model.  Valid after setup().
@@ -867,7 +844,7 @@ class BASE_DE
       // 3. direction i: unit seed at its DOF if it is along an input, zero in every input otherwise
       for( size_t i = 0; i < nPar; ++i )
         for( size_t c = 0; c < vU.size(); ++c ){
-          std::vector<double> e( sens->control_ndof( vDU[i][c] ), 0. );
+          std::vector<double> e( sens->input_ndof( vDU[i][c] ), 0. );
           if( vCi[i] < 0 && vU[c].id().second == vIn[i].id().second && vDof[i] < e.size() ) e[ vDof[i] ] = 1.;
           if( !sens->fix_input( vDU[i][c], e ) ){ err = "fdiff: cannot fix the direction input " + vDU[i][c].name(); delete sens; return nullptr; }
         }
@@ -1053,7 +1030,7 @@ BASE_DE::_extract_from_model
       return false;
     }
     // The node FAMILY is the input's own where it declares one, the domain's otherwise -- the same
-    // InpColloc{type,n_node} that FFModel::control_ndof() reads, so the DOF count and the interpolant
+    // InpColloc{type,n_node} that FFModel::input_ndof() reads, so the DOF count and the interpolant
     // cannot disagree about the function space.
     int inp_type = (int)tdom.type;
     if( iti != _usr._mInpDiscUsr.cend() ){
@@ -1078,7 +1055,7 @@ BASE_DE::_extract_from_model
     tv_inputs.push_back( var );
     _mInpNodes[ var.name() ] = snode;                          // documented as stored; it was not
     std::vector<FFVar> levels;
-    for( size_t e = 0; e < tdom.n_elem; ++e )                  // element-major, as control_ndof() counts
+    for( size_t e = 0; e < tdom.n_elem; ++e )                  // element-major, as input_ndof() counts
       for( size_t j = 0; j < n_node; ++j ){                    // named, so the parameter vector is readable
         std::vector<double> const* fx = fixed_input( var );
         if( fx ){                                                 // FIXED: a constant level, not a parameter
@@ -2123,7 +2100,7 @@ BASE_DE::_record
 
 //! @brief Resolve FFModel's control registry into parameter indices of _mP.  A control that is distributed
 //! over the evolution variable contributes one parameter per element (_mInpLevels), in element order, which
-//! is the same block FFModel::control_ndof() counts -- the two are cross-checked here rather than assumed.
+//! is the same block FFModel::input_ndof() counts -- the two are cross-checked here rather than assumed.
 inline bool
 BASE_DE::_resolve_sensitivity_index
 ()

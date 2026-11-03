@@ -91,7 +91,7 @@ Run build_and_solve( int reg, bool verbose = false )
   IVP.options.SOLVE.ATOL      = IVP.options.SOLVE.ATOLB = IVP.options.SOLVE.ATOLS = 1e-9;
   IVP.options.SOLVE.RTOL      = IVP.options.SOLVE.RTOLB = IVP.options.SOLVE.RTOLS = 1e-9;
 
-  // Registration BEFORE setup(): FFModel::control_ndof reads the declaration, and setup() reindexes,
+  // Registration BEFORE setup(): FFModel::input_ndof reads the declaration, and setup() reindexes,
   // so this is the path the OCFESLV drivers (which register after setup) never exercise.
   if( reg & REG_TF  ) IVP.register_control( TF  );
   if( reg & REG_X10 ) IVP.register_control( X10 );

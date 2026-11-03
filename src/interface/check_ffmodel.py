@@ -173,7 +173,7 @@ B.report()
 #
 # A distributed input p(t) with a reference function, registered as a control: its
 # degrees of freedom are the collocation values, one per node and element, located
-# by `control_dofs` as `DofIndex` records. A second input w(t) is held at known
+# by `input_dofs` as `DofIndex` records. A second input w(t) is held at known
 # values with `fix_input`.
 
 # %%
@@ -192,7 +192,7 @@ C.register_control(p)
 check(C.setup(), "setup() succeeds  (%s)" % C.setup_status)
 n = C.n_control_dof()
 check(n == 3 * 2, "control DOFs of p(t): 3 elements x 2 nodes = %d" % n)
-dofs = C.control_dofs(p)
+dofs = C.input_dofs(p)
 # dicts returned by C++ are keyed by NEW FFVar objects; FFVar compares and hashes by DAG identity, so
 # they can be indexed with the user's own variables
 print("DOF layout of p(t) (element, node):", [(d.element[t], d.node[t]) for d in dofs])

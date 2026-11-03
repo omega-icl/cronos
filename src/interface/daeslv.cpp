@@ -130,7 +130,7 @@ records(std::vector<std::vector<S::Results>> const& RR, size_t n1, t_Arr& t,
 char const* DOC_BYNAME = R"doc(
 The values are given BY NAME: a dict mapping every declared input and constant
 to its values -- a list (one value for a parameter or a constant; one per DOF
-for a distributed input, in the order of ``control_dofs``) or a generator
+for a distributed input, in the order of ``input_dofs``) or a generator
 ``gen(dof: FFModel.DofIndex) -> float``. An incomplete or inconsistent dict
 raises ``ValueError``, naming the entry.
 )doc";
@@ -366,7 +366,7 @@ direction (``sensitivity_index``), one column per output.
           "val_function_gradient", [](S const& self, mc::FFVar const& var)
           { return self.val_function_gradient(var); }, py::arg("var"), R"doc(
 Output gradients with respect to the DOFs of the control ``var`` only: one row
-per DOF (in the order of ``control_dofs``), one column per output.
+per DOF (in the order of ``input_dofs``), one column per output.
 )doc")
       .def(
           "val_function_gradient",

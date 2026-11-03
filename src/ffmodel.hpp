@@ -3725,7 +3725,7 @@ public:
   //! @brief Register a declared input as a reduced-space control (decision variable).  Equivalent to
   //! add_input( ..., is_decision=true ), for a control decided after the input was declared.  Keyed by
   //! FFVar in a map, so the order is canonical (FFVar order, NOT registration order) and duplicates are
-  //! impossible.  The DOF count comes from the DECLARATION, not from any solver -- see control_ndof().
+  //! impossible.  The DOF count comes from the DECLARATION, not from any solver -- see input_ndof().
   void register_control
     ( FFVar const& Var )
     { _flag_decision( Var ); _reindex_controls(); _on_controls_changed(); }
@@ -3768,7 +3768,7 @@ public:
   //! over the domains it is distributed over, of n_elem * n_node -- n_node taken from the input's own
   //! InpColloc where it declares one and from the domain otherwise.  1 for a time-invariant input, 0 if
   //! @p Var is not a declared input.  Registration is not required, and no solver is consulted.
-  size_t control_ndof
+  size_t input_ndof
     ( FFVar const& Var ) const;
 
   //! @brief The components of control-space VECTOR @p g (size n_control_dof()) belonging to @p Var -- an
@@ -3799,7 +3799,7 @@ public:
     }
 
   //! @brief Hold the declared input @p w at KNOWN values: one value for a time-invariant input, its nodal DOFs
-  //! (element-major, as control_ndof() counts them) for a distributed one.  A fixed input is not a parameter of
+  //! (element-major, as input_ndof() counts them) for a distributed one.  A fixed input is not a parameter of
   //! the extracted model -- the solver substitutes the constants where it would mint levels -- and it cannot be
   //! a control: registering it is undone here.  Returns false if @p w is not a declared input or the count is
   //! wrong.
@@ -3819,7 +3819,7 @@ public:
         return false;
       }
       if( _usr._mInpUsr.find( w ) == _usr._mInpUsr.cend() ) return false;
-      size_t const ndof = control_ndof( w );
+      size_t const ndof = input_ndof( w );
       if( values.size() != ndof ) return false;
       _usr._mInpFixUsr[ w ] = values;
       // a fixed input is never a control: clear the FLAG too, since _reindex_controls() rebuilds the
@@ -3843,7 +3843,7 @@ public:
     std::map<FFVar,size_t,lt_FFVar> node;
   };
 
-  //! @brief A declared input and the variables for its DOFs, as a FLAT VECTOR in control_dofs() order, or a
+  //! @brief A declared input and the variables for its DOFs, as a FLAT VECTOR in input_dofs() order, or a
   //! GENERATOR called once per DofIndex -- the form that never requires knowing the order, for multi-domain
   //! inputs in particular.
   struct InputArg
@@ -3855,28 +3855,92 @@ public:
     InputArg( FFVar const& u, std::function<FFVar(DofIndex const&)> g ) : input( u ), gen( std::move( g ) ) {}
   };
 
-  //! @brief A declared input or constant and its VALUES: a flat list in control_dofs() order, or a generator called
+  //! @brief A declared input or constant and its VALUES: a flat list in input_dofs() order, or a generator called
   //! once per DofIndex.  A constant takes one value.  The value counterpart of InputArg, for the solvers' own calls.
   struct InputVal
   {
     FFVar                                      input;
     std::vector<double>                        vals;
     std::function<double(DofIndex const&)>     gen;
+    t_Fun                                      cgen;   //!< a function of the DOF's coordinates (input_coordinates)
     InputVal( FFVar const& u, std::vector<double> const& v ) : input( u ), vals( v ) {}
     InputVal( FFVar const& u, std::function<double(DofIndex const&)> g ) : input( u ), gen( std::move( g ) ) {}
+    //! A generator of the DOF's COORDINATES -- the form update_ref takes -- evaluated at each DOF's node of the
+    //! input's own collocation: { c1_ic, []( FFModel::t_Coord const& c ){ return f( c.at( z ) ); } }.  A typed
+    //! parameter selects this form over the DofIndex one; a generic (auto) lambda is ambiguous.
+    InputVal( FFVar const& u, t_Fun g ) : input( u ), cgen( std::move( g ) ) {}
   };
+
+  //! @brief Resolve values given BY NAME -- { {u, {v1,...}}, ..., {K, {k}} } -- for any solver: every declared
+  //! input (except a fixed one) and every constant exactly once, an input's values a flat list in input_dofs()
+  //! order or a generator sampled over it, a constant one value.  Each input's list goes to @p sink_input, which
+  //! stores it in the solver's own representation and returns false with the reason in its third argument (an
+  //! input the solver does not take, a wrong count); each constant, by its index in var_constant(), to
+  //! @p sink_const.  Returns false with the reason in @p err on the first offending entry.
+  bool resolve_values
+    ( std::vector<InputVal> const& vIn,
+      std::function<bool(FFVar const&, std::vector<double> const&, std::string&)> const& sink_input,
+      std::function<void(size_t, double)> const& sink_const, std::string& err )
+    const
+    {
+      err.clear();
+      auto const& vC = var_constant();
+      std::vector<FFVar> seen;
+      for( auto const& a : vIn ){
+        for( auto const& u : seen ) if( u.id().second == a.input.id().second ){ err = a.input.name() + " is given more than once"; return false; }
+        seen.push_back( a.input );
+        int ic = -1; for( size_t k=0; k<vC.size(); ++k ) if( vC[k].id().second == a.input.id().second ){ ic = (int)k; break; }
+        if( ic >= 0 ){                                    // a constant: one value
+          double const v = a.gen? a.gen( DofIndex() ): a.cgen? a.cgen( t_Coord() ): ( a.vals.size() == 1? a.vals[0]: std::nan("") );
+          if( !a.gen && !a.cgen && a.vals.size() != 1 ){ err = "constant " + a.input.name() + " takes exactly one value"; return false; }
+          sink_const( (size_t)ic, v );  continue;
+        }
+        std::vector<double> v;
+        if( a.gen ){ for( auto const& d : input_dofs( a.input ) ) v.push_back( a.gen( d ) ); }
+        else if( a.cgen ){ for( auto const& c : input_coordinates( a.input ) ) v.push_back( a.cgen( c ) ); }
+        else v = a.vals;
+        if( !sink_input( a.input, v, err ) ) return false;
+      }
+      std::string missing;
+      for( auto const& [w,dom] : var_declared_input() ){
+        if( fixed_input( w ) ) continue;
+        bool in = false; for( auto const& u : seen ) if( u.id().second == w.id().second ){ in = true; break; }
+        if( !in ) missing += " " + w.name();
+      }
+      for( auto const& k : vC ){
+        bool in = false; for( auto const& u : seen ) if( u.id().second == k.id().second ){ in = true; break; }
+        if( !in ) missing += " " + k.name();
+      }
+      if( !missing.empty() ){ err = "every declared input and constant must be given; missing:" + missing; return false; }
+      return true;
+    }
 
   //! @brief The DOFs of declared input @p u, ENUMERATED in the order the solvers lay out its control block:
   //! element blocks outer, nodes inner, and at each level the first domain (canonical FFVar order) varying
   //! fastest -- as OCFESLV::get_input_values / sample_input traverse it, and as ODESLV mints its levels.
-  //! control_dofs( u ).size() == control_ndof( u ).  Empty if @p u is not a declared input.
-  std::vector<DofIndex> control_dofs
+  //! input_dofs( u ).size() == input_ndof( u ).  Empty if @p u is not a declared input.
+  std::vector<DofIndex> input_dofs
     ( FFVar const& u )
     const;
 
-  //! @brief Resolve an InputArg into the DOF variables of its input, in control_dofs() order: the flat vector
+  //! @brief The coordinates of the DOFs of declared input @p u, in input_dofs() order: in each direction the node
+  //! of the input's own collocation -- its declared node family and count, else the domain's -- on the DOF's
+  //! element, where OCFEBASE::sample_input evaluates a coordinate function.  One empty t_Coord for a
+  //! time-invariant input; empty for an undeclared one.
+  std::vector<t_Coord> input_coordinates
+    ( FFVar const& u )
+    const;
+
+  //! @brief Deprecated names of input_dofs() and input_ndof(): these describe every declared input, not only those
+  //! registered as controls (controls(), control_block()), so they are named for inputs since 3 Nov 2026.
+  [[deprecated( "control_dofs() is renamed input_dofs()" )]]
+  std::vector<DofIndex> control_dofs( FFVar const& u ) const { return input_dofs( u ); }
+  [[deprecated( "control_ndof() is renamed input_ndof()" )]]
+  size_t control_ndof( FFVar const& Var ) const { return input_ndof( Var ); }
+
+  //! @brief Resolve an InputArg into the DOF variables of its input, in input_dofs() order: the flat vector
   //! as given, or the generator called on each DofIndex.  Refuses (false, reason in @p err) a count that does
-  //! not match control_ndof(), an undeclared input, or a generator that throws on some DofIndex.
+  //! not match input_ndof(), an undeclared input, or a generator that throws on some DofIndex.
   bool resolve_input_arg
     ( InputArg const& a, std::vector<FFVar>& dofs, std::string& err )
     const;
@@ -3967,12 +4031,12 @@ protected:
   //! @brief Recompute every registered control's DOF count from the declaration, and its offset from the
   //! canonical (map) order.  Called by register_control() and by setup(), where the domains a control is
   //! distributed over are certainly declared -- an add_input( ..., is_decision=true ) may well precede
-  //! its own add_domain(), and control_ndof() would report 0 at that point.
+  //! its own add_domain(), and input_ndof() would report 0 at that point.
   void _reindex_controls
     ()
     {
       _controls.clear();
-      for( auto const& u : _decisionFlag ) _controls[u].ndof = control_ndof( u );
+      for( auto const& u : _decisionFlag ) _controls[u].ndof = input_ndof( u );
       size_t off = 0;
       for( auto& [u,spec] : _controls ){ spec.offset = off; off += spec.ndof; }
       _nControlDof = off;
@@ -4037,7 +4101,7 @@ protected:
 
 
 inline size_t
-FFModel::control_ndof
+FFModel::input_ndof
 ( FFVar const& Var )
 const
 {
@@ -4092,7 +4156,7 @@ const
   size_t ndof_total = 0;
   for( auto const& u : vU ){
     if( _usr._mInpUsr.find( u ) == _usr._mInpUsr.cend() ){ err = "fdiff: " + u.name() + " is not a declared input"; return false; }
-    ndof_total += control_ndof( u );
+    ndof_total += input_ndof( u );
   }
   if( !nDir ) nDir = ndof_total;                          // one direction per DOF: the full Jacobian in one solve
   if( !nDir ){ err = "fdiff: zero directions"; return false; }
@@ -4200,8 +4264,37 @@ const
   return true;
 }
 
+inline std::vector<FFModel::t_Coord>
+FFModel::input_coordinates
+( FFVar const& u )
+const
+{
+  std::vector<t_Coord> out;
+  auto const dofs = input_dofs( u );
+  if( dofs.empty() ) return out;
+  auto const iti = _usr._mInpUsr.find( u );
+  auto const itdisc = _usr._mInpDiscUsr.find( u );
+  std::map< FFVar, std::vector< std::vector<double> >, lt_FFVar > nodes;   // per direction, per element
+  for( auto const& d : iti->second ){                                       // the input's effective domain, as the
+    FFDom dd = _usr._mDomUsr.at( d );                                       // solver builds it (OCFESLV::setup)
+    if( itdisc != _usr._mInpDiscUsr.cend() ){
+      auto const itc = itdisc->second.find( d );
+      if( itc != itdisc->second.cend() ){ dd.type = itc->second.type;  if( itc->second.n_node ) dd.n_node = itc->second.n_node; }
+    }
+    if( !dd.set_nodes() ) return std::vector<t_Coord>();                     // the node set, as every solver makes it
+    auto& per = nodes[ d ];
+    for( size_t ie = 0; ie < dd.n_elem; ++ie ) per.push_back( dd.lgnodes( dd.elem_lo( ie ), dd.elem_up( ie ) ) );
+  }
+  for( auto const& di : dofs ){
+    t_Coord c;
+    for( auto const& [d, e] : di.element ) c[ d ] = nodes.at( d ).at( e ).at( di.node.at( d ) );
+    out.push_back( std::move( c ) );
+  }
+  return out;
+}
+
 inline std::vector<FFModel::DofIndex>
-FFModel::control_dofs
+FFModel::input_dofs
 ( FFVar const& u )
 const
 {
@@ -4214,7 +4307,7 @@ const
   for( auto const& d : iti->second ){                                  // canonical order: first varies fastest
     auto const itd = _usr._mDomUsr.find( d );
     if( itd == _usr._mDomUsr.cend() ) return std::vector<DofIndex>();
-    size_t nn = itd->second.n_node;                                    // as control_ndof resolves it
+    size_t nn = itd->second.n_node;                                    // as input_ndof resolves it
     if( itdisc != _usr._mInpDiscUsr.cend() ){
       auto const itc = itdisc->second.find( d );
       if( itc != itdisc->second.cend() && itc->second.n_node ) nn = itc->second.n_node;
@@ -4243,10 +4336,10 @@ FFModel::resolve_input_arg
 const
 {
   err.clear();  dofs.clear();
-  size_t const nd = control_ndof( a.input );
+  size_t const nd = input_ndof( a.input );
   if( !nd ){ err = a.input.name() + " is not a declared input of the model (or one of its domains is not declared)"; return false; }
   if( a.gen ){
-    for( auto const& d : control_dofs( a.input ) ){
+    for( auto const& d : input_dofs( a.input ) ){
       try{ dofs.push_back( a.gen( d ) ); }
       catch( std::exception const& e ){ err = "the generator for " + a.input.name() + " failed at one of its DOFs: " + e.what(); return false; }
     }

@@ -673,9 +673,13 @@ tau : float
           "n_control_dof", [](M const& self) { return self.n_control_dof(); },
           "Total number of control DOFs.")
       .def(
+          "input_dofs", [](M const& self, mc::FFVar const& u)
+          { return self.input_dofs(u); }, py::arg("var"),
+          "The DOF indices of declared input ``var``, in the order of its values.")
+      .def(
           "control_dofs", [](M const& self, mc::FFVar const& u)
-          { return self.control_dofs(u); }, py::arg("var"),
-          "The DOF indices of control ``var``, in the order of its values.")
+          { return self.input_dofs(u); }, py::arg("var"),
+          "Deprecated alias of input_dofs (renamed 3 Nov 2026).")
       .def(
           "fix_input",
           [](M& self, mc::FFVar const& w, std::vector<double> const& v)

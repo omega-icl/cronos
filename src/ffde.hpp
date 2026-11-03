@@ -386,7 +386,7 @@ public:
   //! @brief TWO-MAP form.  @p vDiff (map 1) lists the inputs the NUMERICAL gradient is taken w.r.t.: it RESETS the
   //! solver's control registry to exactly these.  @p vRest (map 2) lists every other declared input and every
   //! constant: their values pass through the DAG, with ZERO numerical-derivative columns by contract.  Each entry
-  //! is a flat vector in control_dofs() order or a generator called per DofIndex; a constant takes one variable.
+  //! is a flat vector in input_dofs() order or a generator called per DofIndex; a constant takes one variable.
   //! Every declared input (except a fixed one) and every constant must appear in exactly one map.  SYMDIFF may
   //! name any op input or constant for a SYMBOLIC derivative.  COPY leaves the caller's registry as it was;
   //! SHALLOW and TRANSFER keep the new one.  Returns the nf outputs.

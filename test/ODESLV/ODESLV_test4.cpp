@@ -8,7 +8,7 @@
 // Step 3 lifts that.  On element e the control becomes u_e(t) = sum_j L_j(s) U[e,j] with
 // s = (t - t_e)/h_e the element-local coordinate and L_j the Lagrange basis on the declared
 // node family -- so U[e,j] are n_elem * n_node parameters, which is exactly the DOF count
-// FFModel::control_ndof() already reports.
+// FFModel::input_ndof() already reports.
 //
 // THE GATE IS AN EXACT EQUIVALENCE, NOT A CONVERGENCE CHECK.  A Lagrange interpolant through
 // n_node EQUAL nodal values is the constant, whatever the node family.  So an n_node=2 control

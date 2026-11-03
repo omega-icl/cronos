@@ -85,7 +85,7 @@ Parameters
 diff : dict
     Map 1: the inputs the numerical gradient is taken with respect to (the
     controls), in the order of the gradient columns. Each maps to its DOFs as
-    DAG variables: a list in ``control_dofs`` order, or a generator ``gen(dof)
+    DAG variables: a list in ``input_dofs`` order, or a generator ``gen(dof)
     -> FFVar``. It resets the solver's control registry to exactly these
     inputs.
 rest : dict
@@ -118,7 +118,7 @@ Example -- the outputs of a solver whose inputs are its control ``q`` (one DOF
 per time element) and a constant ``k``:
 
 >>> OpOCFE = FFOCFESLV()
->>> Q = [G.add_var("Q%d" % i) for i in range(len(S.control_dofs(q)))]
+>>> Q = [G.add_var("Q%d" % i) for i in range(len(S.input_dofs(q)))]
 >>> K = G.add_var("K")
 >>> y = OpOCFE({q: Q}, {k: [K]}, S)
 )doc");

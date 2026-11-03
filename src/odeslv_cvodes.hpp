@@ -278,7 +278,7 @@ public:
     ( double const*p, double const*c=nullptr, std::ostream& os=std::cout );
 
   //! @brief Solve with the input and constant values given BY NAME: { {w, {v1,...,vn}}, ..., {K, {k}} } -- every
-  //! declared input (except a fixed one) and every constant exactly once, each a value list in control_dofs()
+  //! declared input (except a fixed one) and every constant exactly once, each a value list in input_dofs()
   //! order or a generator.  Throws std::invalid_argument, naming the entry, on an incomplete or inconsistent list.
   STATUS solve
     ( std::vector<FFModel::InputVal> const& vIn, std::ostream& os=std::cout )
@@ -633,7 +633,7 @@ private:
     { return _fp; }
   /** @} */
 
-  //! @brief The gradient rows of control @p var: [dof][function], its DOFs in control_dofs() order, from the last
+  //! @brief The gradient rows of control @p var: [dof][function], its DOFs in input_dofs() order, from the last
   //! solve_fsens() or solve_asens().  Throws if @p var is not a registered control (it then has no
   //! sensitivity direction) or no sensitivity solve has been run.
   std::vector< std::vector< double > > val_function_gradient

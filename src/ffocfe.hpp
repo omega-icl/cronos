@@ -1442,7 +1442,7 @@ public:
   //! @brief TWO-MAP form.  @p vDiff (map 1) lists the inputs the NUMERICAL gradient is taken w.r.t.: it RESETS the
   //! OCFESLV control registry to exactly these.  @p vRest (map 2) lists every other declared input and every
   //! constant: their values pass through the DAG, with ZERO numerical-derivative columns by contract.  Each entry
-  //! is a flat vector in control_dofs() order or a generator called per DofIndex; a constant takes one variable.
+  //! is a flat vector in input_dofs() order or a generator called per DofIndex; a constant takes one variable.
   //! Every declared input and every constant must appear in exactly one map.  The state starting values come
   //! from the references (OCFESLV::init) at every evaluation.  COPY leaves the caller's registry as it was;
   //! SHALLOW and TRANSFER keep the new one.  Op inputs: [ map 1, control order | map-2 inputs | map-2 constants ],

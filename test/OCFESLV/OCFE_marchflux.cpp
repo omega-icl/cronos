@@ -58,7 +58,7 @@ static Run solve( bool marching, double beta, int bc, size_t NT, int disp, doubl
   std::vector<double> var, inp;  S.init( var, inp );
   if( bc == 3 && g_setq ){
     FFVar const* q = nullptr;  for( auto const& [w, d] : S.var_declared_input() ) if( w.name() == "q" ) q = &w;
-    if( q ) S.set_input_values( *q, std::vector<double>( S.control_dofs( *q ).size()? S.control_dofs( *q ).size(): NT, 1. ), inp.data() );
+    if( q ) S.set_input_values( *q, std::vector<double>( S.input_dofs( *q ).size()? S.input_dofs( *q ).size(): NT, 1. ), inp.data() );
     if( disp ){ auto const v = S.get_input_values( *q, inp.data() ); std::printf( "  q after set: %zu values, first %g last %g\n", v.size(), v.front(), v.back() ); }
   }
   if( bc == 3 && disp ){ FFVar const* q = nullptr;  for( auto const& [w, d] : S.var_declared_input() ) if( w.name() == "q" ) q = &w;

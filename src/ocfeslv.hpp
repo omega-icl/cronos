@@ -1698,7 +1698,7 @@ public:
         FFVar const& v = dirs[i].first;
         bool isin = false; for( auto const& [w,dom] : var_declared_input() ) if( w.id().second == v.id().second ){ isin = true; break; }
         if( isin ){
-          if( dirs[i].second >= control_ndof( v ) ){ err = "fdiff: DOF " + std::to_string( dirs[i].second ) + " out of range for " + v.name(); return nullptr; }
+          if( dirs[i].second >= input_ndof( v ) ){ err = "fdiff: DOF " + std::to_string( dirs[i].second ) + " out of range for " + v.name(); return nullptr; }
           for( size_t c=0; c<vU.size(); ++c ) if( vU[c].id().second == v.id().second ){ iu[i] = (int)c; break; }
           if( iu[i] < 0 ){ iu[i] = (int)vU.size(); vU.push_back( v ); }
           continue;
@@ -1715,7 +1715,7 @@ public:
       if( !FFModel::fdiff( *sens, vU, n, vDU, vS, err, /*keep_originals=*/false, vC, seedC ) ){ delete sens; return nullptr; }
       for( size_t i=0; i<n; ++i )                            // direction i: unit seed at its DOF, zero elsewhere
         for( size_t c=0; c<vU.size(); ++c ){
-          std::vector<double> e( sens->control_ndof( vDU[i][c] ), 0. );
+          std::vector<double> e( sens->input_ndof( vDU[i][c] ), 0. );
           if( iu[i] == (int)c && dirs[i].second < e.size() ) e[ dirs[i].second ] = 1.;
           if( !sens->fix_input( vDU[i][c], e ) ){ err = "fdiff: cannot fix the direction input " + vDU[i][c].name(); delete sens; return nullptr; }
         }
@@ -1843,6 +1843,31 @@ public:
   SolveReport solve
     ( double* var, double const* inp = nullptr, double const* cst = nullptr );
 
+  //! @brief Status of a by-name solve, as BASE_DE's: NORMAL on convergence, FAILURE when the solve does not
+  //! converge, FATAL when the model is not set up or init() fails.
+  enum STATUS{ NORMAL=0, FAILURE, FATAL };
+  //! @brief Solve with the input and constant values given BY NAME, as ODESLV_CVODES and DAESLV_IDAS do:
+  //! { {u, {v1,...,vn}}, ..., {K, {k}} } -- every declared input (except a fixed one) and every constant exactly
+  //! once, an input's values a flat list in input_dofs() order (OCFESLV's own element-major / node-inner order)
+  //! or a generator, a constant one value.  The initial guess comes from the references (init()); the solution is
+  //! left in val_state(), the outputs in val_function() -- in declaration order, as eval() returns them -- and the
+  //! solver's report in last_report().  Throws std::invalid_argument, naming the entry, on an incomplete or
+  //! inconsistent list.
+  STATUS solve
+    ( std::vector<FFModel::InputVal> const& vIn );
+  //! @brief The collocated solution of the last by-name solve.
+  std::vector<double> const& val_state() const { return _valSta; }
+  //! @brief The outputs of the last solve, in declaration order -- the name ODESLV_CVODES and DAESLV_IDAS use for
+  //! val_functions(): filled by the solve itself, with captures (monolithic) or accumulated across elements
+  //! (SOLVE.MARCHING).
+  std::vector<double> const& val_function() const { return _valFct; }
+  //! @brief The solver's report of the last by-name solve.
+  SolveReport const& last_report() const { return _lastReport; }
+
+
+  // the by-name solve's results (its outputs are the solver's own _valFct)
+  std::vector<double> _valSta;
+  SolveReport         _lastReport;
 
   // ============================ HOMOTOPY / CONTINUATION ============================
   //
@@ -4930,7 +4955,7 @@ OCFESLV::_on_model_ready
   // Auto-register inputs flagged is_decision at add_input() (declaration order).  Rebuilt on each
   // setup() so it is idempotent under re-setup; an explicit register_control() after setup() still
   // appends (deduplicated).  Skipped implicitly on the early-return setup failures above.
-  _reindex_controls();   // layout from _decisionFlag; FFModel::control_ndof reads the declaration
+  _reindex_controls();   // layout from _decisionFlag; FFModel::input_ndof reads the declaration
   // (the previous setup's caches were invalidated ABOVE, before the W-test and the determinacy audit -- 2026-10-10)
 
   // Header identity, once per process.  A stale object file not relinked against a new
@@ -11714,9 +11739,38 @@ OCFESLV::_eval_fct_dep
              _OCDepEqn, _OCDepVar, _OCDepInp, _OCDepDom, _OCDepCst, _wrkOCDep );
 }
 
+inline OCFESLV::STATUS
+OCFESLV::solve
+( std::vector<FFModel::InputVal> const& vIn )
+{
+  if( !_issetup ) return FATAL;
+  std::vector< std::pair< FFVar, std::vector<double> > > given;
+  std::vector<double> cst( var_constant().size(), 0. );
+  std::string err;
+  bool const ok = resolve_values( vIn,
+    [&]( FFVar const& u, std::vector<double> const& v, std::string& e ){
+      size_t const n = input_dofs( u ).size();
+      if( !n ){ e = u.name() + " is neither an input nor a constant of the model"; return false; }
+      if( fixed_input( u ) ){ e = u.name() + " is neither an input nor a constant of the model (it is fixed)"; return false; }
+      if( v.size() != n ){ e = u.name() + " has " + std::to_string( n ) + " DOFs, but " + std::to_string( v.size() ) + " values were given"; return false; }
+      given.emplace_back( u, v );  return true; },
+    [&]( size_t k, double v ){ cst[k] = v; },
+    err );
+  if( !ok ) throw std::invalid_argument( "OCFESLV::solve ** " + err + "\n" );
+  std::vector<double> inp;
+  if( !init( _valSta, inp, cst.empty()? nullptr: cst.data() ) ) return FATAL;
+  for( auto const& [u, v] : given )
+    if( !set_input_values( u, v, inp.empty()? nullptr: inp.data() ) )
+      throw std::invalid_argument( "OCFESLV::solve ** the values of " + u.name() + " could not be set\n" );
+  // the solve fills the outputs itself (_valFct), with captures or accumulated over a march: never re-evaluated here
+  _lastReport = solve( _valSta.data(), inp.empty()? nullptr: inp.data(), cst.empty()? nullptr: cst.data() );
+  return _lastReport.converged? NORMAL: FAILURE;
+}
+
 } // namespace mc
 
 #if defined(_WIN32)
 # pragma pop_macro("INTERFACE")
 #endif
+
 #endif

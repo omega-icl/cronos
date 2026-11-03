@@ -417,6 +417,7 @@ public:
     std::vector<FrozenTraceConstraintTerm>                 trace_constraints;
     bool                                                   trace_constraints_ready = false;
     std::set<FrozenPhysicalResidualRowKey>                 exact_replacement_rows;
+    std::set<FrozenPhysicalResidualRowKey>                 reserved_definition_rows;   //!< see PlanDecisions
     //! @brief IC_STRONG hybrid: continuity claims whose tau is kept EXPLICIT.
     //!
     //! These are demoted (rank-dependent receiver column) claims whose only
@@ -998,7 +999,9 @@ struct PlanInput
 
   //! reduce_order() auxiliaries: aux state id -> (parent state id, directions its LINK
   //! differentiates in).  Design §3.5 (implied cross-direction auxiliary edges).
-  struct AuxInfo { size_t parent = 0; std::set<size_t> diff_dirs; };
+  //! @brief An order-reduction auxiliary: its parent, the directions its definition differentiates, and its definition
+  //! row (the LINK equation that depends on the auxiliary and on its parent; npos when not found).
+  struct AuxInfo { size_t parent = 0; std::set<size_t> diff_dirs; size_t def_eqn = std::numeric_limits<size_t>::max(); };
   std::map<size_t,AuxInfo> aux_info;
 
   //! Claims suppressed upstream as pinned by an ALL-mask IC/BC: the plan never realises
@@ -1020,6 +1023,11 @@ struct PlanInput
   std::set<ClaimKey> rank_implied_claims;
   //! Nodes per element per domain direction (transverse element line of a face index).
   std::map<size_t,size_t> dom_n_node;
+  //! @brief Each direction's element count, and each state's directions in id order -- the digits of a claim's face
+  //! code are the claimed state's directions other than the claim's own, in that order, each of radix
+  //! n_elem * n_node (OCFEBASE's encode_tensor_face_from_eqn_dims).
+  std::map<size_t,size_t> dom_n_elem;
+  std::map<size_t,std::vector<size_t>> state_dims;
 
   //! True trace/tau column coefficient per receiver edge (aligned with receiver_edges):
   //! sigma-and-width-scaled, exactly as the materialisation assembles the tau columns.
@@ -1078,6 +1086,13 @@ struct PlanDecisions
   //! materialised from this map, one per occurrence, in map order).  Legacy: the
   //! input claims minus dropped ones; GLOBAL: tree edges only.
   std::map<ClaimKey,size_t>                claims_kept;
+
+  //! Definition rows a REDUNDANT tangential-derivative decision relies on (design §3.5): the auxiliary's definition
+  //! at the claim's node, on both sides.  The decision holds only while those rows define the auxiliary, so later
+  //! stages must not take them as Schur pivots -- a pivoted row leaves the system and its auxiliary is no longer the
+  //! derivative there (2-D MoL at 4x4: 150 of 225 pivots fell on definition rows, and the corner claims the rule had
+  //! dropped re-opened by 0.76).
+  std::set<RowKey>                         reserved_definition_rows;
 
   //! Tau allocation: frozen claim key -> tau column ids (var[] indices for IC_TRACE
   //! and for the IC_STRONG kept-explicit subset; internal Schur ids otherwise).
@@ -1609,76 +1624,113 @@ OCPlanGlobalBuilder::build( PlanInput const& in, PlanDecisions& dec, PlanReport&
     rep.clusters.push_back( C );
   }
 
-  // ---- 5. second pass: cross-direction auxiliary edges (design §3.5, with the measured
-  //         condition): implied iff the parent's continuity across the same seam is
-  //         realised EXACT/TAU BY THIS PLAN at EVERY node of the auxiliary's transverse
-  //         element line (the derivative stencil).  A node whose parent claim was
-  //         suppressed upstream (unrealised_claims) breaks the implication.
-  for( size_t ci = 0; ci < rep.clusters.size(); ++ci ){
-    PlanReport::Cluster& C = rep.clusters[ci];
-    for( auto const& [ei, child] : cluster_oriented[ci] ){
-      auto const& e = all_edges[ei];
-      auto itr = C.realisation.find( e.key );
-      if( itr == C.realisation.end() || itr->second != 4 ) continue;
+  // ---- 5. second pass: cross-direction auxiliary edges -- the tangential-derivative implication (design §3.5).
+  //  An auxiliary A = d_y U claimed across a face whose normal is not y.  Its continuity at a face node f FOLLOWS from
+  //  the plan's other constraints when
+  //    (1) U is continuous at every node of f's element line in y -- the two traces are then one polynomial of degree
+  //        nn-1 on that segment, so d_y U agrees on both sides everywhere on it; and
+  //    (2) A = d_y U holds at f on both sides -- its definition row carries no multiplier there.
+  //  Then A_L(f) = d_y U_L(f) = d_y U_R(f) = A_R(f): the claim is exactly redundant and is dropped (REDUNDANT); kept,
+  //  its multiplier makes a constrained system singular (OCFE_PDE3).  Where (2) fails, the claim is an independent
+  //  condition and is realised (TAU); dropped, the jump it should close stays open (2-D MoL, 4x4: 0.76 at corners).
+  //  (2) is read from this plan's own decisions, not from node position: at f, on each side, A's definition row is
+  //  present, is not consumed by an EXACT realisation, and is a receiver (tau_allowed) of no OTHER claim realised TAU.
+  //  A TAU claim either carries its multiplier into its receivers or is eliminated on one of them as the Schur pivot,
+  //  which removes that row from the system; either way A is no longer d_y U there.  At a corner the parent's claim
+  //  across the y-face has A's definition as its receiver -- the LDG lift into the normal derivative -- so the
+  //  tangential claim there is independent and is kept (2-D MoL at 4x4: 150 of 225 pivots on definition rows, the
+  //  corner jump 0.76 when those claims were dropped).  Where the parent's claim there is realised EXACT, nothing
+  //  reaches A's definition and the claim is exactly dependent (OCFE_PDE3: kept, the constrained impositions go
+  //  singular).  Since pivots are drawn only from receivers of TAU claims, a definition row a drop relies on can never
+  //  be pivoted: the premise holds by construction.
+  //  (1) accepts a parent realised EXACT or TAU, or itself REDUNDANT by this rule (continuous by implication): a
+  //  chain's parent is decided first by iterating to a monotone fixpoint -- an edge moves 4 -> 2 once its premises
+  //  hold, and edges still undecided when nothing moves are realised as TAU.
+  //  Locating f's element line: a face code packs the claimed state's tangential directions -- its directions other
+  //  than the claim's, in id order, the lowest innermost -- each as (element, node) with radix n_elem * n_node
+  //  (OCFEBASE's encode_tensor_face_from_eqn_dims); the derivative's digit is decoded in place and its node walked
+  //  with every other digit fixed.  (Until 2 Nov 2026 the rule walked the INNERMOST digit -- time, on (t, x, y) --
+  //  and lacked condition (2); O1.)
+  //  Not applied to an auxiliary's claims in the EVOLUTION direction (e.causal): measured on blk0 AUTO TRACE, 60 such
+  //  drops left the system determined but cost accuracy 1.3055e-5 -> 8.18e-5 (rev155e, corpus-accepted).
+  {
+    // which claims may use each row as a receiver -- for a multiplier, or as the Schur pivot that eliminates it
+    std::map<RowKey,std::vector<ClaimKey>> receiver_of;
+    for( auto const& [key, ris] : rows_of_claim )
+      for( size_t ri : ris ) if( in.rows_at_dof[ri].tau_allowed ) receiver_of[ in.rows_at_dof[ri].row ].push_back( key );
+    auto implied_now = [&]( PlanInput::DofEdge const& e ) -> bool {
       auto ita = in.aux_info.find( e.key.state_id );
-      bool implied = ( ita != in.aux_info.end() );
-      // rev155e (knob, default = pre-155e): CRONOS_AUX_IMPLIED_EVO=0 -> Sec.3.5 does not apply to
-      // an auxiliary's claims in the EVOLUTION direction.  MEASURED: blk0 AUTO TRACE, 60 such
-      // drops, DETERMINED but accuracy 1.3055e-5 -> 8.18e-5; PDE3's load-bearing Sec.3.5 drops are
-      // all spatial.  Row-receiver and cluster-deficit criteria were both refuted (see notes).
-      // DEFAULT 0 (corpus-accepted): Sec.3.5 never applies to evolution-direction aux
-      // claims; CRONOS_AUX_IMPLIED_EVO=1 restores the pre-156 behaviour for attribution.
-      { static int const kEvo = 0;   // CRONOS_AUX_IMPLIED_EVO (retired 2026-10-07, WORKPLAN 3.B batch 2b)
-        if( !kEvo && e.causal ) implied = false; }
-      if( implied ){
-        // transverse element line: 2D only (one differentiated direction); higher
-        // dimensions fall back to "not implied".
-        size_t nn = 0;
-        if( ita->second.diff_dirs.size() == 1 ){
-          auto itn = in.dom_n_node.find( *ita->second.diff_dirs.begin() );
-          if( itn != in.dom_n_node.end() ) nn = itn->second;
-        }
-        if( !nn ) implied = false;
-        else{
-          size_t const e0 = ( e.key.face / nn ) * nn;
-          for( size_t f = e0; f < e0 + nn && implied; ++f ){
-            auto itp = realised_at_locus.find( std::make_tuple( ita->second.parent, e.key.dom_id, e.key.iel_lo, f ) );
-            bool ok = ( itp != realised_at_locus.end() && ( itp->second == 0 || itp->second == 1 ) );
-            // A parent claim whose exact row the corner rank filter REJECTED is not thereby
-            // unenforced: the rejected row is a linear combination of rows the plan does impose,
-            // so the parent's continuity still holds at that locus.  Treating the rejection as a
-            // MISSING claim is a false negative, and it costs the child its aux-implied
-            // realisation.  OFF by default; CRONOS_AUX_IMPLIED_RANK=1 enables the reading.
-            // MEASURED (PDE3, with the corner dedup retired): 68 claims move AUX-IMPLIED -> TAU
-            // and n grows 6,038 -> 6,100 when the rejection IS read as missing.
-            if( !ok ){
-              static int const kRankImplied = 0;   // CRONOS_AUX_IMPLIED_RANK (retired 2026-10-07, WORKPLAN 3.B batch 2b)
-              if( kRankImplied && !in.rank_implied_claims.empty() ){
-                ClaimKey pk = e.key;
-                pk.state_id = ita->second.parent;
-                pk.face     = f;
-                pk.eqn_id   = std::numeric_limits<size_t>::max();
-                pk.kind     = OCPlan::CLAIM_EXACT_C0;
-                auto blk = in.trace_claim_block.find( std::make_pair( pk.state_id, pk.dom_id ) );
-                if( blk != in.trace_claim_block.end() ) pk.block_id = blk->second;
-                ok = in.rank_implied_claims.count( pk ) > 0;
-              }
-            }
-            if( !ok ){
-              // the parent may have no claim at f because it is pinned there (unrealised)
-              ClaimKey pk = e.key; pk.state_id = ita->second.parent; pk.face = f;
-              auto blk = in.trace_claim_block.find( std::make_pair( pk.state_id, pk.dom_id ) );
-              if( blk != in.trace_claim_block.end() ) pk.block_id = blk->second;
-              pk.eqn_id = std::numeric_limits<size_t>::max(); pk.kind = OCPlan::CLAIM_EXACT_C0;
-              (void)pk;   // any missing parent claim at f breaks the implication
-            }
-            implied = ok;
-          }
+      if( ita == in.aux_info.end() || e.causal || ita->second.diff_dirs.size() != 1 ) return false;
+      size_t const dd = *ita->second.diff_dirs.begin();
+      if( dd == e.key.dom_id ) return false;                          // a normal derivative: a flux condition, never implied
+      auto its = in.state_dims.find( e.key.state_id );
+      if( its == in.state_dims.end() ) return false;
+      size_t P = 1, rP = 0, nn = 0;  bool found = false;
+      for( size_t d : its->second ){
+        if( d == e.key.dom_id ) continue;
+        auto itn = in.dom_n_node.find( d ), ite = in.dom_n_elem.find( d );
+        if( itn == in.dom_n_node.end() || ite == in.dom_n_elem.end() || !itn->second ) return false;
+        size_t const r = ite->second * itn->second;
+        if( d == dd ){ rP = r; nn = itn->second; found = true; break; }
+        P *= r;
+      }
+      if( !found || nn < 2 ) return false;
+      size_t const enc = ( e.key.face / P ) % rP, el = enc / nn, base = e.key.face - enc * P;
+      // (2): A's definition at f, on both sides, present, unconsumed, and a receiver of no other claim realised TAU --
+      //      such a claim may carry its multiplier there or eliminate it on that row as its Schur pivot
+      if( ita->second.def_eqn == std::numeric_limits<size_t>::max() ) return false;
+      auto itrc = rows_of_claim.find( e.key );
+      if( itrc == rows_of_claim.end() ) return false;
+      bool lo = false, hi = false;
+      for( size_t ri : itrc->second ){
+        auto const& r = in.rows_at_dof[ri];
+        if( r.row.row_id != ita->second.def_eqn ) continue;
+        ( r.side_hi? hi: lo ) = true;
+        if( consumed.count( r.row ) ) return false;
+        auto itc = receiver_of.find( r.row );
+        if( itc == receiver_of.end() ) continue;
+        for( auto const& k2 : itc->second ){
+          if( !( k2 < e.key ) && !( e.key < k2 ) ) continue;            // the claim itself
+          auto itl = realised_at_locus.find( std::make_tuple( k2.state_id, k2.dom_id, k2.iel_lo, k2.face ) );
+          if( itl == realised_at_locus.end() || itl->second == 1 ) return false;    // TAU, or undecided: may land here
         }
       }
-      if( implied ){ C.realisation[ e.key ] = 2; ++sh.n_aux_implied; }
-      else { C.realisation[ e.key ] = 1; ++sh.n_tau; }
-      realised_at_locus[ std::make_tuple( e.key.state_id, e.key.dom_id, e.key.iel_lo, e.key.face ) ] = C.realisation[ e.key ];
+      if( !lo || !hi ) return false;
+      for( size_t k = 0; k < nn; ++k ){                               // (1): the parent continuous along f's line
+        auto itp = realised_at_locus.find( std::make_tuple( ita->second.parent, e.key.dom_id, e.key.iel_lo, base + ( el * nn + k ) * P ) );
+        if( itp == realised_at_locus.end() || !( itp->second == 0 || itp->second == 1 || itp->second == 2 ) ) return false;
+      }
+      return true;
+    };
+    for( bool moved = true; moved; ){
+      moved = false;
+      for( size_t ci = 0; ci < rep.clusters.size(); ++ci ){
+        PlanReport::Cluster& C = rep.clusters[ci];
+        for( auto const& [ei, child] : cluster_oriented[ci] ){
+          (void)child;
+          auto const& e = all_edges[ei];
+          auto itr = C.realisation.find( e.key );
+          if( itr == C.realisation.end() || itr->second != 4 || !implied_now( e ) ) continue;
+          itr->second = 2;  ++sh.n_aux_implied;  moved = true;
+          // the decision relies on A's definition at the node, both sides: reserve those rows
+          if( auto ita = in.aux_info.find( e.key.state_id ); ita != in.aux_info.end() )
+            if( auto itrc = rows_of_claim.find( e.key ); itrc != rows_of_claim.end() )
+              for( size_t ri : itrc->second )
+                if( in.rows_at_dof[ri].row.row_id == ita->second.def_eqn ) dec.reserved_definition_rows.insert( in.rows_at_dof[ri].row );
+          realised_at_locus[ std::make_tuple( e.key.state_id, e.key.dom_id, e.key.iel_lo, e.key.face ) ] = 2;
+        }
+      }
+    }
+    for( size_t ci = 0; ci < rep.clusters.size(); ++ci ){
+      PlanReport::Cluster& C = rep.clusters[ci];
+      for( auto const& [ei, child] : cluster_oriented[ci] ){
+        (void)child;
+        auto const& e = all_edges[ei];
+        auto itr = C.realisation.find( e.key );
+        if( itr == C.realisation.end() || itr->second != 4 ) continue;
+        itr->second = 1;  ++sh.n_tau;
+        realised_at_locus[ std::make_tuple( e.key.state_id, e.key.dom_id, e.key.iel_lo, e.key.face ) ] = 1;
+      }
     }
   }
 

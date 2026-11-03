@@ -8574,13 +8574,47 @@ OCFEBASE::_pack_plan_input
                   << " rank-implied claims collected=" << in.rank_implied_claims.size()
                   << std::endl;
     }
-    for( auto const& kd : _mDom ) in.dom_n_node[ static_cast<size_t>( kd.first.id().second ) ] = kd.second.n_node;
+    for( auto const& kd : _mDom ){
+      in.dom_n_node[ static_cast<size_t>( kd.first.id().second ) ] = kd.second.n_node;
+      in.dom_n_elem[ static_cast<size_t>( kd.first.id().second ) ] = kd.second.n_elem;
+    }
+    for( auto const& [v, doms] : _mVar ){
+      auto& vd = in.state_dims[ static_cast<size_t>( v.id().second ) ];
+      for( auto const& d : doms ) vd.push_back( static_cast<size_t>( d.id().second ) );
+      std::sort( vd.begin(), vd.end() );
+    }
     // Auxiliary definitions (design §3.5).
     for( auto const& a : _auxDef ){
       if( a.parent.id().second < 0 ) continue;
       PlanInput::AuxInfo& ai = in.aux_info[ static_cast<size_t>( a.aux.id().second ) ];
       ai.parent = static_cast<size_t>( a.parent.id().second );
       for( auto const& d : a.diff_dom ) ai.diff_dirs.insert( static_cast<size_t>( d.id().second ) );
+    }
+    // Each auxiliary's definition row: the LINK row that depends on the auxiliary AND on its parent.  Unique, chains
+    // included: the row defining d_y(d_y U) depends on it and on d_y U, not on U.  Every leaf of the row is supplied
+    // -- the auxiliaries and parents as independent variables, the rest (parameters, other states, t) as constants --
+    // so the dependence evaluation never meets a missing variable.
+    if( _dag && !_auxDef.empty() ){
+      std::map<long,int> slot;  int ns = 0;
+      for( auto const& a : _auxDef ) for( FFVar const* v : { &a.aux, &a.parent } )
+        if( v->id().second >= 0 && !slot.count( v->id().second ) ) slot[ v->id().second ] = ns++;
+      for( size_t k = 0; k < _mEqn.size(); ++k ){
+        if( !_mEqn[k].opt || _mEqn[k].opt->role != EqnRole::LINK ) continue;
+        FFSubgraph const sg = _dag->subgraph( 1, &_mEqn[k].var );
+        std::vector<FFVar> leaves;  std::vector<FFDep> vals;
+        for( FFVar const* v : sg.v_indep ){
+          leaves.push_back( *v );  FFDep d;
+          auto its = slot.find( v->id().second );  if( its != slot.end() ) d.indep( its->second );
+          vals.push_back( d );
+        }
+        std::vector<FFDep> dep( 1 );
+        try{ _dag->eval( std::vector<FFVar>{ _mEqn[k].var }, dep, leaves, vals ); } catch( ... ){ continue; }
+        for( auto const& a : _auxDef ){
+          if( a.parent.id().second < 0 || !slot.count( a.aux.id().second ) || !slot.count( a.parent.id().second ) ) continue;
+          if( dep[0].dep().count( slot[ a.aux.id().second ] ) && dep[0].dep().count( slot[ a.parent.id().second ] ) ){
+            in.aux_info[ static_cast<size_t>( a.aux.id().second ) ].def_eqn = k;  break; }
+        }
+      }
     }
     // Owner rows per state (INTERIOR equations depending on the state or its auxiliaries)
     // and the collocation-set fact per (row, direction).
@@ -8866,6 +8900,7 @@ OCFEBASE::_apply_plan_decisions
   draft.tau_claims             = dec.tau_claims;
   draft.explicit_tau_claims    = dec.explicit_tau_claims;
   draft.exact_replacement_rows = dec.exact_replacement_rows;
+  draft.reserved_definition_rows = dec.reserved_definition_rows;
   draft.n_trace_var            = dec.n_trace_var;
   draft.n_trace_var_explicit   = dec.n_trace_var_explicit;
   draft.n_coll_eqn             = dec.n_coll_eqn;
@@ -11490,6 +11525,8 @@ OCFEBASE::_build_frozen_strong_tau_elimination
   auto try_accept_pivot =
     [&]( FrozenPhysicalResidualRowKey const& rk,
          std::vector<double> const& brow ) -> bool {
+      // a definition row a REDUNDANT decision relies on is never a pivot (PlanDecisions::reserved_definition_rows)
+      if( draft.reserved_definition_rows.count( rk ) ) return false;
       SparseVec r = to_sparse( brow );
       double const n0 = sp_norm( r );
       if( n0 <= 64. * DBL_EPSILON ) return false;

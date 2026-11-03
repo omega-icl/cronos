@@ -525,18 +525,18 @@ int main()
     auto const k3 = pde5::leg3( 2, 4, xy, 1e-12, 1e-14 );
     check( "2-D leg 3: OCFEMOL set up, exported and integrated", !k3.empty() && k3.size() == xy.size() );
     if( !k3.empty() ){
-      // OCFESLV's SPATIAL interface treatment on this three-direction model changes with its TIME order: at orders
-      // 3-4 its receiver graph has 2.94 edges per claim, at 5-6 3.17, and the converged solution moves by 1.1e-2
-      // (2 Nov 2026; open item -- the rod and BZ, two directions, show nothing of the kind through order 7).  MoL builds
-      // the orders-3-4 treatment.  So the same-system check runs where OCFESLV's spatial system is MoL's.
-      std::cout << "\n  leg 1 refined in time ORDER where its spatial plan is MoL's (2x2 x 4 nodes; 4 time elements):\n";
+      // Until 2 Nov 2026 OCFESLV's plan marked an arbitrary subset of tangential-derivative claims redundant on this
+      // three-direction model once a time element had more nodes than a spatial one (the aux-implied rule walked the
+      // face code's TIME digit instead of the derivative's); the ladder then stopped at order 4.  Fixed (O1): the
+      // full order ladder, as for the rod and BZ.
+      std::cout << "\n  leg 1 refined in time ORDER (2x2 elements x 4 nodes in space; 4 time elements):\n";
       std::vector<double> d;
-      for( size_t nodt : { 3u, 4u } ){
+      for( size_t nodt : { 3u, 4u, 5u, 6u } ){
         auto const k1 = pde5::leg1( 2, 4, 4, nodt, xy );  d.push_back( maxdiff( k1, k3 ) );
         std::cout << "      NODT = " << nodt << "   |leg1 - leg3| = " << std::scientific << std::setprecision(3) << d.back() << std::defaultfloat << "\n";
       }
-      check_lt( "2-D: legs 1 and 3 converge in leg 1's time order: >= 10x per order", 10.*d[1], d[0] );
-      check_lt( "2-D: legs 1 and 3 agree to 1e-5 at order 4",                         d[1], 1e-5 );
+      check_lt( "2-D: legs 1 and 3 converge spectrally in leg 1's time order: >= 10x per order", 10.*d[3], d[2] );
+      check_lt( "2-D: legs 1 and 3 agree to 1e-7 at order 6",                                   d[3], 1e-7 );
       std::cout << "\n  leg 3 against the exact solution at T, spatial refinement (NN 5):\n";
       std::vector<double> e;
       for( size_t ne : { 2u, 3u, 4u } ){
@@ -548,6 +548,18 @@ int main()
         std::cout << "      " << ne << "x" << ne << " elements (" << u.size() << " nodes)   |leg3 - exact| = " << std::scientific << std::setprecision(3) << m << std::defaultfloat << "\n";
       }
       check_lt( "2-D: leg 3 converges to the exact solution under spatial refinement", e[2], e[0] );
+      // 4x4 elements: element lines bounded by interior interfaces at both ends.  At their corners the parent's claim
+      // across the other face lifts into the tangential auxiliary's definition, so the tangential claim there is NOT
+      // implied; until the rule read that from the plan's receivers it was dropped, and MoL sat 2x further from the
+      // exact solution than OCFESLV.  The 2x2 case above cannot see it -- every line there ends at the domain boundary.
+      {
+        std::vector<std::pair<double,double>> xy4;
+        auto const u3 = pde5::leg3( 4, 4, xy4, 1e-12, 1e-14 );
+        auto const u1 = pde5::leg1( 4, 4, 4, 6, xy4 );
+        double const d4 = maxdiff( u1, u3 );
+        std::cout << "\n  4x4 elements x 4 nodes:  |OCFESLV (order 6) - MoL| = " << std::scientific << std::setprecision(3) << d4 << std::defaultfloat << "\n";
+        check_lt( "2-D, 4x4: legs 1 and 3 agree to 1e-7 (interior element lines)", d4, 1e-7 );
+      }
     }
   }
 

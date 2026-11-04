@@ -282,6 +282,47 @@ check(len(_ga) == 6 and np.abs(_ga[:5] - _dex).max() < 1e-5,
       "adjoint gradient at the stage times = the closed form -- including the initial time (d x0 / dk = 2)")
 
 # %% [markdown]
+# ## G. A model distributed in space: the method of lines
+#
+# The heated rod of DAESLV_molpde: u(t, z) on z in [0, 1], u = 0 at z = 0, a unit flux at z = 1.
+# DAESLV semi-discretises it at setup -- its working model is the semi-discrete DAE, one state per
+# nodal unknown -- and options.MOL holds the semi-discretisation's options.
+
+# %%
+import cronos
+G5 = FFGraph()
+t, z, u = G5.add_var("t"), G5.add_var("z"), G5.add_var("u(t,z)")
+R = DAESLV(G5)
+R.options.SOLVE.VERBOSE = 0
+R.options.DISPLAY_LEVEL = 0
+R.options.SOLVE.RTOL, R.options.SOLVE.ATOL = 1e-10, 1e-12
+R.options.OUTPUT.RESRECORD = 10
+R.add_domain(t, FFDom(0., 1., 2, FFDom.LGR, 3))                    # the stages
+R.add_domain(z, FFDom(0., 1., 3, FFDom.LGL, 5))
+R.set_evolution_domain(t)
+R.add_state(u, [t, z])
+OpP = FFPartial()
+TI, ZI = FFDom.ALL - FFDom.LB, FFDom.ALL - FFDom.LB - FFDom.UB
+R.add_equation(OpP(u, t) - OpP(0.1 * OpP(u, z), z), [t, z], [TI, ZI], FFModel.EqnOptions(FFModel.EqnRole.INTERIOR))
+R.add_equation(u, [t, z], [TI, FFDom.LB], FFModel.EqnOptions(FFModel.EqnRole.BOUNDARY))
+R.add_equation(0.1 * OpP(u, z) - 1., [t, z], [TI, FFDom.UB], FFModel.EqnOptions(FFModel.EqnRole.BOUNDARY))
+R.add_equation(u, [t, z], [FFDom.LB, FFDom.ALL], FFModel.EqnOptions(FFModel.EqnRole.INITIAL))
+
+check(isinstance(R.options.MOL, DAESLV.MOLOptions) and isinstance(R.options.MOL, cronos.CollocationOptions),
+      "options.MOL is a DAESLV.MOLOptions, a CollocationOptions")
+check(isinstance(cronos.OCFESLV.Options(), cronos.CollocationOptions) and isinstance(cronos.OCFESLV.Options(), FFModel.Options),
+      "OCFESLV.Options derives from CollocationOptions (and so still from FFModel.Options)")
+check(R.options.MOL.IMPOSITION.NEUMANN_NODE == DAESLV.MOLOptions.NEUMANN_ALGEBRAIC,
+      "options.MOL.IMPOSITION.NEUMANN_NODE defaults to NEUMANN_ALGEBRAIC")
+check(R.setup() and R.solve([]) == DAESLV.NORMAL, "a model distributed in space sets up and solves on DAESLV")
+xa = R.results_solve.x.copy()
+check(xa.ndim == 2 and xa.shape[1] == 30, "results_solve: the trajectory of the 30 nodal unknowns (3 elements x 5 LGL in z, u and Dz_u)")
+R.options.MOL.IMPOSITION.NEUMANN_NODE = DAESLV.MOLOptions.NEUMANN_DIFFERENTIAL
+check(R.setup() and R.solve([]) == DAESLV.NORMAL and not np.array_equal(R.results_solve.x[-1], xa[-1]),
+      "options.MOL reaches the semi-discretisation (NEUMANN_DIFFERENTIAL changes the result)")
+check(R.distributed_in_space(), "the declared model is still the PDE after setup")
+
+# %% [markdown]
 # ## Summary
 
 # %%

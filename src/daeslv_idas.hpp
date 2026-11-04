@@ -73,7 +73,10 @@ public:
   struct Options
   : public FFModel::Options
   , public BASE_IDAS::Options
-  {} options;
+  {
+    //! @brief The semi-discretisation's options, for a model distributed in space (see setup): the collocation groups (INTERFACE, ...) and the method of lines' own (IMPOSITION.NEUMANN_NODE).  Its model-level fields (REDUCE, CLASSIFY, DISPLAY_LEVEL, ...) are this solver's own, set above.
+    OCFEMOL::Options MOL;
+  } options;
 
 
   //! @brief Statistics of the last solve
@@ -100,8 +103,9 @@ public:
   //! semi-discrete system -- one state per nodal unknown, on the declared t domain -- becomes THIS solver's working
   //! model, while the declared model stays the user's.  Solve, sensitivities, results and statistics are then this
   //! solver's own; val_state() holds the nodal unknowns, in the order of semidiscrete_states().  Setup sets
-  //! SOLVE.LINSOL = SPARSE, INITIAL.KIN.SPARSE and SOLVE.SUPPRESSALG, which a semi-discrete system needs.  Inputs,
-  //! constants and outputs are taken from MoL phase 6a, transitions from 6c -- until then refused by name.
+  //! SOLVE.LINSOL = SPARSE, INITIAL.KIN.SPARSE and SOLVE.SUPPRESSALG, which a semi-discrete system needs.  Time-invariant
+  //! inputs are the integrator's parameters, set by name as for any model; constants and outputs are taken from MoL
+  //! phase 6a, time-varying inputs and transitions from 6c -- until then refused by name.
   bool setup
     ();
 
@@ -118,8 +122,11 @@ protected:
   std::vector<FFVar>            _molXc;
   FFVar                         _molT;
   bool                          _molSetupRunning = false;   //!< setup() on the semi-discrete declarations
+  //! each declared input (by id) -> its working parameters, in input_dofs() order
+  std::map< long, std::vector<FFVar> >  _molParam;
   bool _setup_mol
     ();
+  typedef OCFEMOL::t_InputLayout const* t_InputLayoutRef;
 
 public:
 
@@ -152,6 +159,25 @@ public:
     ( std::vector<FFModel::InputVal> const& vIn, std::ostream& os=std::cout )
     {
       std::vector<double> P, c;  std::string err;
+      if( _mol ){                       // a model distributed in space: each declared input -> its working parameters
+        P.assign( _np, 0. );
+        bool const ok = resolve_values( vIn,
+          [&]( FFVar const& u, std::vector<double> const& v, std::string& e ){
+            auto const itp = _molParam.find( u.id().second );
+            if( itp == _molParam.end() ){ e = u.name() + " is neither an input nor a constant of the model"; return false; }
+            if( v.size() != itp->second.size() ){
+              e = u.name() + " has " + std::to_string( itp->second.size() ) + " DOFs, but " + std::to_string( v.size() ) + " values were given";
+              return false; }
+            for( size_t k = 0; k < v.size(); ++k ){
+              auto const ix = parameter_index( itp->second[k] );
+              if( ix.size() != 1 ){ e = "the working parameter of " + u.name() + " is missing"; return false; }
+              P[ ix[0] ] = v[k];
+            }
+            return true; },
+          [&]( size_t, double ){}, err );
+        if( !ok ) throw std::invalid_argument( "DAESLV::solve ** " + err + "\n" );
+        return solve( P, c, os );
+      }
       if( !assemble_values( vIn, P, c, err ) ) throw std::invalid_argument( "DAESLV::solve ** " + err + "\n" );
       return solve( P, c, os );
     }
@@ -1290,9 +1316,11 @@ DAESLV_IDAS::_setup_mol
     _extractError = "the model is inconsistent (see the refusal above)";
     return false;
   }
-  if( !_usr._mInpUsr.empty()  ) return refuse( "its inputs are taken from MoL phase 6a" );
+  for( auto const& [w, dom] : _usr._mInpUsr )
+    for( auto const& d : dom )
+      if( _usr._evolution_dom_setUsr && d.id() == _usr._evolution_dom_varUsr.id() )
+        return refuse( "the input " + w.name() + " varies in time: such inputs are taken from MoL phase 6c" );
   if( !_usr._vCstUsr.empty()  ) return refuse( "its constants are taken from MoL phase 6a" );
-  if( !_usr._mFctUsr.empty()  ) return refuse( "its outputs are taken from MoL phase 6a" );
   if( !_usr._mTrnUsr.empty()  ) return refuse( "its transitions are taken from MoL phase 6c" );
   if( !_usr._evolution_dom_setUsr ) return refuse( "the evolution direction must be declared (set_evolution_domain)" );
   auto const itd = _usr._mDomUsr.find( _usr._evolution_dom_varUsr );
@@ -1302,14 +1330,17 @@ DAESLV_IDAS::_setup_mol
   // the semi-discretisation, from this model's own declarations
   _mol.reset( new OCFEMOL( _usr._dagUsr ) );
   _mol->copy_declarations_from( *this );
-  static_cast<FFModel::Options&>( _mol->options ) = static_cast<FFModel::Options const&>( options );
-  if( !_mol->setup() ) return refuse( "its semi-discretisation did not set up (OCFEMOL::setup)" );
+  _mol->options = options.MOL;                                       // the semi-discretisation's own options ...
+  static_cast<FFModel::Options&>( _mol->options ) = static_cast<FFModel::Options const&>( options );   // ... the model's are this solver's
+  if( !_mol->setup() )
+    return refuse( "its semi-discretisation did not set up" + ( _mol->setup_error().empty()? std::string( " (OCFEMOL::setup)" ): ": " + _mol->setup_error() ) );
 
   // its semi-discrete system, declared into a record on its own DAG, seeded for DAESLV's consistent init
   _molDag.reset( new FFGraph );
   FFModel semi;
   std::string err;
-  if( !declare_semidiscrete( *_mol, *_molDag, semi, tdom, _molXc, _molT, &err ) )
+  std::vector<FFVar> uc;
+  if( !declare_semidiscrete( *_mol, *_molDag, semi, tdom, _molXc, _molT, &err, &uc ) )
     return refuse( "its semi-discrete system could not be declared: " + err );
   std::vector<double> x0( _mol->semi_discrete().n_states, 0. );
   _mol->init_seed( tdom.lo_dom, x0.data() );
@@ -1323,6 +1354,20 @@ DAESLV_IDAS::_setup_mol
   _molSetupRunning = false;
   _swap_declarations( semi );
   if( !ok ) return refuse( "its semi-discrete DAE did not set up: " + _extractError );
+
+  // each declared input -> its working parameters (OCFEMOL's input matched by id, then by name, as the extraction does)
+  _molParam.clear();
+  for( auto const& [u, dom] : _usr._mInpUsr ){
+    t_InputLayoutRef L = nullptr;
+    for( auto const& l : _mol->inputs_layout() ) if( l.input.id() == u.id() ){ L = &l; break; }
+    if( !L ) for( auto const& l : _mol->inputs_layout() ) if( l.input.name() == u.name() ){ L = &l; break; }
+    if( !L ) return refuse( "its input " + u.name() + " has no counterpart in the semi-discretisation" );
+    if( L->cols.size() != input_dofs( u ).size() )
+      return refuse( "its input " + u.name() + " has " + std::to_string( input_dofs( u ).size() ) + " DOFs, the semi-discretisation "
+                     + std::to_string( L->cols.size() ) );
+    auto& v = _molParam[ u.id().second ];
+    for( size_t c : L->cols ) v.push_back( uc.at( c ) );
+  }
   return true;
 }
 
@@ -1341,7 +1386,7 @@ DAESLV_IDAS::setup
   // FFODESLV was fine (reported 2026-10-24).
   std::lock_guard<std::recursive_mutex> dag_lock_( dag_mutex() );   // see FFModel::dag_mutex()
   if( !_molSetupRunning ){
-    _mol.reset();  _molDag.reset();  _molXc.clear();
+    _mol.reset();  _molDag.reset();  _molXc.clear();  _molParam.clear();
     if( distributed_in_space() ) return _setup_mol();                // the method of lines
   }
   auto _tick = std::chrono::steady_clock::now();
@@ -1837,21 +1882,20 @@ DAESLV_IDAS::solve
           ++stats.numIC;
         }
       }
-      // The quadrature is reset to ZERO at every stage, as ODESLV's _IC_D_QUAD does, so a quadrature is a
-      // PER-STAGE increment and the accumulation across stages is the FUNCTION's job: extraction puts one
-      // term per stage time in _mFCT, and _eval_fct adds them.  Carrying the accumulator across instead
-      // double-counts every earlier stage -- measured as exactly Q(tau) too much on a two-stage model.
-      // Gated on the stage index ALONE, not on whether the rows change: a stage boundary exists wherever
-      // a POINT capture put one, and the quadrature must restart there too.  Gating it on `restarts` left
-      // the accumulator running on a model whose stages come from an interior tau rather than an input.
-      if( ok && _nq && sg ){
-        for( size_t i = 0; i < _nq; ++i ) N_VGetArrayPointer( Nq )[i] = 0.;
+      // The quadrature ACCUMULATES over the whole horizon: an integral over the evolution direction is its value at
+      // the end (extraction puts one term, at the final stage).  It is never reset at a stage boundary.  Where the
+      // states restart (IDAReInit above), IDAS's history starts afresh, so the quadrature -- and its sensitivity --
+      // are re-initialised there WITH THEIR CURRENT VALUES; elsewhere IDAS simply carries on.  (Until 4 Nov 2026 it
+      // was zeroed at every stage, a residue of the retired description path's per-stage quadrature terms: without a
+      // state restart that left IDAS's quadrature history inconsistent with the zeroed value, and the next step's
+      // error test failed once the integrand was large against ATOL -- an integrand of 10 at ATOL 1e-12.)
+      if( ok && _nq && sg && restarts ){
+        double tq = ta;
+        if( IDAGetQuad( mem, &tq, Nq ) != IDA_SUCCESS ){ ok = false; why = "IDAGetQuad at a restart"; break; }
         if( IDAQuadReInit( mem, Nq ) != IDA_SUCCESS ){ ok = false; why = "IDAQuadReInit"; break; }
-        // the quadrature sensitivity is the derivative of a PER-STAGE increment, so it restarts at
-        // zero with it; the accumulation across stages is val_function_gradient()'s, as the value's
-        // accumulation is val_function()'s
         if( _fsa && yQS ){
-          for( size_t j = 0; j < _np; ++j ) N_VConst( 0., yQS[j] );
+          double tqs = ta;
+          if( IDAGetQuadSens( mem, &tqs, yQS ) != IDA_SUCCESS ){ ok = false; why = "IDAGetQuadSens at a restart"; break; }
           if( IDAQuadSensReInit( mem, yQS ) != IDA_SUCCESS ){ ok = false; why = "IDAQuadSensReInit"; break; }
         }
       }
@@ -2013,6 +2057,7 @@ DAESLV_IDAS::solve
     size_t const nB = _asaP.size();
     std::vector<int> indexBv( nB, -1 );
     std::vector<N_Vector> yBv( nB, nullptr ), ypBv( nB, nullptr ), qBv( nB, nullptr );
+    std::vector<SUNMatrix> ABv( nB, nullptr );  std::vector<SUNLinearSolver> LSBv( nB, nullptr );
     for( size_t b = 0; b < nB; ++b ){
       yBv[b]  = N_VNew_Serial( (sunindextype)_nx, ctx );
       ypBv[b] = N_VNew_Serial( (sunindextype)_nx, ctx );
@@ -2057,8 +2102,11 @@ DAESLV_IDAS::solve
         ok = false; why = "IDASetUserDataB"; break; }
       if( IDASStolerancesB( mem, indexB, options.SOLVE.RTOLB, options.SOLVE.ATOLB ) != IDA_SUCCESS ){
         ok = false; why = "IDASStolerancesB"; break; }
+      // one matrix and linear solver PER backward problem, alive until the sweep ends (IDAS keeps a pointer to each);
+      // they were created into AB / LSB alone, so all but the last problem's leaked (valgrind on DAESLV_quadacc)
       AB = SUNDenseMatrix( (sunindextype)_nx, (sunindextype)_nx, ctx );
       LSB = SUNLinSol_Dense( yB, AB, ctx );
+      ABv[ _asaCur ] = AB;  LSBv[ _asaCur ] = LSB;
       if( !AB || !LSB || IDASetLinearSolverB( mem, indexB, LSB, AB ) != IDA_SUCCESS ){
         ok = false; why = "IDASetLinearSolverB"; break; }
       if( _np && IDAQuadInitB( mem, indexB, MC_IDQUADB__, qB ) != IDA_SUCCESS ){
@@ -2405,9 +2453,9 @@ DAESLV_IDAS::solve
       _asaCur = 0;  _asaBind( 0 );
     } while( false );
     backward_done:
-    if( LSB ) SUNLinSolFree( LSB );
-    if( AB ) SUNMatDestroy( AB );
     for( size_t b = 0; b < nB; ++b ){
+      if( LSBv[b] ) SUNLinSolFree( LSBv[b] );
+      if( ABv[b] )  SUNMatDestroy( ABv[b] );
       if( yBv[b] ) N_VDestroy( yBv[b] );
       if( ypBv[b] ) N_VDestroy( ypBv[b] );
       if( qBv[b] ) N_VDestroy( qBv[b] );

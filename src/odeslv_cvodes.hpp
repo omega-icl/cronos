@@ -1190,9 +1190,10 @@ ODESLV_CVODES::_states_stage
   else if( ( _stage_restart( istg ) || reinit ) && !_CC_CVODE_STA() )
     { _END_STA(); return STATUS::FAILURE; }
   //if( istg && !_CC_CVODE_QUAD() )
+  // the quadrature ACCUMULATES over the horizon: after the state restart it is re-initialised with its CURRENT value,
+  // never zeroed (an integral over t is its value at the end -- extraction's one term, at the final stage)
   if( ( istg || reinit )
-   && ( ( Nq && !_IC_D_QUAD( NV_DATA_S( Nq ) ) ) // quadrature reinitialization
-     || !_CC_CVODE_QUAD() ) )
+   && !_CC_CVODE_QUAD() )
     { _END_STA(); return STATUS::FAILURE; }
   if( record )
     results_solve.push_back( Results( t, _nx, NV_DATA_S(Nx), _nq, _nq? NV_DATA_S(Nq): nullptr ) );
@@ -2027,8 +2028,9 @@ ODESLV_CVODES::_states_ASA
       // Update list of operations in RHSADJ and QUADADJ
       _pos_rhs  = ( _vRHS.size() <=1? 0: _istg-1 );
       _pos_quad = ( _vQUAD.size()<=1? 0: _istg-1 );
-      _pos_fct  = _istg;// ( _vFCT.size()>=_ns? _istg: ( _vFCT.size()==1 && _istg==_ns? 1: 0 ) );   
-      //_vFCT.size()>=_ns? _istg: 0 );
+      // the weight of a quadrature in the outputs (_RHS_SET_ASA's only use of the function set): an integral over t is
+      // the quadrature's value at the END, one term in the final function set, its weight the same over the horizon
+      _pos_fct  = _vFCT.empty()? 0: _vFCT.size() - 1;
 #ifdef CRONOS__ODESLVS_CVODES_DEBUG
       std::cout << "pos_fct: " << _pos_fct << std::endl;
 #endif
@@ -2417,9 +2419,7 @@ ODESLV_CVODES::_states_FSA
          || !ODESLV_CVODES::_CC_CVODE_STA() ) )
         { _END_STA(); _END_SEN( stats_fsens ); return STATUS::FAILURE; }
       if( _istg 
-       //&& !ODESLV_CVODES::_CC_CVODE_QUAD() )
-       && ( ( _Nq && !ODESLV_BASE::_IC_D_QUAD( NV_DATA_S( _Nq ) ) ) // quadrature reinitialization
-         || !ODESLV_CVODES::_CC_CVODE_QUAD() ) )
+       && !ODESLV_CVODES::_CC_CVODE_QUAD() )                 // carried: re-initialised with its current value
         { _END_STA(); _END_SEN( stats_fsens ); return STATUS::FAILURE; }
       if( options.OUTPUT.RESRECORD )
         results_solve.push_back( Results( _t, _nx, NV_DATA_S(_Nx), _nq, _nq? NV_DATA_S(_Nq): nullptr ) );
@@ -2430,10 +2430,8 @@ ODESLV_CVODES::_states_FSA
            || !_CC_D_SEN( _t, NV_DATA_S( _Nx ), NV_DATA_S(_Ny[_isen]) )
            || ( _isen==_nsen-1 && !_CC_CVODES_FSA() ) ) )
             { _END_STA(); _END_SEN( stats_fsens ); return STATUS::FATAL; }
-        if( _istg
-         //&& ( _isen==_np-1 && !_CC_CVODES_QUAD() ) )
-         && ( ( _Nyq && _Nyq[_isen] && !ODESLV_BASE::_IC_D_QUAD( NV_DATA_S(_Nyq[_isen]) ) ) //quadrature sensitivity reinitialization
-           || ( _isen==_nsen-1 && !_CC_CVODES_QUAD() ) ) )
+        if( _istg                                                       // the quadrature sensitivity, carried likewise
+         && ( _isen==_nsen-1 && !_CC_CVODES_QUAD() ) )
             { _END_STA(); _END_SEN( stats_fsens ); return STATUS::FATAL; }
 #ifdef CRONOS__ODESLVS_CVODES_DEBUG
         for( unsigned iy=0; iy<NV_LENGTH_S(_Ny[_isen]); iy++ )

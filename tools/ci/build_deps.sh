@@ -7,6 +7,7 @@
 set -euo pipefail
 OS=${1:?linux|macos|none} VARIANT=${2:?epl|gpl} PREFIX=${3:?install prefix}
 SUITESPARSE_VERSION=7.6.1  SUPERLU_VERSION=5.2.2  SUNDIALS_VERSION=7.9.0  BOOST_VERSION=1.86.0
+CI_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # this script's directory (for patches/)
 OPENBLAS_WIN_VERSION=0.3.28  ARMADILLO_WIN_VERSION=14.2.2      # Windows: as in pymcpp's wheels
 JOBS=$( nproc 2>/dev/null || sysctl -n hw.ncpu )
 case "$VARIANT" in
@@ -82,6 +83,11 @@ for n in klu amd colamd btf suitesparseconfig; do
 done
 echo "== build_deps.sh: KLU for SUNDIALS:$KLU_LIBS"
 fetch "https://github.com/LLNL/sundials/releases/download/v${SUNDIALS_VERSION}/sundials-${SUNDIALS_VERSION}.tar.gz"
+# IDAS decides an order decrease on the state norms alone, which an exactly constant state (e.g. the costate of a
+# conserved output) turns into an order-1 stall when a quadrature or sensitivity is error-controlled.  Until SUNDIALS
+# fixes it upstream, the release is patched to decide on the combined norms (tools/ci/patches/, with the reproducer
+# in its header's references).  CRONOS's DAESLV adjoint relies on it (test/DAESLV/DAESLV_quadacc).
+step sundials-patch patch -d "sundials-${SUNDIALS_VERSION}" -p1 -N -i "$CI_DIR/patches/sundials-idas-order-decision.patch"
 step sundials-configure cmake -S "sundials-${SUNDIALS_VERSION}" -B sun $POLICY -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$PREFIX" \
       -DENABLE_KLU=ON -DKLU_INCLUDE_DIR="$PREFIX/include/suitesparse" -DKLU_LIBRARY_DIR="$PREFIX/lib" $KLU_LIBS \
       -DBUILD_STATIC_LIBS=OFF -DEXAMPLES_ENABLE_C=OFF -DEXAMPLES_INSTALL=OFF

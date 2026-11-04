@@ -1348,7 +1348,7 @@ BASE_DE::_extract_from_model
     if( C.accumulate && a && !a->cst() ){
       FFVar const qa( FFModel::_dag, C.input.name() + "*" );
       quad.push_back( subst1( _in_model_dag( *a ) ) * _in_model_dag( C.source ) );  _mQ.push_back( qa );
-      for( size_t k = 1; k <= _ns; ++k ) add_to( k, idx, qa );          // per-stage quadrature: sum over stages
+      add_to( _ns, idx, qa );          // the quadrature accumulates over the horizon: its value at the end
       return;
     }
     FFVar v = C.accumulate? subst1( _in_model_dag( C.input ) )
@@ -1360,7 +1360,9 @@ BASE_DE::_extract_from_model
           v = FFModel::_dag->compose( std::vector<FFVar>{ v }, tgt, rep )[0];
         }
     FFVar const term = !a? v: a->cst()? FFVar( a->num().val() * v ): subst1( _in_model_dag( *a ) ) * v;
-    if( C.accumulate ){ for( size_t k = 1; k <= _ns; ++k ) add_to( k, idx, term ); }   // sum over stages
+    // an integral over the evolution direction is the quadrature's value at the END: the integrators accumulate it over
+    // the whole horizon (no reset at stage boundaries), so it is one term, at the final stage
+    if( C.accumulate ) add_to( _ns, idx, term );
     else add_to( (size_t)stage_of( C.tau ), idx, term ); };
   // the records whose inputs occur in expression e (full ids)
   auto records_in = [&]( FFVar const& e ){

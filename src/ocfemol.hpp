@@ -33,21 +33,21 @@ public:
   {
     //! @brief What a Neumann/Robin (flux) boundary node is in the semi-discrete DAE.  After order reduction the node
     //! holds the field u and its spatial derivative D, and needs two rows.
+    // NEUMANN_ALGEBRAIC is OCFESLV's rule (leg 1 and leg 3 of DAESLV_molgate are then the same discrete system);
+    // NEUMANN_DIFFERENTIAL is more accurate on the rod (2.3e-4 vs 7.0e-4 at 3x5) and differs from OCFESLV at that
+    // node by spatial error.  Default NEUMANN_ALGEBRAIC (decision 31 Oct 2026: the exactness gate first).
     enum NeumannNode
     {
-      NEUMANN_ALGEBRAIC = 0,   //!< OCFESLV's rule: the LINK row and the boundary row; u at the node is ALGEBRAIC (no d_t row,
-                               //!< no initial condition).  Leg 1 <-> leg 3 of the gate are the SAME discrete system.
-      NEUMANN_DIFFERENTIAL     //!< the PDE row and the boundary row; u at the node stays DIFFERENTIAL with its initial
-                               //!< condition.  More accurate on the rod (2.3e-4 vs 7.0e-4 at 3x5); differs from OCFESLV
-                               //!< at that node by spatial error.
+      NEUMANN_ALGEBRAIC = 0,   //!< the LINK row and the boundary row: u at the node is algebraic (no d_t row, no initial condition)
+      NEUMANN_DIFFERENTIAL     //!< the PDE row and the boundary row: u at the node stays differential, with its initial condition
     };
+    //! @brief How the method of lines treats a boundary node and a high-index model.
     struct t_Imposition
     {
-      NeumannNode NEUMANN_NODE;   //!< default NEUMANN_ALGEBRAIC (decision 31 Oct 2026: the exactness gate first)
-      bool REDUCE_HIGH_INDEX;     //!< a model of structural index > 1 along t: run FFModel's index reduction (dummy
-                                  //!< derivatives, hidden constraints) on the full (t, z) model before t is taken out,
-                                  //!< then collocate the reduced, index-1 system.  Default false: refuse instead (phase 8
-                                  //!< of the MoL plan, offered here as an experiment).
+      NeumannNode NEUMANN_NODE;   //!< What a flux boundary node is in the semi-discrete DAE (default NEUMANN_ALGEBRAIC)
+      // REDUCE_HIGH_INDEX: FFModel's index reduction (dummy derivatives, hidden constraints) on the full (t, z) model
+      // before t is taken out, then the reduced index-1 system collocated -- phase 8 of the MoL plan, an experiment.
+      bool REDUCE_HIGH_INDEX;     //!< A model of structural index > 1 along t: reduce it first (default false: refuse it)
     } IMPOSITION;
 
     Options
@@ -136,6 +136,87 @@ public:
   std::vector<t_MassEntry> const& mass() const { return _mass; }
   //! @brief Whether unknown @p col is differential (some row carries its d_t): the integrator's id vector.
   bool is_differential( size_t col ) const { return col < _colDiff.size() && _colDiff[col]; }
+  //! @brief A model input as the semi-discrete system sees it: its slots in the collocated input vector uc, in
+  //! input_dofs() order (element blocks outer, nodes inner, the first direction fastest -- the order by-name values
+  //! arrive in), their node coordinates at the input's own collocation, and whether the input varies in time (its
+  //! declared domain held the evolution direction, recorded before setup takes t out).  t itself is time_slot().
+  struct t_InputLayout
+  {
+    FFVar input;                                                     //!< the input, as a variable of the working model
+    bool time_varying = false;
+    std::vector<size_t> cols;                                        //!< its slots in uc
+    std::vector< std::vector< std::pair<FFVar,double> > > nodes;     //!< each slot's coordinates
+  };
+  std::vector<t_InputLayout> const& inputs_layout() const { return _inpLayout; }
+  //! @brief Why the last setup() failed, when it did: the first refusal of the model, in words.
+  std::string const& setup_error() const { return _setupError; }
+
+  //! @brief The time part of each output (declaration order), split off at setup: the method of lines integrates in t,
+  //! so an output is its SPATIAL part -- what the collocation evaluates at a given t, from (xc, uc) -- and a time part
+  //! the integrator applies to it: a point in t (with its side), or an integral over t.  The spatial part is the
+  //! output as declared with t taken out: a point in t removed from its point, an outermost integral or evaluation in
+  //! t peeled off (re-integrated or re-evaluated over its other directions, which MC++ folds into the same node).
+  struct t_OutputTime
+  {
+    enum Kind { POINT = 0, INTEGRAL } kind = POINT;
+    double tau  = 0.;                 //!< POINT: the time
+    int    side = FFDom::MINUS;       //!< POINT: the side, at a time where the value may differ on either side
+  };
+  std::vector<t_OutputTime> const& outputs_time() const { return _fctTime; }
+  //! @brief The number of output values (n_colloc_fct(): a point output one, a distributed one per node), in the
+  //! declared outputs' order, each output's values from its row0.
+  size_t n_outputs() const { return _nCollFct; }
+  //! @brief The outputs' spatial parts at (t, xc, uc): @p f has n_outputs() entries.  uc as for eval_residual.
+  bool eval_outputs
+    ( double t, double const* xc, double const* uc, double* f );
+  //! @brief Their Jacobian over [xc | uc] in CSR (columns as deriv_residual_full's): the same FAD seeding as the
+  //! residual's -- the column colouring covers residual and output rows together -- through the output evaluation.
+  bool deriv_outputs_full
+    ( double t, double const* xc, double const* uc, double* f,
+      std::vector<size_t>& ptr, std::vector<size_t>& col, std::vector<double>& val );
+  //! @brief The outputs' xc columns (as jacobian_pattern's) and their input slots other than time_slot() (as
+  //! input_pattern's), in CSR.
+  void output_state_pattern
+    ( std::vector<size_t>& ptr, std::vector<size_t>& col )
+    const
+    {
+      ptr.assign( 1, 0 ); col.clear();
+      for( size_t r = 0; r < _jacPatternFct.size(); ++r ){
+        for( size_t c : _jacPatternFct[r] ) if( c < _nCollVar ) col.push_back( c );
+        ptr.push_back( col.size() );
+      }
+    }
+  void output_input_pattern
+    ( std::vector<size_t>& ptr, std::vector<size_t>& col )
+    const
+    {
+      size_t const it = _nCollInp? pos_input( _evolution_dom_var, {} ): 0;
+      ptr.assign( 1, 0 ); col.clear();
+      for( size_t r = 0; r < _jacPatternFct.size(); ++r ){
+        for( size_t c : _jacPatternFct[r] ) if( c >= _nCollVar && c < _nCollVar + _nCollInp && c - _nCollVar != it ) col.push_back( c - _nCollVar );
+        ptr.push_back( col.size() );
+      }
+    }
+  //! @brief Output @p k's values in the n_outputs() array: (its first, its count) -- a point output one, a distributed
+  //! one per node.
+  std::pair<size_t,size_t> output_rows( size_t k ) const { return { _mFct.at( k ).row0, _mFct.at( k ).nrow }; }
+  //! @brief The pattern of deriv_outputs_full.
+  void output_pattern_full
+    ( std::vector<size_t>& ptr, std::vector<size_t>& col )
+    const
+    {
+      size_t const ncol = _nCollVar + _nCollInp;
+      ptr.assign( 1, 0 ); col.clear();
+      for( size_t r = 0; r < _jacPatternFct.size(); ++r ){
+        for( size_t c : _jacPatternFct[r] ) if( c < ncol ) col.push_back( c );
+        ptr.push_back( col.size() );
+      }
+    }
+  //! @brief Size of the collocated input vector uc, the evolution variable's slot included.
+  size_t n_input_slots() const { return _nCollInp; }
+  //! @brief The evolution variable's slot in uc.
+  size_t time_slot() const { return _nCollInp? pos_input( _evolution_dom_var, {} ): 0; }
+
   //! @brief The columns of @p field, in MESH ORDER: element-major, node within element, the directions in the
   //! field's own order (the order a driver's own mesh loop produces).  Empty for an unknown field.
   //! A field's columns are NOT contiguous -- the layout interleaves fields element by element -- so this is the
@@ -171,7 +252,34 @@ public:
   //! semi_discrete().n_states entries, @p rc semi_discrete().n_rows.  The mass term Mc(xc) d_t xc is not included:
   //! the integrator's residual is Mc xdot - Rc, with Mc from mass().  Phase 4 of the MoL plan.
   bool eval_residual
-    ( double t, double const* xc, double* rc );
+    ( double t, double const* xc, double* rc )
+    { return eval_residual( t, xc, nullptr, rc ); }
+  //! @brief Rc at (t, xc, uc): @p uc is the collocated input vector (n_input_slots(); its time_slot() is overwritten
+  //! with @p t), nullptr for a model without inputs.
+  bool eval_residual
+    ( double t, double const* xc, double const* uc, double* rc );
+  //! @brief The Jacobian of Rc over [xc | uc] in CSR: column c < n_states is xc[c], column n_states + j is uc[j] -- the
+  //! time slot included, so dRc/dt is column n_states + time_slot().  One FAD sweep, uc coloured with xc: what a
+  //! parameter sensitivity needs (dRc/dp) comes from the same evaluation as the integrator's Jacobian.
+  bool deriv_residual_full
+    ( double t, double const* xc, double const* uc, double* rc,
+      std::vector<size_t>& ptr, std::vector<size_t>& col, std::vector<double>& val );
+  //! @brief The pattern of deriv_residual_full.
+  void jacobian_pattern_full
+    ( std::vector<size_t>& ptr, std::vector<size_t>& col )
+    const;
+  //! @brief Per row, the slots j of uc other than time_slot() it depends on, in CSR (col holds j, not n_states + j).
+  void input_pattern
+    ( std::vector<size_t>& ptr, std::vector<size_t>& col )
+    const
+    {
+      size_t const it = _nCollInp? pos_input( _evolution_dom_var, {} ): 0;
+      ptr.assign( 1, 0 ); col.clear();
+      for( size_t r = 0; r < _jacPatternEqn.size(); ++r ){
+        for( size_t c : _jacPatternEqn[r] ) if( c >= _nCollVar && c < _nCollVar + _nCollInp && c - _nCollVar != it ) col.push_back( c - _nCollVar );
+        ptr.push_back( col.size() );
+      }
+    }
 
   //! @brief The Jacobian of Rc(t, xc) with respect to xc, sparse, in CSR: row r's entries are columns
   //! jac_col[jac_ptr[r] .. jac_ptr[r+1]) with values jac_val[...]; and the derivative with respect to t in @p drdt
@@ -187,6 +295,9 @@ public:
   //! unknown it fixes is @p target (the column of the field this entry is the initial condition of).
   struct t_IniEntry
   {
+    //! the inputs the row reads, each as its value AT THE NODE: a combination of its slots in uc, (slot, weight) -- one
+    //! slot with weight 1 where the input's collocation is the field's, the input's Lagrange interpolant otherwise
+    std::vector< std::pair< FFVar, std::vector< std::pair<size_t,double> > > > icols;
     size_t row = 0;                                     //!< index into ini_rows()
     size_t target = 0;                                  //!< the differential unknown this condition fixes
     std::vector< std::pair<FFVar,size_t> > cols;        //!< (field, column of its value at the node)
@@ -203,13 +314,24 @@ public:
   //! operation every such compose rebuilt the whole operation (measured: 415 MB of heap at 144 unknowns, all of it
   //! FFMOLINI re-insertions and their gradients).  Pointwise rows are evaluated once at t0 and gain nothing from
   //! vectorisation.
+  //! The inputs the row reads are bound to @p uc, one variable per slot of the collocated input vector (its time slot
+  //! unused); a row reading an input with no @p uc given is refused (std::invalid_argument), never bound to zero.
   FFVar initial_expression
-    ( size_t k, std::vector<FFVar> const& xc, FFVar const& t )
+    ( size_t k, std::vector<FFVar> const& xc, FFVar const& t, std::vector<FFVar> const& uc = {} )
     const
     {
       auto const& e = _iniStream.at( k );
       std::vector<FFVar> vars, vals;
       for( auto const& [y, c] : e.cols ){ vars.push_back( y ); vals.push_back( xc.at( c ) ); }
+      for( auto const& [w, comb] : e.icols ){
+        FFVar v( 0. );
+        for( auto const& [c, a] : comb ){
+          if( c >= uc.size() ) throw std::invalid_argument( "OCFEMOL::initial_expression ** an INITIAL row reads the input "
+                                                           + w.name() + ": its variables must be given (uc)" );
+          v = ( comb.size() == 1 && a == 1. )? uc[c]: v + a*uc[c];      // the field's collocation: the slot itself
+        }
+        vars.push_back( w );  vals.push_back( v );
+      }
       for( auto const& [d, z] : e.coord ){ vars.push_back( d ); vals.push_back( FFVar( z ) ); }
       if( _evolution_dom_set ){ vars.push_back( _evolution_dom_var ); vals.push_back( t ); }
       for( size_t i = 0; i < _vCst.size() && i < _vCstVal.size(); ++i ){ vars.push_back( _vCst[i] ); vals.push_back( FFVar( _vCstVal[i] ) ); }
@@ -220,12 +342,14 @@ public:
 
   //! @brief The INITIAL rows at the stream's nodes: @p ini has ini_stream().size() entries in that order (the dropped
   //! ones included, so the consistency check at t0 reads the same array).  Each is one small DAG evaluation.
+  //! @p uc: the collocated input vector, for rows that read inputs (nullptr: such a row makes the call fail).
   bool eval_initial
-    ( double t, double const* xc, double* ini );
+    ( double t, double const* xc, double* ini, double const* uc = nullptr );
 
   //! @brief The derivative of eval_initial with respect to xc, in CSR over the entries (a few columns each).
   bool deriv_initial
-    ( double t, double const* xc, double* ini, std::vector<size_t>& ptr, std::vector<size_t>& col, std::vector<double>& val );
+    ( double t, double const* xc, double* ini, std::vector<size_t>& ptr, std::vector<size_t>& col, std::vector<double>& val,
+      double const* uc = nullptr );
 
   //! @brief A SEED for an integrator's own consistent initialisation, without solving anything: the base's reference
   //! initialisation (every unknown from the model's references, the order-reduction auxiliaries from their defining
@@ -251,6 +375,15 @@ protected:
   t_Peel                _peel;      //!< the peel along t (working model)
   std::vector< std::vector< std::pair<size_t,FFVar> > > _massByEqn;   //!< per row of the rewritten _mEqn: (field, coefficient)
   std::vector<t_MassEntry> _mass;    //!< Mc as data
+  std::set<FFVar,lt_FFVar>     _inpTimeVarying;   //!< inputs whose declared domain held t (setup takes it out)
+  std::vector<std::string>     _auditRefusals;    //!< what the INITIAL audit refused, in words
+  std::vector<t_OutputTime>    _fctTime;          //!< see outputs_time()
+  bool _split_output_time
+    ( FFVar const& t );
+  std::string                  _setupError;       //!< see setup_error()
+  std::vector<t_InputLayout>   _inpLayout;        //!< see inputs_layout()
+  void _build_input_layout
+    ();
   std::vector<t_IniEntry>  _iniStream;   //!< the Ini stream and the dropped pairs
   std::map<FFVar,std::vector<size_t>,lt_FFVar> _fieldCols;  //!< per field: its columns in mesh order
   std::map<FFVar,std::vector< std::vector< std::pair<FFVar,double> > >,lt_FFVar> _fieldNodes;  //!< ... and their coordinates
@@ -448,9 +581,12 @@ OCFEMOL::_on_model_discretise
     if( itd == _mDom.end() ){ _setupStatus = SetupStatus::INCONSISTENT_MODEL; return false; }
     _evoLo = itd->second.lo_dom;  _evoHi = itd->second.up_dom;
     _mDom.erase( itd );
+    _inpTimeVarying.clear();
+    for( auto const& [v, dm] : _mInp ) if( dm.count( t ) ) _inpTimeVarying.insert( v );
     for( auto& [v, dm] : _mVar ) dm.erase( t );
     for( auto& [v, dm] : _mInp ) dm.erase( t );
     for( auto& [inp, disc] : _mInpDisc ) disc.erase( t );
+    if( !_split_output_time( t ) ){ _setupStatus = SetupStatus::INCONSISTENT_MODEL; return false; }
     for( auto& f : _mFct ) f.grid.erase( t );
     for( auto& a : _auxDef ){ a.dom.erase( t ); a.diff_dom.erase( t ); }   // reduce_order recorded the auxiliaries over (t,z)
   }
@@ -470,6 +606,7 @@ inline bool
 OCFEMOL::_on_model_ready
 ()
 {
+  _setupError.clear();
   if( !_build_colloc_plan() ) return false;
   _issetup = true;
 
@@ -490,6 +627,7 @@ OCFEMOL::_on_model_ready
              << _shape.t_lo << ", " << _shape.t_hi << "]\n";
 
   _build_column_map();
+  _build_input_layout();
   _build_mass();
   if( !_build_jacobian_pattern() ){
     std::cerr << "OCFEMOL::setup ** the Jacobian pattern of Rc could not be built" << std::endl;
@@ -506,7 +644,11 @@ OCFEMOL::_on_model_ready
   _disp( 1 ) << "OCFEMOL::setup [mol] Ini stream: " << _shape.n_ini_stream << " INITIAL (row, node) pairs at differential nodes; "
              << _shape.n_ini_dropped << " at algebraic nodes dropped (consistency at t0)\n";
   if( bad ){
-    std::cerr << "OCFEMOL::setup ** " << bad << " differential unknown(s) without an initial condition (see the [mol] DOF audit)" << std::endl;
+    if( !_auditRefusals.empty() )
+      _setupError = _auditRefusals.front() + ( _auditRefusals.size() > 1? " (and " + std::to_string( _auditRefusals.size() - 1 ) + " more)": "" );
+    else
+      _setupError = std::to_string( bad ) + " differential unknown(s) without an initial condition (see the [mol] DOF audit)";
+    std::cerr << "OCFEMOL::setup ** " << _setupError << std::endl;
     _setupStatus = SetupStatus::INCONSISTENT_MODEL;
     return false;
   }
@@ -515,11 +657,12 @@ OCFEMOL::_on_model_ready
 
 inline bool
 OCFEMOL::eval_residual
-( double t, double const* xc, double* rc )
+( double t, double const* xc, double const* uc, double* rc )
 {
   if( !_shape.ran || !xc || !rc ) return false;
-  // the inputs of the collocated system: t, and any lumped input of the model (zero until phase 5 wires them)
+  // the collocated input vector: the caller's values, t in its own slot
   std::vector<double> inp( _nCollInp, 0. );
+  if( uc ) std::copy( uc, uc + _nCollInp, inp.begin() );
   if( _nCollInp ) inp[ pos_input( _evolution_dom_var, {} ) ] = t;
   for( size_t i = 0; i < _vCst.size() && i < _vCstVal.size(); ++i ) _OCCst[i].set( _vCstVal[i] );
   _eval_eqn( rc, xc, _nCollInp? inp.data(): nullptr, _OCEqn, _OCVar, _OCInp, _OCDom, _OCCst, _wrkOC );
@@ -538,34 +681,114 @@ const
   }
 }
 
+inline void
+OCFEMOL::jacobian_pattern_full
+( std::vector<size_t>& jac_ptr, std::vector<size_t>& jac_col )
+const
+{
+  size_t const ncol = _nCollVar + _nCollInp;
+  jac_ptr.assign( 1, 0 ); jac_col.clear();
+  for( size_t r = 0; r < _jacPatternEqn.size(); ++r ){
+    for( size_t c : _jacPatternEqn[r] ) if( c < ncol ) jac_col.push_back( c );
+    jac_ptr.push_back( jac_col.size() );
+  }
+}
+
 inline bool
-OCFEMOL::deriv_residual
-( double t, double const* xc, double* rc, std::vector<size_t>& jac_ptr, std::vector<size_t>& jac_col,
-  std::vector<double>& jac_val, double* drdt )
+OCFEMOL::deriv_residual_full
+( double t, double const* xc, double const* uc, double* rc, std::vector<size_t>& jac_ptr, std::vector<size_t>& jac_col,
+  std::vector<double>& jac_val )
 {
   if( !_shape.ran || !_jacReady || !xc ) return false;
   size_t const ncol = _nCollVar + _nCollInp;
-  // the FAD buffers, seeded by colour exactly as OCFESLV::_reset_autodiff seeds its own
+  // the FAD buffers, seeded by colour exactly as OCFESLV::_reset_autodiff seeds its own -- uc's slots coloured with xc
   std::vector<t_FAD> Fvar( _nCollVar ), Finp( _nCollInp ), Feqn( _nCollEqn );
   for( size_t i = 0; i < _nCollVar; ++i ){ Fvar[i] = xc[i]; if( _jacNColor ) Fvar[i].diff( _jacColor[i], _jacNColor ); }
   size_t const it = _nCollInp? pos_input( _evolution_dom_var, {} ): 0;
-  for( size_t i = 0; i < _nCollInp; ++i ){ Finp[i] = ( i == it? t: 0. ); if( _jacNColor ) Finp[i].diff( _jacColor[_nCollVar+i], _jacNColor ); }
+  for( size_t i = 0; i < _nCollInp; ++i ){
+    Finp[i] = ( i == it? t: ( uc? uc[i]: 0. ) );
+    if( _jacNColor ) Finp[i].diff( _jacColor[_nCollVar+i], _jacNColor );
+  }
   _reset_colloc( _OCFVar, _OCFInp, _OCFDom, _OCFCst );
   _OCFEqn = OCVar<t_FAD>();  _wrkOCF.clear();
   std::vector<t_FAD> Fcst( _vCstVal.begin(), _vCstVal.end() );          // the model's constants, as OCFESLV passes them
   for( size_t i = 0; i < _vCst.size() && i < Fcst.size(); ++i ) _OCFCst[i].update( &Fcst[i] );
   _eval_eqn( Feqn.data(), Fvar.empty()? nullptr: Fvar.data(), Finp.empty()? nullptr: Finp.data(),
              _OCFEqn, _OCFVar, _OCFInp, _OCFDom, _OCFCst, _wrkOCF );
-  // extraction into CSR over the xc columns; t's column apart
   jac_ptr.assign( 1, 0 ); jac_col.clear(); jac_val.clear();
   for( size_t r = 0; r < _nCollEqn; ++r ){
     if( rc ) rc[r] = Feqn[r].val();
-    if( drdt ) drdt[r] = 0.;
     for( size_t c : _jacPatternEqn[r] ){
       if( c >= ncol ) continue;
-      double const d = _jacNColor? Feqn[r].deriv( _jacColor[c] ): 0.;
-      if( c < _nCollVar ){ jac_col.push_back( c ); jac_val.push_back( d ); }
-      else if( drdt && c == _nCollVar + it ) drdt[r] = d;
+      jac_col.push_back( c );  jac_val.push_back( _jacNColor? Feqn[r].deriv( _jacColor[c] ): 0. );
+    }
+    jac_ptr.push_back( jac_col.size() );
+  }
+  return true;
+}
+
+inline bool
+OCFEMOL::eval_outputs
+( double t, double const* xc, double const* uc, double* f )
+{
+  if( !_shape.ran || !xc || !f ) return false;
+  if( !_nCollFct ) return true;
+  std::vector<double> inp( _nCollInp, 0. );
+  if( uc ) std::copy( uc, uc + _nCollInp, inp.begin() );
+  if( _nCollInp ) inp[ pos_input( _evolution_dom_var, {} ) ] = t;
+  for( size_t i = 0; i < _vCst.size() && i < _vCstVal.size(); ++i ) _OCCst[i].set( _vCstVal[i] );
+  _eval_fct( f, xc, _nCollInp? inp.data(): nullptr, _OCEqn, _OCVar, _OCInp, _OCDom, _OCCst, _wrkOC );
+  return true;
+}
+
+inline bool
+OCFEMOL::deriv_outputs_full
+( double t, double const* xc, double const* uc, double* f, std::vector<size_t>& ptr, std::vector<size_t>& col,
+  std::vector<double>& val )
+{
+  if( !_shape.ran || !_jacReady || !xc ) return false;
+  size_t const ncol = _nCollVar + _nCollInp;
+  ptr.assign( 1, 0 ); col.clear(); val.clear();
+  if( !_nCollFct ) return true;
+  std::vector<t_FAD> Fvar( _nCollVar ), Finp( _nCollInp ), Ffct( _nCollFct );
+  for( size_t i = 0; i < _nCollVar; ++i ){ Fvar[i] = xc[i]; if( _jacNColor ) Fvar[i].diff( _jacColor[i], _jacNColor ); }
+  size_t const it = _nCollInp? pos_input( _evolution_dom_var, {} ): 0;
+  for( size_t i = 0; i < _nCollInp; ++i ){
+    Finp[i] = ( i == it? t: ( uc? uc[i]: 0. ) );
+    if( _jacNColor ) Finp[i].diff( _jacColor[_nCollVar+i], _jacNColor );
+  }
+  _reset_colloc( _OCFVar, _OCFInp, _OCFDom, _OCFCst );
+  _OCFEqn = OCVar<t_FAD>();  _wrkOCF.clear();
+  std::vector<t_FAD> Fcst( _vCstVal.begin(), _vCstVal.end() );
+  for( size_t i = 0; i < _vCst.size() && i < Fcst.size(); ++i ) _OCFCst[i].update( &Fcst[i] );
+  _eval_fct( Ffct.data(), Fvar.empty()? nullptr: Fvar.data(), Finp.empty()? nullptr: Finp.data(),
+             _OCFEqn, _OCFVar, _OCFInp, _OCFDom, _OCFCst, _wrkOCF );
+  for( size_t r = 0; r < _nCollFct; ++r ){
+    if( f ) f[r] = Ffct[r].val();
+    for( size_t c : _jacPatternFct[r] ){
+      if( c >= ncol ) continue;
+      col.push_back( c );  val.push_back( _jacNColor? Ffct[r].deriv( _jacColor[c] ): 0. );
+    }
+    ptr.push_back( col.size() );
+  }
+  return true;
+}
+
+inline bool
+OCFEMOL::deriv_residual
+( double t, double const* xc, double* rc, std::vector<size_t>& jac_ptr, std::vector<size_t>& jac_col,
+  std::vector<double>& jac_val, double* drdt )
+{
+  // the xc columns of the full derivative, with t's column apart (one FAD code path)
+  std::vector<size_t> P, C;  std::vector<double> V;
+  if( !deriv_residual_full( t, xc, nullptr, rc, P, C, V ) ) return false;
+  size_t const tc = _nCollVar + ( _nCollInp? pos_input( _evolution_dom_var, {} ): 0 );
+  jac_ptr.assign( 1, 0 ); jac_col.clear(); jac_val.clear();
+  for( size_t r = 0; r + 1 < P.size(); ++r ){
+    if( drdt ) drdt[r] = 0.;
+    for( size_t k = P[r]; k < P[r+1]; ++k ){
+      if( C[k] < _nCollVar ){ jac_col.push_back( C[k] ); jac_val.push_back( V[k] ); }
+      else if( drdt && _nCollInp && C[k] == tc ) drdt[r] = V[k];
     }
     jac_ptr.push_back( jac_col.size() );
   }
@@ -574,13 +797,18 @@ OCFEMOL::deriv_residual
 
 inline bool
 OCFEMOL::eval_initial
-( double t, double const* xc, double* ini )
+( double t, double const* xc, double* ini, double const* uc )
 {
   if( !_shape.ran || !xc || !ini ) return false;
   for( size_t k = 0; k < _iniStream.size(); ++k ){
     auto const& e = _iniStream[k];
     std::vector<FFVar> vars; std::vector<double> vals;
     for( auto const& [y, c] : e.cols ){ vars.push_back( y ); vals.push_back( xc[c] ); }
+    if( !e.icols.empty() && !uc ) return false;                        // reads an input: its values are needed
+    for( auto const& [w, comb] : e.icols ){
+      double v = 0.;  for( auto const& [c, a] : comb ) v = ( comb.size() == 1 && a == 1. )? uc[c]: v + a*uc[c];
+      vars.push_back( w );  vals.push_back( v );
+    }
     for( auto const& [d, z] : e.coord ){ vars.push_back( d ); vals.push_back( z ); }
     if( _evolution_dom_set ){ vars.push_back( _evolution_dom_var ); vals.push_back( t ); }
     for( size_t i = 0; i < _vCst.size() && i < _vCstVal.size(); ++i ){ vars.push_back( _vCst[i] ); vals.push_back( _vCstVal[i] ); }
@@ -593,7 +821,8 @@ OCFEMOL::eval_initial
 
 inline bool
 OCFEMOL::deriv_initial
-( double t, double const* xc, double* ini, std::vector<size_t>& ptr, std::vector<size_t>& col, std::vector<double>& val )
+( double t, double const* xc, double* ini, std::vector<size_t>& ptr, std::vector<size_t>& col, std::vector<double>& val,
+  double const* uc )
 {
   if( !_shape.ran || !xc ) return false;
   ptr.assign( 1, 0 ); col.clear(); val.clear();
@@ -604,6 +833,11 @@ OCFEMOL::deriv_initial
     for( auto const& [d, z] : e.coord ){ vars.push_back( d ); vals.push_back( t_FAD( z ) ); }
     if( _evolution_dom_set ){ vars.push_back( _evolution_dom_var ); vals.push_back( t_FAD( t ) ); }
     for( size_t i = 0; i < _vCst.size() && i < _vCstVal.size(); ++i ){ vars.push_back( _vCst[i] ); vals.push_back( t_FAD( _vCstVal[i] ) ); }
+    if( !e.icols.empty() && !uc ) return false;                        // reads an input: its values are needed
+    for( auto const& [w, comb] : e.icols ){                            // held fixed
+      double v = 0.;  for( auto const& [c, a] : comb ) v = ( comb.size() == 1 && a == 1. )? uc[c]: v + a*uc[c];
+      vars.push_back( w );  vals.push_back( t_FAD( v ) );
+    }
     std::vector<t_FAD> out( 1 );
     try{ _dag->eval( std::vector<FFVar>{ _iniEqn[e.row].var }, out, vars, vals ); } catch( ... ){ return false; }
     if( ini ) ini[k] = out[0].val();
@@ -738,6 +972,127 @@ OCFEMOL::_build_column_map
   }
 }
 
+inline bool
+OCFEMOL::_split_output_time
+( FFVar const& t )
+{
+  _fctTime.clear();
+  FFIntegral OpI;  FFEval OpE;
+  auto fail = [&]( size_t k, std::string const& why ){
+    _setupError = "output " + std::to_string( k ) + ": " + why;
+    std::cerr << "OCFEMOL::setup ** " << _setupError << std::endl;
+    return false; };
+  auto has_t_operator = [&]( FFVar const& E ) -> bool {             // a t-operator anywhere in E
+    FFSubgraph const sg = _dag->subgraph( 1, &E );
+    for( auto const* op : sg.l_op ){
+      if( auto const* pi = mc::type_cast<FFIntegral const>( op ) ){ if( pi->Indep().expr.count( t ) ) return true; }
+      else if( auto const* pe = mc::type_cast<FFEval const>( op ) ){ if( pe->Coord().count( t ) ) return true; }
+      else if( auto const* pp = mc::type_cast<FFPartial const>( op ) ){ if( pp->Indep().expr.count( t ) ) return true; }
+    }
+    return false; };
+  for( size_t k = 0; k < _mFct.size(); ++k ){
+    auto& f = _mFct[k];
+    t_OutputTime T;  bool timed = false;
+    if( f.grid.count( t ) )
+      return fail( k, "it is distributed over the evolution direction (a trajectory) -- not taken by the method of lines yet" );
+    // a point in t given with the output
+    if( auto itp = f.point.find( t ); itp != f.point.end() ){
+      T.kind = t_OutputTime::POINT;  T.tau = itp->second;
+      if( auto its = f.side.find( t ); its != f.side.end() ){ T.side = its->second;  f.side.erase( its ); }
+      f.point.erase( itp );  timed = true;
+    }
+    FFVar E = f.var;
+    // a DEFERRED VALUE: FFModel's setup already took the reduction in t out of the output -- the output reads the
+    // deferred input, and the record holds the reduction's source (the integrand, or the operand at tau) and its kind.
+    // That is exactly the split here: the source is the spatial part, the kind the time part.
+    if( is_deferred_input( E ) ){
+      if( timed ) return fail( k, "it is a reduction in t (a deferred value) and is also given a time" );
+      t_DeferredValue const* C = nullptr;
+      for( auto const& c : var_deferred() ) if( c.input.id() == E.id() ){ C = &c; break; }
+      if( !C ) return fail( k, "its deferred value has no record" );
+      T.kind = C->accumulate? t_OutputTime::INTEGRAL: t_OutputTime::POINT;
+      if( !C->accumulate ){ T.tau = C->tau;  if( C->side ) T.side = C->side; }
+      E = C->source;  timed = true;
+    }
+    else{
+      FFSubgraph const sg = _dag->subgraph( 1, &E );
+      for( auto const* op : sg.l_op )
+        if( op && op->type == FFOp::VAR && op->varout.size() && op->varout[0] && is_deferred_input( *op->varout[0] ) )
+          return fail( k, "it is a function of a reduction in t (a deferred value), not the reduction itself -- not taken"
+                          " by the method of lines yet" );
+    }
+    // an outermost integral or evaluation in t
+    FFOp const* pOp = E.opdef().first;
+    if( pOp && pOp->varin.size() == 1 && pOp->varin[0] ){
+      FFVar const operand = *pOp->varin[0];
+      if( auto const* pi = mc::type_cast<FFIntegral const>( pOp ); pi && pi->Indep().expr.count( t ) ){
+        if( timed ) return fail( k, "it integrates over t and is also given a time" );
+        FFIntegral::t_SMon rest;
+        for( auto const& [v, o] : pi->Indep().expr ) if( v.id() != t.id() ) rest += FFIntegral::t_SMon( v, o );
+        E = rest.tord? OpI( operand, rest ): operand;
+        T.kind = t_OutputTime::INTEGRAL;  timed = true;
+      }
+      else if( auto const* pe = mc::type_cast<FFEval const>( pOp ); pe && pe->Coord().count( t ) ){
+        if( timed ) return fail( k, "it is evaluated at a time twice" );
+        T.kind = t_OutputTime::POINT;  T.tau = pe->Coord().at( t );
+        if( auto its = pe->Side().find( t ); its != pe->Side().end() ) T.side = its->second;
+        std::map<FFVar,double,lt_FFVar> coord;  std::map<FFVar,int,lt_FFVar> side;  FFIntegral::t_SMon rest;
+        for( auto const& [v, z] : pe->Coord() ) if( v.id() != t.id() ){ coord[v] = z;  rest += FFIntegral::t_SMon( v, 1 ); }
+        for( auto const& [v, sd] : pe->Side() )  if( v.id() != t.id() ) side[v] = sd;
+        E = rest.tord? OpE( std::vector<FFVar>{ operand }, rest, coord, side )[0]: operand;
+        timed = true;
+      }
+    }
+    if( !timed ) return fail( k, "it gives no time -- evaluate it at a point in t, or integrate it over t" );
+    if( has_t_operator( E ) )
+      return fail( k, "it holds an operator in t below its outermost one -- not taken by the method of lines" );
+    f.var = E;
+    _fctTime.push_back( T );
+  }
+  return true;
+}
+
+inline void
+OCFEMOL::_build_input_layout
+()
+{
+  _inpLayout.clear();
+  for( auto const& [w, dom] : _mInp ){
+    if( _evolution_dom_set && w.id() == _evolution_dom_var.id() ) continue;   // t: time_slot()
+    if( is_deferred_input( w ) ) continue;        // a deferred value: the outputs read its source instead (_split_output_time)
+    auto const itb = _blkInp.find( w );
+    if( itb == _blkInp.end() ) continue;
+    t_InputLayout L;  L.input = w;  L.time_varying = _inpTimeVarying.count( w ) > 0;
+    std::vector<FFVar> const dirs( dom.begin(), dom.end() );
+    if( dirs.empty() ){ L.cols.push_back( pos_input( w, {} ) );  L.nodes.emplace_back();  _inpLayout.push_back( std::move( L ) );  continue; }
+    size_t const nd = dirs.size();
+    auto const& blk_dim = std::get<2>( itb->second );
+    std::vector<size_t> nel( nd ), nnd( nd );
+    std::vector< std::vector< std::vector<double> > > pos( nd );        // per direction, per element: the node positions
+    for( size_t d = 0; d < nd; ++d ){
+      FFDom const& dd = _input_dom( w, dirs[d] );                       // the input's own collocation
+      nel[d] = dd.n_elem;  nnd[d] = blk_dim[d];
+      for( size_t e = 0; e < dd.n_elem; ++e ) pos[d].push_back( dd.lgnodes( dd.elem_lo( e ), dd.elem_up( e ) ) );
+    }
+    // input_dofs() order: element blocks outer, nodes inner, at each level the first direction fastest
+    std::vector<size_t> iel( nd, 0 );
+    for( bool more_el = true; more_el; ){
+      std::map<FFVar,size_t,lt_FFVar> ndx_el;  for( size_t d = 0; d < nd; ++d ) ndx_el[ dirs[d] ] = iel[d];
+      size_t const base = pos_input( w, ndx_el );
+      std::vector<size_t> ind( nd, 0 );
+      for( bool more_nd = true; more_nd; ){
+        size_t c = base, stride = 1;
+        for( size_t d = 0; d < nd; ++d ){ c += ind[d]*stride;  stride *= nnd[d]; }   // within the element: first fastest
+        L.cols.push_back( c );  L.nodes.emplace_back();
+        for( size_t d = 0; d < nd; ++d ) L.nodes.back().emplace_back( dirs[d], pos[d][ iel[d] ].at( ind[d] ) );
+        more_nd = false;  for( size_t d = 0; d < nd; ++d ){ if( ++ind[d] < nnd[d] ){ more_nd = true; break; }  ind[d] = 0; }
+      }
+      more_el = false;  for( size_t d = 0; d < nd; ++d ){ if( ++iel[d] < nel[d] ){ more_el = true; break; }  iel[d] = 0; }
+    }
+    _inpLayout.push_back( std::move( L ) );
+  }
+}
+
 inline void
 OCFEMOL::_build_mass
 ()
@@ -819,6 +1174,44 @@ OCFEMOL::_audit_initial_coverage
 {
   _shape.n_ini_stream = _shape.n_ini_dropped = 0;
   size_t bad = 0;
+  _auditRefusals.clear();
+  auto refuse = [&]( std::string const& m ){ os << "OCFEMOL::setup [mol] DOF audit: " << m << "\n";  _auditRefusals.push_back( m );  ++bad; };
+  // An INITIAL row is evaluated at a node of the field it initialises, so an input it reads is taken at THAT node: a
+  // lumped input is its one slot; a distributed one, declared over the row's directions (otherwise the model is
+  // misspecified: no value at the row's nodes), is its Lagrange interpolant on the element -- in each direction the
+  // weights of the input's own nodes at the field node's reference coordinate (FFDom::w_eval_lagrange), their tensor
+  // product over the directions, so a linear combination of the input's slots.  This is the input as OCFESLV's
+  // collocation evaluates it; at the domain's collocation it is one slot with weight 1, bound as the slot itself.
+  std::set< std::pair<size_t,long> > refused_pairs;      // (INITIAL row, input) already refused
+  auto over_row_dirs = [&]( FFVar const& x, FFVar const& w, std::set<FFVar,lt_FFVar> const& wdom,
+                            std::set<FFVar,lt_FFVar> const& xdom ) -> bool {
+    if( wdom == xdom ) return true;
+    std::ostringstream m;  m << "the INITIAL row of " << x << " reads the input " << w << ", declared over other directions"
+                              << " than the row's: it has no value at the row's nodes";
+    refuse( m.str() );  return false; };
+  // the combination of w's slots giving its value at the field node ( ndx_el, ind ), w over the field's directions dirs
+  auto at_node = [&]( FFVar const& w, std::vector<FFVar> const& dirs, std::map<FFVar,size_t,lt_FFVar> const& ndx_el,
+                      std::vector<size_t> const& ind, std::vector< std::pair<size_t,double> >& comb ) -> bool {
+    comb.clear();
+    size_t const nd = dirs.size();
+    std::vector< std::vector<double> > wts( nd );
+    std::vector<size_t> nni( nd );
+    for( size_t d = 0; d < nd; ++d ){
+      FFDom const& di = _input_dom( w, dirs[d] );  FFDom const& dx = _mDom.at( dirs[d] );
+      nni[d] = di.n_node;
+      if( di.type == dx.type && di.n_node == dx.n_node ){             // the field's own nodes: the unit weight
+        wts[d].assign( di.n_node, 0. );  wts[d].at( ind[d] ) = 1.;  continue; }
+      if( !di.w_eval_lagrange( wts[d], dx.lgnodes().at( ind[d] ), 0 ) || wts[d].size() != di.n_node ) return false;
+    }
+    size_t const base = pos_input( w, ndx_el );
+    std::vector<size_t> j( nd, 0 );
+    for( bool more = true; more; ){
+      double a = 1.;  size_t c = base, stride = 1;
+      for( size_t d = 0; d < nd; ++d ){ a *= wts[d][ j[d] ];  c += j[d]*stride;  stride *= nni[d]; }
+      if( a != 0. ) comb.emplace_back( c, a );
+      more = false;  for( size_t d = 0; d < nd; ++d ){ if( ++j[d] < nni[d] ){ more = true; break; }  j[d] = 0; }
+    }
+    return !comb.empty(); };
   // the INITIAL rows reading each field, with their spatial masks
   std::vector<FFDep> ini_dep;  ini_dep.reserve( _iniEqn.size() );
   for( auto const& e : _iniEqn ) ini_dep.push_back( _deps_of( e.var ) );
@@ -840,6 +1233,11 @@ OCFEMOL::_audit_initial_coverage
           t_IniEntry e; e.row = q; e.target = col; e.dropped = !diff;
           for( auto const& y : _peel.states ) if( ini_dep[q].dep().count( y.id().second ) && _mVar.count( y ) && _mVar.at( y ).empty() )
             e.cols.emplace_back( y, pos_state( y, {} ) );
+          for( auto const& [w, wdom] : _mInp ){                         // the lumped inputs it reads
+            if( ( _evolution_dom_set && w.id() == _evolution_dom_var.id() ) || !ini_dep[q].dep().count( w.id().second ) ) continue;
+            if( wdom.empty() ) e.icols.emplace_back( w, std::vector< std::pair<size_t,double> >{ { pos_input( w, {} ), 1. } } );
+            else over_row_dirs( x, w, wdom, var_dom );                 // a distributed input: no value without a point
+          }
           _iniStream.push_back( std::move( e ) );
         }
       }
@@ -898,6 +1296,20 @@ OCFEMOL::_audit_initial_coverage
             auto ity = _mVar.find( y ); auto itby = _blkVar.find( y );
             if( ity == _mVar.end() || itby == _blkVar.end() || ity->second != var_dom ) continue;   // same grid only
             e.cols.emplace_back( y, pos_state( y, ndx_el ) + ( col - pos_state( x, ndx_el ) ) );
+          }
+          // the inputs it reads, at the node (see over_row_dirs / at_node).  Refusals are reported once per (row, input).
+          for( auto const& [w, wdom] : _mInp ){
+            if( ( _evolution_dom_set && w.id() == _evolution_dom_var.id() ) || !ini_dep[q].dep().count( w.id().second ) ) continue;
+            if( wdom.empty() ){ e.icols.emplace_back( w, std::vector< std::pair<size_t,double> >{ { pos_input( w, {} ), 1. } } );  continue; }
+            auto const key = std::make_pair( q, w.id().second );
+            if( refused_pairs.count( key ) ) continue;
+            std::vector< std::pair<size_t,double> > comb;
+            if( !over_row_dirs( x, w, wdom, var_dom ) ){ refused_pairs.insert( key );  continue; }
+            if( !at_node( w, dirs, ndx_el, ind, comb ) ){
+              std::ostringstream m;  m << "the INITIAL row of " << x << " reads the input " << w << ", whose value at the field's"
+                                        << " nodes could not be interpolated";
+              refuse( m.str() );  refused_pairs.insert( key );  continue; }
+            e.icols.emplace_back( w, std::move( comb ) );
           }
           _iniStream.push_back( std::move( e ) );
         }

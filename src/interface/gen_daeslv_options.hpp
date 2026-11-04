@@ -18,4 +18,10 @@ template <class PyOpt>
 void
 bind_daeslv_options(PyOpt& c)
 {
+  c.def_readwrite(
+      "MOL", &mc::DAESLV_IDAS::Options::MOL,
+      "The semi-discretisation's options, for a model distributed in space "
+      "(see setup): the collocation groups (INTERFACE, ...) and the method of "
+      "lines' own (IMPOSITION.NEUMANN_NODE). Its model-level fields (REDUCE, "
+      "CLASSIFY, DISPLAY_LEVEL, ...) are this solver's own, set above.");
 }

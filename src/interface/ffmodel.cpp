@@ -677,6 +677,10 @@ tau : float
           { return self.input_dofs(u); }, py::arg("var"),
           "The DOF indices of declared input ``var``, in the order of its values.")
       .def(
+          "distributed_in_space", &M::distributed_in_space,
+          "True when a state is declared over a direction other than the evolution one: a model distributed in "
+          "space, which DAESLV semi-discretises by the method of lines and ODESLV refuses.")
+      .def(
           "input_coordinates", [](M const& self, mc::FFVar const& u)
           { return self.input_coordinates(u); }, py::arg("var"),
           "The coordinates of the DOFs of declared input ``var``, in ``input_dofs`` order: one dict "

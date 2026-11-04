@@ -1,0 +1,68 @@
+--- a/src/idas/idas.c
++++ b/src/idas/idas.c
+@@ -6956,13 +6956,14 @@
+     }
+     terr_km1 = IDA_mem->ida_kk * (*err_km1);
+ 
+-    /* Has an order decrease already been decided in IDATestError? */
+-    if (IDA_mem->ida_knew != IDA_mem->ida_kk)
+-    {
+-      check_for_reduction = SUNFALSE;
+-    }
+-
+-    if (check_for_reduction)
++    /* Decide the order decrease afresh, on the COMBINED norms accumulated so far -- the ones the error
++       test uses -- instead of keeping a decrease IDATestError decided on the state norms alone.  A
++       decrease justified by the state norms is not one by the combined norms: with an EXACTLY constant
++       state those norms are all zero, IDATestError's test 0 <= 0 always decreased the order, and a
++       varying quadrature or sensitivity could never overrule it -- the order stalled at 1 and the
++       integration hit mxstep.  Unchanged wherever the state norms dominate. */
++    (void)check_for_reduction;
++    IDA_mem->ida_knew = IDA_mem->ida_kk;
+     {
+       if (IDA_mem->ida_kk > 2)
+       {
+@@ -7052,13 +7053,14 @@
+     }
+     terr_km1 = IDA_mem->ida_kk * (*err_km1);
+ 
+-    /* Has an order decrease already been decided in IDATestError? */
+-    if (IDA_mem->ida_knew != IDA_mem->ida_kk)
+-    {
+-      check_for_reduction = SUNFALSE;
+-    }
+-
+-    if (check_for_reduction)
++    /* Decide the order decrease afresh, on the COMBINED norms accumulated so far -- the ones the error
++       test uses -- instead of keeping a decrease IDATestError decided on the state norms alone.  A
++       decrease justified by the state norms is not one by the combined norms: with an EXACTLY constant
++       state those norms are all zero, IDATestError's test 0 <= 0 always decreased the order, and a
++       varying quadrature or sensitivity could never overrule it -- the order stalled at 1 and the
++       integration hit mxstep.  Unchanged wherever the state norms dominate. */
++    (void)check_for_reduction;
++    IDA_mem->ida_knew = IDA_mem->ida_kk;
+     {
+       if (IDA_mem->ida_kk > 2)
+       {
+@@ -7153,13 +7155,14 @@
+     }
+     terr_km1 = IDA_mem->ida_kk * (*err_km1);
+ 
+-    /* Has an order decrease already been decided in IDATestError? */
+-    if (IDA_mem->ida_knew != IDA_mem->ida_kk)
+-    {
+-      check_for_reduction = SUNFALSE;
+-    }
+-
+-    if (check_for_reduction)
++    /* Decide the order decrease afresh, on the COMBINED norms accumulated so far -- the ones the error
++       test uses -- instead of keeping a decrease IDATestError decided on the state norms alone.  A
++       decrease justified by the state norms is not one by the combined norms: with an EXACTLY constant
++       state those norms are all zero, IDATestError's test 0 <= 0 always decreased the order, and a
++       varying quadrature or sensitivity could never overrule it -- the order stalled at 1 and the
++       integration hit mxstep.  Unchanged wherever the state norms dominate. */
++    (void)check_for_reduction;
++    IDA_mem->ida_knew = IDA_mem->ida_kk;
+     {
+       if (IDA_mem->ida_kk > 2)
+       {

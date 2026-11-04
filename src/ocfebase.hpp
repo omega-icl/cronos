@@ -670,6 +670,10 @@ protected:
   };
   //! @brief Whether marching was REQUESTED (the solver's SOLVE.MARCHING).  Default: no.
   virtual bool _march_requested() const { return false; }
+  //! @brief For _eval_fct under marching (OCFESLV answers): whether output @p f is distributed over the evolution
+  //! direction, and the rows of window @p k it places in the monolithic layout.  Default: no such output.
+  virtual bool _march_field_over_evo( t_Fct const& f ) const { (void)f; return false; }
+  virtual std::vector<size_t> _march_field_rows( t_Fct const& f, size_t k ) const { (void)f; (void)k; return {}; }
 
   //! @brief Default: not marching.  OCFESLV answers from its marching state.
   virtual MarchContext _march_context
@@ -1095,6 +1099,35 @@ protected:
     const;
 
   //! @brief Effective discretisation of input inp along physical domain dom
+  //! @brief The declared model has been imported onto a new working DAG (for OCFESLV and OCFEMOL alike): derive the working input collocation
+  //! from FFModel's declaration (the input shares its domains' grid and differs only in local order and node
+  //! type).  @p vAllVarsLoc / @p ndxAllVars are the positional index the import produced.
+  void _on_model_imported
+    ( std::vector<FFVar> const& vAllVarsLoc,
+      std::map<FFVar::pt_idVar,size_t> const& ndxAllVars )
+    override
+    {
+    // The input shares its domains' grid: take each domain's FFDom and apply the input's declared
+    // collocation.  (Through rev192 the FFDom was captured when add_input() ran; deriving it here means a
+    // domain REDECLARED after its inputs now governs them too -- NOTES_20260911m Sec.3.)
+    _mInpDisc.clear();
+    for( auto const& [inp, decl] : _usr._mInpDiscUsr ){
+      t_Dom disc;
+      for( auto const& [dvar, ic] : decl ){
+        auto itdom = _usr._mDomUsr.find( dvar );
+        if( itdom == _usr._mDomUsr.end() )
+          throw Exceptions( Exceptions::INDEX );
+        FFDom opt = itdom->second;
+        opt.type = ic.type;
+        if( ic.n_node ) opt.n_node = ic.n_node;
+        if( opt.n_node == 0 )
+          throw FFDom::Exceptions( FFDom::Exceptions::NODES );
+        disc[ _local( dvar, vAllVarsLoc, ndxAllVars ) ] = opt;
+      }
+      _mInpDisc[ _local( inp, vAllVarsLoc, ndxAllVars ) ] = std::move( disc );
+    }
+    }
+
   FFDom const& _input_dom
     ( FFVar const& inp, FFVar const& dom )
     const;
@@ -1116,6 +1149,15 @@ protected:
   template <typename U>
   void _eval_eqn
     ( U* eqn, U const* var, U const* inp, 
+      OCVar<U>& OCres, std::vector<OCVar<U>>& OCvar,  std::vector<OCVar<U>>& OCinp,
+      std::vector<OCVar<U>>& OCdom, std::vector<OCVar<U>>& OCcst, std::vector<OCVar<U>>& OCwrk )
+    const;
+
+  //! @brief Templated evaluation of the collocated output functions (the base's, for OCFESLV and OCFEMOL alike; the
+  //! marching state through _march_context and the _march_field_* hooks)
+  template <typename U>
+  void _eval_fct
+    ( U* fct, U const* var, U const* inp,
       OCVar<U>& OCres, std::vector<OCVar<U>>& OCvar,  std::vector<OCVar<U>>& OCinp,
       std::vector<OCVar<U>>& OCdom, std::vector<OCVar<U>>& OCcst, std::vector<OCVar<U>>& OCwrk )
     const;
@@ -5070,10 +5112,15 @@ protected:
   //! deriv_residual reads it.  The output-function pass goes through _eval_fct_dep, which the solver overrides.
   bool _build_jacobian_pattern
     ();
-  //! @brief The output functions' dependence pass for _build_jacobian_pattern; the default has none.
+  //! @brief The output functions' dependence pass for _build_jacobian_pattern: _eval_fct in the dependence environment
+  //! (OCFESLV's, moved here with _eval_fct -- OCFEMOL's outputs need it as much).
   virtual void _eval_fct_dep
     ( std::vector<FFDep>& fct_dep, std::vector<FFDep> const& var_dep, std::vector<FFDep> const& inp_dep )
-    { (void)fct_dep; (void)var_dep; (void)inp_dep; }
+    {
+      _eval_fct( fct_dep.data(), var_dep.empty()? nullptr: var_dep.data(),
+                 inp_dep.empty()? nullptr: inp_dep.data(),
+                 _OCDepEqn, _OCDepVar, _OCDepInp, _OCDepDom, _OCDepCst, _wrkOCDep );
+    }
 
 };
 
@@ -17514,6 +17561,290 @@ OCFEBASE::_build_jacobian_pattern
     _jacReady = false;
     return false;
   }
+}
+
+template <typename U>
+inline void
+OCFEBASE::_eval_fct
+( U* fct, U const* var, U const* inp,
+  OCVar<U>& OCres, std::vector<OCVar<U>>& OCvar,  std::vector<OCVar<U>>& OCinp,
+  std::vector<OCVar<U>>& OCdom, std::vector<OCVar<U>>& OCcst, std::vector<OCVar<U>>& OCwrk )
+const
+{
+  auto const mctx = _march_context();                // marching state, through the hook (OCFESLV answers)
+  // Validate external coefficient arrays before any output assembly.
+  if( _nCollVar && !var )
+    throw Exceptions( Exceptions::INTERNAL );
+  if( _nCollInp && !inp )
+    throw Exceptions( Exceptions::INTERNAL );
+  if( _nCollFct && !fct )
+    throw Exceptions( Exceptions::INTERNAL );
+
+  // =========================================================================
+  // LOOP 3: POST-EVALUATION OUTPUT FUNCTIONS
+  //
+  // Point outputs contribute one scalar row.  Distributed outputs contribute
+  // one row per collocation node selected by their grid mask.  These rows are
+  // appended to the fct[] array only; they never participate in equation row
+  // counts, classification, or interface residual/SAT assembly.
+  // =========================================================================
+  size_t nfct = 0;
+  U* fct_base = fct;
+
+  for( auto const& fctrec : _mFct ){
+    auto const& fctvar   = fctrec.var;
+    auto const& fctpoint = fctrec.point;
+    auto const& fctgrid  = fctrec.grid;
+
+#ifdef CRONOS_DEBUG_OUT
+    _disp( 3 ) << "eval output " << nfct << " begin\n";
+#endif
+
+    std::set<FFVar,lt_FFVar> evaldom =
+      nfct < _fctEvalDom.size()? _fctEvalDom[nfct] : std::set<FFVar,lt_FFVar>();
+
+    std::map<FFVar, size_t, lt_FFVar> fixed_el;
+    std::map<FFVar, double, lt_FFVar> ref_el;
+    for( auto const& [dvar, val] : fctpoint ){
+      auto const& dom = _mDom.at( dvar );
+      auto const isd = fctrec.side.find( dvar );
+      auto const [iel, xi] = _point_in_domain( dom, val, isd == fctrec.side.end()? (int)FFDom::MINUS: isd->second );
+      fixed_el[dvar] = iel;
+      ref_el[dvar]   = xi;
+    }
+
+    // Element dimensions not fixed by a point and not part of the distributed
+    // grid are looped over and accumulated.  This preserves the existing scalar
+    // output behaviour for FFIntegral terms, where integrated dimensions no
+    // longer appear in OCres.dom() after evaluation.
+    // A direction consumed by an FFEval INSIDE the output expression is PINNED to the element holding its point (with
+    // the evaluation's side), exactly as the equation path pins _eqnEvalPoint -- not accumulated.  Without this, under
+    // REDUCE.ORDER = RED_NONE (no capture), OpE(x,t,tau) was summed over every element of t: n_elem times its value.
+    if( fctrec.var.dag() ){
+      FFSubgraph sgf = _dag->subgraph( 1, &fctrec.var );
+      for( auto const* op : sgf.l_op ){
+        auto const* fe = op? mc::type_cast<FFEval const>( op ): nullptr;
+        if( !fe ) continue;
+        for( auto const& [dv, z0] : fe->Coord() ){
+          if( fixed_el.count( dv ) || !_mDom.count( dv ) ) continue;
+          auto const [iel, xi] = _point_in_domain( _mDom.at( dv ), z0, fe->side( dv ) );  (void)xi;
+          fixed_el[dv] = iel;
+        }
+      }
+    }
+    std::set<FFVar,lt_FFVar> free_dom;
+    for( auto const& dvar : evaldom ){
+      if( fctpoint.find( dvar ) != fctpoint.end() ) continue;
+      if( fixed_el.count( dvar ) ) continue;                  // pinned by an FFEval in the expression (above)
+      if( fctgrid.find( dvar )  != fctgrid.end()  ) continue;
+      free_dom.insert( dvar );
+    }
+
+    auto transform_buffer = [&]( std::vector<U> buf, std::map<FFVar,size_t,lt_FFVar> const& ndx_el ) -> std::vector<U>
+    {
+      struct FDim {
+        FFDom const* pdom;
+        FFVar const* pvar;
+        size_t       cur_n;
+      };
+
+      std::vector<FDim> fdims;
+      fdims.reserve( OCres.dom().size() );
+      for( auto const& [pvar, pdom] : OCres.dom() )
+        fdims.push_back({ pdom, pvar, pdom->n_node });
+
+      for( size_t idim = 0; idim < fdims.size(); ++idim ){
+        auto& fd = fdims[idim];
+
+        size_t stride = 1;
+        for( size_t d = 0; d < idim; ++d ) stride *= fdims[d].cur_n;
+        size_t outer = 1;
+        for( size_t d = idim+1; d < fdims.size(); ++d ) outer *= fdims[d].cur_n;
+
+        auto itref = ref_el.find( *fd.pvar );
+        if( itref != ref_el.end() ){
+          std::vector<U> newbuf;
+          if( !fd.pdom->eval_lagrange( newbuf, itref->second, 0, buf, stride, outer ) )
+            throw Exceptions( Exceptions::INTERNAL );
+          buf      = std::move( newbuf );
+          fd.cur_n = 1;
+          continue;
+        }
+
+        auto itgrid = fctgrid.find( *fd.pvar );
+        if( itgrid == fctgrid.end() )
+          throw Exceptions( Exceptions::DOMAIN );
+
+        int lim = itgrid->second;
+        size_t const iel = ndx_el.count(*fd.pvar)? ndx_el.at(*fd.pvar) : size_t(0);
+        size_t const n   = fd.cur_n;
+        size_t const nel = fd.pdom->n_elem;
+        // marching (2026-10-06, WORKPLAN 1.1): the evolution direction is collapsed to the resident window, ONE element
+        // that would count as both the first and the last.  The window emits ALL its evolution nodes (no mask drop,
+        // no unique-node drop) -- the same rows, hence the same Jacobian pattern, in every window -- and
+        // _march_field_rows applies the GLOBAL mask when it places them in the monolithic layout.
+        bool const evo_all = _evolution_dom_var.dag() && fd.pvar->id() == _evolution_dom_var.id() && mctx.n_grid > 1
+                          && lim != FFDom::LB && lim != FFDom::UB;
+        if( evo_all ) lim = FFDom::ALL;
+
+        if( lim == FFDom::LB || lim == FFDom::UB ){
+          double const t_eval = ( lim == FFDom::LB ) ? -1.0 : 1.0;
+          std::vector<U> newbuf;
+          if( !fd.pdom->eval_lagrange( newbuf, t_eval, 0, buf, stride, outer ) )
+            throw Exceptions( Exceptions::INTERNAL );
+          buf      = std::move( newbuf );
+          fd.cur_n = 1;
+        }
+        else{
+          std::vector<size_t> vi;
+          vi.reserve( n );
+          for( size_t k = 0; k < n; ++k ){
+            bool ok = true;
+            switch( lim ){
+              case FFDom::ALL:              break;
+              case FFDom::ALL-FFDom::LB:
+                if( iel == 0      && k == 0   ) ok = false;
+                break;
+              case FFDom::ALL-FFDom::UB:
+                if( iel == nel-1  && k == n-1 ) ok = false;
+                break;
+              case FFDom::ALL-FFDom::LB-FFDom::UB:
+                if( iel == 0      && k == 0   ) ok = false;
+                if( iel == nel-1  && k == n-1 ) ok = false;
+                break;
+              default: throw Exceptions( Exceptions::INTERNAL );
+            }
+
+            if( ok && !evo_all
+             && options.OUTPUT.GRID_POLICY == Options::OUT_UNIQUE_PHYSICAL
+             && ( fd.pdom->type == FFDom::LGL || fd.pdom->type == FFDom::CGL )
+             && iel > 0 && k == 0 )
+              ok = false;
+
+            if( ok ) vi.push_back( k );
+          }
+
+          if( vi.size() < n ){
+            std::vector<U> newbuf;
+            newbuf.reserve( stride * vi.size() * outer );
+            for( size_t o = 0; o < outer; ++o )
+              for( size_t vk : vi )
+                for( size_t s = 0; s < stride; ++s )
+                  newbuf.push_back( buf[ s + vk * stride + o * n * stride ] );
+            buf      = std::move( newbuf );
+            fd.cur_n = vi.size();
+          }
+        }
+      }
+
+      return buf;
+    };
+
+    auto eval_block = [&]( std::map<FFVar,size_t,lt_FFVar> const& ndx_el ) -> std::vector<U>
+    {
+      auto const& plan_fct = ( nfct < _depPlanFct.size() ? _depPlanFct[nfct]
+                                                         : std::vector<t_DepUpdate>() );
+      for( auto const& upd : plan_fct ){
+        size_t inc = 0;
+        switch( upd.typ ){
+          case DOMAIN:  OCdom[upd.pos].update( _node_block( _vDom[upd.pos], ndx_el ), ndx_el ); break;
+          case STATE:   inc = pos_state( _vVar[upd.pos], ndx_el );
+                        OCvar[upd.pos].update( &var[inc], ndx_el ); break;
+          case INPUT: { auto ndx_in = ndx_el;   // marching: remap evolution element to the resident window
+                        if( mctx.in_march && _evolution_dom_var.dag() && _mInpDisc.count( _vInp[upd.pos] ) ){
+                          auto ite = ndx_in.find( _evolution_dom_var );
+                          if( ite != ndx_in.end() ) ite->second = mctx.window; }
+                        inc = pos_input( _vInp[upd.pos], ndx_in );
+                        OCinp[upd.pos].update( &inp[inc], ndx_in ); break; }
+          case CONSTANT: break;
+          default: throw Exceptions( Exceptions::INTERNAL );
+        }
+      }
+
+      _dag->eval( _sgFct[nfct], OCwrk,
+                  1, &fctvar, &OCres,
+                  _vVar.size(), _vVar.data(), OCvar.data(),
+                  _vInp.size(), _vInp.data(), OCinp.data(),
+                  _vCst.size(), _vCst.data(), OCcst.data(),
+                  _vDom.size(), _vDom.data(), OCdom.data() );
+
+      return transform_buffer( std::vector<U>( OCres.coef().begin(), OCres.coef().end() ), ndx_el );
+    };
+
+    size_t out_row = fctrec.row0;
+    std::map<FFVar, size_t, lt_FFVar> grid_el;
+    bool grid_done = false;
+    bool grid_once = fctgrid.empty();
+
+    while( true ){
+      if( fctgrid.empty() ){
+        if( grid_done ) break;
+        grid_done = true;
+      }
+      else{
+        if( !_next_block( grid_el, fctgrid ) || grid_el.empty() ) break;
+      }
+
+      std::vector<U> acc;
+      bool have_acc = false;
+
+      std::map<FFVar, size_t, lt_FFVar> free_el;
+      bool free_done = false;
+      while( true ){
+        if( free_dom.empty() ){
+          if( free_done ) break;
+          free_done = true;
+        }
+        else{
+          if( !_next_block( free_el, free_dom ) || free_el.empty() ) break;
+        }
+
+        std::map<FFVar, size_t, lt_FFVar> ndx_el( fixed_el );
+        for( auto const& [dvar, iel] : grid_el ) ndx_el[dvar] = iel;
+        for( auto const& [dvar, iel] : free_el ) ndx_el[dvar] = iel;
+
+        std::vector<U> vals = eval_block( ndx_el );
+        if( !have_acc ){
+          acc = std::move( vals );
+          have_acc = true;
+        }
+        else{
+          if( acc.size() != vals.size() )
+            throw Exceptions( Exceptions::INTERNAL );
+          for( size_t i = 0; i < acc.size(); ++i ) acc[i] += vals[i];
+        }
+      }
+
+      if( !have_acc )
+        throw Exceptions( Exceptions::INTERNAL );
+
+      if( fctrec.kind == FctKind::POINT ){
+        if( acc.size() != 1 )
+          throw Exceptions( Exceptions::INTERNAL );
+        fct[out_row++] = acc[0];
+      }
+      else{
+        for( U const& val : acc )
+          fct[out_row++] = val;
+      }
+
+      if( grid_once ) break;
+    }
+
+    if( mctx.n_grid > 1 && _march_field_over_evo( fctrec ) ){
+      if( out_row != fctrec.row0 + _march_field_rows( fctrec, mctx.in_march? mctx.window: 0 ).size() ) throw Exceptions( Exceptions::INTERNAL );
+    }
+    else if( out_row != fctrec.row0 + fctrec.nrow )
+      throw Exceptions( Exceptions::INTERNAL );
+
+#ifdef CRONOS_DEBUG_OUT
+    _disp( 3 ) << "eval output " << nfct << " assigned rows "
+              << fctrec.row0 << ":" << out_row << "\n";
+#endif
+    ++nfct;
+  }
+
+  (void)fct_base;
 }
 
 } // namespace mc

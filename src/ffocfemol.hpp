@@ -13,6 +13,21 @@
 namespace mc
 {
 
+//! @brief What FFMOLRES / FFGradMOLRES ask an OCFEMOL, by kind: the residual rows or the outputs' spatial parts
+namespace molop
+{
+inline size_t rows( OCFEMOL const* m, int kind ){ return kind? m->n_outputs(): m->semi_discrete().n_rows; }
+inline void pattern_x( OCFEMOL const* m, int kind, std::vector<size_t>& p, std::vector<size_t>& c )
+{ if( kind ) m->output_state_pattern( p, c ); else m->jacobian_pattern( p, c ); }
+inline void pattern_u( OCFEMOL const* m, int kind, std::vector<size_t>& p, std::vector<size_t>& c )
+{ if( kind ) m->output_input_pattern( p, c ); else m->input_pattern( p, c ); }
+inline bool eval( OCFEMOL* m, int kind, double t, double const* xc, double const* uc, double* out )
+{ return kind? m->eval_outputs( t, xc, uc, out ): m->eval_residual( t, xc, uc, out ); }
+inline bool deriv_full( OCFEMOL* m, int kind, double t, double const* xc, double const* uc, double* out,
+                        std::vector<size_t>& p, std::vector<size_t>& c, std::vector<double>& v )
+{ return kind? m->deriv_outputs_full( t, xc, uc, out, p, c, v ): m->deriv_residual_full( t, xc, uc, out, p, c, v ); }
+}
+
 //! @brief The method-of-lines residual Rc(t, xc) as a DAG external operation
 ////////////////////////////////////////////////////////////////////////
 //! mc::FFMOLRES inserts into a DAG the n_rows outputs rc = Rc(t, xc) of a set-up mc::OCFEMOL, from the
@@ -30,11 +45,16 @@ class FFMOLRES
 public:
   //! @brief Copy policy for the solver the operation holds
   enum Policy { SHALLOW = 0, COPY = 1, TRANSFER = -1 };
+  //! @brief What the operation's outputs are: the residual rows Rc(xc, uc), or the outputs' spatial parts F(xc, uc)
+  //! (OCFEMOL::eval_outputs) -- one implementation, OCFEMOL asked by kind (see molop)
+  enum Kind { RESIDUAL = 0, OUTPUTS = 1 };
 
 protected:
   OCFEMOL*     _pMOL = nullptr;   //!< the set-up solver
   bool         _own  = false;     //!< whether this operation owns (and deletes) it
+  int          _kind = RESIDUAL;  //!< see Kind
   size_t       _nSta = 0;         //!< n_states
+  size_t       _nInp = 1;         //!< n_input_slots: the collocated input vector uc, t in its own slot
   size_t       _nRow = 0;         //!< n_rows
   std::string  _name;
   //! @brief The gradient operation's outputs, built once per operation instance and reused by every deriv call:
@@ -47,19 +67,22 @@ protected:
     const;
 
   FFVar** _set
-    ( size_t const nSta, FFVar const* pSta, FFVar const& t, OCFEMOL* pMOL, int policy, std::string const& name )
+    ( size_t const nSta, FFVar const* pSta, size_t const nInp, FFVar const* pInp, OCFEMOL* pMOL, int policy, std::string const& name )
     {
       if( !pMOL || !pMOL->semi_discrete().ran || nSta != pMOL->semi_discrete().n_states )
         throw std::runtime_error( "FFMOLRES ** the solver is not set up or the state count does not match\n" );
+      if( nInp != std::max<size_t>( 1, pMOL->n_input_slots() ) )
+        throw std::runtime_error( "FFMOLRES ** the input vector must have n_input_slots() entries, t in time_slot()\n" );
       if( _own && _pMOL ) delete _pMOL;
       _own  = ( policy > 0 );
       _pMOL = pMOL;
       _nSta = nSta;
-      _nRow = pMOL->semi_discrete().n_rows;
+      _nInp = nInp;
+      _nRow = molop::rows( pMOL, _kind );
       _name = name;
       data    = pMOL;
       owndata = false;
-      std::vector<FFVar> vIn( pSta, pSta + nSta );  vIn.push_back( t );
+      std::vector<FFVar> vIn( pSta, pSta + nSta );  vIn.insert( vIn.end(), pInp, pInp + nInp );
       FFVar** ppRes = insert_external_operation( *this, _nRow, vIn.size(), vIn.data() );
       _own = false;
       FFOp* pOp = (*ppRes)->opdef().first;
@@ -70,8 +93,8 @@ protected:
 
 public:
   FFMOLRES
-    ()
-    : FFOp( EXTERN )
+    ( Kind kind = RESIDUAL )
+    : FFOp( EXTERN ), _kind( kind )
     { this->sparse = true; }   // MC++ calls the SPARSE deriv only when this is set; unset, it allocates a dense
                                 // n_rows x (n_states+1) array per call and calls the dense deriv (FFOCFERES sets it too)
 
@@ -79,14 +102,24 @@ public:
     ()
     { if( _own && _pMOL ) delete _pMOL; }
 
-  //! @brief Insert the operation: the n_rows outputs for inputs @p vSta (n_states) and @p t.
+  //! @brief Insert the operation: the n_rows outputs Rc(xc, uc) for the states @p vSta (n_states) and the collocated
+  //! input vector @p vInp (n_input_slots(): t in time_slot(), each other slot a variable of the integrator).
   std::vector<FFVar> operator()
-    ( std::vector<FFVar> const& vSta, FFVar const& t, OCFEMOL* pMOL, int policy = SHALLOW, std::string const& name = "" )
+    ( std::vector<FFVar> const& vSta, std::vector<FFVar> const& vInp, OCFEMOL* pMOL, int policy = SHALLOW,
+      std::string const& name = "" )
     {
-      FFVar** ppRes = _set( vSta.size(), vSta.data(), t, pMOL, policy, name );
+      FFVar** ppRes = _set( vSta.size(), vSta.data(), vInp.size(), vInp.data(), pMOL, policy, name );
       std::vector<FFVar> vDep( _nRow );
       for( size_t i = 0; i < _nRow; ++i ) vDep[i] = *ppRes[i];
       return vDep;
+    }
+  //! @brief For a model whose only input is t: inputs @p vSta and @p t.
+  std::vector<FFVar> operator()
+    ( std::vector<FFVar> const& vSta, FFVar const& t, OCFEMOL* pMOL, int policy = SHALLOW, std::string const& name = "" )
+    {
+      if( pMOL && pMOL->n_input_slots() > 1 )
+        throw std::runtime_error( "FFMOLRES ** the model has inputs: give the collocated input vector, not t alone\n" );
+      return operator()( vSta, std::vector<FFVar>{ t }, pMOL, policy, name );
     }
 
   OCFEMOL* solver() const { return _pMOL; }
@@ -143,19 +176,20 @@ public:
     const
     {
       if( data != op->data ) return data < op->data;
-      return false;
+      return _kind < static_cast<FFMOLRES const*>( op )->_kind;      // the residual and the outputs of one OCFEMOL
     }
   std::string name
     ()
     const
-    { std::ostringstream oss; oss << ( _name.empty()? "MOLRES": _name ) << "[" << _nRow << "x" << _nSta + 1 << "]"; return oss.str(); }
+    { std::ostringstream oss; oss << ( _name.empty()? ( _kind? "MOLFCT": "MOLRES" ): _name ) << "[" << _nRow << "x" << _nSta + _nInp << "]"; return oss.str(); }
   bool commutative
     ()
     const
     { return false; }
 };
 
-//! @brief The Jacobian entries of FFMOLRES as a DAG external operation: the nnz values of dRc/dxc in CSR order,
+//! @brief The Jacobian entries of FFMOLRES as a DAG external operation: the values of dRc/dxc in CSR order
+//! (OCFEMOL::jacobian_pattern), then those of dRc/d(the other input slots) in CSR order (OCFEMOL::input_pattern),
 //! then the n_rows values of dRc/dt.
 ////////////////////////////////////////////////////////////////////////
 class FFGradMOLRES
@@ -164,27 +198,29 @@ class FFGradMOLRES
 protected:
   OCFEMOL*     _pMOL = nullptr;
   bool         _own  = false;
-  size_t       _nSta = 0, _nRow = 0, _nnz = 0;
+  int          _kind = FFMOLRES::RESIDUAL;
+  size_t       _nSta = 0, _nInp = 1, _nRow = 0, _nnz = 0, _nnu = 0;
   std::string  _name;
 
 public:
   FFGradMOLRES
-    ()
-    : FFOp( EXTERN )
+    ( int kind = FFMOLRES::RESIDUAL )
+    : FFOp( EXTERN ), _kind( kind )
     {}
   virtual ~FFGradMOLRES
     ()
     { if( _own && _pMOL ) delete _pMOL; }
 
-  //! @brief Insert: outputs are the nnz Jacobian values (CSR order of OCFEMOL::jacobian_pattern) followed by dRc/dt.
+  //! @brief Insert over the inputs [xc, uc]: see the class.
   FFVar** operator()
-    ( size_t const nSta, FFVar const* pSta, FFVar const& t, OCFEMOL* pMOL, bool own, std::string const& name )
+    ( size_t const nSta, FFVar const* pSta, size_t const nInp, FFVar const* pInp, OCFEMOL* pMOL, bool own, std::string const& name )
     {
-      _pMOL = pMOL; _own = false; _nSta = nSta; _nRow = pMOL->semi_discrete().n_rows; _name = name;
-      std::vector<size_t> ptr, col;  pMOL->jacobian_pattern( ptr, col );  _nnz = col.size();
+      _pMOL = pMOL; _own = false; _nSta = nSta; _nInp = nInp; _nRow = molop::rows( pMOL, _kind ); _name = name;
+      std::vector<size_t> ptr, col;  molop::pattern_x( pMOL, _kind, ptr, col );  _nnz = col.size();
+      molop::pattern_u( pMOL, _kind, ptr, col );  _nnu = col.size();
       data = pMOL;  owndata = false;
-      std::vector<FFVar> vIn( pSta, pSta + nSta );  vIn.push_back( t );
-      FFVar** ppRes = insert_external_operation( *this, _nnz + _nRow, vIn.size(), vIn.data() );
+      std::vector<FFVar> vIn( pSta, pSta + nSta );  vIn.insert( vIn.end(), pInp, pInp + nInp );
+      FFVar** ppRes = insert_external_operation( *this, _nnz + _nnu + _nRow, vIn.size(), vIn.data() );
       if( own ) dynamic_cast<FFGradMOLRES*>( (*ppRes)->opdef().first )->_own = true;
       return ppRes;
     }
@@ -205,23 +241,31 @@ public:
     const
     {
       (void)mVar;
-      if( !_pMOL || nVar != _nSta + 1 || nRes != _nnz + _nRow )
+      if( !_pMOL || nVar != _nSta + _nInp || nRes != _nnz + _nnu + _nRow )
         throw std::runtime_error( "FFGradMOLRES::eval double ** size mismatch\n" );
+      size_t const it = _pMOL->time_slot(), tc = _nSta + it;
       std::vector<size_t> ptr, col; std::vector<double> val;
-      std::vector<double> drdt( _nRow );
-      if( !_pMOL->deriv_residual( vVar[_nSta], vVar, nullptr, ptr, col, val, drdt.data() ) )
-        throw std::runtime_error( "FFGradMOLRES::eval double ** OCFEMOL::deriv_residual failed\n" );
-      if( val.size() != _nnz ) throw std::runtime_error( "FFGradMOLRES::eval double ** pattern changed\n" );
-      for( size_t k = 0; k < _nnz; ++k ) vRes[k] = val[k];
-      for( size_t r = 0; r < _nRow; ++r ) vRes[_nnz + r] = drdt[r];
+      if( !molop::deriv_full( _pMOL, _kind,  vVar[tc], vVar, vVar + _nSta, nullptr, ptr, col, val ) )
+        throw std::runtime_error( "FFGradMOLRES::eval double ** OCFEMOL::deriv_residual_full failed\n" );
+      // split each row's entries: xc first (jacobian_pattern's order), the other input slots next, t last (dense)
+      size_t kx = 0, ku = _nnz;
+      for( size_t r = 0; r + 1 < ptr.size(); ++r ){
+        vRes[_nnz + _nnu + r] = 0.;
+        for( size_t j = ptr[r]; j < ptr[r+1]; ++j ){
+          if( col[j] < _nSta )  vRes[kx++] = val[j];
+          else if( col[j] == tc ) vRes[_nnz + _nnu + r] = val[j];
+          else                  vRes[ku++] = val[j];
+        }
+      }
+      if( kx != _nnz || ku != _nnz + _nnu ) throw std::runtime_error( "FFGradMOLRES::eval double ** pattern changed\n" );
     }
   void eval
     ( unsigned const nRes, FFVar* vRes, unsigned const nVar, FFVar const* vVar, unsigned const* mVar )
     const
     {
       (void)mVar;
-      FFGradMOLRES op;
-      FFVar** ppRes = op( _nSta, vVar, vVar[_nSta], _pMOL, false, _name );
+      FFGradMOLRES op( _kind );
+      FFVar** ppRes = op( _nSta, vVar, _nInp, vVar + _nSta, _pMOL, false, _name );
       for( unsigned k = 0; k < nRes; ++k ) vRes[k] = *ppRes[k];
     }
   template <typename U>
@@ -230,8 +274,8 @@ public:
     const
     { throw std::runtime_error( "FFGradMOLRES::eval ** evaluation type not supported\n" ); }
 
-  bool lt( FFOp const* op ) const { if( data != op->data ) return data < op->data; return false; }
-  std::string name() const { std::ostringstream oss; oss << ( _name.empty()? "GradMOLRES": _name ) << "[" << _nnz + _nRow << "]"; return oss.str(); }
+  bool lt( FFOp const* op ) const { if( data != op->data ) return data < op->data; return _kind < static_cast<FFGradMOLRES const*>( op )->_kind; }
+  std::string name() const { std::ostringstream oss; oss << ( _name.empty()? ( _kind? "GradMOLFCT": "GradMOLRES" ): _name ) << "[" << _nnz + _nnu + _nRow << "]"; return oss.str(); }
   bool commutative() const { return false; }
 };
 
@@ -355,12 +399,12 @@ FFMOLRES::_gradient
 ( FFVar const* vVar )
 const
 {
-  std::vector<long> ids( _nSta + 1 );  for( size_t i = 0; i <= _nSta; ++i ) ids[i] = vVar[i].id().second;
+  std::vector<long> ids( _nSta + _nInp );  for( size_t i = 0; i < _nSta + _nInp; ++i ) ids[i] = vVar[i].id().second;
   if( _gradOut.empty() || ids != _gradIn ){
-    FFGradMOLRES gop;
-    FFVar** ppG = gop( _nSta, vVar, vVar[_nSta], _pMOL, false, _name );
-    std::vector<size_t> ptr, col;  _pMOL->jacobian_pattern( ptr, col );
-    _gradOut.assign( col.size() + _nRow, FFVar() );
+    FFGradMOLRES gop( _kind );
+    FFVar** ppG = gop( _nSta, vVar, _nInp, vVar + _nSta, _pMOL, false, _name );
+    std::vector<size_t> ptr, col, pu, cu;  molop::pattern_x( _pMOL, _kind, ptr, col );  molop::pattern_u( _pMOL, _kind, pu, cu );
+    _gradOut.assign( col.size() + cu.size() + _nRow, FFVar() );
     for( size_t k = 0; k < _gradOut.size(); ++k ) _gradOut[k] = *ppG[k];
     _gradIn = ids;
   }
@@ -374,8 +418,9 @@ FFMOLRES::eval
 const
 {
   (void)mVar;
-  if( !_pMOL || nVar != _nSta + 1 || nRes != _nRow ) throw std::runtime_error( "FFMOLRES::eval double ** size mismatch\n" );
-  if( !_pMOL->eval_residual( vVar[_nSta], vVar, vRes ) ) throw std::runtime_error( "FFMOLRES::eval double ** OCFEMOL::eval_residual failed\n" );
+  if( !_pMOL || nVar != _nSta + _nInp || nRes != _nRow ) throw std::runtime_error( "FFMOLRES::eval double ** size mismatch\n" );
+  if( !molop::eval( _pMOL, _kind,  vVar[_nSta + _pMOL->time_slot()], vVar, vVar + _nSta, vRes ) )
+    throw std::runtime_error( "FFMOLRES::eval double ** OCFEMOL::eval_residual failed\n" );
 }
 
 inline void
@@ -384,7 +429,8 @@ FFMOLRES::eval
 const
 {
   (void)mVar;
-  if( !_pMOL || nVar != _nSta + 1 || nRes != _nRow ) throw std::runtime_error( "FFMOLRES::eval FAD ** size mismatch\n" );
+  if( !_pMOL || nVar != _nSta + _nInp || nRes != _nRow ) throw std::runtime_error( "FFMOLRES::eval FAD ** size mismatch\n" );
+  size_t const tc = _nSta + _pMOL->time_slot();
   std::vector<double> x( nVar );
   for( unsigned i = 0; i < nVar; ++i ) x[i] = vVar[i].val();
   bool dependent = false;  unsigned nDir = 0;
@@ -396,21 +442,24 @@ const
   }
   std::vector<double> r( nRes );
   if( !dependent ){
-    if( !_pMOL->eval_residual( x[_nSta], x.data(), r.data() ) ) throw std::runtime_error( "FFMOLRES::eval FAD ** eval failed\n" );
+    if( !molop::eval( _pMOL, _kind,  x[tc], x.data(), x.data() + _nSta, r.data() ) ) throw std::runtime_error( "FFMOLRES::eval FAD ** eval failed\n" );
     for( unsigned k = 0; k < nRes; ++k ) vRes[k] = r[k];
     return;
   }
-  // one compressed Jacobian, then each output's directions as a sparse combination of the inputs' directions
-  std::vector<size_t> ptr, col; std::vector<double> val, drdt( nRes );
-  if( !_pMOL->deriv_residual( x[_nSta], x.data(), r.data(), ptr, col, val, drdt.data() ) )
-    throw std::runtime_error( "FFMOLRES::eval FAD ** OCFEMOL::deriv_residual failed\n" );
+  // one compressed Jacobian over [xc | uc], then each output's directions as a sparse combination of the inputs' --
+  // xc's entries, the other input slots', and t's last (its column dense, as the operation declares it)
+  std::vector<size_t> ptr, col; std::vector<double> val;
+  if( !molop::deriv_full( _pMOL, _kind,  x[tc], x.data(), x.data() + _nSta, r.data(), ptr, col, val ) )
+    throw std::runtime_error( "FFMOLRES::eval FAD ** OCFEMOL::deriv_residual_full failed\n" );
   for( unsigned k = 0; k < nRes; ++k ){
     vRes[k] = r[k];
     vRes[k].diff( 0, nDir );  vRes[k].d( 0 ) = 0.;      // allocate nDir directions
+    double drdt = 0.;
+    for( size_t j = ptr[k]; j < ptr[k+1]; ++j ) if( col[j] == tc ) drdt = val[j];
     for( unsigned d = 0; d < nDir; ++d ){
       double s = 0.;
-      for( size_t j = ptr[k]; j < ptr[k+1]; ++j ) if( vVar[col[j]].depend() ) s += val[j] * vVar[col[j]].deriv( d );
-      if( vVar[_nSta].depend() ) s += drdt[k] * vVar[_nSta].deriv( d );
+      for( size_t j = ptr[k]; j < ptr[k+1]; ++j ) if( col[j] != tc && vVar[col[j]].depend() ) s += val[j] * vVar[col[j]].deriv( d );
+      if( vVar[tc].depend() ) s += drdt * vVar[tc].deriv( d );
       vRes[k].d( d ) = s;
     }
   }
@@ -422,12 +471,13 @@ FFMOLRES::eval
 const
 {
   (void)mVar;
-  if( !_pMOL || nVar != _nSta + 1 || nRes != _nRow ) throw std::runtime_error( "FFMOLRES::eval FFDep ** size mismatch\n" );
-  std::vector<size_t> ptr, col;  _pMOL->jacobian_pattern( ptr, col );
+  if( !_pMOL || nVar != _nSta + _nInp || nRes != _nRow ) throw std::runtime_error( "FFMOLRES::eval FFDep ** size mismatch\n" );
+  std::vector<size_t> ptr, col, pu, cu;  molop::pattern_x( _pMOL, _kind, ptr, col );  molop::pattern_u( _pMOL, _kind, pu, cu );
   for( unsigned k = 0; k < nRes; ++k ){
     vRes[k] = FFDep();
     for( size_t j = ptr[k]; j < ptr[k+1]; ++j ) vRes[k] += vVar[col[j]];
-    vRes[k] += vVar[_nSta];                               // every row may depend on t (conservative)
+    for( size_t j = pu[k]; j < pu[k+1]; ++j ) vRes[k] += vVar[ _nSta + cu[j] ];
+    vRes[k] += vVar[ _nSta + _pMOL->time_slot() ];        // every row may depend on t (conservative)
     vRes[k].update( FFDep::TYPE::N );                     // nonlinear in general
   }
 }
@@ -438,8 +488,8 @@ FFMOLRES::eval
 const
 {
   (void)mVar;
-  FFMOLRES op;
-  FFVar** ppRes = op._set( _nSta, vVar, vVar[_nSta], _pMOL, SHALLOW, _name );
+  FFMOLRES op( static_cast<Kind>( _kind ) );
+  FFVar** ppRes = op._set( _nSta, vVar, _nInp, vVar + _nSta, _pMOL, SHALLOW, _name );
   for( unsigned k = 0; k < nRes; ++k ) vRes[k] = *ppRes[k];
 }
 
@@ -449,12 +499,14 @@ FFMOLRES::deriv
 const
 {
   // dense: every derivative, from the sparse entries
-  std::vector<size_t> ptr, col;  _pMOL->jacobian_pattern( ptr, col );
+  std::vector<size_t> ptr, col, pu, cu;  molop::pattern_x( _pMOL, _kind, ptr, col );  molop::pattern_u( _pMOL, _kind, pu, cu );
+  size_t const tc = _nSta + _pMOL->time_slot();
   FFVar const* ppG = _gradient( vVar );                 // one gradient operation per instance, reused
   for( unsigned k = 0; k < nRes; ++k ){
     for( unsigned i = 0; i < nVar; ++i ) vDer[k][i] = 0.;
     for( size_t j = ptr[k]; j < ptr[k+1]; ++j ) vDer[k][ col[j] ] = ppG[j];
-    vDer[k][_nSta] = ppG[ col.size() + k ];
+    for( size_t j = pu[k]; j < pu[k+1]; ++j ) vDer[k][ _nSta + cu[j] ] = ppG[ col.size() + j ];
+    vDer[k][tc] = ppG[ col.size() + cu.size() + k ];
   }
 }
 
@@ -464,14 +516,17 @@ FFMOLRES::deriv
   size_t* nnz, size_t** colnz )
 const
 {
-  std::vector<size_t> ptr, col;  _pMOL->jacobian_pattern( ptr, col );
-  for( unsigned k = 0; k < nRes; ++k ) nnz[k] = ( ptr[k+1] - ptr[k] ) + 1;      // + the t column
+  std::vector<size_t> ptr, col, pu, cu;  molop::pattern_x( _pMOL, _kind, ptr, col );  molop::pattern_u( _pMOL, _kind, pu, cu );
+  size_t const tc = _nSta + _pMOL->time_slot();
+  // each row: its xc columns, its other input slots, and t's column -- the last always (declared conservatively)
+  for( unsigned k = 0; k < nRes; ++k ) nnz[k] = ( ptr[k+1] - ptr[k] ) + ( pu[k+1] - pu[k] ) + 1;
   if( colnz ){
     for( unsigned k = 0; k < nRes; ++k ){
       if( !colnz[k] ) colnz[k] = new size_t[ nnz[k] ];
       size_t m = 0;
       for( size_t j = ptr[k]; j < ptr[k+1]; ++j ) colnz[k][m++] = col[j];
-      colnz[k][m] = _nSta;
+      for( size_t j = pu[k]; j < pu[k+1]; ++j ) colnz[k][m++] = _nSta + cu[j];
+      colnz[k][m] = tc;
     }
   }
   if( !vDer ) return;
@@ -480,7 +535,8 @@ const
     if( !vDer[k] ) vDer[k] = new FFVar[ nnz[k] ];
     size_t m = 0;
     for( size_t j = ptr[k]; j < ptr[k+1]; ++j ) vDer[k][m++] = ppG[j];
-    vDer[k][m] = ppG[ col.size() + k ];
+    for( size_t j = pu[k]; j < pu[k+1]; ++j ) vDer[k][m++] = ppG[ col.size() + j ];
+    vDer[k][m] = ppG[ col.size() + cu.size() + k ];
   }
 }
 
@@ -525,9 +581,13 @@ configure_semidiscrete
 //! Mc dxc/dt + Rc(xc, t) = 0 (a row with mass is differential and holds after t0; an algebraic row holds everywhere)
 //! and the INITIAL rows at t0.  @p M may be any FFModel -- a solver, or a plain record whose declarations a solver
 //! then sets up from (DAESLV, for a model distributed in space).
+//! The model's inputs: each slot of a time-invariant input becomes an input of @p M with no domain -- a parameter of the
+//! integrator -- in input_dofs() order; @p uc, if given, receives the collocated input vector (t in time_slot(), the
+//! parameter of each other slot).  A time-varying input is refused (MoL phase 6c).
 inline bool
 declare_semidiscrete
-( OCFEMOL& mol, FFGraph& dag, FFModel& M, FFDom const& tdom, std::vector<FFVar>& xc, FFVar& t, std::string* err = nullptr )
+( OCFEMOL& mol, FFGraph& dag, FFModel& M, FFDom const& tdom, std::vector<FFVar>& xc, FFVar& t, std::string* err = nullptr,
+  std::vector<FFVar>* uc = nullptr )
 {
   auto fail = [&]( std::string const& m ){ if( err ) *err = m; return false; };
   auto const& D = mol.semi_discrete();
@@ -549,8 +609,21 @@ declare_semidiscrete
     M.update_ref( xc[i], mol.column_field( i, fld, ref )? ref: 0. );
   }
 
-  // Rc and the Ini stream as operations over (xc, t)
-  FFMOLRES RES;  std::vector<FFVar> rc  = RES( xc, t, &mol );
+  // the collocated input vector: t in its slot, each slot of a time-invariant input a parameter of the integrator
+  std::vector<FFVar> U( std::max<size_t>( 1, mol.n_input_slots() ), FFVar( 0. ) );
+  U[ mol.time_slot() ] = t;
+  for( auto const& L : mol.inputs_layout() ){
+    if( L.time_varying ) return fail( "the input " + L.input.name() + " varies in time: such inputs are taken from MoL phase 6c" );
+    for( size_t k = 0; k < L.cols.size(); ++k ){
+      FFVar const p = dag.add_var( L.input.name() + "_" + std::to_string( k ) );
+      M.add_input( p, {} );
+      U.at( L.cols[k] ) = p;
+    }
+  }
+  if( uc ) *uc = U;
+
+  // Rc as one operation over (xc, uc)
+  FFMOLRES RES;  std::vector<FFVar> rc  = RES( xc, U, &mol );
 
   // the rows: mass terms + the remainder.  A row with mass is differential and does not hold at t0 (its INITIAL
   // rows do); an algebraic row holds everywhere, t0 included.
@@ -568,7 +641,20 @@ declare_semidiscrete
   // the INITIAL rows as ordinary pointwise expressions, not as outputs of FFMOLINI (see OCFEMOL::initial_expression)
   auto const& IS = mol.ini_stream();
   for( size_t k = 0; k < IS.size(); ++k )
-    if( !IS[k].dropped ) M.add_equation( mol.initial_expression( k, xc, t ), {t}, {FFDom::LB}, INIT );
+    if( !IS[k].dropped ) M.add_equation( mol.initial_expression( k, xc, t, U ), {t}, {FFDom::LB}, INIT );
+  // the outputs: their spatial parts as ONE operation over (xc, uc), each value given its time part back -- a point in
+  // t, or an integral over t -- in the declared order, so the integrator's outputs are the model's (val_function())
+  if( mol.n_outputs() ){
+    FFMOLRES FCT( FFMOLRES::OUTPUTS );
+    std::vector<FFVar> const fc = FCT( xc, U, &mol );
+    FFEval OpE;  FFIntegral OpI;
+    auto const& T = mol.outputs_time();
+    for( size_t k = 0; k < T.size(); ++k ){
+      auto const [r0, nr] = mol.output_rows( k );
+      for( size_t r = r0; r < r0 + nr; ++r )
+        M.add_output( T[k].kind == OCFEMOL::t_OutputTime::INTEGRAL? OpI( fc.at( r ), t ): OpE( fc.at( r ), t, T[k].tau, T[k].side ) );
+    }
+  }
   return true;
 }
 

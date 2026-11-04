@@ -11142,6 +11142,31 @@ const
     FFSubgraph sg = dag->subgraph( 1, &fctvar );
     std::set<FFVar,lt_FFVar> fctmindom;
 
+    // The domain variables the output uses FREELY: reached from its root along a path that crosses no operator
+    // BINDING them -- an integral over the variable, or an evaluation at a point of it.  A bound use (the t of
+    // OpI( t*x, t ), or of an operand evaluated at t = tau) needs no point or limit of the output's own; a free one
+    // does, below.  Each (operation, bound set) is visited once.
+    std::set<long> free_dom;
+    {
+      std::set< std::pair< FFOp const*, std::vector<long> > > seen;
+      std::function<void( FFVar const&, std::set<long> const& )> walk = [&]( FFVar const& v, std::set<long> const& bound ){
+        FFOp const* op = v.opdef().first;
+        if( !op ) return;
+        std::vector<long> const key( bound.begin(), bound.end() );
+        if( !seen.insert( { op, key } ).second ) return;
+        if( op->type == FFOp::VAR ){
+          if( op->varout.size() && op->varout[0] && mDom.count( *op->varout[0] ) && !bound.count( op->varout[0]->id().second ) )
+            free_dom.insert( op->varout[0]->id().second );
+          return;
+        }
+        std::set<long> inner = bound;
+        if( auto const* pi = mc::type_cast<FFIntegral const>( op ) ) for( auto const& [dv, o] : pi->Indep().expr ){ (void)o; inner.insert( dv.id().second ); }
+        else if( auto const* pe = mc::type_cast<FFEval const>( op ) ) for( auto const& [dv, z] : pe->Coord() ){ (void)z; inner.insert( dv.id().second ); }
+        for( auto const* in : op->varin ) if( in ) walk( *in, inner );
+      };
+      walk( fctvar, std::set<long>() );
+    }
+
     for( auto itop = sg.l_op.cbegin(); itop != sg.l_op.cend(); ++itop ){
       auto const& op = *itop;
       if( op->type != FFOp::VAR || is_constant( *op->varout[0] ) )
@@ -11167,13 +11192,13 @@ const
                     << " MISSING IN OUTPUT " << fctvar << std::endl;
           return false;
         }
-        if( availabledom.find( itdom->first ) == availabledom.end() ){
+        if( availabledom.find( itdom->first ) == availabledom.end() && free_dom.count( itdom->first.id().second ) ){
           std::cerr << "  **ERROR: DOMAIN VARIABLE " << itdom->first
                     << " USED IN OUTPUT " << fctvar
                     << " BUT NO EVALUATION VALUE OR DISTRIBUTED LIMIT WAS PROVIDED" << std::endl;
           return false;
         }
-        fctmindom.insert( itdom->first );
+        if( free_dom.count( itdom->first.id().second ) ) fctmindom.insert( itdom->first );   // a bound use requires nothing
         continue;
       }
 

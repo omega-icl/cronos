@@ -82,6 +82,7 @@ from ``pymcpp``, which this module imports.
   mc_ffodeslv(m);
   mc_daeslv(m);
   mc_ffdaeslv(m);  // after mc_odeslv: FFODESLV takes an ODESLV
+  // mc_daeslv before mc_ocfeslv: it registers CollocationOptions, the base of OCFESLV.Options
   mc_ocfeslv(m);   // after mc_ffmodel: OCFESLV derives from FFModel
   mc_ffocfe(m);    // after mc_ocfeslv: FFOCFESLV / FFOCFERES take an OCFESLV
   

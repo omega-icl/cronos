@@ -911,6 +911,11 @@ BASE_DE::_extract_from_model
   };
   _dT.clear(); _mT.clear(); _mX.clear(); _mP.clear(); _mC.clear(); _mQ.clear(); _mLHS.clear();
   _mIC.clear(); _mDE.clear(); _mQUAD.clear(); _mFCT.clear();
+  if( distributed_in_space() ){                    // DAESLV takes such a model before extraction (method of lines)
+    _extractError = "a state is declared over a direction other than the evolution one: the model is distributed in"
+                    " space -- solve it with DAESLV, which semi-discretises it by the method of lines";
+    return false;
+  }
   _explicitIC_cached = false;
   _ns = _nx = _nx0 = _nc = _np = _nq = _nf = 0;
   _extractError.clear();

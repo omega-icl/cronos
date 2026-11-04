@@ -2391,6 +2391,14 @@ protected:
     ( FFModel const& src, std::vector<FFVar> const& extraRoots,
       std::vector<FFVar>& vAllVarsLoc, std::map<FFVar::pt_idVar,size_t>& ndxAllVars );
 
+  //! @brief Exchange this model's declarations with @p other's.  A solver sets its WORKING model up from another
+  //! declaration record so -- swap it in, setup(), swap back -- every stage of setup reading the declarations as
+  //! usual, while the declared model stays what the user wrote (DAESLV: a model distributed in space, whose working
+  //! model is its semi-discretisation).
+  void _swap_declarations
+    ( FFModel& other )
+    { std::swap( _usr, other._usr ); }
+
 public:
 
   //! @brief Equation types based on principal symbol analysis.
@@ -3926,6 +3934,31 @@ public:
   std::vector<DofIndex> input_dofs
     ( FFVar const& u )
     const;
+
+  //! @brief Replace this model's DECLARATIONS by @p src's -- the model as declared: constants, domains, states,
+  //! inputs (with their collocation and continuity), equations, outputs, transitions, the evolution direction and
+  //! the references -- on the same user DAG.  Options are not touched and the model is left not set up: its own
+  //! setup() imports the declarations as it does its own, and re-builds every equation's options through its own
+  //! factory (_make_equation_options).  DAESLV hands a model distributed in space to its semi-discretisation so.
+  void copy_declarations_from
+    ( FFModel const& src )
+    { _usr = src._usr;  _issetup = false; }
+
+  //! @brief True when a state is declared over a direction other than the evolution one (or, with no evolution
+  //! direction set, when the states span more than one direction): a model distributed in space, which DAESLV
+  //! semi-discretises by the method of lines and ODESLV refuses.
+  bool distributed_in_space
+    ()
+    const
+    {
+      std::set<FFVar,lt_FFVar> dirs;
+      for( auto const& [v, doms] : _usr._mVarUsr ) for( auto const& d : doms ) dirs.insert( d );
+      if( _usr._evolution_dom_setUsr ){
+        for( auto const& d : dirs ) if( d.id() != _usr._evolution_dom_varUsr.id() ) return true;
+        return false;
+      }
+      return dirs.size() > 1;
+    }
 
   //! @brief The coordinates of the DOFs of declared input @p u, in input_dofs() order: in each direction the node
   //! of the input's own collocation -- its declared node family and count, else the domain's -- on the DOF's

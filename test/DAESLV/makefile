@@ -5,7 +5,7 @@ include $(PATH_CRONOS)/src/makeoptions.mk
 
 #####
 
-all: DAESLV_test1 DAESLV_test2 DAESLV_switched DAESLV_jacobian DAESLV_inputs DAESLV_outputs DAESLV_restart DAESLV_hidden DAESLV_icseed DAESLV_trans DAESLV_icsens DAESLV_fsens DAESLV_asens DAESLV_asensmulti DAESLV_jypprobe DAESLV_fdiff DAESLV_ffdae DAESLV_record DAESLV_eqnrole DAESLV_threads DAESLV_dummy DAESLV_reduction DAESLV_scaling DAESLV_mol DAESLV_molpeel DAESLV_molsetup DAESLV_molbench DAESLV_molgate DAESLV_molpsa
+all: DAESLV_test1 DAESLV_test2 DAESLV_switched DAESLV_jacobian DAESLV_inputs DAESLV_outputs DAESLV_restart DAESLV_hidden DAESLV_icseed DAESLV_trans DAESLV_icsens DAESLV_fsens DAESLV_asens DAESLV_asensmulti DAESLV_jypprobe DAESLV_fdiff DAESLV_ffdae DAESLV_record DAESLV_eqnrole DAESLV_threads DAESLV_dummy DAESLV_reduction DAESLV_scaling DAESLV_mol DAESLV_molpeel DAESLV_molsetup DAESLV_molbench DAESLV_molgate DAESLV_molpde DAESLV_molpsa
 
 DAESLV_test1 : DAESLV_test1.o
 	$(LINK) $(FLAG_LINK) -o $@ $< $(LIB_CRONOS) $(LIB_DEP)
@@ -89,6 +89,9 @@ DAESLV_molbench : DAESLV_molbench.o
 	$(LINK) $(FLAG_LINK) -o $@ $< $(LIB_CRONOS) $(LIB_DEP)
 
 DAESLV_molgate : DAESLV_molgate.o
+	$(LINK) $(FLAG_LINK) -o $@ $< $(LIB_CRONOS) $(LIB_DEP)
+
+DAESLV_molpde : DAESLV_molpde.o
 	$(LINK) $(FLAG_LINK) -o $@ $< $(LIB_CRONOS) $(LIB_DEP)
 
 DAESLV_molpsa : DAESLV_molpsa.o

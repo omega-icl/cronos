@@ -499,20 +499,12 @@ const
 //! @return false with @p err set on a state-dependent mass coefficient or a solver that is not set up.
 //! MoL workplan, phase 5.
 ////////////////////////////////////////////////////////////////////////
+//! @brief The integrator options a semi-discrete DAE needs, set on @p S (export_semidiscrete's solver half).
 template <typename SOLVER>
-inline bool
-export_semidiscrete
-( OCFEMOL& mol, FFGraph& dag, SOLVER& S, FFDom const& tdom, std::vector<FFVar>& xc, FFVar& t, std::string* err = nullptr )
+inline void
+configure_semidiscrete
+( SOLVER& S )
 {
-  auto fail = [&]( std::string const& m ){ if( err ) *err = m; return false; };
-  auto const& D = mol.semi_discrete();
-  if( !D.ran ) return fail( "the OCFEMOL is not set up" );
-  for( auto const& m : mol.mass() )
-    if( !m.coeff.cst() )
-      return fail( "the mass coefficient of row " + std::to_string( m.row ) + " is state-dependent; this hand-over takes"
-                   " constant mass coefficients only (a node-wise coefficient operation is the next step)" );
-
-  S.set_dag( &dag );
   // The consistent initialisation is DAESLV's own KINSOL corrector (INITIAL rows with the interior rows at t0).  A
   // semi-discrete system is large and sparse: the corrector's dense default would be O(n^3).  The user may override
   // after the call.  (The step bound needs nothing here: its automatic default is right for any seed.)
@@ -526,15 +518,35 @@ export_semidiscrete
   // discrete system has many algebraic unknowns slaved to boundary data, and where that data moves at t0 -- a ramped
   // feed -- the first step's error estimate on them cannot pass (measured: the PSA column, h -> 4e-9 at t = 0).
   S.options.SOLVE.SUPPRESSALG = true;
+}
+
+//! @brief The semi-discrete system of a set-up @p mol, DECLARED into the model @p M on @p dag (export_semidiscrete's
+//! model half): the domain @p tdom of t, one state per nodal unknown xc_i on {t} with its field's reference, the rows
+//! Mc dxc/dt + Rc(xc, t) = 0 (a row with mass is differential and holds after t0; an algebraic row holds everywhere)
+//! and the INITIAL rows at t0.  @p M may be any FFModel -- a solver, or a plain record whose declarations a solver
+//! then sets up from (DAESLV, for a model distributed in space).
+inline bool
+declare_semidiscrete
+( OCFEMOL& mol, FFGraph& dag, FFModel& M, FFDom const& tdom, std::vector<FFVar>& xc, FFVar& t, std::string* err = nullptr )
+{
+  auto fail = [&]( std::string const& m ){ if( err ) *err = m; return false; };
+  auto const& D = mol.semi_discrete();
+  if( !D.ran ) return fail( "the OCFEMOL is not set up" );
+  for( auto const& m : mol.mass() )
+    if( !m.coeff.cst() )
+      return fail( "the mass coefficient of row " + std::to_string( m.row ) + " is state-dependent; this hand-over takes"
+                   " constant mass coefficients only (a node-wise coefficient operation is the next step)" );
+
+  M.set_dag( &dag );
   t = dag.add_var( "t" );
   xc.assign( D.n_states, FFVar() );
   for( size_t i = 0; i < D.n_states; ++i ) xc[i] = dag.add_var( "xc_" + std::to_string( i ) );
-  S.add_domain( t, tdom );
-  S.set_evolution_domain( t );
+  M.add_domain( t, tdom );
+  M.set_evolution_domain( t );
   FFVar fld;  double ref = 0.;
   for( size_t i = 0; i < D.n_states; ++i ){
-    S.add_state( xc[i], {t} );
-    S.update_ref( xc[i], mol.column_field( i, fld, ref )? ref: 0. );
+    M.add_state( xc[i], {t} );
+    M.update_ref( xc[i], mol.column_field( i, fld, ref )? ref: 0. );
   }
 
   // Rc and the Ini stream as operations over (xc, t)
@@ -548,15 +560,27 @@ export_semidiscrete
   auto const INTER = FFModel::EqnRole::INTERIOR, INIT = FFModel::EqnRole::INITIAL;
   int const TI = FFDom::ALL - FFDom::LB;
   for( size_t r = 0; r < D.n_rows; ++r ){
-    if( mass_of_row[r].empty() ){ S.add_equation( rc[r], {t}, {FFDom::ALL}, INTER ); continue; }
+    if( mass_of_row[r].empty() ){ M.add_equation( rc[r], {t}, {FFDom::ALL}, INTER ); continue; }
     FFVar row = rc[r];
     for( auto const& [c, a] : mass_of_row[r] ) row += a * OpP( xc[c], t );
-    S.add_equation( row, {t}, {TI}, INTER );
+    M.add_equation( row, {t}, {TI}, INTER );
   }
   // the INITIAL rows as ordinary pointwise expressions, not as outputs of FFMOLINI (see OCFEMOL::initial_expression)
   auto const& IS = mol.ini_stream();
   for( size_t k = 0; k < IS.size(); ++k )
-    if( !IS[k].dropped ) S.add_equation( mol.initial_expression( k, xc, t ), {t}, {FFDom::LB}, INIT );
+    if( !IS[k].dropped ) M.add_equation( mol.initial_expression( k, xc, t ), {t}, {FFDom::LB}, INIT );
+  return true;
+}
+
+//! @brief declare_semidiscrete into the solver @p S, then configure_semidiscrete( @p S ) -- the explicit two-object
+//! hand-over of MoL phase 5.  DAESLV takes a model distributed in space itself (DAESLV_IDAS::setup).
+template <typename SOLVER>
+inline bool
+export_semidiscrete
+( OCFEMOL& mol, FFGraph& dag, SOLVER& S, FFDom const& tdom, std::vector<FFVar>& xc, FFVar& t, std::string* err = nullptr )
+{
+  if( !declare_semidiscrete( mol, dag, S, tdom, xc, t, err ) ) return false;
+  configure_semidiscrete( S );
   return true;
 }
 

@@ -12,9 +12,11 @@
 #include <tuple>
 #include <vector>
 
+#include <memory>
 #include "daeslv_base.hpp"
 #include "base_idas.hpp"
 #include "base_kinsol.hpp"
+#include "ffocfemol.hpp"     // a model distributed in space: the method of lines (MoL 7'b)
 
 namespace mc
 {
@@ -93,8 +95,33 @@ public:
     }
 
   //! @brief Extract the model as a DAE and build the evaluation plan.  False with err() set.
+  //! A model DISTRIBUTED IN SPACE (a state declared over a direction other than the evolution one) is taken by
+  //! the method of lines: an OCFEMOL, given this model's declarations, collocates the spatial directions, and its
+  //! semi-discrete system -- one state per nodal unknown, on the declared t domain -- becomes THIS solver's working
+  //! model, while the declared model stays the user's.  Solve, sensitivities, results and statistics are then this
+  //! solver's own; val_state() holds the nodal unknowns, in the order of semidiscrete_states().  Setup sets
+  //! SOLVE.LINSOL = SPARSE, INITIAL.KIN.SPARSE and SOLVE.SUPPRESSALG, which a semi-discrete system needs.  Inputs,
+  //! constants and outputs are taken from MoL phase 6a, transitions from 6c -- until then refused by name.
   bool setup
     ();
+
+  //! @brief For a model distributed in space after setup(): the semi-discretisation (field_columns() and
+  //! field_nodes() map a field to its nodal unknowns), and those unknowns -- the working model's states, in the
+  //! order of val_state().  Null and empty otherwise.
+  OCFEMOL const*            semidiscrete_model () const { return _mol.get(); }
+  std::vector<FFVar> const& semidiscrete_states() const { return _molXc; }
+
+protected:
+  // the method of lines (see setup): the semi-discretisation and the DAG its semi-discrete system is declared on
+  std::unique_ptr<OCFEMOL>      _mol;
+  std::unique_ptr<FFGraph>      _molDag;
+  std::vector<FFVar>            _molXc;
+  FFVar                         _molT;
+  bool                          _molSetupRunning = false;   //!< setup() on the semi-discrete declarations
+  bool _setup_mol
+    ();
+
+public:
 
   //! @brief How many of the np() parameters are per-stage INPUT LEVELS rather than model parameters.  They
   //! are passed in solve()'s parameter vector like any other.  Non-zero exactly when the model has
@@ -1246,6 +1273,61 @@ DAESLV_IDAS::IDJAC__
 
 inline
 bool
+DAESLV_IDAS::_setup_mol
+()
+{
+  auto refuse = [&]( std::string const& why ){
+    _extractError = "a model distributed in space (method of lines): " + why;  _mol.reset();  _molDag.reset();  _molXc.clear();
+    return false; };
+  // The declared model is validated first, as by any solver: FFModel::setup's opening -- the options applied, then
+  // its model checks on the user's declarations (a transition's form, an evaluation that would break causality) --
+  // and only then is what the method of lines does not take yet refused.  A model that is wrong is told why; one
+  // that is right but not yet supported is told when.
+  _apply_options();
+  Options::_force_display_from_env( FFModel::options.DISPLAY_LEVEL );
+  if( !_check_transitions() || !_check_equation_reductions() ){
+    _setupStatus = SetupStatus::INCONSISTENT_MODEL;
+    _extractError = "the model is inconsistent (see the refusal above)";
+    return false;
+  }
+  if( !_usr._mInpUsr.empty()  ) return refuse( "its inputs are taken from MoL phase 6a" );
+  if( !_usr._vCstUsr.empty()  ) return refuse( "its constants are taken from MoL phase 6a" );
+  if( !_usr._mFctUsr.empty()  ) return refuse( "its outputs are taken from MoL phase 6a" );
+  if( !_usr._mTrnUsr.empty()  ) return refuse( "its transitions are taken from MoL phase 6c" );
+  if( !_usr._evolution_dom_setUsr ) return refuse( "the evolution direction must be declared (set_evolution_domain)" );
+  auto const itd = _usr._mDomUsr.find( _usr._evolution_dom_varUsr );
+  if( itd == _usr._mDomUsr.end() ) return refuse( "the evolution direction has no declared domain" );
+  FFDom const tdom = itd->second;                                    // the stages: the declared t domain's elements
+
+  // the semi-discretisation, from this model's own declarations
+  _mol.reset( new OCFEMOL( _usr._dagUsr ) );
+  _mol->copy_declarations_from( *this );
+  static_cast<FFModel::Options&>( _mol->options ) = static_cast<FFModel::Options const&>( options );
+  if( !_mol->setup() ) return refuse( "its semi-discretisation did not set up (OCFEMOL::setup)" );
+
+  // its semi-discrete system, declared into a record on its own DAG, seeded for DAESLV's consistent init
+  _molDag.reset( new FFGraph );
+  FFModel semi;
+  std::string err;
+  if( !declare_semidiscrete( *_mol, *_molDag, semi, tdom, _molXc, _molT, &err ) )
+    return refuse( "its semi-discrete system could not be declared: " + err );
+  std::vector<double> x0( _mol->semi_discrete().n_states, 0. );
+  _mol->init_seed( tdom.lo_dom, x0.data() );
+  for( size_t i = 0; i < x0.size() && i < _molXc.size(); ++i ) semi.update_ref( _molXc[i], x0[i] );
+  configure_semidiscrete( *this );
+
+  // THIS solver's working model, set up from those declarations; the declared model -- the user's -- is restored
+  _swap_declarations( semi );
+  _molSetupRunning = true;
+  bool const ok = setup();
+  _molSetupRunning = false;
+  _swap_declarations( semi );
+  if( !ok ) return refuse( "its semi-discrete DAE did not set up: " + _extractError );
+  return true;
+}
+
+inline
+bool
 DAESLV_IDAS::setup
 ()
 {
@@ -1258,6 +1340,10 @@ DAESLV_IDAS::setup
   // FFDAESLV raced -- fine at MAXTHREAD=1, throwing above it, where the same sweep over an
   // FFODESLV was fine (reported 2026-10-24).
   std::lock_guard<std::recursive_mutex> dag_lock_( dag_mutex() );   // see FFModel::dag_mutex()
+  if( !_molSetupRunning ){
+    _mol.reset();  _molDag.reset();  _molXc.clear();
+    if( distributed_in_space() ) return _setup_mol();                // the method of lines
+  }
   auto _tick = std::chrono::steady_clock::now();
   auto _lap = [&]( char const* what ){
     if( options.DISPLAY_LEVEL >= 2 ){

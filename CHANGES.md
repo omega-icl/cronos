@@ -15,6 +15,9 @@
   component composed pointwise there (`OCFEMOL::transition_expressions`, the INITIAL rows' form: the integrator
   peels these rows, so no vectorised operation); the integrator's stop machinery re-solves the algebraic nodes and
   carries the sensitivities across. `FFMOLINI`/`FFGradMOLINI`, the vectorised Ini stream, retired for that reason.
+* **DAESLV: the consistent initialisation follows the integrator's linear algebra.** With `LINSOL = SPARSE` the IC
+  solve (and its polish) factorises with KLU; it factorised dense whatever `LINSOL` said. `DAESLV_mol`, whose leg 1
+  drives a 12 000-unknown space-time system through DAESLV: 514 s -> 48 s in the sandbox.
 * **DAESLV: IDACalcIC retired.** The KINSOL consistent initialisation is the one corrector, at t0 and at every
   stage boundary; its `(y0, y'0)` now starts IDAS (the derivative was computed and discarded, with IDACalcIC
   repairing it after the solve by default). Gone with it: `INITIAL.SOLVER`, `CALCIC`, `TOUT1`, `NMAXIC`,

@@ -248,6 +248,10 @@ public:
       // IDAS's own error-weighted criterion (BASE_KINSOL::Knobs::RTOL / ATOL), as IDACalcIC's was
       BASE_KINSOL::Knobs k = options.INITIAL.KIN;
       if( k.RTOL <= 0. && k.ATOL <= 0. ){ k.RTOL = options.SOLVE.RTOL;  k.ATOL = options.SOLVE.ATOL; }
+      // ... and the integrator's LINEAR ALGEBRA: a sparse integration gets a sparse (KLU) consistent initialisation.
+      // (DAESLV_mol's leg 1 drives a 12 000-unknown space-time system through DAESLV: its IC solve factorised that
+      // DENSE, 230 s per solve, the whole of the driver's time -- measured 6 Nov 2026.)
+      if( options.SOLVE.LINSOL == BASE_IDAS::Options::SPARSE ) k.SPARSE = true;
       return k; }
 
 

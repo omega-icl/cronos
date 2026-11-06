@@ -520,6 +520,9 @@ protected:
     { return _mDom; }
 
 
+  //! @brief The residual and the outputs are swept separately here, each on its own colouring.
+  bool _colour_rows_separately() const override { return true; }
+
   //! @brief No element of the evolution direction is collocated: t is a scalar input, the integrator's.
   EvolutionWindow _evolution_window
     ()
@@ -724,7 +727,8 @@ OCFEMOL::_on_model_ready
     _setupStatus = SetupStatus::INCONSISTENT_MODEL;
     return false;
   }
-  _disp( 1 ) << "OCFEMOL::setup [mol] Jacobian of Rc: " << _jacNColor << " colours over " << _nCollVar + _nCollInp << " columns\n";
+  _disp( 1 ) << "OCFEMOL::setup [mol] Jacobian of Rc: " << _jacNColorEqn << " colours over " << _nCollVar + _nCollInp
+             << " columns (the outputs' " << _jacNColorFct << ", separately)\n";
   _shape.n_diff_cols = 0; for( bool b : _colDiff ) _shape.n_diff_cols += b;
   _shape.n_alg_rows  = 0; for( bool b : _rowAlg )  _shape.n_alg_rows  += b;
   _disp( 1 ) << "OCFEMOL::setup [mol] Mc: " << _mass.size() << " entries; " << _shape.n_diff_cols << " differential unknowns, "
@@ -793,11 +797,11 @@ OCFEMOL::deriv_residual_full
   size_t const ncol = _nCollVar + _nCollInp;
   // the FAD buffers, seeded by colour exactly as OCFESLV::_reset_autodiff seeds its own -- uc's slots coloured with xc
   std::vector<t_FAD> Fvar( _nCollVar ), Finp( _nCollInp ), Feqn( _nCollEqn );
-  for( size_t i = 0; i < _nCollVar; ++i ){ Fvar[i] = xc[i]; if( _jacNColor ) Fvar[i].diff( _jacColor[i], _jacNColor ); }
+  for( size_t i = 0; i < _nCollVar; ++i ){ Fvar[i] = xc[i]; if( _jacNColorEqn ) Fvar[i].diff( _jacColorEqn[i], _jacNColorEqn ); }
   size_t const it = _nCollInp? pos_input( _evolution_dom_var, {} ): 0;
   for( size_t i = 0; i < _nCollInp; ++i ){
     Finp[i] = ( i == it? t: ( uc? uc[i]: 0. ) );
-    if( _jacNColor ) Finp[i].diff( _jacColor[_nCollVar+i], _jacNColor );
+    if( _jacNColorEqn ) Finp[i].diff( _jacColorEqn[_nCollVar+i], _jacNColorEqn );
   }
   _reset_colloc( _OCFVar, _OCFInp, _OCFDom, _OCFCst );
   _OCFEqn = OCVar<t_FAD>();  _wrkOCF.clear();
@@ -810,7 +814,7 @@ OCFEMOL::deriv_residual_full
     if( rc ) rc[r] = Feqn[r].val();
     for( size_t c : _jacPatternEqn[r] ){
       if( c >= ncol ) continue;
-      jac_col.push_back( c );  jac_val.push_back( _jacNColor? Feqn[r].deriv( _jacColor[c] ): 0. );
+      jac_col.push_back( c );  jac_val.push_back( _jacNColorEqn? Feqn[r].deriv( _jacColorEqn[c] ): 0. );
     }
     jac_ptr.push_back( jac_col.size() );
   }
@@ -841,11 +845,11 @@ OCFEMOL::deriv_outputs_full
   ptr.assign( 1, 0 ); col.clear(); val.clear();
   if( !_nCollFct ) return true;
   std::vector<t_FAD> Fvar( _nCollVar ), Finp( _nCollInp ), Ffct( _nCollFct );
-  for( size_t i = 0; i < _nCollVar; ++i ){ Fvar[i] = xc[i]; if( _jacNColor ) Fvar[i].diff( _jacColor[i], _jacNColor ); }
+  for( size_t i = 0; i < _nCollVar; ++i ){ Fvar[i] = xc[i]; if( _jacNColorFct ) Fvar[i].diff( _jacColorFct[i], _jacNColorFct ); }
   size_t const it = _nCollInp? pos_input( _evolution_dom_var, {} ): 0;
   for( size_t i = 0; i < _nCollInp; ++i ){
     Finp[i] = ( i == it? t: ( uc? uc[i]: 0. ) );
-    if( _jacNColor ) Finp[i].diff( _jacColor[_nCollVar+i], _jacNColor );
+    if( _jacNColorFct ) Finp[i].diff( _jacColorFct[_nCollVar+i], _jacNColorFct );
   }
   _reset_colloc( _OCFVar, _OCFInp, _OCFDom, _OCFCst );
   _OCFEqn = OCVar<t_FAD>();  _wrkOCF.clear();
@@ -857,7 +861,7 @@ OCFEMOL::deriv_outputs_full
     if( f ) f[r] = Ffct[r].val();
     for( size_t c : _jacPatternFct[r] ){
       if( c >= ncol ) continue;
-      col.push_back( c );  val.push_back( _jacNColor? Ffct[r].deriv( _jacColor[c] ): 0. );
+      col.push_back( c );  val.push_back( _jacNColorFct? Ffct[r].deriv( _jacColorFct[c] ): 0. );
     }
     ptr.push_back( col.size() );
   }

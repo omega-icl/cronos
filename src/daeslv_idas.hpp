@@ -533,6 +533,9 @@ protected:
   size_t _nJy = 0, _nJyp = 0;                //!< entry counts of the two blocks, for the active stage
   std::vector<int> _ixJy, _ixJyp;            //!< where each block entry lands in the CSC value array
   std::vector<sunindextype> _colptr, _rowidx;//!< the union pattern, CSC
+  std::vector<sunindextype> _colptrB, _rowidxB;//!< its TRANSPOSE, the backward Jacobian's pattern (phase 8)
+  size_t _asaNB = 1;                           //!< the adjoined outputs STACKED into one backward problem (6 Nov 2026)
+  std::vector<size_t>       _transpB;          //!< forward pattern slot k -> its slot in the transpose
   size_t _nnzjac = 0;                        //!< nonzeros of dF/dy + c_j dF/dy' for the CURRENT stage
   size_t _nnzjacmax = 0;                     //!< the worst stage's count, which the matrix is sized on
   SUNMatrix _sun_mat = nullptr;              //!< kept so a restart can reinitialize KLU on it
@@ -700,11 +703,16 @@ protected:
     {
       // which backward problem this call belongs to.  IDAS hands back the pointer given to
       // IDASetUserDataB, as CVODES does for ODESLV's _ifct; the void* was discarded before.
-      if( ud ) _asaCur = *static_cast<size_t const*>( ud );
+      (void)ud;
+      // ONE backward problem for every adjoined output (6 Nov 2026): lambda stacked by output, the forward rows and
+      // Jacobian evaluated ONCE per call and contracted per block -- each output had its own IDA instance, its own
+      // step sequence and so its own full evaluation at every backward residual (nB x the dominant cost).
       _eval_rows( tt, N_VGetArrayPointer( yy ), N_VGetArrayPointer( yp ) );
-      double const* lam = N_VGetArrayPointer( yyB );
-      double const* lap = N_VGetArrayPointer( ypB );
-      double* r = N_VGetArrayPointer( rrB );
+      for( size_t b = 0; b < _asaNB; ++b ){
+      _asaCur = b;
+      double const* lam = N_VGetArrayPointer( yyB ) + b * _nx;
+      double const* lap = N_VGetArrayPointer( ypB ) + b * _nx;
+      double* r = N_VGetArrayPointer( rrB ) + b * _nx;
       for( size_t i = 0; i < _nx; ++i ) r[i] = 0.;
       for( size_t e = 0; e < _nJyp; ++e ) r[ _cJyp[e] ] += _dEVAL[ _offJyp + e ] * lap[ _rJyp[e] ];
       for( size_t e = 0; e < _nJy;  ++e ) r[ _cJy[e]  ] -= _dEVAL[ _offJy  + e ] * lam[ _rJy[e]  ];
@@ -714,6 +722,7 @@ protected:
       if( _asaQ_() < _nq )
         for( size_t e = 0; e < _nQy; ++e )
           if( (size_t)_rQy[e] == _asaQ_() ) r[ _cQy[e] ] += _asaWq_() * _dEVAL[ _offQy + e ];
+      }
       return 0;
     }
 
@@ -879,23 +888,62 @@ protected:
     {
       // which backward problem this call belongs to.  IDAS hands back the pointer given to
       // IDASetUserDataB, as CVODES does for ODESLV's _ifct; the void* was discarded before.
-      if( ud ) _asaCur = *static_cast<size_t const*>( ud );
+      (void)ud;
       _eval_rows( tt, N_VGetArrayPointer( yy ), N_VGetArrayPointer( yp ) );
-      double const* lam = N_VGetArrayPointer( yyB );
-      double* q = N_VGetArrayPointer( rrQB );
-      for( size_t j = 0; j < _np; ++j ) q[j] = 0.;
-      for( size_t e = 0; e < _nFp; ++e ) q[ _cFp[e] ] += _dEVAL[ _offFp + e ] * lam[ _rFp[e] ];
-      if( _asaQ_() < _nq )
-        for( size_t e = 0; e < _nQp; ++e )
-          if( (size_t)_rQp[e] == _asaQ_() ) q[ _cQp[e] ] += _asaWq_() * _dEVAL[ _offQp + e ];
+      for( size_t b = 0; b < _asaNB; ++b ){                   // stacked: block b's integrand from block b's lambda
+        _asaCur = b;
+        double const* lam = N_VGetArrayPointer( yyB ) + b * _nx;
+        double* q = N_VGetArrayPointer( rrQB ) + b * _np;
+        for( size_t j = 0; j < _np; ++j ) q[j] = 0.;
+        for( size_t e = 0; e < _nFp; ++e ) q[ _cFp[e] ] += _dEVAL[ _offFp + e ] * lam[ _rFp[e] ];
+        if( _asaQ_() < _nq )
+          for( size_t e = 0; e < _nQp; ++e )
+            if( (size_t)_rQp[e] == _asaQ_() ) q[ _cQp[e] ] += _asaWq_() * _dEVAL[ _offQp + e ];
+      }
       return 0;
     }
   //! @brief Adjoint Jacobian; phase 6, refuses for now.
+  //! @brief The BACKWARD residual's Jacobian in IDAS's convention, d rB/d lambda + cjB d rB/d lambda': the backward
+  //! residual is LINEAR in (lambda, lambda') with the forward Jacobian transposed as its coefficients (IDRESB__), so
+  //!     J_B = -Jy^T + Jypdot^T + cjB Jyp^T
+  //! scattered from the entries _eval_rows just produced.  (Unregistered until 6 Nov 2026, IDAS built it by
+  //! difference quotients: n backward residuals per Jacobian -- 62 000 of the 62 110 backward residual calls of
+  //! DAESLV_molsens's column, the adjoint 11x the value solve.)
   int IDJACB__
-    ( sunrealtype, sunrealtype, N_Vector, N_Vector, N_Vector, N_Vector, N_Vector, SUNMatrix, void*,
+    ( sunrealtype tt, sunrealtype cjB, N_Vector yy, N_Vector yp, N_Vector, N_Vector, N_Vector, SUNMatrix JacB, void*,
       N_Vector, N_Vector, N_Vector )
     override
-    { return -1; }
+    {
+      _eval_rows( tt, N_VGetArrayPointer( yy ), N_VGetArrayPointer( yp ) );
+      if( SUNMatGetID( JacB ) == SUNMATRIX_SPARSE ){                        // KLU: the transposed union pattern
+        std::vector<double> v( _nnzjac, 0. );
+        for( size_t e = 0; e < _nJy;  ++e ) v[ _transpB[ _ixJy[e]  ] ] -= _dEVAL[ _offJy  + e ];
+        for( size_t e = 0; e < _nJyp; ++e ) v[ _transpB[ _ixJyp[e] ] ] += cjB * _dEVAL[ _offJyp + e ];
+        if( _hasJypdot )
+          for( size_t e = 0; e < _nJyp; ++e ) v[ _transpB[ _ixJyp[e] ] ] += _dEVAL[ _offJypdot + e ];
+        sunindextype* cp = SUNSparseMatrix_IndexPointers( JacB );
+        sunindextype* ri = SUNSparseMatrix_IndexValues( JacB );
+        sunrealtype*  d  = SUNSparseMatrix_Data( JacB );
+        // the stacked problem's Jacobian is BLOCK DIAGONAL, _asaNB copies of J_B: sparse by construction once stacked
+        for( size_t b = 0; b < _asaNB; ++b ){
+          for( size_t c = 0; c < _nx; ++c ) cp[ b*_nx + c ] = (sunindextype)( b*_nnzjac ) + _colptrB[c];
+          for( size_t e = 0; e < _nnzjac; ++e ){ ri[ b*_nnzjac + e ] = (sunindextype)( b*_nx ) + _rowidxB[e]; d[ b*_nnzjac + e ] = v[e]; }
+        }
+        cp[ _asaNB*_nx ] = (sunindextype)( _asaNB*_nnzjac );
+        return 0;
+      }
+      SUNMatZero( JacB );
+      sunrealtype* J = SUNDenseMatrix_Data( JacB );
+      sunindextype const n = SUNDenseMatrix_Rows( JacB );                   // column-major: (i, j) at J[ i + n j ]
+      for( size_t b = 0; b < _asaNB; ++b ){
+        size_t const o = b * _nx;
+        for( size_t e = 0; e < _nJy;  ++e ) J[ o + _cJy[e]  + n * ( o + _rJy[e]  ) ] -= _dEVAL[ _offJy  + e ];
+        for( size_t e = 0; e < _nJyp; ++e ) J[ o + _cJyp[e] + n * ( o + _rJyp[e] ) ] += cjB * _dEVAL[ _offJyp + e ];
+        if( _hasJypdot )
+          for( size_t e = 0; e < _nJyp; ++e ) J[ o + _cJyp[e] + n * ( o + _rJyp[e] ) ] += _dEVAL[ _offJypdot + e ];
+      }
+      return 0;
+    }
 
   //! @brief Forward sensitivity is phase 5.
   //! @brief The FORWARD SENSITIVITY residual, one per direction:
@@ -930,11 +978,11 @@ protected:
     override
     {
       if( !_nq ) return -1;
-      double const* y = N_VGetArrayPointer( yy ); double const* ypv = N_VGetArrayPointer( yp );
-      _dVAR[0] = tt;
-      for( size_t i = 0; i < _nx; ++i ){ _dVAR[1+i] = y[i]; _dVAR[1+_nx+i] = ypv[i]; }
-      _dag->eval( _dWRK, _vEVAL.size(), _vEVAL.data(), _dEVAL.data(),
-                  _vVAR.size(), _vVAR.data(), _dVAR.data() );
+      // through the MEMOISED full evaluation: IDAS asks for the quadrature sensitivities at the point the state and
+      // sensitivity residuals have just converged on, so the rows and entries are already in _dEVAL.  This evaluated
+      // the whole set itself, unmemoised, on every call -- 848 calls, 2.3 ms each, 1.9 of the 4.7 s of solve_fsens
+      // on the PSA column at 480 states (6 Nov 2026), and the same count of full sweeps on any model.
+      _eval_rows( tt, N_VGetArrayPointer( yy ), N_VGetArrayPointer( yp ) );
       for( int j = 0; j < Ns; ++j ){
         double const* sj  = N_VGetArrayPointer( yyS[j] );
         double const* spj = N_VGetArrayPointer( ypS[j] );
@@ -1002,6 +1050,16 @@ MC_IDQUADF__
 {
   return ( BASE_IDAS::PTR_BASE_IDAS->*PTR_IDQUADF )( Ns, tt, yy, yp, yyS, ypS, rrQ, rhsQS,
                                                      user_data, t1, t2, t3 );
+}
+
+//! @brief C trampoline for the backward residual's Jacobian, reaching the solver's IDJACB__.
+inline
+int
+MC_IDJACB__
+( sunrealtype tt, sunrealtype cjB, N_Vector yy, N_Vector yp, N_Vector yyB, N_Vector ypB, N_Vector rrB,
+  SUNMatrix JacB, void* ud, N_Vector t1, N_Vector t2, N_Vector t3 )
+{
+  return ( BASE_IDAS::PTR_BASE_IDAS->*PTR_IDJACB )( tt, cjB, yy, yp, yyB, ypB, rrB, JacB, ud, t1, t2, t3 );
 }
 
 //! @brief C trampoline for the forward-sensitivity residual, reaching the solver's IDRESF__.
@@ -1272,6 +1330,21 @@ DAESLV_IDAS::_build_rows
   _ixJy = P.ixJy;    _ixJyp = P.ixJyp;
   _colptr = P.colptr; _rowidx = P.rowidx;
   _nnzjac = P.nnz;
+  // the TRANSPOSED union pattern, for the backward Jacobian J_B = -Jy^T + Jypdot^T + cjB Jyp^T (IDJACB__): forward
+  // slot k at (row _rowidx[k], column c) sits in the backward CSC at (row c, column _rowidx[k]) -- a fixed permutation
+  // of the same slots, so the backward integration factorises with KLU as the forward does (phase 8, 6 Nov 2026)
+  { std::vector<sunindextype> cnt( _nx + 1, 0 );
+    for( size_t c = 0; c < _nx; ++c ) for( sunindextype e = _colptr[c]; e < _colptr[c+1]; ++e ) ++cnt[ _rowidx[e] + 1 ];
+    _colptrB.assign( _nx + 1, 0 );
+    for( size_t c = 0; c < _nx; ++c ) _colptrB[c+1] = _colptrB[c] + cnt[c+1];
+    _rowidxB.assign( _nnzjac, 0 );  _transpB.assign( _nnzjac, 0 );
+    std::vector<sunindextype> next( _colptrB.begin(), _colptrB.end() - 1 );
+    for( size_t c = 0; c < _nx; ++c )
+      for( sunindextype e = _colptr[c]; e < _colptr[c+1]; ++e ){
+        size_t const pos = (size_t)next[ _rowidx[e] ]++;
+        _rowidxB[pos] = (sunindextype)c;  _transpB[e] = pos;
+      }
+  }
   _dEVAL.assign( _vEVAL.size(), 0. );
   return true;
 }
@@ -2079,22 +2152,41 @@ DAESLV_IDAS::solve
     // same storage as before, reached through the current index; step (d) registers nf of them and a
     // single IDASolveB advances them all, as CVodeB does for ODESLV.
     size_t const nB = _asaP.size();
-    std::vector<int> indexBv( nB, -1 );
+    // ONE backward problem for every adjoined output (6 Nov 2026): the blocks stacked by output in yBS / ypBS / qBS,
+    // one IDA instance, one step sequence, one block-diagonal matrix -- so the forward rows and Jacobian are
+    // evaluated once per backward residual, not once per output.  The per-block vectors stay as scratch for the
+    // seeds, the impulses, the stops and the gradient; gather() / scatter() move them across.
+    _asaNB = nB;
+    size_t const nxS = nB * _nx, npS = std::max<size_t>( _np, 1 ), nqS = nB * npS;
     std::vector<N_Vector> yBv( nB, nullptr ), ypBv( nB, nullptr ), qBv( nB, nullptr );
-    std::vector<SUNMatrix> ABv( nB, nullptr );  std::vector<SUNLinearSolver> LSBv( nB, nullptr );
     for( size_t b = 0; b < nB; ++b ){
       yBv[b]  = N_VNew_Serial( (sunindextype)_nx, ctx );
       ypBv[b] = N_VNew_Serial( (sunindextype)_nx, ctx );
-      qBv[b]  = N_VNew_Serial( (sunindextype)std::max<size_t>( _np, 1 ), ctx );
+      qBv[b]  = N_VNew_Serial( (sunindextype)npS, ctx );
       N_VConst( 0., yBv[b] );  N_VConst( 0., ypBv[b] );  N_VConst( 0., qBv[b] );
     }
+    N_Vector yBS = N_VNew_Serial( (sunindextype)nxS, ctx ), ypBS = N_VNew_Serial( (sunindextype)nxS, ctx ),
+             qBS = N_VNew_Serial( (sunindextype)nqS, ctx );
+    N_VConst( 0., yBS );  N_VConst( 0., ypBS );  N_VConst( 0., qBS );
+    auto gather = [&](){
+      for( size_t b = 0; b < nB; ++b ){
+        std::copy_n( N_VGetArrayPointer( yBv[b] ),  _nx, N_VGetArrayPointer( yBS )  + b*_nx );
+        std::copy_n( N_VGetArrayPointer( ypBv[b] ), _nx, N_VGetArrayPointer( ypBS ) + b*_nx );
+        std::copy_n( N_VGetArrayPointer( qBv[b] ),  npS, N_VGetArrayPointer( qBS )  + b*npS );
+      } };
+    auto scatter = [&](){
+      for( size_t b = 0; b < nB; ++b ){
+        std::copy_n( N_VGetArrayPointer( yBS )  + b*_nx, _nx, N_VGetArrayPointer( yBv[b] ) );
+        std::copy_n( N_VGetArrayPointer( ypBS ) + b*_nx, _nx, N_VGetArrayPointer( ypBv[b] ) );
+        std::copy_n( N_VGetArrayPointer( qBS )  + b*npS, npS, N_VGetArrayPointer( qBv[b] ) );
+      } };
     // the names the body already uses, RE-BOUND per problem.  These were references, which bind once
     // and would have kept pointing at problem 0 as _asaCur advanced -- harmless while nB is 1 and
     // wrong the moment step (d) registers more, so they are values re-assigned by _asaBind().
-    int      indexB = -1;
+    int      indexB = -1;                   // the ONE stacked backward problem
     N_Vector yB = nullptr, ypB = nullptr, qB = nullptr;
     auto _asaBind = [&]( size_t const b ){
-      indexB = indexBv[b];  yB = yBv[b];  ypB = ypBv[b];  qB = qBv[b];
+      yB = yBv[b];  ypB = ypBv[b];  qB = qBv[b];
     };
     _asaBind( _asaCur );
     SUNMatrix AB = nullptr; SUNLinearSolver LSB = nullptr;
@@ -2107,7 +2199,7 @@ DAESLV_IDAS::solve
     // and its consistent terminal seed.  _asaCur selects which one the accessors and the callbacks
     // refer to, so the body below is the single-problem code, run once per output.
     if( _lk.size() != _ns+1 ) _lk.assign( _ns+1, std::vector<std::vector<double>>( _nf ) );
-    for( _asaCur = 0; _asaCur < nB && ok; ++_asaCur ){
+    for( _asaCur = 0; _asaCur < nB && ok; ++_asaCur ){     // per block: the weight, the terminal seed, the direct term
       _asaBind( _asaCur );
     _asaWq_() = 0.;
     if( _asaQ_() < _nq && _asaWqCol_() < _vFJac.size() && !_vFJac[_asaWqCol_()].empty() ){
@@ -2118,41 +2210,6 @@ DAESLV_IDAS::solve
         if( (size_t)_rFJ[_asaWqCol_()][e] == _asaF_() && (size_t)_cFJ[_asaWqCol_()][e] == _nx + _asaQ_() )
           _asaWq_() += dj[e];
     }
-    do{
-      if( IDACreateB( mem, &indexB ) != IDA_SUCCESS ){ ok = false; why = "IDACreateB"; break; }
-      if( IDAInitB( mem, indexB, MC_IDRESB__, tEnd, yB, ypB ) != IDA_SUCCESS ){
-        ok = false; why = "IDAInitB"; break; }
-      if( IDASetUserDataB( mem, indexB, &_asaIdx[ _asaCur ] ) != IDA_SUCCESS ){
-        ok = false; why = "IDASetUserDataB"; break; }
-      if( IDASStolerancesB( mem, indexB, options.SOLVE.RTOLB, options.SOLVE.ATOLB ) != IDA_SUCCESS ){
-        ok = false; why = "IDASStolerancesB"; break; }
-      // a backward problem honours the forward problem's step controls, as ODESLV's do (CVodeSet*B) -- it ran under
-      // IDAS's own 500 steps whatever NMAX said, and an adjoint at tight tolerances hit mxstep (DAESLV_molsens)
-      if( ( options.SOLVE.NMAX && IDASetMaxNumStepsB( mem, indexB, (long)options.SOLVE.NMAX ) != IDA_SUCCESS )
-       || ( options.SOLVE.HMAX > 0. && IDASetMaxStepB( mem, indexB, options.SOLVE.HMAX ) != IDA_SUCCESS )
-       || IDASetMaxOrdB( mem, indexB, options.SOLVE.MAXORD ) != IDA_SUCCESS ){
-        ok = false; why = "the backward problem's step controls"; break; }
-      // one matrix and linear solver PER backward problem, alive until the sweep ends (IDAS keeps a pointer to each);
-      // they were created into AB / LSB alone, so all but the last problem's leaked (valgrind on DAESLV_quadacc)
-      AB = SUNDenseMatrix( (sunindextype)_nx, (sunindextype)_nx, ctx );
-      LSB = SUNLinSol_Dense( yB, AB, ctx );
-      ABv[ _asaCur ] = AB;  LSBv[ _asaCur ] = LSB;
-      if( !AB || !LSB || IDASetLinearSolverB( mem, indexB, LSB, AB ) != IDA_SUCCESS ){
-        ok = false; why = "IDASetLinearSolverB"; break; }
-      if( _np && IDAQuadInitB( mem, indexB, MC_IDQUADB__, qB ) != IDA_SUCCESS ){
-        ok = false; why = "IDAQuadInitB"; break; }
-      // lambda(T) = 0 is the right VALUE but not a consistent STATE: resB = Jyp^T lambda' - Jy^T lambda
-      // + g_y, so lambda'(T) must satisfy Jyp^T lambda'(T) = -g_y there.  Seeding it at zero made
-      // IDASolveB fail outright rather than drift, which is the good failure.  IDACalcICB solves it,
-      // and needs the backward id vector: adjoint row i is DIFFERENTIAL exactly where column i of Jyp
-      // has an entry, the transpose of the forward partition.
-      // A POINT output has no running integrand; its whole influence enters through the TERMINAL
-      // condition  Jyp^T lambda(T) = ( df/dx )( T ).  _dFVAR still holds the final stage time from the
-      // forward sweep's last _eval_fct, so the function Jacobian is evaluated where it belongs.
-      // The terminal system runs for EVERY output kind.  h_x is zero when there is no point output,
-      // but a pure quadrature still needs lambda'(T) = -g_y^T from step (c): left at zero, IDASolveB
-      // fails its first step at T (this guard was `_asaHasX_() &&`, and IDACalcICB used to repair it).
-      {
         if( _asaHasX_() && !_vFJac.empty() && !_vFJac[ _vFJac.size()-1 ].empty() ){
           size_t const kT = _vFJac.size()-1;
           std::vector<double> dj( _vFJac[kT].size(), 0. );
@@ -2188,40 +2245,54 @@ DAESLV_IDAS::solve
         std::vector<double> dGdpT;
         if( !_adjoint_seed( ctx, tEnd, _asaHx_(), gyT, N_VGetArrayPointer( yB ), N_VGetArrayPointer( ypB ), why, &dGdpT ) ){
           ok = false; break; }
-        if( !dGdpT.empty() && qB && _np ){                     // IDAQuadInitB copied qB already: push the direct term
+        if( !dGdpT.empty() && _np )                            // the direct term enters the block's quadrature
           for( size_t j = 0; j < _np; ++j ) N_VGetArrayPointer( qB )[j] += dGdpT[j];
-          if( IDAQuadReInitB( mem, indexB, qB ) != IDA_SUCCESS ){ ok = false; why = "IDAQuadReInitB with the projected seed"; break; }
-        }
-        if( IDAReInitB( mem, indexB, tEnd, yB, ypB ) != IDA_SUCCESS ){ ok = false; why = "IDAReInitB with the terminal seed"; break; }
+    }
+    _asaCur = 0;  _asaBind( 0 );
+    if( ok ) do{                                               // ONE registration: the stacked problem
+      gather();
+      if( IDACreateB( mem, &indexB ) != IDA_SUCCESS ){ ok = false; why = "IDACreateB"; break; }
+      if( IDAInitB( mem, indexB, MC_IDRESB__, tEnd, yBS, ypBS ) != IDA_SUCCESS ){
+        ok = false; why = "IDAInitB"; break; }
+      if( IDASStolerancesB( mem, indexB, options.SOLVE.RTOLB, options.SOLVE.ATOLB ) != IDA_SUCCESS ){
+        ok = false; why = "IDASStolerancesB"; break; }
+      if( ( options.SOLVE.NMAX && IDASetMaxNumStepsB( mem, indexB, (long)options.SOLVE.NMAX ) != IDA_SUCCESS )
+       || ( options.SOLVE.HMAX > 0. && IDASetMaxStepB( mem, indexB, options.SOLVE.HMAX ) != IDA_SUCCESS )
+       || IDASetMaxOrdB( mem, indexB, options.SOLVE.MAXORD ) != IDA_SUCCESS ){
+        ok = false; why = "the backward problem's step controls"; break; }
+      // the matrix: block diagonal, nB copies of J_B -- sparse by construction once stacked, so KLU whenever there is
+      // more than one block or the forward factorises sparse; dense only for ONE output under LINSOL = DENSE
+#if defined( CRONOS__WITH_KLU )
+      if( nB > 1 || options.SOLVE.LINSOL == BASE_IDAS::Options::SPARSE ){
+        AB  = SUNSparseMatrix( (sunindextype)nxS, (sunindextype)nxS, (sunindextype)( nB * _nnzjacmax ), CSC_MAT, ctx );
+        LSB = SUNLinSol_KLU( yBS, AB, ctx );
       }
-
-      { N_Vector idB = N_VNew_Serial( (sunindextype)_nx, ctx );
+      else
+#endif
+      { AB = SUNDenseMatrix( (sunindextype)nxS, (sunindextype)nxS, ctx );
+        LSB = SUNLinSol_Dense( yBS, AB, ctx ); }
+      if( !AB || !LSB || IDASetLinearSolverB( mem, indexB, LSB, AB ) != IDA_SUCCESS
+       || IDASetJacFnB( mem, indexB, MC_IDJACB__ ) != IDA_SUCCESS ){
+        ok = false; why = "IDASetLinearSolverB"; break; }
+      if( _np && IDAQuadInitB( mem, indexB, MC_IDQUADB__, qBS ) != IDA_SUCCESS ){
+        ok = false; why = "IDAQuadInitB"; break; }
+      { N_Vector idB = N_VNew_Serial( (sunindextype)nxS, ctx );
         N_VConst( 0., idB );
-        for( size_t e = 0; e < _nJyp; ++e ) N_VGetArrayPointer( idB )[ _cJyp[e] ] = 1.;
+        for( size_t b = 0; b < nB; ++b )
+          for( size_t e = 0; e < _nJyp; ++e ) N_VGetArrayPointer( idB )[ b*_nx + _cJyp[e] ] = 1.;
         int const rc = IDASetIdB( mem, indexB, idB );
         N_VDestroy( idB );
         if( rc != IDA_SUCCESS ){ ok = false; why = "IDASetIdB"; break; }
-        // IDACalcICB is NOT called for the terminal seed: ( lambda(T), lambda'(T) ) are fully
-        // determined by the linear extended system above -- measured, it moved lambda by 0.0 on every
-        // model once that was in place -- so a Newton iteration on a linear problem has nothing to do.
-        // IDASetIdB stays: IDAS still wants the partition for its error test on the algebraic part.
-        if( IDAGetConsistentICB( mem, indexB, yB, ypB ) != IDA_SUCCESS ){
+        if( IDAGetConsistentICB( mem, indexB, yBS, ypBS ) != IDA_SUCCESS ){
           ok = false; why = "IDAGetConsistentICB"; break; }
+        scatter();
       }
       if( _np && options.SOLVE.QERRB ){
         IDASetQuadErrConB( mem, indexB, SUNTRUE );
         if( IDAQuadSStolerancesB( mem, indexB, options.SOLVE.RTOLB, options.SOLVE.ATOLB ) != IDA_SUCCESS ){
           ok = false; why = "IDAQuadSStolerancesB"; break; }
       }
-      // Backward STAGE BY STAGE, so an output term at an INTERIOR stage time can be picked up.  A
-      // measurement at tau gives lambda an impulse there:  Jyp^T lambda(tau^-) = Jyp^T lambda(tau^+)
-      // + (df/dx)(tau).  ODESLV expresses the same thing as one Hamiltonian  f_k(x) + lambda^T.map
-      // differentiated in one go; here the map term is the stop system rather than a divided map, so
-      // the two parts are taken separately -- this is the measurement part, which is what parameter
-      // estimation against time-series data needs and which needs no restart machinery.
     } while( false );
-      indexBv[ _asaCur ] = indexB;        // IDACreateB wrote it into the local; the sweep reads indexBv
-    }   // end of the per-output creation loop: every backward problem is registered and seeded
     _asaCur = 0;  _asaBind( 0 );
     if( !ok ) goto backward_done;
     do{
@@ -2339,13 +2410,16 @@ DAESLV_IDAS::solve
             // EVERY problem is reinitialised: IDAS holds its own copy of each lambda, and a problem
             // whose lambda changed in yBv without an IDAReInitB simply carries on from the old one --
             // which is what left the interior outputs at zero in the first cut of this step
-            for( size_t b = 0; b < nB && ok; ++b ){
-              if( IDAReInitB( mem, indexBv[b], _dT[kk], yBv[b], ypBv[b] ) != IDA_SUCCESS ){
-                ok = false; why = "IDAReInitB at an interior stage time"; break; }
-              if( _np && IDAQuadReInitB( mem, indexBv[b], qBv[b] ) != IDA_SUCCESS ){
-                ok = false; why = "IDAQuadReInitB"; break; }
-            }
-            if( !ok ) break;
+            gather();
+#if defined( CRONOS__WITH_KLU )
+            // the stage's rows may change the pattern: KLU re-analyses, as the forward restart does after ITS _build_rows
+            if( AB && LSB && SUNMatGetID( AB ) == SUNMATRIX_SPARSE
+             && SUNLinSol_KLUReInit( LSB, AB, (sunindextype)( nB * _nnzjacmax ), 2 ) ){ ok = false; why = "KLU reinit of the backward problem"; break; }
+#endif
+            if( IDAReInitB( mem, indexB, _dT[kk], yBS, ypBS ) != IDA_SUCCESS ){
+              ok = false; why = "IDAReInitB at an interior stage time"; break; }
+            if( _np && IDAQuadReInitB( mem, indexB, qBS ) != IDA_SUCCESS ){
+              ok = false; why = "IDAQuadReInitB"; break; }
           }
         }
         // The backward sweep sub-samples by RESRECORD exactly as the forward one does, stopping at
@@ -2355,8 +2429,9 @@ DAESLV_IDAS::solve
         if( brec ){
           // the STAGE-END row, for EVERY problem -- the first cut pushed it for problem 0 only, which
           // left an integral output four rows short of a point output and the binder refusing them
+          if( _np && IDAGetQuadB( mem, indexB, &tb2, qBS ) != IDA_SUCCESS ){ ok = false; why = "IDAGetQuadB"; }
+          else scatter();
           for( size_t b = 0; b < nB && ok; ++b ){
-            if( _np && IDAGetQuadB( mem, indexBv[b], &tb2, qBv[b] ) != IDA_SUCCESS ){ ok = false; why = "IDAGetQuadB"; break; }
             if( _asaP[b].ifct < results_asens.size() )
               results_asens[ _asaP[b].ifct ].push_back( Results( _dT[kk], _nx, N_VGetArrayPointer( yBv[b] ),
                                                                  _np, _np? N_VGetArrayPointer( qBv[b] ): nullptr ) );
@@ -2371,13 +2446,9 @@ DAESLV_IDAS::solve
             // ONE call advances EVERY registered backward problem, as CVodeB does for ODESLV --
             // over a single forward solve and a single set of checkpoints
             if( IDASolveB( mem, tgt, IDA_NORMAL ) < 0 ){ ok = false; why = "IDASolveB"; break; }
-            for( size_t b = 0; b < nB && ok; ++b ){
-              if( IDAGetB( mem, indexBv[b], &tb2, yBv[b], ypBv[b] ) != IDA_SUCCESS ){
-                ok = false; why = "IDAGetB"; break; }
-              if( _np && IDAGetQuadB( mem, indexBv[b], &tb2, qBv[b] ) != IDA_SUCCESS ){
-                ok = false; why = "IDAGetQuadB"; break; }
-            }
-            if( !ok ) break;
+            if( IDAGetB( mem, indexB, &tb2, yBS, ypBS ) != IDA_SUCCESS ){ ok = false; why = "IDAGetB"; break; }
+            if( _np && IDAGetQuadB( mem, indexB, &tb2, qBS ) != IDA_SUCCESS ){ ok = false; why = "IDAGetQuadB"; break; }
+            scatter();
             _asaBind( _asaCur );
             // the t0 row waits: qB there is only the RUNNING part of the gradient, and the
             // initial-condition term is added below -- recording it early is what left ODESLV's
@@ -2483,9 +2554,10 @@ DAESLV_IDAS::solve
       _asaCur = 0;  _asaBind( 0 );
     } while( false );
     backward_done:
+    if( LSB ) SUNLinSolFree( LSB );
+    if( AB )  SUNMatDestroy( AB );
+    N_VDestroy( yBS );  N_VDestroy( ypBS );  N_VDestroy( qBS );
     for( size_t b = 0; b < nB; ++b ){
-      if( LSBv[b] ) SUNLinSolFree( LSBv[b] );
-      if( ABv[b] )  SUNMatDestroy( ABv[b] );
       if( yBv[b] ) N_VDestroy( yBv[b] );
       if( ypBv[b] ) N_VDestroy( ypBv[b] );
       if( qBv[b] ) N_VDestroy( qBv[b] );

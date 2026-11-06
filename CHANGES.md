@@ -15,6 +15,21 @@
   component composed pointwise there (`OCFEMOL::transition_expressions`, the INITIAL rows' form: the integrator
   peels these rows, so no vectorised operation); the integrator's stop machinery re-solves the algebraic nodes and
   carries the sensitivities across. `FFMOLINI`/`FFGradMOLINI`, the vectorised Ini stream, retired for that reason.
+* **DAESLV adjoint: one backward problem for every adjoined output.** The outputs' multipliers are stacked into
+  one IDA instance with one step sequence and one block-diagonal matrix (KLU whenever there is more than one
+  block or the forward factorises sparse), so the forward rows and Jacobian are evaluated once per backward
+  residual rather than once per output. The backward Jacobian is analytic (it was built by difference quotients),
+  and the quadrature sensitivity integrands read the memoised evaluation. The PSA column at 480 states, one
+  parameter, two outputs: `solve_fsens` 4.7 s -> 2.6 s, `solve_asens` 6.1 s -> 3.9 s, against 0.6 s for the solve.
+* **OCFEMOL: the residual's Jacobian coloured on the equation rows alone.** The coloured pattern held the output
+  rows too, for OCFESLV's single sweep; under MoL an output distributed over space is one row touching every
+  node of its fields, so every such column needed its own colour: 121 for a residual whose rows need far fewer,
+  paid at every Jacobian and every sensitivity or backward residual. OCFEMOL sweeps the residual and the outputs
+  separately and now colours them separately. PSA column: `solve_fsens` 2.6 s -> 1.95 s, `solve_asens` 3.9 s -> 2.7 s.
+* **DAESLV: `ic_sens` and `ic_adjoint` factorise as the IC solve does.** One `_ic_factor` builds the IC system's
+  Jacobian in the pattern the IC solve uses, transposed for the adjoint, on KLU under `LINSOL = SPARSE` and dense
+  otherwise; the sensitivity seeds at t0 and the sensitivities across a stop, forward and adjoint, were dense
+  whatever `LINSOL` said.
 * **DAESLV: the consistent initialisation follows the integrator's linear algebra.** With `LINSOL = SPARSE` the IC
   solve (and its polish) factorises with KLU; it factorised dense whatever `LINSOL` said. `DAESLV_mol`, whose leg 1
   drives a 12 000-unknown space-time system through DAESLV: 514 s -> 48 s in the sandbox.

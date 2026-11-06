@@ -689,6 +689,14 @@ class BASE_DE
     ( int const n, double const* z, double* J, void* user );
   static int _ic_spjac
     ( int const n, double const* z, double* val, void* user );
+  //! @brief The IC system's Jacobian at @p z, FACTORISED for ic_sens / ic_adjoint: KLU on the system's own pattern
+  //! (S.sp, the one the IC solve factorises) when the integrator's knobs say SPARSE, dense otherwise -- the rule the
+  //! IC solve follows since 6 Nov 2026 (DAESLV_mol's 12 000-unknown system factorised dense, 230 s a solve).
+  //! @p transposed for the adjoint.  @p F receives the matrix, solver and a work vector; the caller frees them.
+  struct t_ICFactor { SUNMatrix A = nullptr; SUNLinearSolver LS = nullptr; N_Vector b = nullptr;
+                      void free(){ if( LS ) SUNLinSolFree( LS ); if( A ) SUNMatDestroy( A ); if( b ) N_VDestroy( b ); LS = nullptr; A = nullptr; b = nullptr; } };
+  bool _ic_factor
+    ( t_ICSys& S, size_t const n, double const* z, SUNContext ctx, bool const transposed, t_ICFactor& F );
 
   //! @brief Every variable the IC rows are evaluated against, in _dIcVar order.
   std::vector<FFVar> const& _icUnkAll
@@ -1887,37 +1895,24 @@ BASE_DE::ic_sens
       }
   }
 
-  // dF/dz at the same point, through the SAME callback KINSOL drove
-  std::vector<double> z( n, 0. ), J( n*n, 0. );
+  // dF/dz at the same point, through the SAME callbacks KINSOL drove, factorised as the IC solve was
+  std::vector<double> z( n, 0. );
   for( size_t i = 0; i < _nx && i < n; ++i ) z[i] = S.dVar[1+i];
   for( size_t d = 0; d < S.dotOf.size(); ++d ) z[_nx+d] = S.dVar[ dot0 + d ];
-  _icCur = &S;
-  _ic_jac( (int)n, z.data(), J.data(), this );
-  _icCur = nullptr;
-
   // one factorisation, _np back-substitutions
   SUNContext ctx = nullptr;
   if( SUNContext_Create( SUN_COMM_NULL, &ctx ) < 0 ) return false;
-  SUNMatrix A = SUNDenseMatrix( (sunindextype)n, (sunindextype)n, ctx );
-  N_Vector b = N_VNew_Serial( (sunindextype)n, ctx );
-  SUNLinearSolver LS = SUNLinSol_Dense( b, A, ctx );
-  bool ok = ( A && b && LS );
-  if( ok ){
-    for( size_t c = 0; c < n; ++c )
-      for( size_t r = 0; r < n; ++r ) SM_ELEMENT_D( A, r, c ) = J[ r + n*c ];
-    ok = ( SUNLinSolSetup( LS, A ) == 0 );
-  }
+  t_ICFactor F;
+  bool ok = _ic_factor( S, n, z.data(), ctx, false, F );
   for( size_t j = 0; ok && j < _np; ++j ){
-    double* bd = N_VGetArrayPointer( b );
+    double* bd = N_VGetArrayPointer( F.b );
     for( size_t r = 0; r < n; ++r ) bd[r] = rhs[ j*n + r ];
-    ok = ( SUNLinSolSolve( LS, A, b, b, 0. ) == 0 );
+    ok = ( SUNLinSolSolve( F.LS, F.A, F.b, F.b, 0. ) == 0 );
     if( !ok ) break;
     for( size_t i = 0; i < _nx && i < n; ++i ) dxdp[j][i] = bd[i];
     for( size_t d = 0; d < S.dotOf.size(); ++d ) ddxdp[j][ S.dotOf[d] ] = bd[_nx+d];
   }
-  if( LS ) SUNLinSolFree( LS );
-  if( A ) SUNMatDestroy( A );
-  if( b ) N_VDestroy( b );
+  F.free();
   SUNContext_Free( &ctx );
   return ok;
 }
@@ -1947,24 +1942,18 @@ BASE_DE::ic_adjoint
   for( size_t d = 0; d < S->dotOf.size(); ++d ) z[_nx+d] = S->dotOf[d] < dxplus.size()? dxplus[ S->dotOf[d] ]: 0.;
   _icCur = S;  _ic_scatter( this, (int)n, z.data() );
 
-  // dF/dz at the solution, transposed, against [ v^+ ; 0 ]
-  std::vector<double> J( n*n, 0. );
-  _ic_jac( (int)n, z.data(), J.data(), this );
+  // dF/dz at the solution, TRANSPOSED, against [ v^+ ; 0 ] -- factorised as the IC solve was
   _icCur = nullptr;
   SUNContext ctx = nullptr;
   if( SUNContext_Create( SUN_COMM_NULL, &ctx ) < 0 ) return false;
-  SUNMatrix A = SUNDenseMatrix( (sunindextype)n, (sunindextype)n, ctx );
-  N_Vector b = N_VNew_Serial( (sunindextype)n, ctx );
-  SUNLinearSolver LS = SUNLinSol_Dense( b, A, ctx );
-  bool ok = ( A && b && LS );
+  t_ICFactor F;
+  bool ok = _ic_factor( *S, n, z.data(), ctx, true, F );
   if( ok ){
-    for( size_t c = 0; c < n; ++c )
-      for( size_t r = 0; r < n; ++r ) SM_ELEMENT_D( A, r, c ) = J[ c + n*r ];     // TRANSPOSED
-    for( size_t r = 0; r < n; ++r ) N_VGetArrayPointer( b )[r] = r < _nx && r < vplus.size()? vplus[r]: 0.;
-    ok = ( SUNLinSolSetup( LS, A ) == 0 ) && ( SUNLinSolSolve( LS, A, b, b, 0. ) == 0 );
+    for( size_t r = 0; r < n; ++r ) N_VGetArrayPointer( F.b )[r] = r < _nx && r < vplus.size()? vplus[r]: 0.;
+    ok = ( SUNLinSolSolve( F.LS, F.A, F.b, F.b, 0. ) == 0 );
   }
   if( ok ){
-    double const* mu = N_VGetArrayPointer( b );
+    double const* mu = N_VGetArrayPointer( F.b );
     // v^- = -( dF/dx^- )^T mu, the dx^- block likewise
     if( S->nnzL ){
       S->dag->eval( S->wrk, S->evalL.size(), S->evalL.data(), S->dEvalL.data(),
@@ -1984,11 +1973,56 @@ BASE_DE::ic_adjoint
         if( S->jcolP[e] < _np && S->jrowP[e] < n ) dGdp[ S->jcolP[e] ] -= S->dEvalP[e] * mu[ S->jrowP[e] ];
     }
   }
-  if( LS ) SUNLinSolFree( LS );
-  if( A ) SUNMatDestroy( A );
-  if( b ) N_VDestroy( b );
+  F.free();
   SUNContext_Free( &ctx );
   return ok;
+}
+
+inline
+bool
+BASE_DE::_ic_factor
+( t_ICSys& S, size_t const n, double const* z, SUNContext ctx, bool const transposed, t_ICFactor& F )
+{
+  F.b = N_VNew_Serial( (sunindextype)n, ctx );
+  if( !F.b ) return false;
+  bool const sparse = _ic_knobs().SPARSE && !S.sp.colptr.empty() && S.sp.colptr.size() == n + 1;
+#if defined( CRONOS__WITH_KLU )
+  if( sparse ){
+    size_t const nnz = S.sp.rowidx.size();
+    std::vector<double> val( nnz, 0. );
+    _icCur = &S;  _ic_spjac( (int)n, z, val.data(), this );  _icCur = nullptr;
+    F.A = SUNSparseMatrix( (sunindextype)n, (sunindextype)n, (sunindextype)nnz, CSC_MAT, ctx );
+    if( !F.A ) return false;
+    sunindextype* cp = SUNSparseMatrix_IndexPointers( F.A );
+    sunindextype* ri = SUNSparseMatrix_IndexValues( F.A );
+    sunrealtype*  d  = SUNSparseMatrix_Data( F.A );
+    if( !transposed ){
+      for( size_t c = 0; c <= n; ++c ) cp[c] = S.sp.colptr[c];
+      for( size_t e = 0; e < nnz; ++e ){ ri[e] = S.sp.rowidx[e];  d[e] = val[e]; }
+    }
+    else{                                                      // the CSC of the transpose: column = pattern row
+      std::vector<sunindextype> cnt( n + 1, 0 );
+      for( size_t c = 0; c < n; ++c ) for( sunindextype e = S.sp.colptr[c]; e < S.sp.colptr[c+1]; ++e ) ++cnt[ S.sp.rowidx[e] + 1 ];
+      cp[0] = 0;  for( size_t c = 0; c < n; ++c ) cp[c+1] = cp[c] + cnt[c+1];
+      std::vector<sunindextype> next( cp, cp + n );
+      for( size_t c = 0; c < n; ++c )
+        for( sunindextype e = S.sp.colptr[c]; e < S.sp.colptr[c+1]; ++e ){
+          sunindextype const pos = next[ S.sp.rowidx[e] ]++;
+          ri[pos] = (sunindextype)c;  d[pos] = val[e];
+        }
+    }
+    F.LS = SUNLinSol_KLU( F.b, F.A, ctx );
+    return F.LS && SUNLinSolSetup( F.LS, F.A ) == 0;
+  }
+#endif
+  std::vector<double> J( n*n, 0. );
+  _icCur = &S;  _ic_jac( (int)n, z, J.data(), this );  _icCur = nullptr;
+  F.A = SUNDenseMatrix( (sunindextype)n, (sunindextype)n, ctx );
+  if( !F.A ) return false;
+  for( size_t c = 0; c < n; ++c )
+    for( size_t r = 0; r < n; ++r ) SM_ELEMENT_D( F.A, r, c ) = transposed? J[ c + n*r ]: J[ r + n*c ];
+  F.LS = SUNLinSol_Dense( F.b, F.A, ctx );
+  return F.LS && SUNLinSolSetup( F.LS, F.A ) == 0;
 }
 
 inline

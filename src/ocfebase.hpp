@@ -5085,6 +5085,15 @@ protected:
 
   //! @brief Number of colors in the cached compressed-forward seed matrix
   unsigned                           _jacNColor = 0;
+  //! @brief The equation rows and the output rows coloured SEPARATELY (phase 8, 6 Nov 2026), for a solver that sweeps
+  //! them separately (OCFEMOL): an output distributed over space is one row touching every node of its fields, and in
+  //! the combined colouring every such column needs its own colour -- 121 colours for a residual whose rows need ~40
+  //! on the PSA column at 480 states, paid at every Jacobian and every sensitivity or backward residual.
+  std::vector<unsigned>              _jacColorEqn, _jacColorFct;
+  unsigned                           _jacNColorEqn = 0, _jacNColorFct = 0;
+  //! @brief Whether this solver sweeps the equation rows and the output rows separately (OCFEMOL: yes), in which case
+  //! only the two separate colourings are built; otherwise only the combined one.
+  virtual bool _colour_rows_separately() const { return false; }
 
   //! @brief True when _jacPattern/_jacColor match the current setup/options
   bool                               _jacReady = false;
@@ -17484,7 +17493,7 @@ OCFEBASE::_build_jacobian_pattern
   _jacLinearEqn.clear();
   _jacLinearFct.clear();
   _jacColor.clear();
-  _jacNColor = 0;
+  _jacNColor = 0;  _jacNColorEqn = _jacNColorFct = 0;  _jacColorEqn.clear();  _jacColorFct.clear();
   _jacAllEqnLinear = false;
   _jacAllFctLinear = false;
 
@@ -17549,7 +17558,15 @@ OCFEBASE::_build_jacobian_pattern
 
     std::vector< std::vector<size_t> > all_pattern( _jacPatternEqn );
     all_pattern.insert( all_pattern.end(), _jacPatternFct.begin(), _jacPatternFct.end() );
-    _jacColor = _color_jacobian_columns( all_pattern, ncol, _jacNColor );
+    // only the colouring the solver sweeps with: a greedy colouring costs the sum of the squared row sizes, and an
+    // output row can touch every column -- three colourings per setup cost OCFESLV's ladders x1.8 (sweep, 6 Nov 2026)
+    if( !_colour_rows_separately() )
+      _jacColor = _color_jacobian_columns( all_pattern, ncol, _jacNColor );
+    else{
+      _jacColorEqn = _color_jacobian_columns( _jacPatternEqn, ncol, _jacNColorEqn );
+      _jacColorFct = _jacPatternFct.empty()? std::vector<unsigned>( ncol, 0 ): _color_jacobian_columns( _jacPatternFct, ncol, _jacNColorFct );
+      if( _jacPatternFct.empty() ) _jacNColorFct = 0;
+    }
     _jacInterfaceType  = options.INTERFACE.TYPE;
     _jacImpositionType = options.INTERFACE.IMPOSITION;
     _jacClassified     = _classified;
@@ -17564,7 +17581,7 @@ OCFEBASE::_build_jacobian_pattern
     _jacAllEqnLinear = false;
     _jacAllFctLinear = false;
     _jacColor.clear();
-    _jacNColor = 0;
+    _jacNColor = 0;  _jacNColorEqn = _jacNColorFct = 0;  _jacColorEqn.clear();  _jacColorFct.clear();
     _jacReady = false;
     return false;
   }

@@ -36,8 +36,8 @@ namespace mc
 //!     later step; the residual is symbolic, so it is available, just not wired;
 //!   * no quadratures, no point outputs, no sensitivities.  The eight BASE_IDAS sensitivity callbacks are
 //!     present and REFUSE, so phases 5/6 fill them in rather than finding a silent wrong answer;
-//!   * consistent initialisation is IDACalcIC (option A of the plan).  Option C -- a one-element OCFESLV
-//!     solve -- is the fallback for multi-rooted ICs and is not wired here.
+//!   * consistent initialisation is the KINSOL solve of the shared system (plan D4 / §3.12), at t0 and at every
+//!     stage boundary; IDACalcIC was retired on 5 Nov 2026.
 //!
 //! The residual is evaluated in the MODEL's dag rather than a solver-local copy, so nothing is inserted
 //! or renamed; the coefficients and remainders come out of one subgraph in a single eval, and the
@@ -123,7 +123,8 @@ protected:
   FFVar                         _molT;
   bool                          _molSetupRunning = false;   //!< setup() on the semi-discrete declarations
   //! each declared input (by id) -> its working parameters, in input_dofs() order
-  std::map< long, std::vector<FFVar> >  _molParam;
+  std::map< long, std::vector<size_t> > _molParam;   //!< declared input -> its working PARAMETER INDICES, in input_dofs order
+  std::vector<size_t>                   _molGradRow; //!< declared DOF row r (declared inputs in order) -> working parameter
   bool _setup_mol
     ();
   typedef OCFEMOL::t_InputLayout const* t_InputLayoutRef;
@@ -159,27 +160,29 @@ public:
     ( std::vector<FFModel::InputVal> const& vIn, std::ostream& os=std::cout )
     {
       std::vector<double> P, c;  std::string err;
-      if( _mol ){                       // a model distributed in space: each declared input -> its working parameters
-        P.assign( _np, 0. );
-        bool const ok = resolve_values( vIn,
-          [&]( FFVar const& u, std::vector<double> const& v, std::string& e ){
-            auto const itp = _molParam.find( u.id().second );
-            if( itp == _molParam.end() ){ e = u.name() + " is neither an input nor a constant of the model"; return false; }
-            if( v.size() != itp->second.size() ){
-              e = u.name() + " has " + std::to_string( itp->second.size() ) + " DOFs, but " + std::to_string( v.size() ) + " values were given";
-              return false; }
-            for( size_t k = 0; k < v.size(); ++k ){
-              auto const ix = parameter_index( itp->second[k] );
-              if( ix.size() != 1 ){ e = "the working parameter of " + u.name() + " is missing"; return false; }
-              P[ ix[0] ] = v[k];
-            }
-            return true; },
-          [&]( size_t, double ){}, err );
-        if( !ok ) throw std::invalid_argument( "DAESLV::solve ** " + err + "\n" );
-        return solve( P, c, os );
-      }
-      if( !assemble_values( vIn, P, c, err ) ) throw std::invalid_argument( "DAESLV::solve ** " + err + "\n" );
+      if( !_assemble_by_name( vIn, P, c, err ) ) throw std::invalid_argument( "DAESLV::solve ** " + err + "\n" );
       return solve( P, c, os );
+    }
+
+  //! @brief The by-name values @p vIn as the working model's parameters @p P and constants @p C -- ONE resolution for
+  //! solve, solve_fsens and solve_asens.  For a model distributed in space each declared input maps to its working
+  //! parameters (_molParam), which setup lays out in the declared inputs' DOF order (checked there), so P and the
+  //! gradient's rows both read as the declared DOFs; otherwise BASE_DE::assemble_values.
+  bool _assemble_by_name
+    ( std::vector<FFModel::InputVal> const& vIn, std::vector<double>& P, std::vector<double>& C, std::string& err )
+    {
+      if( !_mol ) return assemble_values( vIn, P, C, err );
+      P.assign( _np, 0. );  C.clear();
+      return resolve_values( vIn,
+        [&]( FFVar const& u, std::vector<double> const& v, std::string& e ){
+          auto const itp = _molParam.find( u.id().second );
+          if( itp == _molParam.end() ){ e = u.name() + " is neither an input nor a constant of the model"; return false; }
+          if( v.size() != itp->second.size() ){
+            e = u.name() + " has " + std::to_string( itp->second.size() ) + " DOFs, but " + std::to_string( v.size() ) + " values were given";
+            return false; }
+          for( size_t k = 0; k < v.size(); ++k ) P[ itp->second[k] ] = v[k];
+          return true; },
+        [&]( size_t, double ){}, err );
     }
 
   //! @brief Solve the consistent-initialisation system.  A thin forward to the SHARED solve in
@@ -189,7 +192,7 @@ public:
     ( std::vector<double>& y, std::vector<double>& yp )
     { std::vector<double> par( _np, 0. );
       for( size_t j = 0; j < _np && 1 + 2*_nx + j < _dVAR.size(); ++j ) par[j] = _dVAR[ 1 + 2*_nx + j ];
-      return BASE_DE::solve_ic( y, yp, options.INITIAL.KIN, par ); }
+      return BASE_DE::solve_ic( y, yp, _ic_knobs(), par ); }
 
   //! @brief DAESLV implements transitions: a jump is a ROW of the stop system, replacing the continuity
   //! of the state it determines.  Not lifted -- the stop IS where it is applied -- so the times must
@@ -241,14 +244,12 @@ public:
     ()
     const
     override
-    { return options.INITIAL.KIN; }
+    { // the INTEGRATOR's tolerances in the knobs: the consistent point, at t0 and at every stop, is polished to
+      // IDAS's own error-weighted criterion (BASE_KINSOL::Knobs::RTOL / ATOL), as IDACalcIC's was
+      BASE_KINSOL::Knobs k = options.INITIAL.KIN;
+      if( k.RTOL <= 0. && k.ATOL <= 0. ){ k.RTOL = options.SOLVE.RTOL;  k.ATOL = options.SOLVE.ATOL; }
+      return k; }
 
-  //! @brief Whether the explicit fast path may be taken; see BASE_DE's hook.
-  bool _ic_bypass_explicit
-    ()
-    const
-    override
-    { return options.INITIAL.BYPASS_EXPLICIT; }
 
   //! @brief Nonzeros of the Jacobian IDAS factorizes -- the UNION of the dF/dy and dF/dy' patterns.
   size_t nnz_jac
@@ -352,7 +353,7 @@ public:
   STATUS solve_fsens
     ( std::vector<FFModel::InputVal> const& vIn, std::ostream& os=std::cout )
     { std::vector<double> P, C;  std::string err;
-      if( !assemble_values( vIn, P, C, err ) )
+      if( !_assemble_by_name( vIn, P, C, err ) )
         throw std::invalid_argument( "DAESLV::solve_fsens ** " + err );
       return solve_fsens( P, C, os ); }
 
@@ -360,7 +361,7 @@ public:
   STATUS solve_asens
     ( std::vector<FFModel::InputVal> const& vIn, std::ostream& os=std::cout )
     { std::vector<double> P, C;  std::string err;
-      if( !assemble_values( vIn, P, C, err ) )
+      if( !_assemble_by_name( vIn, P, C, err ) )
         throw std::invalid_argument( "DAESLV::solve_asens ** " + err );
       return solve_asens( P, C, os ); }
 
@@ -647,7 +648,8 @@ protected:
   std::vector<double> _dWRK;                 //!< eval work array
   std::vector<FFVar>  _vIC;                  //!< initial values, as expressions
   std::vector< std::vector<double> > _xk;    //!< state at the initial point and at each stage time
-  std::vector<double> _dX, _dX0, _dXP0;      //!< state now, and (state, derivative) after IDACalcIC
+  std::vector<double> _dX, _dX0, _dXP0;      //!< state now, and (state, derivative) at t0
+  size_t _numIC0 = 0;                        //!< the consistent initialisations at t0, before stats exist
 
   //! @brief The DAE residual: F = M(t,y,p) * yp + R(t,y,p).
   int IDRES__
@@ -1319,9 +1321,7 @@ DAESLV_IDAS::_setup_mol
   for( auto const& [w, dom] : _usr._mInpUsr )
     for( auto const& d : dom )
       if( _usr._evolution_dom_setUsr && d.id() == _usr._evolution_dom_varUsr.id() )
-        return refuse( "the input " + w.name() + " varies in time: such inputs are taken from MoL phase 6c" );
   if( !_usr._vCstUsr.empty()  ) return refuse( "its constants are taken from MoL phase 6a" );
-  if( !_usr._mTrnUsr.empty()  ) return refuse( "its transitions are taken from MoL phase 6c" );
   if( !_usr._evolution_dom_setUsr ) return refuse( "the evolution direction must be declared (set_evolution_domain)" );
   auto const itd = _usr._mDomUsr.find( _usr._evolution_dom_varUsr );
   if( itd == _usr._mDomUsr.end() ) return refuse( "the evolution direction has no declared domain" );
@@ -1355,19 +1355,63 @@ DAESLV_IDAS::_setup_mol
   _swap_declarations( semi );
   if( !ok ) return refuse( "its semi-discrete DAE did not set up: " + _extractError );
 
-  // each declared input -> its working parameters (OCFEMOL's input matched by id, then by name, as the extraction does)
-  _molParam.clear();
+  // Each declared input -> its working PARAMETERS, one per declared DOF in input_dofs order: a BIJECTION declared DOF
+  // <-> working parameter, through which by-name values enter the parameter vector and the gradient's rows come back
+  // in declared order.  A time-invariant input's slot IS its parameter (the identity, slot by slot).  A time-varying
+  // input's declared DOFs interleave t with the spatial directions (input_dofs: element blocks outer, nodes inner, the
+  // first direction fastest), while the semi-discretisation holds one input over t per spatial SLOT, its levels in a
+  // block: a declared DOF's spatial (element, node) picks the slot, its (element, node) in t picks the level.
+  _molParam.clear();  _molGradRow.clear();
+  std::vector<bool> used( _np, false );
   for( auto const& [u, dom] : _usr._mInpUsr ){
     t_InputLayoutRef L = nullptr;
     for( auto const& l : _mol->inputs_layout() ) if( l.input.id() == u.id() ){ L = &l; break; }
     if( !L ) for( auto const& l : _mol->inputs_layout() ) if( l.input.name() == u.name() ){ L = &l; break; }
     if( !L ) return refuse( "its input " + u.name() + " has no counterpart in the semi-discretisation" );
-    if( L->cols.size() != input_dofs( u ).size() )
-      return refuse( "its input " + u.name() + " has " + std::to_string( input_dofs( u ).size() ) + " DOFs, the semi-discretisation "
-                     + std::to_string( L->cols.size() ) );
+    std::vector<DofIndex> const dofs = input_dofs( u );                 // the DECLARED input's DOFs (t included)
     auto& v = _molParam[ u.id().second ];
-    for( size_t c : L->cols ) v.push_back( uc.at( c ) );
+    if( !L->time_varying ){
+      if( L->cols.size() != dofs.size() )
+        return refuse( "its input " + u.name() + " has " + std::to_string( dofs.size() ) + " DOFs, the semi-discretisation "
+                       + std::to_string( L->cols.size() ) );
+      for( size_t c : L->cols ){
+        auto const ix = parameter_index( uc.at( c ) );
+        if( ix.size() != 1 ) return refuse( "the working parameter of " + u.name() + " is missing" );
+        v.push_back( ix[0] );
+      }
+    }
+    else{
+      FFVar const& tv = _usr._evolution_dom_varUsr;
+      auto const itt = _usr._mDomUsr.find( tv );
+      size_t const nel_t = itt == _usr._mDomUsr.cend()? 0: itt->second.n_elem;
+      std::vector< std::vector<size_t> > lev( L->cols.size() );         // per slot: its levels' parameter indices
+      for( size_t k = 0; k < L->cols.size(); ++k ){
+        lev[k] = parameter_index( uc.at( L->cols[k] ) );
+        if( lev[k].empty() || !nel_t || lev[k].size() % nel_t ) return refuse( "the levels of " + u.name() + " are missing" );
+      }
+      size_t const nn_t = lev[0].size() / nel_t;
+      for( auto const& d : dofs ){
+        size_t k = L->cols.size();
+        for( size_t kk = 0; kk < L->cols.size() && k == L->cols.size(); ++kk ){
+          bool same = true;
+          for( auto const& [dv, e] : L->dof[kk].element ){ auto it = d.element.find( dv );  if( it == d.element.end() || it->second != e ){ same = false; break; } }
+          for( auto const& [dv, n] : L->dof[kk].node ){ if( !same ) break;  auto it = d.node.find( dv );  if( it == d.node.end() || it->second != n ) same = false; }
+          if( same ) k = kk;
+        }
+        auto const ite = d.element.find( tv ), itn = d.node.find( tv );
+        if( k == L->cols.size() || ite == d.element.end() || itn == d.node.end() )
+          return refuse( "a DOF of " + u.name() + " matches no slot of the semi-discretisation" );
+        size_t const m = ite->second * nn_t + itn->second;
+        if( m >= lev[k].size() ) return refuse( "a DOF of " + u.name() + " matches no level of its slot" );
+        v.push_back( lev[k][m] );
+      }
+    }
+    for( size_t ix : v ){
+      if( ix >= _np || used[ix] ) return refuse( "the working parameters of " + u.name() + " are not a bijection with its DOFs" );
+      used[ix] = true;  _molGradRow.push_back( ix );
+    }
   }
+  if( _molGradRow.size() != _np ) return refuse( "it has " + std::to_string( _np ) + " working parameters for " + std::to_string( _molGradRow.size() ) + " declared input DOFs" );
   return true;
 }
 
@@ -1551,8 +1595,6 @@ DAESLV_IDAS::solve
   // Initial values: the INITIAL rows, which may depend on the parameters AND on the states -- a
   // materialised hidden constraint becomes ic[i] = -R/L with R carrying other states.  Seed from the
   // declared references first, so the result does not depend on what the previous call left in _dVAR.
-  // NOTE this is ONE PASS: when the rows are implicit in each other it is a starting point for
-  // IDACalcIC, not a solution of them.  See the plan's IC-solve item.
   std::vector<double> y0( _nx, 0. );
   // Stage 0's rows are built by setup(), but the stage loop leaves them at the LAST stage, so a second
   // solve() on the same object started stage 0 with the previous run's final input levels -- measured at
@@ -1571,16 +1613,12 @@ DAESLV_IDAS::solve
   // derivatives: _split_in leaves anything else in the remainder, so ic[x] can carry z and dx/dt and
   // cannot be evaluated at all.  With a solve available the divided form is not needed -- the reference
   // seed goes straight to solve_ic, which takes the rows as they are.
-  if( options.INITIAL.SOLVER != BASE_IDAS::Options::t_Initial::KINSOL )
-    _dag->eval( _dWRK, _vIC.size(), _vIC.data(), y0.data(),
-                _vVAR.size(), _vVAR.data(), _dVAR.data() );
-  else
-    for( size_t i = 0; i < _nx; ++i ) y0[i] = _dVAR[1+i];      // the reference seed, already in _dVAR
+  for( size_t i = 0; i < _nx; ++i ) y0[i] = _dVAR[1+i];      // the reference seed, already in _dVAR
 
-  // With INITIAL.SOLVER = KINSOL the one-pass evaluation above is only the SEED: solve_ic() then resolves
-  // the INITIAL rows together with the interior rows at t0, which is what rows implicit in each other
-  // need -- one evaluation cannot resolve them, and _mIC's divided form cannot even represent them.
-  if( options.INITIAL.SOLVER == BASE_IDAS::Options::t_Initial::KINSOL ){
+  // The seed is only a SEED: solve_ic() resolves the INITIAL rows together with the interior rows at t0, which is
+  // what rows implicit in each other need -- one evaluation cannot resolve them, and _mIC's divided form cannot
+  // even represent them.  It yields y(t0) AND y'(t0) from the one solve; IDAS starts from that pair.
+  {
     for( size_t i = 0; i < _nx; ++i ) _dVAR[1+i] = y0[i];
     std::vector<double> yv, ypv;
     BASE_KINSOL::Report const r = solve_ic( yv, ypv );
@@ -1589,9 +1627,11 @@ DAESLV_IDAS::solve
       os << "DAESLV_IDAS ** " << r.message << std::endl;   // a warning: the point is usable, just inexact
     y0 = yv;
     _dXP0 = ypv;
+    ++_numIC0;                                   // counted in stats.numIC below
   }
 
   _init_stats( stats );
+  stats.numIC += _numIC0;  _numIC0 = 0;
   SUNContext ctx = nullptr;
   if( SUNContext_Create( SUN_COMM_NULL, &ctx ) < 0 ){ _extractError = "SUNContext_Create failed"; return FATAL; }
   N_Vector yy = N_VNew_Serial( (sunindextype)_nx, ctx );
@@ -1599,7 +1639,7 @@ DAESLV_IDAS::solve
   N_Vector id = N_VNew_Serial( (sunindextype)_nx, ctx );
   for( size_t i = 0; i < _nx; ++i ){
     N_VGetArrayPointer( yy )[i] = y0[i];
-    N_VGetArrayPointer( yp )[i] = 0.;
+    N_VGetArrayPointer( yp )[i] = _dXP0[i];     // KINSOL's y'(t0), from the same solve as y(t0) (it was 0 until 5 Nov 2026)
     N_VGetArrayPointer( id )[i] = _mID[i];
   }
 
@@ -1705,20 +1745,6 @@ DAESLV_IDAS::solve
     if( options.SOLVE.NMAX ) IDASetMaxNumSteps( mem, (long)options.SOLVE.NMAX );
     if( options.SOLVE.HMAX > 0. ) IDASetMaxStep( mem, options.SOLVE.HMAX );
     if( options.SOLVE.H0 > 0. ) IDASetInitStep( mem, options.SOLVE.H0 );
-    IDASetMaxNumStepsIC( mem, options.INITIAL.NMAXIC );
-    IDASetMaxNumJacsIC( mem, options.INITIAL.MAXJACIC );
-    IDASetMaxNumItersIC( mem, options.INITIAL.MAXNLIIC );
-    IDASetLineSearchOffIC( mem, options.INITIAL.LSOFFIC );
-    if( options.INITIAL.STEPTOLIC > 0. ) IDASetStepToleranceIC( mem, options.INITIAL.STEPTOLIC );
-
-    if( options.INITIAL.CALCIC != BASE_IDAS::Options::NONE ){
-      double t1 = options.INITIAL.TOUT1;
-      if( t1 == 0. ) t1 = _dT.size() > 1? _dT[1]: _dT[0] + 1.;
-      int const icopt = ( options.INITIAL.CALCIC == BASE_IDAS::Options::YA_YDP )? IDA_YA_YDP_INIT: IDA_Y_INIT;
-      if( IDACalcIC( mem, icopt, t1 ) != IDA_SUCCESS ){ ok = false; why = "IDACalcIC"; break; }
-      IDAGetConsistentIC( mem, yy, yp );
-      ++stats.numIC;
-    }
     for( size_t i = 0; i < _nx; ++i ){
       _dX0[i]  = N_VGetArrayPointer( yy )[i];
       _dXP0[i] = N_VGetArrayPointer( yp )[i];
@@ -1767,8 +1793,8 @@ DAESLV_IDAS::solve
     // entries rather than one.  At such a boundary the BDF history describes a problem that no longer
     // exists (ODESLV's _stage_restart rule), AND, unlike an ODE, the state itself is no longer
     // consistent: the DIFFERENTIAL components carry over, but the ALGEBRAIC ones are whatever the new
-    // constraints say and generally JUMP.  So the restart is IDAReInit followed by IDACalcIC in
-    // IDA_YA_YDP_INIT, which holds the differential components and re-solves the algebraic ones and the
+    // constraints say and generally JUMP.  So the restart is a consistent initialisation (restart_ic, the
+    // stop system) followed by IDAReInit -- it holds the differential components and re-solves the algebraic ones and the
     // derivatives -- the split the id vector already carries.  Merely re-initialising would resume from
     // an inconsistent point, and with SUPPRESSALG on that first step can look plausible rather than fail.
     // A stop exists wherever the rows change OR a transition was declared: without the second clause a
@@ -1829,10 +1855,10 @@ DAESLV_IDAS::solve
           ok = false; why = "SUNLinSol_KLUReInit"; break;
         }
 #endif
-        if( options.INITIAL.SOLVER == BASE_IDAS::Options::t_Initial::KINSOL ){
+        {
           // A stage boundary is a consistent initialisation: the stage's rows together with CONTINUITY on
-          // the differential states, the left state as data.  Same solve as t0 (plan §3.13), and unlike
-          // IDACalcIC it reports WHY it failed -- a degenerate configuration is named, not just flagged.
+          // the differential states, the left state as data.  Same solve as t0 (plan §3.13), and it reports
+          // WHY it failed -- a degenerate configuration is named, not just flagged.
           std::vector<double> const xL( N_VGetArrayPointer( yy ), N_VGetArrayPointer( yy ) + _nx );
           std::vector<double> xp, dxp, par( _np, 0. );
           for( size_t j = 0; j < _np; ++j ) par[j] = _dVAR[ 1 + 2*_nx + j ];
@@ -1847,7 +1873,7 @@ DAESLV_IDAS::solve
               }
             set_ic_left_sens( sL, sdL );
           }
-          BASE_KINSOL::Report const R = restart_ic( ta, xL, xp, dxp, options.INITIAL.KIN, par, dxL );
+          BASE_KINSOL::Report const R = restart_ic( ta, xL, xp, dxp, _ic_knobs(), par, dxL );
           _xplus[sg] = xp;  _xpplus[sg] = dxp;
           if( R.status == BASE_KINSOL::FAILED ){ ok = false; why = "restart_ic: " + R.message; break; }
           if( R.status == BASE_KINSOL::RANK_DEFICIENT )
@@ -1874,12 +1900,6 @@ DAESLV_IDAS::solve
             int const ism2 = ( options.SOLVE.FSACORR == BASE_IDAS::Options::SIMULTANEOUS )? IDA_SIMULTANEOUS: IDA_STAGGERED;
             if( IDASensReInit( mem, ism2, yS, ypS ) != IDA_SUCCESS ){ ok = false; why = "IDASensReInit"; break; }
           }
-        }
-        else if( options.INITIAL.CALCIC != BASE_IDAS::Options::NONE ){
-          int const icopt = ( options.INITIAL.CALCIC == BASE_IDAS::Options::YA_YDP )? IDA_YA_YDP_INIT: IDA_Y_INIT;
-          if( IDACalcIC( mem, icopt, tb ) != IDA_SUCCESS ){ ok = false; why = "IDACalcIC at a stage boundary"; break; }
-          IDAGetConsistentIC( mem, yy, yp );
-          ++stats.numIC;
         }
       }
       // The quadrature ACCUMULATES over the whole horizon: an integral over the evolution direction is its value at
@@ -2102,6 +2122,12 @@ DAESLV_IDAS::solve
         ok = false; why = "IDASetUserDataB"; break; }
       if( IDASStolerancesB( mem, indexB, options.SOLVE.RTOLB, options.SOLVE.ATOLB ) != IDA_SUCCESS ){
         ok = false; why = "IDASStolerancesB"; break; }
+      // a backward problem honours the forward problem's step controls, as ODESLV's do (CVodeSet*B) -- it ran under
+      // IDAS's own 500 steps whatever NMAX said, and an adjoint at tight tolerances hit mxstep (DAESLV_molsens)
+      if( ( options.SOLVE.NMAX && IDASetMaxNumStepsB( mem, indexB, (long)options.SOLVE.NMAX ) != IDA_SUCCESS )
+       || ( options.SOLVE.HMAX > 0. && IDASetMaxStepB( mem, indexB, options.SOLVE.HMAX ) != IDA_SUCCESS )
+       || IDASetMaxOrdB( mem, indexB, options.SOLVE.MAXORD ) != IDA_SUCCESS ){
+        ok = false; why = "the backward problem's step controls"; break; }
       // one matrix and linear solver PER backward problem, alive until the sweep ends (IDAS keeps a pointer to each);
       // they were created into AB / LSB alone, so all but the last problem's leaked (valgrind on DAESLV_quadacc)
       AB = SUNDenseMatrix( (sunindextype)_nx, (sunindextype)_nx, ctx );
@@ -2472,8 +2498,10 @@ DAESLV_IDAS::solve
   // val_function_gradient() is [ parameter ][ function ], ODESLV's shape -- the FF operations read
   // gradient()[ op input i ][ output k ] and both solvers must agree on which index is which
   _fp.assign( _np, std::vector<double>( _nf, 0. ) );
+  // a model distributed in space: the gradient's rows in DECLARED DOF order (the bijection of _setup_mol)
   if( _dFGrad.size() == _nf*_np )
     for( size_t r = 0; r < _nf; ++r ) for( size_t j = 0; j < _np; ++j ) _fp[j][r] = _dFGrad[ r*_np + j ];
+    if( _mol && _molGradRow.size() == _np ){ auto const fw = _fp;  for( size_t r = 0; r < _np; ++r ) _fp[r] = fw[ _molGradRow[r] ]; }
 
   // file the counters under the kind of solve this was
   if     ( _asa ) stats_asens = stats;

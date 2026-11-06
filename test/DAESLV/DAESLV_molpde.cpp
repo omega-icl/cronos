@@ -273,14 +273,16 @@ int main()
       check( oo && e0 <= 1e-6 && e1 <= 1e-6, "(G) meaning: both outputs = OCFESLV's (time order 4 x 6), to 1e-6" );
     }
   }
-  // (C) not yet taken, refused by name: a time-varying input
+  // (C) a time-varying input is taken (MoL 6c; its gate is DAESLV_moltime): declared over {t}, it is an input over t of the
+  // semi-discrete DAE, its levels the integrator's parameters -- one declared DOF per level
   {
     FFGraph G;  DAESLV_IDAS S( &G );  FFVar t, z, u;
     declare_rod( S, G, t, z, u, 3, 5 );
-    FFVar k = G.add_var( "k" );  S.add_input( k, {t} );
+    FFVar k = G.add_var( "k" );  S.add_input( k, {t}, FFDom::LGL, 1 );            // piecewise constant: 2 levels on 2 stages
     S.options.DISPLAY_LEVEL = 0;
-    check( !S.setup() && S.extract_error().find( "varies in time" ) != std::string::npos
-                      && S.extract_error().find( "6c" ) != std::string::npos, "(C) a time-varying input: refused, naming phase 6c" );
+    bool const ok = S.setup();
+    check( ok && S.input_dofs( k ).size() == 2 && S.np() == 2,
+           "(C) a time-varying input is taken: 2 levels, the integrator's 2 parameters" + ( ok? std::string(): " -- " + S.extract_error() ) );
   }
   {
     FFGraph G;  DAESLV_IDAS S( &G );  FFVar t, z, u;

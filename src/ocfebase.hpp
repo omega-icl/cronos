@@ -655,30 +655,37 @@ protected:
 
 protected:
 
-  //! @brief The marching context as seen by the DIRECTION-AGNOSTIC code (the OCVar environment,
-  //! the interface plan, the determinacy audits).  Those are built over the collocated
-  //! directions and must not read the marching driver's state directly: they ask this.  Phase 1
-  //! of the MoL work moves them into OCFEBASE, where this declaration goes with a "not marching"
-  //! default; OCFESLV then answers it from the members below.  Introduced as C0 so that every
-  //! later commit of that phase is a pure move.
-  struct MarchContext {
-    bool   in_march = false;   //!< a resident marching window is being assembled
-    size_t window   = 0;       //!< its index (meaningful when in_march)
-    size_t n_grid   = 0;       //!< size of the recorded march grid (N+1 for N steps; 0: none)
-    size_t n_steps  = 0;       //!< n_march_steps(): 0 when monolithic
-    bool   active   = false;   //!< SOLVE.MARCHING with a recorded grid of at least one step
+  //! @brief WHAT OF THE EVOLUTION DIRECTION the current assembly collocates, and of what horizon -- as seen by the
+  //! direction-agnostic code (the OCVar environment, the interface plan, the audits, the output evaluation), which must
+  //! not read a solver's strategy: it asks this, and each derived class answers.  Three answers:
+  //!   ALL  -- every element of the evolution domain (a monolithic solve: the default);
+  //!   ONE  -- one element of a horizon solved element by element (OCFESLV's marching window);
+  //!   NONE -- no element: t is a scalar input of the collocated system (OCFEMOL, the method of lines).
+  //! (Was MarchContext / _march_context until 4 Nov 2026; NONE behaves as its "not marching" default did.)
+  struct EvolutionWindow {
+    enum Kind { ALL = 0, ONE, NONE } kind = ALL;
+    size_t index      = 0;      //!< ONE: the collocated element's GLOBAL index in the horizon
+    size_t n_elements = 0;      //!< the horizon's elements when it is solved element by element (0: it is not)
+    bool   stepwise   = false;  //!< the solve proceeds element by element: requested, with n_elements >= 1
   };
-  //! @brief Whether marching was REQUESTED (the solver's SOLVE.MARCHING).  Default: no.
-  virtual bool _march_requested() const { return false; }
-  //! @brief For _eval_fct under marching (OCFESLV answers): whether output @p f is distributed over the evolution
-  //! direction, and the rows of window @p k it places in the monolithic layout.  Default: no such output.
-  virtual bool _march_field_over_evo( t_Fct const& f ) const { (void)f; return false; }
-  virtual std::vector<size_t> _march_field_rows( t_Fct const& f, size_t k ) const { (void)f; (void)k; return {}; }
-
-  //! @brief Default: not marching.  OCFESLV answers from its marching state.
-  virtual MarchContext _march_context
+  virtual EvolutionWindow _evolution_window
     () const
-    { return MarchContext(); }
+    { return EvolutionWindow(); }
+  //! @brief Whether a solve element by element along the evolution direction is REQUESTED -- known before any
+  //! horizon is recorded, unlike EvolutionWindow::stepwise.  Default: no.
+  virtual bool _stepwise_requested() const { return false; }
+  //! @brief Whether output @p f is distributed over the evolution direction: it spans the whole horizon.
+  bool _output_over_evolution
+    ( t_Fct const& f )
+    const
+    {
+      if( f.kind != FctKind::DISTRIBUTED || !_evolution_dom_var.dag() ) return false;
+      for( auto const& [dv, lim] : f.grid ){ (void)lim; if( dv.id() == _evolution_dom_var.id() ) return true; }
+      return false;
+    }
+  //! @brief For an output distributed over the evolution direction: the rows horizon element @p k produces, placed in
+  //! the full-horizon layout (the derived class that solves element by element answers).  Default: none.
+  virtual std::vector<size_t> _window_output_rows( t_Fct const& f, size_t k ) const { (void)f; (void)k; return {}; }
 
 public:
   //! @brief the SOLVER's options.  DERIVES from FFModel::Options, which brings the model's 12
@@ -1154,7 +1161,7 @@ protected:
     const;
 
   //! @brief Templated evaluation of the collocated output functions (the base's, for OCFESLV and OCFEMOL alike; the
-  //! marching state through _march_context and the _march_field_* hooks)
+  //! evolution direction through _evolution_window and _window_output_rows)
   template <typename U>
   void _eval_fct
     ( U* fct, U const* var, U const* inp,
@@ -5448,7 +5455,7 @@ const
   // CONSTANT: under marching it stayed 0 after the first window (q = 1 0 0 0), and the march then used those
   // zeros -- nothing re-samples it per window.  Re-fill every input distributed along the evolution direction
   // across its full element grid (monolithic: already filled, left untouched).
-  if( inp && _march_context().active && _evolution_dom_set && _evolution_dom_var.dag() ){   // == is_marching(); via the hook, so this moves to the base
+  if( inp && _evolution_window().stepwise && _evolution_dom_set && _evolution_dom_var.dag() ){   // a horizon solved element by element
     for( auto const& [v, doms] : _mInp ){
       bool on_evol = false;
       for( auto const& d : doms ) if( d.id() == _evolution_dom_var.id() ){ on_evol = true; break; }
@@ -5544,10 +5551,10 @@ const
           // element 0).  Remap the evolution element to the resident window so pos_input()
           // reads THIS window's slot (control DOF k), not element 0.  Inert off marching.
           auto ndx_in = ndx_el;
-          auto const mctx = _march_context();
-          if( mctx.in_march && _evolution_dom_var.dag() && _mInpDisc.count( _vInp[pos] ) ){
+          auto const ew = _evolution_window();
+          if( ew.kind == EvolutionWindow::ONE && _evolution_dom_var.dag() && _mInpDisc.count( _vInp[pos] ) ){
             auto ite = ndx_in.find( _evolution_dom_var );
-            if( ite != ndx_in.end() ) ite->second = mctx.window;
+            if( ite != ndx_in.end() ) ite->second = ew.index;
           }
           inc = pos_input( _vInp[pos], ndx_in );
           OCinp[pos].update( &inp[inc], ndx_in );
@@ -6263,10 +6270,10 @@ const
       size_t nsel = 0;
       // marching (2026-10-06): the evolution direction is collapsed to the resident window (one element), but the
       // output's rows span the WHOLE horizon -- count them over the global windows, with the global element index,
-      // as the per-window emission applies the masks (see _march_field_rows)
-      auto const mctx = _march_context();
-      bool const evo_march = _evolution_dom_var.dag() && var.id() == _evolution_dom_var.id() && mctx.n_grid > 1;
-      size_t const nel_eff = evo_march? mctx.n_steps: dom.n_elem;
+      // as the per-window emission applies the masks (see _window_output_rows)
+      auto const ew = _evolution_window();
+      bool const evo_march = _evolution_dom_var.dag() && var.id() == _evolution_dom_var.id() && ew.n_elements >= 1;
+      size_t const nel_eff = evo_march? ew.n_elements: dom.n_elem;
       switch( lim ){
         case FFDom::ALL:
         case FFDom::ALL-FFDom::LB:
@@ -14697,7 +14704,7 @@ OCFEBASE::_prepare_interface_plan_tables
                 << ( options.INTERFACE.IMPOSITION == Options::IC_WEAK   ? "IC_WEAK"
                    : options.INTERFACE.IMPOSITION == Options::IC_TRACE  ? "IC_TRACE"
                                                                    : "IC_STRONG" )
-                << ( _march_requested() ? "  march" : "  mono" ) << " =====" << std::endl;
+                << ( _stepwise_requested() ? "  march" : "  mono" ) << " =====" << std::endl;
     }
 
     auto _t_mgs0 = std::chrono::steady_clock::now();
@@ -15475,10 +15482,10 @@ const
             }
             case INPUT: {
               auto nel_in = nel;   // marching: remap evolution element of a distributed input to the resident window
-              auto const mctx = _march_context();
-              if( mctx.in_march && _evolution_dom_var.dag() && _mInpDisc.count( _vInp[upd.pos] ) ){
+              auto const ew = _evolution_window();
+              if( ew.kind == EvolutionWindow::ONE && _evolution_dom_var.dag() && _mInpDisc.count( _vInp[upd.pos] ) ){
                 auto ite = nel_in.find( _evolution_dom_var );
-                if( ite != nel_in.end() ) ite->second = mctx.window;
+                if( ite != nel_in.end() ) ite->second = ew.index;
               }
               inc = pos_input( _vInp[upd.pos], nel_in );
               bool zeroit = false;
@@ -16398,7 +16405,7 @@ const
     // output point outside the current window (e.g. a terminal point on an early block) is
     // expected: clamp here and let the block that actually contains the point produce the
     // value (the marching accumulator overwrites terminal outputs, discarding this clamp).
-    if( !_march_context().in_march )              // via the hook, so this moves to the base
+    if( _evolution_window().kind != EvolutionWindow::ONE )   // not one element of a longer horizon
       throw Exceptions( Exceptions::INDEX );
   }
 
@@ -17571,7 +17578,7 @@ OCFEBASE::_eval_fct
   std::vector<OCVar<U>>& OCdom, std::vector<OCVar<U>>& OCcst, std::vector<OCVar<U>>& OCwrk )
 const
 {
-  auto const mctx = _march_context();                // marching state, through the hook (OCFESLV answers)
+  auto const ew = _evolution_window();               // what of the evolution direction is collocated (the solver answers)
   // Validate external coefficient arrays before any output assembly.
   if( _nCollVar && !var )
     throw Exceptions( Exceptions::INTERNAL );
@@ -17682,8 +17689,8 @@ const
         // marching (2026-10-06, WORKPLAN 1.1): the evolution direction is collapsed to the resident window, ONE element
         // that would count as both the first and the last.  The window emits ALL its evolution nodes (no mask drop,
         // no unique-node drop) -- the same rows, hence the same Jacobian pattern, in every window -- and
-        // _march_field_rows applies the GLOBAL mask when it places them in the monolithic layout.
-        bool const evo_all = _evolution_dom_var.dag() && fd.pvar->id() == _evolution_dom_var.id() && mctx.n_grid > 1
+        // _window_output_rows applies the GLOBAL mask when it places them in the monolithic layout.
+        bool const evo_all = _evolution_dom_var.dag() && fd.pvar->id() == _evolution_dom_var.id() && ew.n_elements >= 1
                           && lim != FFDom::LB && lim != FFDom::UB;
         if( evo_all ) lim = FFDom::ALL;
 
@@ -17751,9 +17758,9 @@ const
           case STATE:   inc = pos_state( _vVar[upd.pos], ndx_el );
                         OCvar[upd.pos].update( &var[inc], ndx_el ); break;
           case INPUT: { auto ndx_in = ndx_el;   // marching: remap evolution element to the resident window
-                        if( mctx.in_march && _evolution_dom_var.dag() && _mInpDisc.count( _vInp[upd.pos] ) ){
+                        if( ew.kind == EvolutionWindow::ONE && _evolution_dom_var.dag() && _mInpDisc.count( _vInp[upd.pos] ) ){
                           auto ite = ndx_in.find( _evolution_dom_var );
-                          if( ite != ndx_in.end() ) ite->second = mctx.window; }
+                          if( ite != ndx_in.end() ) ite->second = ew.index; }
                         inc = pos_input( _vInp[upd.pos], ndx_in );
                         OCinp[upd.pos].update( &inp[inc], ndx_in ); break; }
           case CONSTANT: break;
@@ -17831,8 +17838,8 @@ const
       if( grid_once ) break;
     }
 
-    if( mctx.n_grid > 1 && _march_field_over_evo( fctrec ) ){
-      if( out_row != fctrec.row0 + _march_field_rows( fctrec, mctx.in_march? mctx.window: 0 ).size() ) throw Exceptions( Exceptions::INTERNAL );
+    if( ew.n_elements >= 1 && _output_over_evolution( fctrec ) ){
+      if( out_row != fctrec.row0 + _window_output_rows( fctrec, ew.kind == EvolutionWindow::ONE? ew.index: 0 ).size() ) throw Exceptions( Exceptions::INTERNAL );
     }
     else if( out_row != fctrec.row0 + fctrec.nrow )
       throw Exceptions( Exceptions::INTERNAL );

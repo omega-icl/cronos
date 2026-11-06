@@ -141,7 +141,6 @@ int main()
     M.add_equation( x0 - x1 - 1.,      {t}, {FFDom::LB}, ii );
     M.options.DISPLAY_LEVEL = 0;
     M.options.SOLVE.RTOL = M.options.SOLVE.ATOL = 1e-10;
-    M.options.INITIAL.SOLVER = BASE_IDAS::Options::t_Initial::KINSOL;
     check_bool( "implicit INITIAL rows are ACCEPTED", M.setup() );
     if( M.setup() ){
       std::vector<double> y, yp;
@@ -180,7 +179,6 @@ int main()
     M.add_equation( x + 2.*z + OpP(x,t) - 2., {t}, {FFDom::LB}, ii );   // h(x, y, dx/dt)
     M.options.DISPLAY_LEVEL = 0;
     M.options.SOLVE.RTOL = M.options.SOLVE.ATOL = 1e-10;
-    M.options.INITIAL.SOLVER = BASE_IDAS::Options::t_Initial::KINSOL;
     check_bool( "a row in x, y AND dx/dt is accepted", M.setup() );
     if( M.setup() ){
       std::vector<double> y, yp;

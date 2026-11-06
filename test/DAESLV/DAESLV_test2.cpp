@@ -122,7 +122,6 @@ int main()
     // ACCEPTED and the question moves to solve time.  This configuration is rank-deficient BY
     // CONSTRUCTION -- released horizontally, the position constraint's gradient collapses onto the row
     // pinning x -- so what is asserted is the DIAGNOSIS, not a trajectory (plan §3.12).
-    M.options.INITIAL.SOLVER = BASE_IDAS::Options::t_Initial::KINSOL;
     check_bool( "the index-3 model is now ACCEPTED, not refused", M.setup() );
     if( M.setup() ){
       std::vector<double> yv, ypv;

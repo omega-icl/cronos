@@ -83,12 +83,14 @@ int main()
     for( size_t e = 0; e < NE; ++e ){ P.push_back( 1. + (double)e ); exact += P.back() * 2./(double)NE; }
     M.solve( P );
     std::cout << "    numIC=" << M.stats.numIC << "  rows of val_quadrature()=" << M.val_quadrature().size() << "\n";
-    // The OUTPUT is the sum over stages, which is val_function()'s job; val_quadrature() holds the per-stage
-    // increments it is summed from.  Checking both pins the division of labour, not just the total.
+    // The quadrature ACCUMULATES over the horizon (4 Nov 2026): val_quadrature() holds its value at each stage time,
+    // and the OUTPUT is its value at the end (val_function()).  Checking the running values pins that, not just
+    // the total.  (Until then it held per-stage increments, zeroed at every stage, which val_function() summed.)
     check( "the output integral over 4 stages", M.val_function()[ M.blk_fct(0).first ], exact, 1e-7 );
-    for( size_t e = 0; e < NE; ++e )
-      check( "  stage " + std::to_string(e+1) + " increment = u_e h",
-             M.val_quadrature().at(e+1)[0], P[e] * 2./(double)NE, 1e-7 );
+    for( size_t e = 0; e < NE; ++e ){
+      double run = 0.;  for( size_t k = 0; k <= e; ++k ) run += P[k] * 2./(double)NE;
+      check( "  Q at the end of stage " + std::to_string(e+1) + " = sum_k<=e u_k h",
+             M.val_quadrature().at(e+1)[0], run, 1e-7 ); }
     M.solve( P );
     check( "solve() idempotent on the output", M.val_function()[ M.blk_fct(0).first ], exact, 1e-7 ); }
 
@@ -119,7 +121,7 @@ int main()
       check( "f2 = x(1) + int_0^1 x dt",    F[ M.blk_fct(2).first ],
              std::exp(-1.) + 1. - std::exp(-1.), 1e-7 );
       check( "f3 = int_0^1 x dt alone",     F[ M.blk_fct(3).first ], 1. - std::exp(-1.), 1e-7 );
-      std::cout << "    stage times / per-stage quadrature increments:\n";
+      std::cout << "    stage times / the quadrature's running values:\n";
       for( size_t k = 0; k < M.val_quadrature().size(); ++k )
         std::cout << "      k=" << k << "  q=" << std::scientific << std::setprecision(10)
                   << M.val_quadrature()[k][0] << "\n";

@@ -40,7 +40,10 @@ static R run( bool dummy, double rtol ){
   M.add_equation( nA + nB - 1., {t}, {FFDom::ALL}, INTER );
   M.add_equation( nA - n0, {t}, {FFDom::LB}, INIT );
   M.add_output( OpE( nA, t, 1. ) ); M.add_output( OpI( std::vector<FFVar>{ q }, {t} )[0] );
-  M.options.SOLVE.RTOL = M.options.SOLVE.ATOL = rtol; M.options.DISPLAY_LEVEL = 0; M.options.SOLVE.VERBOSE = 0; M.options.OUTPUT.RESRECORD = 50;
+  M.options.SOLVE.RTOL = M.options.SOLVE.ATOL = rtol;
+  // the adjoint at the same tolerance (its default 1e-7 is what the |S-D| checks at rtol 1e-10 were measuring)
+  M.options.SOLVE.RTOLB = M.options.SOLVE.ATOLB = rtol;
+  M.options.DISPLAY_LEVEL = 0; M.options.SOLVE.VERBOSE = 0; M.options.OUTPUT.RESRECORD = 50;
   M.options.REDUCE.DUMMY_DERIV = dummy;
   if( !M.setup() ) return r;
   r.nx = M.nx(); std::vector<double> P{ 1.5, 0.8 };

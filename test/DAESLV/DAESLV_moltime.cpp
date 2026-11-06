@@ -1,0 +1,283 @@
+// DAESLV_moltime -- MoL phase 6c, time-varying inputs: a model distributed in space with inputs that vary in time, on
+// DAESLV (each spatial slot an input over t of the semi-discrete DAE, with the declared collocation in t; the levels
+// the integrator's parameters) and on OCFESLV, declared once.
+// (A) a time-varying INLET: u_t = alpha u_zz, u(0,t) = g(t) with g an input over {t}, 3 LGL nodes per stage on 2
+//     stages, its levels sampled from a smooth profile so g is continuous (OCFESLV collocates t with the state
+//     continuous at the stage boundary, so a jump in Dirichlet data is not a case it can take), u_z(1,t) = 0,
+//     u0 = g(t0); outputs the inventory at T and the outlet integral.  Values against OCFESLV (a ladder in its time
+//     order); d/dg_k forward = adjoint = central difference, including through the INITIAL row u0 = g(t0) -- which
+//     ic_sens lost until 5 Nov 2026 (the placeholder chain; also fixed for the ODESLV forward path).
+// (B) a DISTRIBUTED, time-varying SOURCE s(t,z) with its own collocation, 3 LGL nodes per element in t AND z (2 stages,
+//     2 spatial elements): 36 declared DOFs whose input_dofs order interleaves t and z -- the bijection declared DOF
+//     <-> working parameter, since the semi-discretisation keeps one input over t per spatial slot.  J = int u dz at
+//     T against OCFESLV (the same spatial discretisation: a source at a boundary or interface node enters through the
+//     row structure there, so no quadrature-weight closed form holds); forward = adjoint = central difference, per DOF.
+// (D) a TRANSITION on a field (MoL 6c): the zero-flux rod with a source p e^-t, u0 = 1, and u(tau+) = u(tau-)/2 at
+//     tau = 0.5, a stage boundary (FFModel requires an element boundary of t).  Applied at the field's differential nodes, both sides composed there; the
+//     integrator's stop machinery re-solves the algebraic nodes and carries the sensitivities across.  A uniform field
+//     is in the operator's kernel, so with J = int u dz at T: J = [1 + p(1 - e^-tau)]/2 + p(e^-tau - e^-T) and
+//     dJ/dp = (1 - e^-tau)/2 + e^-tau - e^-T, exactly on any mesh -- value, forward and adjoint against them.
+#include <iostream>
+#include <iomanip>
+#include <cmath>
+#include "ocfeslv.hpp"
+#include "daeslv_idas.hpp"
+#include "odeslv_cvodes.hpp"
+using namespace mc;
+
+static int nfail = 0;
+static void check( std::string const& w, bool ok )
+{ std::cout << "  " << std::left << std::setw(88) << w << ( ok? "PASS": "FAIL" ) << "\n"; if( !ok ) ++nfail; }
+static double rel( double a, double b ){ return std::fabs( a - b )/std::max( 1e-300, std::fabs( b ) ); }
+static double const ALPHA = 0.1, TEND = 1.;
+
+static void colloc_options( OCFESLV& oc )
+{ oc.options.INTERFACE.IMPOSITION = OCFESLV::Options::IC_STRONG;  oc.options.DISPLAY_LEVEL = 0;  oc.options.SOLVE.MARCHING = false; }
+static void colloc_options( DAESLV_IDAS& S )
+{ S.options.MOL.INTERFACE.IMPOSITION = OCFEMOL::Options::IC_STRONG;  S.options.DISPLAY_LEVEL = 0;
+  S.options.SOLVE.RTOL = 1e-10;  S.options.SOLVE.ATOL = 1e-12;  S.options.SOLVE.RTOLB = 1e-10;  S.options.SOLVE.ATOLB = 1e-12;
+  S.options.SOLVE.VERBOSE = 0; }
+
+// (A) the inlet rod; NODT: the time order (OCFESLV collocates t; DAESLV takes the t domain's elements as its stages)
+template <typename OC>
+static void declare_inlet( OC& oc, FFGraph& G, FFVar& t, FFVar& z, FFVar& u, FFVar& g, size_t NODT )
+{
+  t = G.add_var("t"); z = G.add_var("z"); u = G.add_var("u"); g = G.add_var("g");
+  oc.add_domain( t, FFDom( 0., TEND, 2, FFDom::LGR, NODT ) );
+  oc.add_domain( z, FFDom( 0., 1., 3, FFDom::LGL, 5 ) );
+  oc.set_evolution_domain( t );
+  oc.add_state( u, {t,z} ); oc.update_ref( u, 1. );
+  oc.add_input( g, {t}, FFDom::LGL, 3 );                              // 3 levels per stage, continuous across them
+  FFPartial OpP;  FFIntegral OpI;
+  int const TI = FFDom::ALL - FFDom::LB, ZI = FFDom::ALL - FFDom::LB - FFDom::UB;
+  typename OC::EqnOptions io( OC::EqnRole::INTERIOR, 0 ), ib( OC::EqnRole::BOUNDARY, 0 ), ii( OC::EqnRole::INITIAL, 0 );
+  oc.add_equation( OpP(u,t) - OpP( ALPHA*OpP(u,z), z ), {t,z}, {TI, ZI},                io );
+  oc.add_equation( u - g,                              {t,z}, {TI, FFDom::LB},         ib );
+  oc.add_equation( OpP(u,z),                           {t,z}, {TI, FFDom::UB},         ib );
+  oc.add_equation( u - g,                              {t,z}, {FFDom::LB, FFDom::ALL}, ii );
+  oc.add_output( OpI( u, z ), {t}, {TEND} );                         // 0: the inventory at T
+  oc.add_output( OpI( u, t ), {z}, {1.} );                           // 1: the outlet integral
+  colloc_options( oc );
+}
+
+static bool inlet_daeslv( int mode, std::vector<double> const& G, std::vector<double>& f, std::vector<std::vector<double>>& Gr, std::string& why )
+{
+  FFGraph dag;  DAESLV_IDAS S( &dag );  FFVar t, z, u, g;
+  declare_inlet( S, dag, t, z, u, g, 3 );
+  if( !S.setup() ){ why = "setup: " + S.extract_error(); return false; }
+  std::vector<FFModel::InputVal> const in{ { g, G } };
+  auto const st = mode == 0? S.solve( in ): mode == 1? S.solve_fsens( in ): S.solve_asens( in );
+  if( st != DAESLV_IDAS::NORMAL ){ why = "solve: " + S.extract_error(); return false; }
+  f = S.val_function();  if( mode ) Gr = S.val_function_gradient();
+  return f.size() == 2;
+}
+static bool inlet_ocfeslv( std::vector<double> const& G, size_t NODT, std::vector<double>& f, std::string& why )
+{
+  FFGraph dag;  OCFESLV oc( &dag );  FFVar t, z, u, g;
+  declare_inlet( oc, dag, t, z, u, g, NODT );
+  if( !oc.setup() ){ why = "setup"; return false; }
+  if( oc.solve( std::vector<FFModel::InputVal>{ { g, G } } ) != OCFESLV::NORMAL ){ why = "solve"; return false; }
+  f = oc.val_function();  return f.size() == 2;
+}
+
+// (B) the source rod
+template <typename OC>
+static void declare_source( OC& oc, FFGraph& G, FFVar& t, FFVar& z, FFVar& u, FFVar& s, size_t NODT )
+{
+  t = G.add_var("t"); z = G.add_var("z"); u = G.add_var("u"); s = G.add_var("s");
+  oc.add_domain( t, FFDom( 0., TEND, 2, FFDom::LGR, NODT ) );
+  oc.add_domain( z, FFDom( 0., 1., 2, FFDom::LGL, 5 ) );
+  oc.set_evolution_domain( t );
+  oc.add_state( u, {t,z} ); oc.update_ref( u, 1. );
+  oc.add_input( s, {t,z}, FFDom::LGL, 3 );                            // 3 LGL nodes per element, in t and in z
+  FFPartial OpP;  FFIntegral OpI;
+  int const TI = FFDom::ALL - FFDom::LB, ZI = FFDom::ALL - FFDom::LB - FFDom::UB;
+  typename OC::EqnOptions io( OC::EqnRole::INTERIOR, 0 ), ib( OC::EqnRole::BOUNDARY, 0 ), ii( OC::EqnRole::INITIAL, 0 );
+  oc.add_equation( OpP(u,t) - OpP( ALPHA*OpP(u,z), z ) - s, {t,z}, {TI, ZI},                io );
+  oc.add_equation( OpP(u,z),                               {t,z}, {TI, FFDom::LB},         ib );
+  oc.add_equation( OpP(u,z),                               {t,z}, {TI, FFDom::UB},         ib );
+  oc.add_equation( u - 1.,                                 {t,z}, {FFDom::LB, FFDom::ALL}, ii );
+  oc.add_output( OpI( u, z ), {t}, {TEND} );
+  colloc_options( oc );
+}
+
+int main()
+{
+  std::set_terminate( []{ try{ throw; } catch( mc::FFBase::Exceptions& e ){ std::cerr << "FFBase::Exceptions: " << e.what() << "\n"; }
+                          catch( std::exception const& e ){ std::cerr << "exception: " << e.what() << "\n"; } catch( ... ){} std::abort(); } );
+  std::cout << std::scientific << std::setprecision(3);
+  std::string why;
+  // ---- (A)
+  std::cout << "(A) a time-varying inlet g(t), piecewise constant on 2 stages\n";
+  // g at the 3 LGL nodes of each stage ([0, .5], [.5, 1]): 1 + 0.5 sin(pi t) -- the shared node gets one value
+  double const tn[6] = { 0., 0.25, 0.5, 0.5, 0.75, 1. };
+  std::vector<double> G( 6 );  for( int k = 0; k < 6; ++k ) G[k] = 1. + 0.5*std::sin( M_PI*tn[k] );
+  double const H = 1e-2;                                                // the model is linear in g
+  std::vector<double> f0, fF, fA, fp, fm;  std::vector<std::vector<double>> gF, gA, d;
+  bool const v = inlet_daeslv( 0, G, f0, d, why );
+  check( "(A) DAESLV: the model with a time-varying input sets up and solves by name" + ( v? std::string(): " -- " + why ), v );
+  bool const fw = inlet_daeslv( 1, G, fF, gF, why );
+  check( "(A) forward sensitivities" + ( fw? std::string(): " -- " + why ), fw && gF.size() == 6 && gF[0].size() == 2 );
+  bool const ad = inlet_daeslv( 2, G, fA, gA, why );
+  check( "(A) adjoint sensitivities" + ( ad? std::string(): " -- " + why ), ad && gA.size() == 6 && gA[0].size() == 2 );
+  if( v && fw && ad ){
+    // errors scaled by each output's largest gradient (a near-zero entry has no relative error of its own)
+    double gmax[2] = { 0., 0. };  for( size_t k = 0; k < 6; ++k ) for( int i = 0; i < 2; ++i ) gmax[i] = std::max( gmax[i], std::fabs( gF[k][i] ) );
+    double eFA = 0., eFD = 0.;
+    for( size_t k = 0; k < 6; ++k ){
+      std::vector<double> Gp = G, Gm = G;  Gp[k] += H;  Gm[k] -= H;
+      inlet_daeslv( 0, Gp, fp, d, why );  inlet_daeslv( 0, Gm, fm, d, why );
+      for( int i = 0; i < 2; ++i ){
+        double const fd = ( fp[i] - fm[i] )/( 2.*H );               // the model is linear in g: no truncation error
+        eFA = std::max( eFA, std::fabs( gA[k][i] - gF[k][i] )/gmax[i] );  eFD = std::max( eFD, std::fabs( gF[k][i] - fd )/gmax[i] );
+        if( k < 2 || i == 0 ) std::cout << "    d f" << i << " / d g" << k << ":  fwd " << gF[k][i] << "  adj " << gA[k][i] << "  FD " << fd << "\n";
+      }
+    }
+    std::cout << "    max scaled: adj-fwd " << eFA << "  fwd-FD " << eFD << "\n";
+    check( "(A) adjoint = forward, to 1e-8 of the largest gradient",             eFA <= 1e-8 );
+    check( "(A) forward = central difference, to 1e-6 of the largest gradient",  eFD <= 1e-6 );
+    std::vector<std::vector<double>> fL( 3 );  bool oc = true;
+    for( int k = 0; k < 3 && oc; ++k ) oc = inlet_ocfeslv( G, 3 + k, fL[k], why );
+    check( "(A) OCFESLV at time orders 3, 4, 5" + ( oc? std::string(): " -- " + why ), oc );
+    if( oc ){
+      bool conv = true;
+      for( int i = 0; i < 2; ++i ){
+        std::cout << "    f" << i << "  DAESLV " << std::setprecision(10) << f0[i] << std::setprecision(2) << "   |DAESLV - OCFESLV|/|.| orders 3 4 5:";
+        for( int k = 0; k < 3; ++k ) std::cout << " " << rel( f0[i], fL[k][i] );
+        std::cout << std::setprecision(3) << "\n";
+        for( int k = 0; k < 2; ++k ) conv = conv && rel( f0[i], fL[k][i] ) >= 3.*rel( f0[i], fL[k+1][i] );
+      }
+      check( "(A) the gap to OCFESLV falls >= 3x per time order", conv );
+      check( "(A) at order 5: DAESLV = OCFESLV to 1e-5",          rel( f0[0], fL[2][0] ) <= 1e-5 && rel( f0[1], fL[2][1] ) <= 1e-5 );
+    }
+  }
+  // ---- (B)
+  std::cout << "(B) a distributed, time-varying source s(t,z): (2 stages x 3 nodes) x (2 elements x 3 nodes) = 36 DOFs\n";
+  {
+    FFGraph dag;  DAESLV_IDAS S( &dag );  FFVar t, z, u, s;
+    declare_source( S, dag, t, z, u, s, 3 );
+    bool ok = S.setup();
+    check( "(B) setup" + ( ok? std::string(): " -- " + S.extract_error() ), ok );
+    if( ok ){
+      auto const dofs = S.input_dofs( s );
+      std::cout << "    declared DOFs: " << dofs.size() << "\n";
+      check( "(B) 36 declared DOFs", dofs.size() == 36 );
+      std::vector<double> SV( dofs.size() );                          // a distinct value per DOF
+      for( size_t k = 0; k < dofs.size(); ++k ) SV[k] = 0.3 + 0.02*k;
+      std::vector<FFModel::InputVal> const in{ { s, SV } };
+      ok = S.solve( in ) == DAESLV_IDAS::NORMAL;
+      check( "(B) value solve by name" + ( ok? std::string(): " -- " + S.extract_error() ), ok );
+      if( ok ){
+        double const J0 = S.val_function().at( 0 );
+        std::vector<std::vector<double>> gF, gA;
+        bool const fw = S.solve_fsens( in ) == DAESLV_IDAS::NORMAL;  if( fw ) gF = S.val_function_gradient();
+        bool const ad = S.solve_asens( in ) == DAESLV_IDAS::NORMAL;  if( ad ) gA = S.val_function_gradient();
+        check( "(B) forward and adjoint sensitivities (36 rows)", fw && ad && gF.size() == 36 && gA.size() == 36 );
+        if( fw && ad && gF.size() == 36 && gA.size() == 36 ){
+          double eFA = 0., eFD = 0.;
+          for( size_t k = 0; k < 36; ++k ){
+            auto const itn = dofs[k].node.find( z ), itt = dofs[k].node.find( t );
+            std::vector<double> Sp = SV, Sm = SV;  Sp[k] += 0.1;  Sm[k] -= 0.1;   // J is linear in s: a large step
+            S.solve( std::vector<FFModel::InputVal>{ { s, Sp } } );  double const Jp = S.val_function().at( 0 );
+            S.solve( std::vector<FFModel::InputVal>{ { s, Sm } } );  double const Jm = S.val_function().at( 0 );
+            double const fd = ( Jp - Jm )/0.2;
+            eFA = std::max( eFA, rel( gA[k][0], gF[k][0] ) );  eFD = std::max( eFD, rel( gF[k][0], fd ) );
+            if( k < 4 ) std::cout << "    DOF " << k << " (t el " << dofs[k].element.at( t ) << " node " << itt->second << ", z el " << dofs[k].element.at( z ) << " node " << itn->second
+                                  << "): fwd " << gF[k][0] << " adj " << gA[k][0] << " FD " << fd << "\n";
+          }
+          std::cout << "    J " << J0 << "   max rel: adj-fwd " << eFA << "  fwd-FD " << eFD << "\n";
+          check( "(B) adjoint = forward, to 1e-8",                         eFA <= 1e-8 );
+          check( "(B) forward = central difference, to 1e-6",              eFD <= 1e-6 );
+          // the value against OCFESLV, on the same declaration (orders 3, 4, 5)
+          std::vector<double> fo( 3, 0. );  bool oc = true;
+          for( int k = 0; k < 3 && oc; ++k ){
+            FFGraph dag2;  OCFESLV oc2( &dag2 );  FFVar t2, z2, u2, s2;
+            declare_source( oc2, dag2, t2, z2, u2, s2, 3 + k );
+            oc = oc2.setup() && oc2.solve( std::vector<FFModel::InputVal>{ { s2, SV } } ) == OCFESLV::NORMAL;
+            if( oc ) fo[k] = oc2.val_function().at( 0 );
+          }
+          std::cout << "    |J - OCFESLV|/|.| orders 3 4 5: " << rel( J0, fo[0] ) << " " << rel( J0, fo[1] ) << " " << rel( J0, fo[2] ) << "\n";
+          check( "(B) OCFESLV solves the same declaration",                 oc );
+          check( "(B) at order 5: J = OCFESLV to 1e-5",                     oc && rel( J0, fo[2] ) <= 1e-5 );
+        }
+      }
+    }
+  }
+  // ---- (C) the gap that (A) exposed, in its simplest form, on both integrators
+  std::cout << "(C) an INITIAL row reading a time-varying input: x' = -x, x(0) = u(t0), u piecewise constant on 2 stages\n";
+  {
+    double const e1 = std::exp( -1. );
+    auto ode = [&]( auto& s, FFGraph& G, int mode, double& x1, double& du0, double& du1, std::string& w ){
+      FFVar t = G.add_var("t"), x = G.add_var("x"), u = G.add_var("u");
+      s.add_domain( t, FFDom( 0., 1., 2, FFDom::LGR, 3 ) );  s.set_evolution_domain( t );
+      s.add_state( x, {t} );  s.update_ref( x, 1. );
+      s.add_input( u, {t}, FFDom::LGL, 1 );
+      FFPartial OpP;  FFEval OpE;
+      using OC = std::decay_t<decltype( s )>;
+      typename OC::EqnOptions io( OC::EqnRole::INTERIOR, 0 ), ii( OC::EqnRole::INITIAL, 0 );
+      s.add_equation( OpP(x,t) + x, {t}, {FFDom::ALL - FFDom::LB}, io );
+      s.add_equation( x - u,        {t}, {FFDom::LB},              ii );
+      s.add_output( OpE( x, t, 1. ) );
+      s.options.SOLVE.RTOL = 1e-10;  s.options.SOLVE.ATOL = 1e-12;  s.options.SOLVE.RTOLB = 1e-10;  s.options.SOLVE.ATOLB = 1e-12;
+      s.options.DISPLAY_LEVEL = 0;  s.options.SOLVE.VERBOSE = 0;
+      if( !s.setup() ){ w = "setup"; return false; }
+      std::vector<FFModel::InputVal> const in{ { u, { 0.8, 1.5 } } };
+      if( ( mode == 1? s.solve_fsens( in ): s.solve_asens( in ) ) != OC::NORMAL ){ w = "solve: " + s.extract_error(); return false; }
+      x1 = s.val_function().at(0);  du0 = s.val_function_gradient().at(0).at(0);  du1 = s.val_function_gradient().at(1).at(0);
+      return true; };
+    for( int mode : { 1, 2 } ){
+      double x1 = 0., a = 0., b = 0.;  std::string w;
+      { FFGraph G;  DAESLV_IDAS S( &G );  bool const ok = ode( S, G, mode, x1, a, b, w );
+        check( std::string( "(C) DAESLV " ) + ( mode == 1? "forward": "adjoint" ) + ": dx(1)/du0 = e^-1, dx(1)/du1 = 0" + ( ok? "": " -- " + w ),
+               ok && rel( x1, 0.8*e1 ) <= 1e-8 && rel( a, e1 ) <= 1e-8 && std::fabs( b ) <= 1e-12 ); }
+      { FFGraph G;  ODESLV_CVODES S( &G );  bool const ok = ode( S, G, mode, x1, a, b, w );
+        bool const good = ok && rel( x1, 0.8*e1 ) <= 1e-8 && rel( a, e1 ) <= 1e-8 && std::fabs( b ) <= 1e-12;
+        if( mode == 1 ) check( "(C) ODESLV forward: the same (the explicit bypass yields to the solve)" + ( ok? std::string(): " -- " + w ), good );
+        else std::cout << "  (C) ODESLV adjoint: dx(1)/du0 " << a << " (exact " << e1 << ") -- its initial term is derived symbolically, not from ic_sens: open item, not gated\n"; }
+    }
+  }
+  // ---- (D)
+  std::cout << "(D) a transition on a field: u(tau+) = u(tau-)/2 at tau = 0.5\n";
+  {
+    double const P = 0.7, TAU = 0.5, eT = std::exp( -TEND ), eTau = std::exp( -TAU );   // tau on an element boundary of t (FFModel's rule)
+    double const Jex = 0.5*( 1. + P*( 1. - eTau ) ) + P*( eTau - eT ), dJex = 0.5*( 1. - eTau ) + eTau - eT;
+    auto rod = [&]( int mode, double& J, double& dJ, std::string& w ){
+      FFGraph G;  DAESLV_IDAS S( &G );
+      FFVar t = G.add_var("t"), z = G.add_var("z"), u = G.add_var("u"), p = G.add_var("p");
+      S.add_domain( t, FFDom( 0., TEND, 2, FFDom::LGR, 3 ) );
+      S.add_domain( z, FFDom( 0., 1., 3, FFDom::LGL, 5 ) );
+      S.set_evolution_domain( t );
+      S.add_state( u, {t,z} ); S.update_ref( u, 1. );
+      S.add_input( p, {} );
+      FFPartial OpP;  FFIntegral OpI;
+      int const TI = FFDom::ALL - FFDom::LB, ZI = FFDom::ALL - FFDom::LB - FFDom::UB;
+      DAESLV_IDAS::EqnOptions io( DAESLV_IDAS::EqnRole::INTERIOR, 0 ), ib( DAESLV_IDAS::EqnRole::BOUNDARY, 0 ), ii( DAESLV_IDAS::EqnRole::INITIAL, 0 );
+      S.add_equation( OpP(u,t) - OpP( ALPHA*OpP(u,z), z ) - p*exp( -t ), {t,z}, {TI, ZI},                io );
+      S.add_equation( OpP(u,z),                                        {t,z}, {TI, FFDom::LB},         ib );
+      S.add_equation( OpP(u,z),                                        {t,z}, {TI, FFDom::UB},         ib );
+      S.add_equation( u - 1.,                                          {t,z}, {FFDom::LB, FFDom::ALL}, ii );
+      S.add_transition( { 0.5*u }, { u }, t, TAU );
+      S.add_output( OpI( u, z ), {t}, {TEND} );
+      colloc_options( S );
+      if( !S.setup() ){ w = "setup: " + S.extract_error(); return false; }
+      std::vector<FFModel::InputVal> const in{ { p, { P } } };
+      auto const st = mode == 0? S.solve( in ): mode == 1? S.solve_fsens( in ): S.solve_asens( in );
+      if( st != DAESLV_IDAS::NORMAL ){ w = "solve: " + S.extract_error(); return false; }
+      J = S.val_function().at( 0 );  if( mode ) dJ = S.val_function_gradient().at( 0 ).at( 0 );
+      return true; };
+    double J0 = 0., Jf = 0., Ja = 0., dF = 0., dA = 0., d0 = 0.;  std::string w;
+    bool const rv = rod( 0, J0, d0, w );
+    check( "(D) a model with a transition sets up and solves" + ( rv? std::string(): " -- " + w ), rv );
+    bool const rf = rod( 1, Jf, dF, w );
+    check( "(D) forward sensitivities across the stop" + ( rf? std::string(): " -- " + w ), rf );
+    bool const ra = rod( 2, Ja, dA, w );
+    check( "(D) adjoint sensitivities across the stop" + ( ra? std::string(): " -- " + w ), ra );
+    if( rv && rf && ra ){
+      std::cout << "    J " << J0 << " (closed form " << Jex << ")   dJ/dp: fwd " << dF << " adj " << dA << " (closed form " << dJex << ")\n";
+      check( "(D) J = closed form, to 1e-8",                          rel( J0, Jex ) <= 1e-8 );
+      check( "(D) dJ/dp = closed form, forward and adjoint, to 1e-8", rel( dF, dJex ) <= 1e-8 && rel( dA, dJex ) <= 1e-8 );
+    }
+  }
+  std::cout << "==========  DAESLV_moltime: " << ( nfail? std::to_string( nfail ) + " FAILED": std::string( "ALL PASS" ) ) << "  ==========\n";
+  return nfail? 1: 0;
+}

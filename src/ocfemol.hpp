@@ -146,8 +146,22 @@ public:
     bool time_varying = false;
     std::vector<size_t> cols;                                        //!< its slots in uc
     std::vector< std::vector< std::pair<FFVar,double> > > nodes;     //!< each slot's coordinates
+    std::vector<DofIndex> dof;                                       //!< each slot's (element, node) in the spatial directions
   };
   std::vector<t_InputLayout> const& inputs_layout() const { return _inpLayout; }
+  //! @brief The collocation a time-varying input declared in the evolution direction (add_input's type and nodes per
+  //! element), for the integrator's own input over t: false when it declared none (then: as the t domain).
+  bool input_time_collocation
+    ( FFVar const& u, FFDom::TYPE& type, size_t& n_node )
+    const
+    {
+      if( !_evolution_dom_set ) return false;
+      auto const itd = _usr._mInpDiscUsr.find( u );
+      if( itd == _usr._mInpDiscUsr.cend() ) return false;
+      auto const itc = itd->second.find( _evolution_dom_var );
+      if( itc == itd->second.cend() ) return false;
+      type = itc->second.type;  n_node = itc->second.n_node;  return true;
+    }
   //! @brief Why the last setup() failed, when it did: the first refusal of the model, in words.
   std::string const& setup_error() const { return _setupError; }
 
@@ -340,6 +354,81 @@ public:
       return out[0];
     }
 
+  //! @brief Transitions are taken (MoL 6c): registered into the working model by FFModel::setup like the rows, and
+  //! handed to the integrator in their semi-discrete form (transition_expressions), not solved here.
+  bool _transitions_supported() const override { return true; }
+
+  //! @brief The semi-discrete form of the declared transition @p k (MoL 6c): per component, at each DIFFERENTIAL node
+  //! of the state it determines (the nodes that carry INITIAL rows), its left side and its right side composed at the
+  //! node -- the fields they read as their columns in @p xc, the coordinates by value, the evolution variable as @p t,
+  //! the constants by value.  The algebraic nodes are re-solved by their rows at tau^+ (the integrator's stop system).
+  //! The determined state is the record's, or inferred as the ONE state the right side reads.  A component reading an
+  //! input, or determining a lumped state with no INITIAL row here, is refused (false, @p why).
+  bool transition_expressions
+    ( size_t k, std::vector<FFVar> const& xc, FFVar const& t, std::vector<FFVar>& left, std::vector<FFVar>& right,
+      std::string& why )
+    const
+    {
+      left.clear();  right.clear();
+      if( k >= var_transition().size() ){ why = "no such transition"; return false; }
+      auto const& tr = var_transition()[k];                       // the WORKING copy: its expressions live in _dag
+      auto states_of = [&]( FFVar const& e, std::set<FFVar,lt_FFVar>& st, bool& inp ){
+        auto sg = _dag->subgraph( 1, &e );
+        for( auto const* v : sg.v_indep ){
+          if( _mVar.count( *v ) ) st.insert( *v );
+          else if( _mInp.count( *v ) ) inp = true;
+        } };
+      for( size_t i = 0; i < tr.right.size() && i < tr.left.size(); ++i ){
+        std::set<FFVar,lt_FFVar> sr, sl;  bool inp = false;
+        states_of( tr.right[i], sr, inp );  states_of( tr.left[i], sl, inp );
+        if( inp ){ why = "a transition component reads an input: not taken by the method of lines yet"; return false; }
+        FFVar s;
+        if( i < tr.states.size() && tr.states[i].dag() ) s = tr.states[i];
+        else if( sr.size() == 1 ) s = *sr.begin();
+        else { why = "a transition component determines no single state (name it: add_transition's states)"; return false; }
+        auto itc = _fieldCols.find( s );  auto itn = _fieldNodes.find( s );
+        if( itc == _fieldCols.end() || itn == _fieldNodes.end() ){ why = "the state " + s.name() + " has no nodes here"; return false; }
+        auto column_at = [&]( FFVar const& f, std::vector< std::pair<FFVar,double> > const& coord, size_t& col ){
+          auto ic = _fieldCols.find( f );  auto in = _fieldNodes.find( f );
+          if( ic == _fieldCols.end() || in == _fieldNodes.end() ) return false;
+          for( size_t j = 0; j < in->second.size(); ++j ){
+            if( in->second[j].size() != coord.size() ) continue;
+            bool same = true;
+            for( size_t d = 0; d < coord.size() && same; ++d ){
+              same = false;
+              for( auto const& [dv, z] : in->second[j] ) if( dv.id() == coord[d].first.id() && z == coord[d].second ){ same = true; break; }
+            }
+            if( same ){ col = ic->second[j]; return true; }
+          }
+          return false; };
+        size_t nnode = 0;
+        for( auto const& e : _iniStream ){
+          if( e.dropped ) continue;
+          size_t j = itc->second.size();
+          for( size_t jj = 0; jj < itc->second.size(); ++jj ) if( itc->second[jj] == e.target ){ j = jj; break; }
+          if( j == itc->second.size() ) continue;                       // the entry is another state's
+          auto const& coord = itn->second[j];
+          std::vector<FFVar> vars, vals;
+          std::set<FFVar,lt_FFVar> all( sr );  all.insert( sl.begin(), sl.end() );
+          for( auto const& f : all ){
+            size_t c = 0;
+            if( !column_at( f, coord, c ) ){ why = "the state " + f.name() + " has no node where " + s.name() + " has one"; return false; }
+            vars.push_back( f );  vals.push_back( xc.at( c ) );
+          }
+          for( auto const& [dv, z] : coord ){ vars.push_back( dv );  vals.push_back( FFVar( z ) ); }
+          if( _evolution_dom_set ){ vars.push_back( _evolution_dom_var );  vals.push_back( t ); }
+          for( size_t q = 0; q < _vCst.size() && q < _vCstVal.size(); ++q ){ vars.push_back( _vCst[q] );  vals.push_back( FFVar( _vCstVal[q] ) ); }
+          std::vector<FFVar> out( 2 );
+          _dag->eval( std::vector<FFVar>{ tr.left[i], tr.right[i] }, out, vars, vals );
+          left.push_back( out[0] );  right.push_back( out[1] );  ++nnode;
+        }
+        if( !nnode ){ why = "the state " + s.name() + " has no differential node to reset"; return false; }
+      }
+      return !left.empty();
+    }
+  size_t n_transitions() const { return var_transition().size(); }
+  double transition_time( size_t k ) const { return var_transition().at( k ).tau; }
+
   //! @brief The INITIAL rows at the stream's nodes: @p ini has ini_stream().size() entries in that order (the dropped
   //! ones included, so the consistency check at t0 reads the same array).  Each is one small DAG evaluation.
   //! @p uc: the collocated input vector, for rows that read inputs (nullptr: such a row makes the call fail).
@@ -430,12 +519,13 @@ protected:
     override
     { return _mDom; }
 
-  //! @brief Not marching, ever: t is the integrator's.
-  MarchContext _march_context
+
+  //! @brief No element of the evolution direction is collocated: t is a scalar input, the integrator's.
+  EvolutionWindow _evolution_window
     ()
     const
     override
-    { return MarchContext(); }
+    { EvolutionWindow w;  w.kind = EvolutionWindow::NONE;  return w; }
 
   bool _on_setup_begin
     ()
@@ -1064,7 +1154,7 @@ OCFEMOL::_build_input_layout
     if( itb == _blkInp.end() ) continue;
     t_InputLayout L;  L.input = w;  L.time_varying = _inpTimeVarying.count( w ) > 0;
     std::vector<FFVar> const dirs( dom.begin(), dom.end() );
-    if( dirs.empty() ){ L.cols.push_back( pos_input( w, {} ) );  L.nodes.emplace_back();  _inpLayout.push_back( std::move( L ) );  continue; }
+    if( dirs.empty() ){ L.cols.push_back( pos_input( w, {} ) );  L.nodes.emplace_back();  L.dof.emplace_back();  _inpLayout.push_back( std::move( L ) );  continue; }
     size_t const nd = dirs.size();
     auto const& blk_dim = std::get<2>( itb->second );
     std::vector<size_t> nel( nd ), nnd( nd );
@@ -1083,8 +1173,11 @@ OCFEMOL::_build_input_layout
       for( bool more_nd = true; more_nd; ){
         size_t c = base, stride = 1;
         for( size_t d = 0; d < nd; ++d ){ c += ind[d]*stride;  stride *= nnd[d]; }   // within the element: first fastest
-        L.cols.push_back( c );  L.nodes.emplace_back();
-        for( size_t d = 0; d < nd; ++d ) L.nodes.back().emplace_back( dirs[d], pos[d][ iel[d] ].at( ind[d] ) );
+        L.cols.push_back( c );  L.nodes.emplace_back();  L.dof.emplace_back();
+        for( size_t d = 0; d < nd; ++d ){
+          L.nodes.back().emplace_back( dirs[d], pos[d][ iel[d] ].at( ind[d] ) );
+          L.dof.back().element[ dirs[d] ] = iel[d];  L.dof.back().node[ dirs[d] ] = ind[d];
+        }
         more_nd = false;  for( size_t d = 0; d < nd; ++d ){ if( ++ind[d] < nnd[d] ){ more_nd = true; break; }  ind[d] = 0; }
       }
       more_el = false;  for( size_t d = 0; d < nd; ++d ){ if( ++iel[d] < nel[d] ){ more_el = true; break; }  iel[d] = 0; }

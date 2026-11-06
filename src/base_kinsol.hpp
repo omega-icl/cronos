@@ -8,6 +8,7 @@
 
 #include <cmath>
 #include <string>
+#include <limits>
 #include <vector>
 
 #include <kinsol/kinsol.h>
@@ -62,6 +63,15 @@ public:
     double MAXNEWTONSTEP = 0.;
     //! @brief iteration cap
     int MAXIT = 200;
+    //! @brief The INTEGRATOR's tolerances, when the consistent point is to be polished to them (both 0: no polish).
+    //! A residual below FTOL pins an ill-conditioned algebraic unknown only to ~FTOL / its row scale, and an
+    //! integrator that error-tests that unknown at ATOL then rejects every first step (DAESLV_mol at 5x7, atol 1e-13:
+    //! a 1.8e-12 correction weighted 1e13).  The polish runs KINSOL's scaled-step criterion with the integrator's
+    //! error weights 1 / (RTOL |y| + ATOL) as the scaling -- IDACalcIC's own test -- until the weighted Newton
+    //! correction is below WSTEPTOL.
+    double RTOL = 0., ATOL = 0.;
+    //! @brief the polish's bound on the weighted Newton correction (IDACalcIC's epsIC)
+    double WSTEPTOL = 0.01;
     //! @brief use the line-search globalisation (KIN_LINESEARCH) rather than plain Newton (KIN_NONE).
     //! Made no measurable difference on the §3.12 systems; kept because it costs nothing where it does not help
     bool LINESEARCH = true;
@@ -149,12 +159,14 @@ BASE_KINSOL::solve
   Sparsity const* sp )
 {
   Report R;
+  bool const polish = ( k.RTOL > 0. || k.ATOL > 0. );
   // AT the root already?  KINSOL's setup fails (-11) on a zero residual, and a reinitialisation after a
-  // discontinuity often starts consistent; this is the common case, not the odd one.
+  // discontinuity often starts consistent; this is the common case, not the odd one.  (With a polish requested,
+  // residual consistency is not the criterion: only an exactly zero residual is at the root.)
   { std::vector<double> f( n );
     if( res( n, y.data(), f.data(), user ) == 0 ){
       double nrm = 0.; for( double const v : f ) nrm = std::max( nrm, std::fabs( v ) );
-      if( nrm <= k.FTOL ){ R.status = AT_ROOT; R.fnorm = nrm; R.message = "already consistent"; return R; }
+      if( nrm <= ( polish? 0.: k.FTOL ) ){ R.status = AT_ROOT; R.fnorm = nrm; R.message = "already consistent"; return R; }
     } }
 
   SUNContext ctx = nullptr;
@@ -224,6 +236,28 @@ BASE_KINSOL::solve
   }
   else { R.status = FAILED; R.message = "KINSol returned " + std::to_string( R.kin_flag ); }
 
+  // THE POLISH: from the residual-consistent point, KINSOL's scaled-step criterion in the integrator's error-weighted
+  // norm, the weights from this point (near the solution, so they are the integrator's own).  The residual tolerance
+  // is made negligible so it cannot stop the iteration first; convergence is the step below WSTEPTOL (KIN_SUCCESS
+  // or KIN_STEP_LT_STPTOL), told from a stall by the residual still meeting FTOL.
+  if( polish && R.status == OK ){
+    for( int i = 0; i < n; ++i ) N_VGetArrayPointer( sc )[i] = 1./( k.RTOL*std::fabs( y[i] ) + k.ATOL );
+    KINSetFuncNormTol( mem, 1e-300 );
+    KINSetScaledStepTol( mem, k.WSTEPTOL );
+    int const flag2 = KINSol( mem, uu, KIN_NONE, sc, sc );
+    long it2 = 0;  KINGetNumNonlinSolvIters( mem, &it2 );
+    std::vector<double> f( n ), y2( n );
+    for( int i = 0; i < n; ++i ) y2[i] = N_VGetArrayPointer( uu )[i];
+    double nrm = std::numeric_limits<double>::infinity();
+    if( res( n, y2.data(), f.data(), user ) == 0 ){ nrm = 0.; for( double const v : f ) nrm = std::max( nrm, std::fabs( v ) ); }
+    bool const polished = ( flag2 == KIN_SUCCESS || flag2 == KIN_INITIAL_GUESS_OK || flag2 == KIN_STEP_LT_STPTOL ) && nrm <= k.FTOL;
+    if( polished ){ y = y2;  R.iterations += it2;  R.fnorm = nrm; }
+    else{
+      R.status = RANK_DEFICIENT;
+      R.message = "the polish to the integrator's tolerance stalled (KINSol " + std::to_string( flag2 ) + ", " + std::to_string( it2 )
+                + " iterations, |F| = " + std::to_string( nrm ) + "): the consistent point is accurate only to the residual";
+    }
+  }
   SUNLinSolFree( LS ); SUNMatDestroy( A ); N_VDestroy( uu ); N_VDestroy( sc );
   KINFree( &mem ); SUNContext_Free( &ctx );
   return R;

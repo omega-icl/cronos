@@ -65,17 +65,6 @@ bind_idas_options(PyOpt& c)
              "Use analytic sparse Jacobian and the KLU sparse direct solver. "
              "Requires a build with KLU")
       .export_values();
-  py::enum_<mc::BASE_IDAS::Options::CALCIC_MODE>(
-      c, "CALCIC_MODE",
-      "Enumeration of consistent-initialisation modes, passed to IDACalcIC")
-      .value("NONE", mc::BASE_IDAS::Options::NONE,
-             "Take the supplied (y0, yp0) as consistent; do not call IDACalcIC")
-      .value("YA_YDP", mc::BASE_IDAS::Options::YA_YDP,
-             "IDA_YA_YDP_INIT: solve for the algebraic components of y and for "
-             "y', given the")
-      .value("Y", mc::BASE_IDAS::Options::Y,
-             "IDA_Y_INIT: solve for y given y', holding y' fixed")
-      .export_values();
   py::class_<mc::BASE_IDAS::Options::t_Solve> c_SOLVE(
       c, "t_Solve",
       "Everything the integration takes: method, linear and nonlinear solver, "
@@ -177,60 +166,28 @@ bind_idas_options(PyOpt& c)
                   "its SOLVE, which has no SENS/ADJOINT substructures either.");
   py::class_<mc::BASE_IDAS::Options::t_Initial> c_INITIAL(
       c, "t_Initial",
-      "Consistent initialisation: the IDACalcIC controls, and where a KINSOL "
-      "initial-condition solve's own options belong.");
+      "Consistent initialisation: the KINSOL solve of the INITIAL rows "
+      "TOGETHER WITH the interior rows at t0, and of the stop system at every "
+      "stage boundary (plan D4/§3.12, §3.13) -- the SHARED system, so the "
+      "initial state, its derivative and the sensitivities' initial data come "
+      "from one solve, as ODESLV's do. (IDACalcIC, IDAS's own corrector, was "
+      "the alternative until 5 Nov 2026 -- and ran after the KINSOL solve at "
+      "t0 by default, repairing a derivative that was never handed to IDAS; "
+      "retired with its options.)");
   c_INITIAL.def(py::init<>());
-  py::enum_<mc::BASE_IDAS::Options::t_Initial::IC_SOLVER>(
-      c_INITIAL, "IC_SOLVER",
-      "Which corrector resolves the initial conditions. IDACALCIC is IDAS's "
-      "own, the fast path for rows already explicit in each state; KINSOL "
-      "solves the INITIAL rows TOGETHER WITH the interior rows at t0, which is "
-      "what rows implicit in each other need (plan D4/§3.12).")
-      .export_values();
-  c_INITIAL.def_readwrite(
-      "SOLVER", &mc::BASE_IDAS::Options::t_Initial::SOLVER,
-      "the corrector to use (default: KINSOL -- the SHARED system, so the "
-      "initial state and its derivative come from the same solve ODESLV takes. "
-      "IDACALCIC is kept as the IDAS-native path)");
   c_INITIAL.def_readwrite("KIN", &mc::BASE_IDAS::Options::t_Initial::KIN,
                           "the KINSOL corrector's own knobs, embedded rather "
                           "than a fourth options object");
-  c_INITIAL.def_readwrite("BYPASS_EXPLICIT",
-                          &mc::BASE_IDAS::Options::t_Initial::BYPASS_EXPLICIT,
-                          "skip the solve where every INITIAL row pins one "
-                          "state linearly with no derivative, the case in "
-                          "which the divided form is exact (default: true)");
-  c_INITIAL.def_readwrite(
-      "CALCIC", &mc::BASE_IDAS::Options::t_Initial::CALCIC,
-      "Consistent-initialisation mode [Default: YA_YDP] (IDACalcIC)");
-  c_INITIAL.def_readwrite(
-      "TOUT1", &mc::BASE_IDAS::Options::t_Initial::TOUT1,
-      "First output time handed to IDACalcIC, which only uses its DIRECTION "
-      "and rough magnitude [Default: 0e0 = let the integrator pick from the "
-      "stage length]");
-  c_INITIAL.def_readwrite("NMAXIC", &mc::BASE_IDAS::Options::t_Initial::NMAXIC,
-                          "Maximum number of steps in the IC calculation "
-                          "[Default: 5] (IDASetMaxNumStepsIC)");
-  c_INITIAL.def_readwrite("MAXJACIC",
-                          &mc::BASE_IDAS::Options::t_Initial::MAXJACIC,
-                          "Maximum number of Jacobian re-evaluations in the IC "
-                          "calculation [Default: 4] (IDASetMaxNumJacsIC)");
-  c_INITIAL.def_readwrite("MAXNLIIC",
-                          &mc::BASE_IDAS::Options::t_Initial::MAXNLIIC,
-                          "Maximum number of Newton iterations per IC step "
-                          "[Default: 10] (IDASetMaxNumItersIC)");
-  c_INITIAL.def_readwrite("LSOFFIC",
-                          &mc::BASE_IDAS::Options::t_Initial::LSOFFIC,
-                          "Whether to switch the IC line search OFF [Default: "
-                          "false] (IDASetLineSearchOffIC)");
-  c_INITIAL.def_readwrite("STEPTOLIC",
-                          &mc::BASE_IDAS::Options::t_Initial::STEPTOLIC,
-                          "Step tolerance of the IC calculation [Default: 0e0 "
-                          "(auto)] (IDASetStepToleranceIC)");
   c.def_readwrite(
       "INITIAL", &mc::BASE_IDAS::Options::INITIAL,
-      "Consistent initialisation: the IDACalcIC controls, and where a KINSOL "
-      "initial-condition solve's own options belong.");
+      "Consistent initialisation: the KINSOL solve of the INITIAL rows "
+      "TOGETHER WITH the interior rows at t0, and of the stop system at every "
+      "stage boundary (plan D4/§3.12, §3.13) -- the SHARED system, so the "
+      "initial state, its derivative and the sensitivities' initial data come "
+      "from one solve, as ODESLV's do. (IDACalcIC, IDAS's own corrector, was "
+      "the alternative until 5 Nov 2026 -- and ran after the KINSOL solve at "
+      "t0 by default, repairing a derivative that was never handed to IDAS; "
+      "retired with its options.)");
   py::class_<mc::BASE_IDAS::Options::t_Output> c_OUTPUT(
       c, "t_Output",
       "Output options, mirroring ODESLV_CVODES::Options::t_Output.");

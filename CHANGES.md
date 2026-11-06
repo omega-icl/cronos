@@ -1,5 +1,32 @@
 # Changes
 
+## Unreleased
+
+* **DAESLV: the consistent initialisation converges to the integrator's tolerance.** KINSOL's point met the
+  residual tolerance but pinned an ill-conditioned algebraic unknown only to ~1e-12, which IDAS error-tests at
+  `ATOL`; a polish pass with KINSOL's scaled-step criterion in the error-weighted norm `1/(RTOL|y|+ATOL)` now ends
+  every IC solve, at t0 and at each stop (`BASE_KINSOL::Knobs::RTOL/ATOL/WSTEPTOL`). This is what IDACalcIC did.
+* **MoL on DAESLV (6c): time-varying inputs.** Each spatial slot of a declared input over `t` becomes an input over
+  `t` of the semi-discrete DAE with the declared collocation; declared DOFs and working parameters are matched as
+  a bijection, so by-name values and gradient rows read as the declared DOFs. `ic_sens` now differentiates through
+  the placeholders binding a time-varying input at `t0` (an INITIAL row `x(0) = u(t0)` had no sensitivity to `u`,
+  in ODESLV and DAESLV alike), and such a row no longer counts as explicit for the bypass.
+* **MoL on DAESLV (6c): transitions.** A declared transition is applied at its state's differential nodes, each
+  component composed pointwise there (`OCFEMOL::transition_expressions`, the INITIAL rows' form: the integrator
+  peels these rows, so no vectorised operation); the integrator's stop machinery re-solves the algebraic nodes and
+  carries the sensitivities across. `FFMOLINI`/`FFGradMOLINI`, the vectorised Ini stream, retired for that reason.
+* **DAESLV: IDACalcIC retired.** The KINSOL consistent initialisation is the one corrector, at t0 and at every
+  stage boundary; its `(y0, y'0)` now starts IDAS (the derivative was computed and discarded, with IDACalcIC
+  repairing it after the solve by default). Gone with it: `INITIAL.SOLVER`, `CALCIC`, `TOUT1`, `NMAXIC`,
+  `MAXJACIC`, `MAXNLIIC`, `LSOFFIC`, `STEPTOLIC` and DAESLV's unused `BYPASS_EXPLICIT` (ODESLV keeps its own).
+  `stats.numIC` counts the t0 solve. Results move at tolerance level: IDAS starts from KINSOL's point.
+* **Quadratures accumulate over the horizon** in ODESLV and DAESLV, with no per-stage reset; an integral over t is
+  the quadrature's value at the end. Fixes DAESLV failing at a stage boundary without a state restart (a large
+  integrand against ATOL) and integral outputs that could come out wrong on a multi-stage horizon.
+* **MoL on DAESLV (6a, 6b):** a model distributed in space declared through FFModel, solved by DAESLV with inputs,
+  outputs and sensitivities by name; `tools/ci/build_deps.sh` patches SUNDIALS IDAS's order decision (an exactly
+  constant state with an error-controlled quadrature stalled it at order 1).
+
 ## 5.1.0 (2026-10-27)
 
 The headline is a second integrator. **DAESLV** integrates the model's undivided form with SUNDIALS IDAS,

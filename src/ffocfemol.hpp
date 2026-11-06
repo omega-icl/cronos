@@ -280,119 +280,10 @@ public:
 };
 
 
-//! @brief The Ini stream as a DAG external operation: every entry of OCFEMOL::ini_stream() (the stream first use, the
-//! dropped pairs for the consistency check at t0) evaluated from (xc, t).  Derivative through FFGradMOLINI.
-////////////////////////////////////////////////////////////////////////
-class FFGradMOLINI
-: public FFOp
-{
-protected:
-  OCFEMOL* _pMOL = nullptr; size_t _nSta = 0, _nIni = 0, _nnz = 0; std::string _name;
-public:
-  FFGradMOLINI() : FFOp( EXTERN ) {}
-  FFVar** operator()
-    ( size_t const nSta, FFVar const* pSta, FFVar const& t, OCFEMOL* pMOL, std::string const& name )
-    {
-      _pMOL = pMOL; _nSta = nSta; _nIni = pMOL->ini_stream().size(); _name = name;
-      _nnz = 0; for( auto const& e : pMOL->ini_stream() ) _nnz += e.cols.size();
-      data = pMOL; owndata = false;
-      std::vector<FFVar> vIn( pSta, pSta + nSta ); vIn.push_back( t );
-      return insert_external_operation( *this, _nnz, vIn.size(), vIn.data() );
-    }
-  virtual void feval
-    ( std::type_info const& idU, unsigned const nRes, void* vRes, unsigned const nVar, void const* vVar, unsigned const* mVar )
-    const
-    {
-      if( mc::same_type( idU, typeid( FFVar ) ) ) return eval( nRes, static_cast<FFVar*>(vRes), nVar, static_cast<FFVar const*>(vVar), mVar );
-      else if( mc::same_type( idU, typeid( double ) ) ) return eval( nRes, static_cast<double*>(vRes), nVar, static_cast<double const*>(vVar), mVar );
-      throw std::runtime_error( "FFGradMOLINI::feval ** no evaluation method for type " + std::string( idU.name() ) + "\n" );
-    }
-  void eval( unsigned const nRes, double* vRes, unsigned const nVar, double const* vVar, unsigned const* mVar ) const
-    {
-      (void)mVar; if( !_pMOL || nVar != _nSta + 1 || nRes != _nnz ) throw std::runtime_error( "FFGradMOLINI::eval ** size mismatch\n" );
-      std::vector<size_t> ptr, col; std::vector<double> val;
-      if( !_pMOL->deriv_initial( vVar[_nSta], vVar, nullptr, ptr, col, val ) || val.size() != _nnz ) throw std::runtime_error( "FFGradMOLINI::eval ** deriv_initial failed\n" );
-      for( size_t k = 0; k < _nnz; ++k ) vRes[k] = val[k];
-    }
-  void eval( unsigned const nRes, FFVar* vRes, unsigned const nVar, FFVar const* vVar, unsigned const* mVar ) const
-    { (void)mVar; FFGradMOLINI op; FFVar** pp = op( _nSta, vVar, vVar[_nSta], _pMOL, _name ); for( unsigned k = 0; k < nRes; ++k ) vRes[k] = *pp[k]; }
-  template <typename U> void eval( unsigned const, U*, unsigned const, U const*, unsigned const* ) const
-    { throw std::runtime_error( "FFGradMOLINI::eval ** evaluation type not supported\n" ); }
-  bool lt( FFOp const* op ) const { if( data != op->data ) return data < op->data; return false; }
-  std::string name() const { std::ostringstream oss; oss << ( _name.empty()? "GradMOLINI": _name ) << "[" << _nnz << "]"; return oss.str(); }
-  bool commutative() const { return false; }
-};
-
-class FFMOLINI
-: public FFOp
-{
-protected:
-  OCFEMOL* _pMOL = nullptr; size_t _nSta = 0, _nIni = 0; std::string _name;
-public:
-  FFMOLINI() : FFOp( EXTERN ) { this->sparse = true; }   // the sparse deriv, as for FFMOLRES
-  //! @brief Insert: one output per entry of OCFEMOL::ini_stream(), in that order.
-  std::vector<FFVar> operator()
-    ( std::vector<FFVar> const& vSta, FFVar const& t, OCFEMOL* pMOL, std::string const& name = "" )
-    {
-      if( !pMOL || !pMOL->semi_discrete().ran || vSta.size() != pMOL->semi_discrete().n_states )
-        throw std::runtime_error( "FFMOLINI ** the solver is not set up or the state count does not match\n" );
-      _pMOL = pMOL; _nSta = vSta.size(); _nIni = pMOL->ini_stream().size(); _name = name;
-      data = pMOL; owndata = false;
-      std::vector<FFVar> vIn( vSta ); vIn.push_back( t );
-      FFVar** pp = insert_external_operation( *this, _nIni, vIn.size(), vIn.data() );
-      std::vector<FFVar> out( _nIni ); for( size_t k = 0; k < _nIni; ++k ) out[k] = *pp[k]; return out;
-    }
-  virtual void feval
-    ( std::type_info const& idU, unsigned const nRes, void* vRes, unsigned const nVar, void const* vVar, unsigned const* mVar )
-    const
-    {
-      if( mc::same_type( idU, typeid( FFVar ) ) ) return eval( nRes, static_cast<FFVar*>(vRes), nVar, static_cast<FFVar const*>(vVar), mVar );
-      else if( mc::same_type( idU, typeid( FFDep ) ) ) return eval( nRes, static_cast<FFDep*>(vRes), nVar, static_cast<FFDep const*>(vVar), mVar );
-      else if( mc::same_type( idU, typeid( double ) ) ) return eval( nRes, static_cast<double*>(vRes), nVar, static_cast<double const*>(vVar), mVar );
-      else if( mc::same_type( idU, typeid( FADType<double> ) ) ) return eval( nRes, static_cast<FADType<double>*>(vRes), nVar, static_cast<FADType<double> const*>(vVar), mVar );
-      throw std::runtime_error( "FFMOLINI::feval ** no evaluation method for type " + std::string( idU.name() ) + "\n" );
-    }
-  void eval( unsigned const nRes, double* vRes, unsigned const nVar, double const* vVar, unsigned const* mVar ) const
-    { (void)mVar; if( !_pMOL || nVar != _nSta + 1 || nRes != _nIni || !_pMOL->eval_initial( vVar[_nSta], vVar, vRes ) ) throw std::runtime_error( "FFMOLINI::eval double ** failure\n" ); }
-  void eval( unsigned const nRes, FADType<double>* vRes, unsigned const nVar, FADType<double> const* vVar, unsigned const* mVar ) const
-    {
-      (void)mVar; std::vector<double> x( nVar ); for( unsigned i = 0; i < nVar; ++i ) x[i] = vVar[i].val();
-      unsigned nDir = 0; for( unsigned i = 0; i < nVar; ++i ) if( vVar[i].depend() ){ nDir = vVar[i].size(); break; }
-      std::vector<size_t> ptr, col; std::vector<double> val, v( nRes );
-      if( !_pMOL->deriv_initial( x[_nSta], x.data(), v.data(), ptr, col, val ) ) throw std::runtime_error( "FFMOLINI::eval FAD ** failure\n" );
-      for( unsigned k = 0; k < nRes; ++k ){
-        vRes[k] = v[k]; if( !nDir ) continue;
-        vRes[k].diff( 0, nDir ); vRes[k].d( 0 ) = 0.;
-        for( unsigned d = 0; d < nDir; ++d ){ double s = 0.; for( size_t j = ptr[k]; j < ptr[k+1]; ++j ) if( vVar[col[j]].depend() ) s += val[j]*vVar[col[j]].deriv( d ); vRes[k].d( d ) = s; }
-      }
-    }
-  void eval( unsigned const nRes, FFDep* vRes, unsigned const nVar, FFDep const* vVar, unsigned const* mVar ) const
-    {
-      (void)mVar; (void)nVar; auto const& IS = _pMOL->ini_stream();
-      for( unsigned k = 0; k < nRes; ++k ){ vRes[k] = FFDep(); for( auto const& [y, c] : IS[k].cols ) vRes[k] += vVar[c]; vRes[k] += vVar[_nSta]; vRes[k].update( FFDep::TYPE::N ); }
-    }
-  void eval( unsigned const nRes, FFVar* vRes, unsigned const nVar, FFVar const* vVar, unsigned const* mVar ) const
-    { (void)mVar; FFMOLINI op; std::vector<FFVar> vs( vVar, vVar + _nSta ); auto out = op( vs, vVar[_nSta], _pMOL, _name ); for( unsigned k = 0; k < nRes; ++k ) vRes[k] = out[k]; }
-  template <typename U> void eval( unsigned const, U*, unsigned const, U const*, unsigned const* ) const
-    { throw std::runtime_error( "FFMOLINI::eval ** evaluation type not supported\n" ); }
-  void deriv( unsigned const nRes, FFVar const* vRes, unsigned const nVar, FFVar const* vVar, FFVar** vDer ) const
-    {
-      auto const& IS = _pMOL->ini_stream(); FFGradMOLINI gop; FFVar** pg = gop( _nSta, vVar, vVar[_nSta], _pMOL, _name ); size_t j = 0;
-      for( unsigned k = 0; k < nRes; ++k ){ for( unsigned i = 0; i < nVar; ++i ) vDer[k][i] = 0.; for( auto const& [y, c] : IS[k].cols ) vDer[k][c] = *pg[j++]; }
-    }
-  void deriv( unsigned const nRes, FFVar const* vRes, unsigned const nVar, FFVar const* vVar, FFVar** vDer, size_t* nnz, size_t** colnz ) const
-    {
-      auto const& IS = _pMOL->ini_stream();
-      for( unsigned k = 0; k < nRes; ++k ) nnz[k] = IS[k].cols.size();
-      if( colnz ) for( unsigned k = 0; k < nRes; ++k ){ if( !colnz[k] ) colnz[k] = new size_t[ std::max<size_t>( nnz[k], 1 ) ]; size_t m = 0; for( auto const& [y, c] : IS[k].cols ) colnz[k][m++] = c; }
-      if( !vDer ) return;
-      FFGradMOLINI gop; FFVar** pg = gop( _nSta, vVar, vVar[_nSta], _pMOL, _name ); size_t j = 0;
-      for( unsigned k = 0; k < nRes; ++k ){ if( !vDer[k] ) vDer[k] = new FFVar[ std::max<size_t>( nnz[k], 1 ) ]; for( size_t m = 0; m < nnz[k]; ++m ) vDer[k][m] = *pg[j++]; }
-    }
-  bool lt( FFOp const* op ) const { if( data != op->data ) return data < op->data; return false; }
-  std::string name() const { std::ostringstream oss; oss << ( _name.empty()? "MOLINI": _name ) << "[" << _nIni << "x" << _nSta + 1 << "]"; return oss.str(); }
-  bool commutative() const { return false; }
-};
+// (FFMOLINI, the Ini stream as one vectorised operation, and FFGradMOLINI were retired on 5 Nov 2026: the integrator
+//  PEELS INITIAL rows one at a time, composing each with its target state, and every such compose rebuilt the whole
+//  operation -- the INITIAL rows are declared as pointwise expressions (OCFEMOL::initial_expression), and so are the
+//  transitions (transition_expressions).  FFMOLRES keeps the kinds whose vectors the integrator consumes whole.)
 
 inline FFVar const*
 FFMOLRES::_gradient
@@ -583,7 +474,7 @@ configure_semidiscrete
 //! then sets up from (DAESLV, for a model distributed in space).
 //! The model's inputs: each slot of a time-invariant input becomes an input of @p M with no domain -- a parameter of the
 //! integrator -- in input_dofs() order; @p uc, if given, receives the collocated input vector (t in time_slot(), the
-//! parameter of each other slot).  A time-varying input is refused (MoL phase 6c).
+//! parameter of each other slot; a time-varying input's slots are inputs over t, with its declared collocation).
 inline bool
 declare_semidiscrete
 ( OCFEMOL& mol, FFGraph& dag, FFModel& M, FFDom const& tdom, std::vector<FFVar>& xc, FFVar& t, std::string* err = nullptr,
@@ -609,14 +500,19 @@ declare_semidiscrete
     M.update_ref( xc[i], mol.column_field( i, fld, ref )? ref: 0. );
   }
 
-  // the collocated input vector: t in its slot, each slot of a time-invariant input a parameter of the integrator
+  // the collocated input vector: t in its slot; each slot of a time-invariant input a PARAMETER of the integrator,
+  // each slot of a time-varying one an INPUT OVER t with the declared collocation in t (its levels per element are
+  // the integrator's parameters; within a stage it is the interpolant of them -- BASE_DE's own machinery)
   std::vector<FFVar> U( std::max<size_t>( 1, mol.n_input_slots() ), FFVar( 0. ) );
   U[ mol.time_slot() ] = t;
   for( auto const& L : mol.inputs_layout() ){
-    if( L.time_varying ) return fail( "the input " + L.input.name() + " varies in time: such inputs are taken from MoL phase 6c" );
+    FFDom::TYPE ttype = FFDom::LGR;  size_t tnode = 0;
+    bool const tcoll = L.time_varying && mol.input_time_collocation( L.input, ttype, tnode );
     for( size_t k = 0; k < L.cols.size(); ++k ){
       FFVar const p = dag.add_var( L.input.name() + "_" + std::to_string( k ) );
-      M.add_input( p, {} );
+      if( !L.time_varying ) M.add_input( p, {} );
+      else if( tcoll )      M.add_input( p, {t}, ttype, tnode );
+      else                  M.add_input( p, {t} );
       U.at( L.cols[k] ) = p;
     }
   }
@@ -642,6 +538,13 @@ declare_semidiscrete
   auto const& IS = mol.ini_stream();
   for( size_t k = 0; k < IS.size(); ++k )
     if( !IS[k].dropped ) M.add_equation( mol.initial_expression( k, xc, t, U ), {t}, {FFDom::LB}, INIT );
+  // the transitions (MoL 6c): each declared one applied at its state's differential nodes, both sides composed there;
+  // the integrator's stop machinery does the rest (the algebraic nodes re-solved, the sensitivities carried across)
+  for( size_t k = 0; k < mol.n_transitions(); ++k ){
+    std::vector<FFVar> lft, rgt;  std::string why;
+    if( !mol.transition_expressions( k, xc, t, lft, rgt, why ) ) return fail( "transition " + std::to_string( k ) + ": " + why );
+    M.add_transition( lft, rgt, t, mol.transition_time( k ) );
+  }
   // the outputs: their spatial parts as ONE operation over (xc, uc), each value given its time part back -- a point in
   // t, or an integral over t -- in the declared order, so the integrator's outputs are the model's (val_function())
   if( mol.n_outputs() ){

@@ -467,17 +467,19 @@ int main()
     }
     std::cout << "      SFAD: " << Je.size() << " nonzeros, " << matched << " matched to deriv_residual, max diff " << dj << "\n";
     check( "op: MC++'s sparse forward mode through the DAG reproduces deriv_residual exactly", matched == Je.size() && dj == 0. );
-    // the Ini stream as an operation in the same DAG: values and MC++'s derivative against eval_initial/deriv_initial
-    FFMOLINI INI; std::vector<FFVar> ini = INI( xc, tt, &oc );
+    // the Ini stream as pointwise expressions in the same DAG (initial_expression -- the vectorised FFMOLINI was retired,
+    // the integrator peels INITIAL rows one at a time): each evaluates like eval_initial, and its derivative on the rod
+    // (u - 0) is the identity on the target
     auto const& IS = oc.ini_stream();
+    std::vector<FFVar> ini;  for( size_t k = 0; k < IS.size(); ++k ) ini.push_back( oc.initial_expression( k, xc, tt ) );
     std::vector<double> i1( ini.size() ), i2( ini.size() ); H.eval( ini, i1, leaves, x ); oc.eval_initial( x[n], x.data(), i2.data() );
     double di = 0.; for( size_t k = 0; k < ini.size(); ++k ) di = std::max( di, std::fabs( i1[k] - i2[k] ) );
-    check( "op: FFMOLINI has one output per Ini entry and evaluates like eval_initial", ini.size() == IS.size() && di == 0. );
+    check( "expr: one initial_expression per Ini entry, evaluating like eval_initial", ini.size() == IS.size() && di == 0. );
     auto JI = H.SFAD( ini, leaves ); auto const& Ir = std::get<0>(JI); auto const& Ic = std::get<1>(JI); auto const& Ie = std::get<2>(JI);
     std::vector<double> iv( Ie.size() ); H.eval( Ie, iv, leaves, x );
     bool okI = Ie.size() == IS.size(); double dI = 0.;
     for( size_t k = 0; okI && k < Ie.size(); ++k ){ okI = ( Ic[k] == IS[ Ir[k] ].target ); dI = std::max( dI, std::fabs( iv[k] - 1. ) ); }
-    check( "op: SFAD of FFMOLINI is the identity on the targets (rod: u - 0)", okI && dI == 0. );
+    check( "expr: SFAD of the initial expressions is the identity on the targets (rod: u - 0)", okI && dI == 0. );
   }
 
   std::cout << "\n==========  DAESLV_molsetup: " << n_pass << " passed, " << n_fail << " failed -- " << ( n_fail? "FAIL": "ALL PASS" ) << "  ==========\n\n";

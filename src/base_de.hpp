@@ -117,6 +117,10 @@ class BASE_DE
     std::vector<size_t>                jrowL, jcolL;
     size_t                             nnzL = 0, nLftCol = 0;
     std::vector<FFVar>                 evalP;    //!< the SFAD entries of dF/dp
+    std::vector<FFVar>                 evalQ;    //!< the SFAD entries of dF/dq, q the input PLACEHOLDERS of both sides
+    std::vector<double>                dEvalQ;   //!< (u(tau^+) then u(tau^-)): the chain to the levels is ic_sens's
+    std::vector<size_t>                jrowQ, jcolQ;
+    size_t                             nnzQ = 0;
     std::vector<double>                dEvalP;
     std::vector<size_t>                jrowP, jcolP;
     size_t                             nnzP = 0;
@@ -756,6 +760,30 @@ class BASE_DE
   //! replaces the continuity of its post-jump states with that transition's rows.
   bool _assemble_ic
     ( t_ICSys& S, bool const at_stop, FFModel::t_TransitionJump const* G = nullptr );
+
+  //! @brief The levels that placeholder @p j of @p side (0: u(tau^+), 1: u(tau^-)) is bound from at @p tau -- their
+  //! parameter indices @p ndx -- and the interpolant's basis weights @p w over them: dq/dp for ic_sens, the same
+  //! binding as _ic_bind's.
+  void _ic_level_weights
+    ( double const tau, int const side, size_t const j, std::vector<size_t>& ndx, std::vector<double>& w )
+    const
+    {
+      ndx.clear();  w.clear();
+      if( j >= _mTVInp.size() || j >= _mInpParNdx.size() ) return;
+      size_t const e = _elem_of( tau, side? FFDom::MINUS: FFDom::PLUS );
+      if( e + 1 >= _mElemBnd.size() ) return;
+      double const te = _mElemBnd.at( e ), he = _mElemBnd.at( e+1 ) - te;
+      double const sc = he > 0.? ( tau - te ) / he: 0.;
+      auto const itn = _mInpNodes.find( _mTVInp[j].name() );
+      if( itn == _mInpNodes.end() ) return;
+      auto const& sn = itn->second;  auto const& pidx = _mInpParNdx[j];
+      size_t const nn = sn.size();
+      if( nn < 2 ){ if( e < pidx.size() ){ ndx.push_back( pidx[e] );  w.push_back( 1. ); }  return; }
+      for( size_t q = 0; q < nn && e*nn+q < pidx.size(); ++q ){
+        std::vector<double> unit( nn, 0. );  unit[q] = 1.;
+        ndx.push_back( pidx[e*nn+q] );  w.push_back( _interp_level( sn, unit, sc ) );
+      }
+    }
 
   //! @brief Bind @p S's parameters, constants, input placeholders and seed for an evaluation at @p tau.
   void _ic_bind
@@ -1696,6 +1724,24 @@ BASE_DE::_assemble_ic
     S.dEvalP.assign( S.nnzP, 0. );
     delete[] std::get<1>( Jp ); delete[] std::get<2>( Jp ); delete[] std::get<3>( Jp );
   }
+  // dF/dq, q the input PLACEHOLDERS: a time-varying input enters the rows as its value at tau, bound by _ic_bind
+  // from the LEVELS of the element at tau through the interpolant.  The levels are parameters, so dF/dp has a
+  // second term, dF/dq . dq/dp, with dq/dp the interpolant's basis weights -- chained in ic_sens.  (Until 5 Nov
+  // 2026 an INITIAL row x(0) = u(0) gave dx0/du = 0: the input's effect through the initial condition was lost.)
+  { size_t const nUp = _mTVInp.size(), nLo = _mUmVar.size();
+    if( _np && nUp + nLo ){
+      std::vector<FFVar> qv;
+      size_t const q0 = 1 + _nx + _np + _nc;
+      for( size_t j = 0; j < nUp + nLo && q0 + j < S.all.size(); ++j ) qv.push_back( S.all[ q0 + j ] );
+      auto const Jq = S.dag->SFAD( (unsigned)S.row.size(), S.row.data(), (unsigned)qv.size(), qv.data() );
+      S.nnzQ = std::get<0>( Jq );
+      S.jrowQ.assign( S.nnzQ, 0 ); S.jcolQ.assign( S.nnzQ, 0 );
+      for( unsigned e = 0; e < S.nnzQ; ++e ){ S.jrowQ[e] = std::get<1>( Jq )[e];  S.jcolQ[e] = std::get<2>( Jq )[e]; }
+      S.evalQ.assign( std::get<3>( Jq ), std::get<3>( Jq ) + S.nnzQ );
+      S.dEvalQ.assign( S.nnzQ, 0. );
+      delete[] std::get<1>( Jq ); delete[] std::get<2>( Jq ); delete[] std::get<3>( Jq );
+    }
+  }
   // dF/d(x^-, dx^-).  At a stop the system is F( z ; p, x^-, dx^- ) = 0 and the LEFT state depends on
   // the parameters as well, so the chain rule has a second term:
   //     ( dF/dz ) . ( dz/dp ) = - dF/dp - ( dF/dx^- ) . s^-  - ( dF/ddx^- ) . s'^-
@@ -1744,11 +1790,15 @@ const
   if( _explicitIC_cached ) return _explicitIC;
   _explicitIC_cached = true;  _explicitIC = false;
   std::set<long> stateId;  for( auto const& x : _mX ) stateId.insert( x.id().second );
+  std::set<long> tvId;     for( auto const& u : _mTVInp ) tvId.insert( u.id().second );
+  for( auto const& u : _mUpVar ) tvId.insert( u.id().second );
   std::string const dname = "Partial[" + ( _mT.empty()? std::string(): _mT[0].name() ) + "]";
   for( auto const& row : _mICRES ){
     auto sg = FFModel::_dag->subgraph( 1, &row );
     for( auto const* op : sg.l_op )                                    // any derivative node at all?
       if( op && op->type >= FFOp::EXTERN && op->name() == dname ) return false;
+    for( auto const* v : sg.v_indep )                                  // a TIME-VARYING input: its value at t0 is bound
+      if( tvId.count( v->id().second ) ) return false;                 // by the solve, not evaluable from the divided form
     FFVar const* the_state = nullptr;  size_t nst = 0;
     for( auto const* v : sg.v_indep )
       if( stateId.count( v->id().second ) ){ ++nst; the_state = v; }
@@ -1804,6 +1854,22 @@ BASE_DE::ic_sens
                  S.all.size(), S.all.data(), S.dVar.data() );
     for( size_t e = 0; e < S.nnzP; ++e )
       if( S.jcolP[e] < _np && S.jrowP[e] < n ) rhs[ S.jcolP[e]*n + S.jrowP[e] ] = -S.dEvalP[e];
+  }
+  // ... the PLACEHOLDER term: dF/dq . dq/dp, dq/dp the interpolant's weights over the levels of the element at tau
+  if( S.nnzQ ){
+    S.dag->eval( S.wrk, S.evalQ.size(), S.evalQ.data(), S.dEvalQ.data(),
+                 S.all.size(), S.all.data(), S.dVar.data() );
+    double const tau = S.dVar[0];
+    size_t const nUp = _mTVInp.size();
+    for( size_t e = 0; e < S.nnzQ; ++e ){
+      size_t const r = S.jrowQ[e], c = S.jcolQ[e];
+      if( r >= n ) continue;
+      int const side = c >= nUp? 1: 0;
+      std::vector<size_t> ndx;  std::vector<double> w;
+      _ic_level_weights( tau, side, c - ( side? nUp: 0 ), ndx, w );
+      for( size_t q = 0; q < ndx.size() && q < w.size(); ++q )
+        if( ndx[q] < _np ) rhs[ ndx[q]*n + r ] -= S.dEvalQ[e] * w[q];
+    }
   }
   // ... and the LEFT-state term, where this is a stop and the caller carried (s^-, s'^-) in
   if( S.nnzL && !_icLeftSens.empty() ){

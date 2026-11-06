@@ -53,7 +53,6 @@ static void run( char const* label, bool implicit )
     M.add_equation( x1 -    p, {t}, {FFDom::LB}, ii );
   }
   M.options.SOLVE.RTOL = M.options.SOLVE.ATOL = 1e-11;
-  M.options.INITIAL.BYPASS_EXPLICIT = false;      // force the SOLVE on both, so they are comparable
   M.options.DISPLAY_LEVEL = 0;
   if( !M.setup() ){ std::cout << "    setup failed: " << M.extract_error() << "\n"; ++n_fail; return; }
 

@@ -102,13 +102,6 @@ public:
       SPARSE	//!< Use analytic sparse Jacobian and the KLU sparse direct solver.  Requires a build with KLU
 		//!< (CRONOS__WITH_KLU); otherwise the integrator REFUSES it at setup
     };
-    //! @brief Enumeration of consistent-initialisation modes, passed to IDACalcIC
-    enum CALCIC_MODE{
-      NONE=0,	//!< Take the supplied (y0, yp0) as consistent; do not call IDACalcIC
-      YA_YDP,	//!< IDA_YA_YDP_INIT: solve for the algebraic components of y and for y', given the
-		//!< differential components of y.  Requires the id vector (IDASetId)
-      Y		//!< IDA_Y_INIT: solve for y given y', holding y' fixed
-    };
 
     //! @brief Everything the integration takes: method, linear and nonlinear solver, step control, tolerances,
     //! and the sensitivity and adjoint settings.  Grouped as OCFESLV groups its SOLVE, which has no
@@ -187,38 +180,15 @@ public:
 
     } SOLVE;
 
-    //! @brief Consistent initialisation: the IDACalcIC controls, and where a KINSOL initial-condition solve's
-    //! own options belong.
+    //! @brief Consistent initialisation: the KINSOL solve of the INITIAL rows TOGETHER WITH the interior rows at t0,
+    //! and of the stop system at every stage boundary (plan D4/§3.12, §3.13) -- the SHARED system, so the initial
+    //! state, its derivative and the sensitivities' initial data come from one solve, as ODESLV's do.  (IDACalcIC,
+    //! IDAS's own corrector, was the alternative until 5 Nov 2026 -- and ran after the KINSOL solve at t0 by default,
+    //! repairing a derivative that was never handed to IDAS; retired with its options.)
     struct t_Initial
     {
-      //! @brief Which corrector resolves the initial conditions.  IDACALCIC is IDAS's own, the fast path
-      //! for rows already explicit in each state; KINSOL solves the INITIAL rows TOGETHER WITH the interior
-      //! rows at t0, which is what rows implicit in each other need (plan D4/§3.12).
-      enum IC_SOLVER { IDACALCIC=0, KINSOL };
-      //! @brief the corrector to use (default: KINSOL -- the SHARED system, so the initial state and its
-      //! derivative come from the same solve ODESLV takes.  IDACALCIC is kept as the IDAS-native path)
-      IC_SOLVER SOLVER = KINSOL;
       //! @brief the KINSOL corrector's own knobs, embedded rather than a fourth options object
       BASE_KINSOL::Knobs KIN;
-      //! @brief skip the solve where every INITIAL row pins one state linearly with no derivative, the
-      //! case in which the divided form is exact (default: true)
-      bool BYPASS_EXPLICIT = true;
-
-      //! @brief Consistent-initialisation mode [Default: YA_YDP] (IDACalcIC)
-      CALCIC_MODE CALCIC = YA_YDP;
-      //! @brief First output time handed to IDACalcIC, which only uses its DIRECTION and rough
-      //! magnitude [Default: 0e0 = let the integrator pick from the stage length]
-      double TOUT1 = 0e0;
-      //! @brief Maximum number of steps in the IC calculation [Default: 5] (IDASetMaxNumStepsIC)
-      int NMAXIC = 5;
-      //! @brief Maximum number of Jacobian re-evaluations in the IC calculation [Default: 4] (IDASetMaxNumJacsIC)
-      int MAXJACIC = 4;
-      //! @brief Maximum number of Newton iterations per IC step [Default: 10] (IDASetMaxNumItersIC)
-      int MAXNLIIC = 10;
-      //! @brief Whether to switch the IC line search OFF [Default: false] (IDASetLineSearchOffIC)
-      bool LSOFFIC = false;
-      //! @brief Step tolerance of the IC calculation [Default: 0e0 (auto)] (IDASetStepToleranceIC)
-      double STEPTOLIC = 0e0;
     } INITIAL;
 
     //! @brief Output options, mirroring ODESLV_CVODES::Options::t_Output.

@@ -450,8 +450,8 @@ public:
   //! @brief OCFEBASE::_solve_display_level(): SOLVE.DISPLAY_LEVEL when set, else the model's.
   int _solve_display_level() const override
     { return options.SOLVE.DISPLAY_LEVEL < 0 ? options.DISPLAY_LEVEL : options.SOLVE.DISPLAY_LEVEL; }
-  //! @brief OCFEBASE::_march_requested(): SOLVE.MARCHING.
-  bool _march_requested() const override { return options.SOLVE.MARCHING; }
+  //! @brief OCFEBASE::_stepwise_requested(): SOLVE.MARCHING.
+  bool _stepwise_requested() const override { return options.SOLVE.MARCHING; }
 
   //! @brief The collocation grid of direction @p dir (OCBase::colloc_dom): the grid the equations are collocated on,
   //! onto which a nonlinear operation lifts a coarser multi-node input first (2026-09-28)
@@ -2258,15 +2258,9 @@ protected:
   //! initial-time output (t=0) is captured at window 0 and a final-time output at the last window --
   //! or the output has no evolution-t coordinate (spatial-only -> keep the last window's value).
   //! Evolution-direction integrals are summed and do not consult this.
-  //! @brief Is output f DISTRIBUTED over the evolution direction?  (2026-10-06, WORKPLAN 1.1)  Such an output spans
-  //! the whole horizon: under marching every window emits the rows of ITS time element (the emission applies the
-  //! evolution mask with the global element index), and _march_field_rows places them in the monolithic layout.
-  bool _march_field_over_evo( t_Fct const& f ) const override
-  {
-    if( f.kind != FctKind::DISTRIBUTED || !_evolution_dom_var.dag() ) return false;
-    for( auto const& [dv, lim] : f.grid ){ (void)lim; if( dv.id() == _evolution_dom_var.id() ) return true; }
-    return false;
-  }
+  // An output DISTRIBUTED over the evolution direction (OCFEBASE::_output_over_evolution; 2026-10-06, WORKPLAN 1.1)
+  // spans the whole horizon: under marching every window emits the rows of ITS time element (the emission applies the
+  // evolution mask with the global element index), and _window_output_rows places them in the monolithic layout.
   //! @brief Nodes of one element kept by a grid mask (the emission's rule: the domain's ends by mask, the unique-node
   //! policy for the left trace of every non-first LGL/CGL element; LB/UB are one interpolated row per block).
   size_t _grid_sel_count( FFDom const& dom, int lim, size_t iel, size_t nel ) const
@@ -2290,7 +2284,7 @@ protected:
   //! the left trace of a non-first LGL/CGL element under OUT_UNIQUE_PHYSICAL) or when the window does not own the
   //! row (an LB/UB evolution mask: the first/last window does).
   static constexpr size_t npos = static_cast<size_t>( -1 );
-  std::vector<size_t> _march_field_rows( t_Fct const& f, size_t k ) const override
+  std::vector<size_t> _window_output_rows( t_Fct const& f, size_t k ) const override
   {
     std::vector<size_t> rows;
     size_t const nw = _marchGrid.size() > 1? _marchGrid.size() - 1: 1;
@@ -2458,15 +2452,17 @@ protected:
   // The control registry (_controls, _nControlDof) is FFModel's -- see the note by
   // _on_controls_changed() above.  The uses below resolve to the inherited members unchanged.
 
-  //! @brief OCFEBASE::_march_context(), answered from the marching members below.
-  MarchContext _march_context
+  //! @brief OCFEBASE::_evolution_window(), answered from the marching members below: ONE while a window is assembled,
+  //! ALL otherwise; the horizon's elements are the march's steps (n_march_steps(): 0 with no recorded grid).
+  EvolutionWindow _evolution_window
     () const override
     {
-      MarchContext m;
-      m.in_march = _inMarch;  m.window = _marchWindow;
-      m.n_grid   = _marchGrid.size();  m.n_steps = n_march_steps();
-      m.active   = options.SOLVE.MARCHING && m.n_steps >= 1;
-      return m;
+      EvolutionWindow w;
+      w.kind       = _inMarch? EvolutionWindow::ONE: EvolutionWindow::ALL;
+      w.index      = _marchWindow;
+      w.n_elements = n_march_steps();
+      w.stepwise   = options.SOLVE.MARCHING && w.n_elements >= 1;
+      return w;
     }
 
   //! @brief Reentrancy guard: true while _solve_marching() drives per-element solve()s.
@@ -5886,9 +5882,9 @@ OCFESLV::_wdecide_restore
   }
 
   // ---- per-window BEFORE deficiencies (win 0, and win 1 when marching) -------
-  auto const mctx = _march_context();
-  bool const marching = mctx.active;
-  size_t const nwin = marching ? std::min<size_t>( 2, mctx.n_steps ) : 1;
+  auto const ew = _evolution_window();
+  bool const marching = ew.stepwise;
+  size_t const nwin = marching ? std::min<size_t>( 2, ew.n_elements ) : 1;
   std::vector<double> x, u; std::string reftag;
   _reference_point( x, u, reftag );
   double const* xv = x.empty() ? nullptr : x.data();
@@ -6005,8 +6001,8 @@ OCFESLV::_wdecide_restore
     double const* xav = xa.empty() ? nullptr : xa.data();
     double const* uav = ua.empty() ? nullptr : ua.data();
     double const* cav = _vCstVal.empty() ? nullptr : _vCstVal.data();
-    bool const marching_a = mctx.active;
-    size_t const nwin_a = marching_a ? std::min<size_t>( 2, mctx.n_steps ) : 1;
+    bool const marching_a = ew.stepwise;
+    size_t const nwin_a = marching_a ? std::min<size_t>( 2, ew.n_elements ) : 1;
     for( size_t w = 0; w < nwin_a; ++w ){
       t_JacAssembly A;
       bool const oka = ( w == 0 && !marching_a ) ? assemble( xav, uav, cav, A, true )
@@ -6129,9 +6125,9 @@ OCFESLV::_audit_determinacy
   }
   else _reference_point( x, u, reftag );
   double const* cst = _vCstVal.empty() ? nullptr : _vCstVal.data();
-  auto const mctx = _march_context();
-  bool const marching = mctx.active;
-  size_t const nwin = marching ? std::min<size_t>( 2, mctx.n_steps ) : 1;
+  auto const ew = _evolution_window();
+  bool const marching = ew.stepwise;
+  size_t const nwin = marching ? std::min<size_t>( 2, ew.n_elements ) : 1;
 
   auto imp_name = [&]() -> char const* {
     return options.INTERFACE.IMPOSITION == Options::IC_WEAK   ? "IC_WEAK"
@@ -7351,8 +7347,8 @@ OCFESLV::_solve_marching( double* var, double const* inp, double const* cst )
         bool const summed = ( f.row0 < nfct && fctsum[f.row0] );
         // An output DISTRIBUTED over the evolution direction (2026-10-06, WORKPLAN 1.1): this window emitted the rows
         // of ITS time element, in its emission order; place them in the monolithic layout
-        if( !summed && _march_field_over_evo( f ) ){
-          std::vector<size_t> const rows = _march_field_rows( f, k );
+        if( !summed && _output_over_evolution( f ) ){
+          std::vector<size_t> const rows = _window_output_rows( f, k );
           for( size_t i = 0; i < rows.size() && f.row0 + i < nfct; ++i )
             if( rows[i] != npos && f.row0 + rows[i] < nfct ) fctacc[ f.row0 + rows[i] ] = fctblk[ f.row0 + i ];
           continue;
@@ -7747,8 +7743,8 @@ OCFESLV::_march_fsens_apply
       bool const summed = ( f.row0 < nf && fctsum[f.row0] );
       // a field output over the evolution direction (2026-10-06, WORKPLAN 1.1): this window's rows, emitted in
       // window order at f.row0.., go to their global rows
-      if( !summed && _march_field_over_evo( f ) ){
-        std::vector<size_t> const rows = _march_field_rows( f, k );
+      if( !summed && _output_over_evolution( f ) ){
+        std::vector<size_t> const rows = _window_output_rows( f, k );
         for( size_t i = 0; i < rows.size(); ++i ){
           if( rows[i] == npos ) continue;
           size_t const r = f.row0 + i, g = f.row0 + rows[i];
@@ -7933,8 +7929,8 @@ OCFESLV::_march_asens_apply
       bool const summed = ( f.row0 < nf && fctsum[f.row0] );
       // a field output over the evolution direction (2026-10-06, WORKPLAN 1.1): window row f.row0+i is global row
       // f.row0+rows[i] -- it takes that row's weight; the window's other rows of f carry none
-      if( !summed && _march_field_over_evo( f ) ){
-        std::vector<size_t> const rows = _march_field_rows( f, k );
+      if( !summed && _output_over_evolution( f ) ){
+        std::vector<size_t> const rows = _window_output_rows( f, k );
         for( size_t i = 0; i < rows.size(); ++i ){
           if( rows[i] == npos ) continue;
           size_t const r = f.row0 + i, g = f.row0 + rows[i];

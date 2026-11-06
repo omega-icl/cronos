@@ -85,7 +85,7 @@ protected:
     override
     { return true; }
 
-  //! @brief DAESLV_IDAS resolves them with BASE_KINSOL behind INITIAL.SOLVER, so implicit rows are not a
+  //! @brief DAESLV_IDAS resolves them with BASE_KINSOL (its consistent initialisation), so implicit rows are not a
   //! reason to refuse the model.  Whether a given configuration is SOLVABLE is a rank question, answered at
   //! solve time with a diagnosis, not guessable from the rows at setup.
   bool _solves_initial_rows
@@ -174,7 +174,7 @@ DAESLV_BASE::_extract_dae
   if( options.DISPLAY_LEVEL >= 2 ) std::cerr << "DAESLV_BASE::_extract_dae [timing] build_id            "
     << std::fixed << std::setprecision(2) << std::chrono::duration<double,std::milli>( std::chrono::steady_clock::now() - _t0 ).count() << " ms\n";
   // IDAS integrates a SQUARE residual: one row per unknown.  The unknowns are the states, so this is the
-  // place a mis-posed model shows up, before any IDACalcIC is asked to make sense of it.
+  // place a mis-posed model shows up, before the consistent initialisation is asked to make sense of it.
   if( n_residual() != _nx ){
     _extractError = std::to_string( n_residual() ) + " evolution row(s) for " + std::to_string( _nx )
                   + " state(s): the residual IDAS integrates must be square";

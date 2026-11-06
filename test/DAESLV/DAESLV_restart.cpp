@@ -51,7 +51,6 @@ int main()
 
   M.options.SOLVE.RTOL = M.options.SOLVE.ATOL = 1e-10;
   M.options.DISPLAY_LEVEL = 0;
-  M.options.INITIAL.SOLVER = BASE_IDAS::Options::t_Initial::KINSOL;
 
   if( !M.setup() ){ std::cout << "setup failed: " << M.extract_error() << "\n"; return 1; }
   std::cout << "    stages=" << M.nx() << " states, np=" << M.np()
@@ -104,14 +103,6 @@ int main()
   M.solve( P );
   check( "solve() is idempotent on y(T)", M.val_state().back()[0], yT, 0. );
   check( "solve() is idempotent on z(T)", M.val_state().back()[1], zT, 0. );
-
-  // The two correctors AGREE on this model, each from its own setup().  Switching INITIAL.SOLVER after
-  // setup() is what used to differ, and that was the idempotence defect above, not the corrector:
-  // IDACalcIC in YA_YDP_INIT tracks the closed form here to 5e-10.
-  M.options.INITIAL.SOLVER = BASE_IDAS::Options::t_Initial::IDACALCIC;
-  M.setup();
-  M.solve( P );
-  check( "IDACalcIC agrees with KINSOL on y(T)", M.val_state().back()[0], yT, 1e-7 );
 
   std::cout << "\n==========  DAESLV_restart: " << n_pass << " passed, " << n_fail << " failed -- "
             << ( n_fail? "FAILURES": "ALL PASS" ) << "  ==========\n\n";

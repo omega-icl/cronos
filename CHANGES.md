@@ -21,6 +21,17 @@
   residual rather than once per output. The backward Jacobian is analytic (it was built by difference quotients),
   and the quadrature sensitivity integrands read the memoised evaluation. The PSA column at 480 states, one
   parameter, two outputs: `solve_fsens` 4.7 s -> 2.6 s, `solve_asens` 6.1 s -> 3.9 s, against 0.6 s for the solve.
+* **MoL: the consistent initialisation starts from the declared profile at every node.** An INITIAL row at an
+  algebraic node (a Dirichlet node, or by default a Neumann node) is set aside, the node being held by its
+  boundary row; `OCFEMOL::init_seed` skipped those rows, so the node started from its reference value, and a
+  boundary row with several roots could be met on the wrong one. On the heated rod with `D(u) = D0 (1 + beta u)`
+  the flux row was met at `1 + beta u < 0`, a negative diffusivity: `u(2,1) = -1.02` against OCFESLV's `2.79`.
+  The set-aside rows now seed their nodes too; DAESLV reports, at `DISPLAY_LEVEL >= 1`, how far the consistent
+  initialisation moved such a node from its declared value (`initial_consistency_defect`, unread before).
+* **Notebooks: `MOL_tutorial` and `PSA_tutorial`.** The OCFESLV tutorial's heated rod on DAESLV by the method of
+  lines, one declaration for both solvers: outputs, profiles, OCFESLV's spectral convergence in its time order,
+  gradients by name in the shared layout. A non-isothermal two-component adsorption column, by MoL or by space-time
+  collocation behind one switch: breakthrough, thermal front, sensitivities to the affinity, a cross-check.
 * **Outputs that are NONLINEAR functions of horizon integrals and point evaluations**, on ODESLV, DAESLV and
   under MoL (refused before: one record or an affine combination). Before the model sets up, each distinct
   reduction in `t` such an output reads is lifted into a hidden STATE -- an integral into the quadrature state

@@ -1714,6 +1714,16 @@ DAESLV_IDAS::solve
     y0 = yv;
     _dXP0 = ypv;
     ++_numIC0;                                   // counted in stats.numIC below
+    // a model distributed in space: an INITIAL row at an algebraic node was set aside (the node is held by its
+    // boundary row), so the consistent point may differ from the declared profile there -- say by how much
+    if( _mol && !_dT.empty() ){
+      double const defect = _mol->initial_consistency_defect( _dT[0], y0.data() );
+      double scale = 1.;  for( double v : y0 ) scale = std::max( scale, std::fabs( v ) );
+      if( defect > 1e-6 * scale && options.DISPLAY_LEVEL >= 1 )
+        os << "DAESLV_IDAS ** the consistent initialisation moved a node held by a boundary or algebraic row by "
+           << defect << " from its declared initial value: the declared profile is not consistent with that row there"
+           << " (or the row has several roots)" << std::endl;
+    }
   }
 
   _init_stats( stats );

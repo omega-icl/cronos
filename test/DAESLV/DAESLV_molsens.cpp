@@ -229,7 +229,11 @@ int main()
       if( oc ){ eV = std::max( eV, rel( f0[i], fo[i] ) );  eG = std::max( eG, rel( gF[i], go[i] ) ); }
     }
     std::cout << "    max rel: adj-fwd " << ( ad? eFA: NAN ) << "  fwd-FD " << eFD << "  values DAESLV-OCFESLV " << eV << "  gradients DAESLV-OCFESLV " << eG << "\n";
-    check( "(A) DAESLV forward = central difference of its own values, to 1e-5", eFD <= 1e-5 );
+    // the central difference of two ADAPTIVE solves carries their uncorrelated global errors, ~1e-9 at RTOL 1e-10,
+    // over H = 1e-4: noise ~1e-5 by construction, so 1e-5 sat at the floor (2.6e-6, 5.5e-6, 1.0e-5 across changes that
+    // left the forward sensitivity, the adjoint and the OCFESLV comparison unchanged -- 7 Nov 2026).  A wrong
+    // sensitivity is wrong at order one; the sharp checks are adjoint = forward and the convergence to OCFESLV.
+    check( "(A) DAESLV forward = central difference of its own values, to 1e-4 (the FD's noise ~1e-5)", eFD <= 1e-4 );
     bool conv = oc;
     if( oc ){
       std::cout << std::setprecision(10);

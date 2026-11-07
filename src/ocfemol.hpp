@@ -973,8 +973,12 @@ OCFEMOL::init_seed
   for( int sweep = 0; sweep < 8; ++sweep ){
     if( !deriv_initial( t, xc, ini.data(), ptr, col, val ) ) return false;
     double move = 0.;
+    // every INITIAL row seeds its node -- the dropped ones too: an algebraic node is HELD by its boundary or
+    // algebraic row, not by its INITIAL row, but the declared profile is where the consistent initialisation should
+    // START.  From the reference value instead, a boundary row with several roots can be met on the wrong one: the
+    // flux row D(u) u_z = q with D = D0 (1 + beta u) was met at 1 + beta u < 0 on the heated rod of the MoL tutorial,
+    // a negative diffusivity, u(2,1) = -1.02 against 2.79 (7 Nov 2026).
     for( size_t k = 0; k < _iniStream.size(); ++k ){
-      if( _iniStream[k].dropped ) continue;
       size_t const tgt = _iniStream[k].target;
       double d = 0.;  for( size_t j = ptr[k]; j < ptr[k+1]; ++j ) if( col[j] == tgt ) d = val[j];
       if( std::fabs( d ) < 1e-12 ) continue;

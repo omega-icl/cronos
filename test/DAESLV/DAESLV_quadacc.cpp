@@ -59,11 +59,55 @@ void run( char const* name, size_t NST )
     line( mode? "adjoint": "forward", ok, eg );
   }
 }
+// NONLINEAR functions of horizon integrals (7 Nov 2026; refused before, Z10: one record or an affine combination):
+// A = int_0^1 x dt, sqrt(A) and A/B with B = int_0^1 x^2 dt on x' = -k x, x(0) = 1 -- values and d/dk against the
+// closed forms, forward and adjoint, on both solvers.  Each record a hidden function, the output finished from them.
+template <typename S>
+void run_nonlinear( char const* name )
+{
+  double const K = 0.7;
+  FFGraph G;  S s( &G );  FFPartial OpP;  FFIntegral OpI;
+  FFVar t = G.add_var("t"), x = G.add_var("x"), k = G.add_var("k");
+  s.add_domain( t, FFDom( 0., 1., 2, FFDom::LGR, 3 ) );
+  s.set_evolution_domain( t );
+  s.add_state( x, {t} );  s.update_ref( x, 1. );
+  s.add_input( k, {} );
+  typename S::EqnOptions io( S::EqnRole::INTERIOR, 0 ), ii( S::EqnRole::INITIAL, 0 );
+  s.add_equation( OpP(x,t) + k*x, {t}, {FFDom::ALL - FFDom::LB}, io );
+  s.add_equation( x - 1.,         {t}, {FFDom::LB},              ii );
+  FFVar A = OpI( x, t ), B = OpI( x*x, t );
+  s.add_output( A );  s.add_output( sqrt( A ) );  s.add_output( A / B );
+  s.options.SOLVE.RTOL = 1e-10;  s.options.SOLVE.ATOL = ATOLG;  s.options.SOLVE.VERBOSE = 0;  s.options.DISPLAY_LEVEL = 0;
+  double const Ae = ( 1 - std::exp(-K) )/K, Be = ( 1 - std::exp(-2*K) )/( 2*K );
+  double const dA = -( Ae - std::exp(-K) )/K, dB = -( Be - std::exp(-2*K) )/K;
+  double const f[3] = { Ae, std::sqrt( Ae ), Ae/Be }, df[3] = { dA, dA/( 2*std::sqrt( Ae ) ), ( dA*Be - Ae*dB )/( Be*Be ) };
+  std::vector<double> const P{ K };
+  auto line = [&]( char const* what, bool ok, double err, double tol ){
+    ++nfail;  if( ok && err < tol ) --nfail;
+    std::cout << "  " << std::left << std::setw(7) << name << "nonlinear  " << std::setw(10) << what << ( ok? "": " FAILED (" + s.extract_error() + ")" )
+              << "max rel err " << std::scientific << std::setprecision(2) << err << ( ok && err < tol? "  PASS": "  FAIL" ) << "\n"; };
+  if( !s.setup() ){ line( "setup", false, 0., 0. ); return; }
+  bool ok = s.solve( P ) == S::NORMAL;
+  double ev = 0.;  if( ok ) for( int i = 0; i < 3; ++i ) ev = std::max( ev, std::fabs( s.val_function()[i] - f[i] )/std::fabs( f[i] ) );
+  line( "value", ok && s.nf() == 3, ev, 1e-8 );
+  for( int mode = 0; mode < 2; ++mode ){
+    ok = ( mode? s.solve_asens( P ): s.solve_fsens( P ) ) == S::NORMAL;
+    double eg = 0.;
+    if( ok ){
+      auto const& Gr = s.val_function_gradient();
+      for( int i = 0; i < 3; ++i ){
+        double const g = Gr.size() == 3? Gr[i].at( 0 ): Gr.at( 0 ).at( i );
+        eg = std::max( eg, std::fabs( g - df[i] )/std::fabs( df[i] ) ); } }
+    line( mode? "adjoint": "forward", ok, eg, mode? 1e-6: 1e-7 );
+  }
+}
+
 int main( int argc, char* argv[] )
 {
   if( argc > 1 ) X0G = std::atof( argv[1] );
   if( argc > 2 ) ATOLG = std::atof( argv[2] );
   for( size_t n : { 1, 2, 4 } ){ run<ODESLV_CVODES>( "ODESLV", n );  run<DAESLV_IDAS>( "DAESLV", n ); }
+  run_nonlinear<ODESLV_CVODES>( "ODESLV" );  run_nonlinear<DAESLV_IDAS>( "DAESLV" );
   std::cout << ( nfail? "FAILURES: ": "ALL PASS" ) << ( nfail? std::to_string( nfail ): std::string() ) << "\n";
   return nfail? 1: 0;
 }

@@ -755,7 +755,7 @@ if(ENABLE_PYTHON)
   endif()
 endif()
 
-# `make check` (or `cmake --build <dir> --target check`): runs the five Python check scripts against the freshly
+# `make check` (or `cmake --build <dir> --target check`): runs the Python check scripts against the freshly
 # built cronos module, in order, stopping at the first failure (a script exits non-zero when one of its checks
 # fails).  The scripts find the modules through CRONOS_PYPATH: the cronos build directory, then PYMCPP_DIR.
 if(ENABLE_PYTHON)
@@ -768,6 +768,7 @@ if(ENABLE_PYTHON)
       check_ffodeslv.py
       check_ocfeslv.py
       check_daeslv.py
+      check_daeslv_mol.py
       check_ffdaeslv.py
       check_ffocfe.py)
   set(_check_cmds "")

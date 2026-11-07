@@ -552,7 +552,32 @@ declare_semidiscrete
     std::vector<FFVar> const fc = FCT( xc, U, &mol );
     FFEval OpE;  FFIntegral OpI;
     auto const& T = mol.outputs_time();
-    for( size_t k = 0; k < T.size(); ++k ){
+    auto spatial = [&]( size_t k )->FFVar{                 // the scalar spatial part of output k, at every t
+      if( T[k].sparts.empty() ) return fc.at( mol.output_rows( k ).first );
+      std::vector<FFVar> vars( T[k].sph ), vals;         // hs over the nested reductions' rows, the constants by value
+      for( size_t i : T[k].sparts ) vals.push_back( fc.at( mol.output_rows( i ).first ) );
+      for( size_t q = 0; q < mol.constant_values().size(); ++q ){ vars.push_back( mol.constant_vars()[q] );  vals.push_back( FFVar( mol.constant_values()[q] ) ); }
+      std::vector<FFVar> out( 1 );
+      mol.dag()->eval( std::vector<FFVar>{ T[k].hs }, out, vars, vals );
+      return out[0]; };
+    auto reduction = [&]( size_t k )->FFVar{               // the reduction in t of the scalar spatial part of output k
+      return T[k].kind == OCFEMOL::t_OutputTime::INTEGRAL? OpI( spatial( k ), t ): OpE( spatial( k ), t, T[k].tau, T[k].side ); };
+    size_t const ndecl = mol.n_declared_outputs();          // the parts of composed outputs follow the declared ones
+    for( size_t k = 0; k < ndecl && k < T.size(); ++k ){
+      if( T[k].kind == OCFEMOL::t_OutputTime::COMPOSED ){
+        // h over the parts' reductions: the deferred inputs replaced by them, the constants by their values
+        std::vector<FFVar> vars( T[k].dvars ), vals;
+        for( size_t i : T[k].parts ){
+          if( mol.output_rows( i ).second != 1 ) return fail( "a composed output's part is not a scalar in space" );
+          vals.push_back( reduction( i ) );
+        }
+        for( size_t q = 0; q < mol.constant_values().size(); ++q ){ vars.push_back( mol.constant_vars()[q] );  vals.push_back( FFVar( mol.constant_values()[q] ) ); }
+        std::vector<FFVar> out( 1 );
+        mol.dag()->eval( std::vector<FFVar>{ T[k].h }, out, vars, vals );
+        M.add_output( out[0] );
+        continue;
+      }
+      if( !T[k].sparts.empty() ){ M.add_output( reduction( k ) );  continue; }
       auto const [r0, nr] = mol.output_rows( k );
       for( size_t r = r0; r < r0 + nr; ++r )
         M.add_output( T[k].kind == OCFEMOL::t_OutputTime::INTEGRAL? OpI( fc.at( r ), t ): OpE( fc.at( r ), t, T[k].tau, T[k].side ) );

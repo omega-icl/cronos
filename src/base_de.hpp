@@ -218,6 +218,20 @@ class BASE_DE
   std::vector<std::vector<FFVar>>      _mDE;    //!< right-hand sides (one entry)
   std::vector<std::vector<FFVar>>      _mQUAD;  //!< quadrature integrands (one entry)
   std::vector<std::map<size_t,FFVar>>  _mFCT;   //!< functions, per stage: index -> expression
+  //! @brief Lift the NONLINEAR outputs of the DECLARATION into hidden STATES (7 Nov 2026): before FFModel::setup, an
+  //! output that is a nonlinear function h of reductions in t -- integrals over the horizon, values at a time -- is
+  //! rewritten as ONE point evaluation at the end of the horizon of h over hidden states: an integral int g dt
+  //! becomes the quadrature state q' = g, q(0) = 0; a value e(x(tau)) at an interior tau the frozen state s' = 0,
+  //! s(0) = 0 with the transition s(tau+) = e(x(tau-)); a value at the end stays in place; one hidden state per
+  //! DISTINCT reduction, shared by the outputs reading it.  Everything downstream then sees a standard model: one
+  //! record per output, the adjoint ONE backward problem per output seeded with dh/d(q, s) at the end, the forward
+  //! sensitivities those of a point output, the value a state's.  An affine combination of reductions is left to the
+  //! record machinery (OCFESLV's own capture of evolution-direction reductions in outputs -- f(INT R) as f(cap),
+  //! evaluated once at completion -- is this mechanism's counterpart on the collocation side).  Called by the solvers'
+  //! setup() on the declaration they set up -- the semi-discrete one under the method of lines.
+  bool _lift_nonlinear_outputs();
+
+
   std::string _extractError;                    //!< why the last extraction failed
 
   size_t _ns = 0;        //!< number of stages: _dT.size()-1
@@ -1470,8 +1484,9 @@ BASE_DE::_extract_from_model
     for( size_t j = 0; affine && j < A.size(); ++j ) if( !A[j].cst() && !records_in( A[j] ).empty() ) affine = false;
     if( affine && !B[0].cst() && !records_in( B[0] ).empty() ) affine = false;
     if( !affine ){
-      _extractError = "an output combines evaluations/integrals NONLINEARLY (" + fct.var.name() + "): ODESLV supports an"
-                      " output that is one evaluation or integral, or an AFFINE combination of them";
+      _extractError = "an output combines evaluations/integrals NONLINEARLY (" + fct.var.name() + "): the integrator takes"
+                      " one evaluation or integral, or an AFFINE combination of them -- a nonlinear combination of reductions"
+                      " in t is lifted into hidden states before setup (_lift_nonlinear_outputs), so this one is of another kind";
       return false;
     }
     size_t const idx = _nf++;
@@ -1482,6 +1497,7 @@ BASE_DE::_extract_from_model
   blk_first.push_back( _nf );                             // the block of every output among the functions
   _blkFct.clear();
   for( size_t k = 0; k + 1 < blk_first.size(); ++k ) _blkFct.push_back( { blk_first[k], blk_first[k+1] - blk_first[k] } );
+
   if( tv_inputs.empty() || quad.empty() )                 // after the outputs: they may have added quadratures
     _mQUAD.assign( 1, quad );
   else{                                                    // integrands with time-varying inputs: per stage
@@ -2242,6 +2258,87 @@ BASE_DE::_resolve_sensitivity_index
     }
   }
   _nsen = _ndxSEN.size();
+  return true;
+}
+
+inline bool
+BASE_DE::_lift_nonlinear_outputs
+()
+{
+  if( !_usr._evolution_dom_setUsr ) return true;
+  FFVar const t = _usr._evolution_dom_varUsr;
+  auto itd = _usr._mDomUsr.find( t );
+  if( itd == _usr._mDomUsr.end() ) return true;
+  double const tEnd = itd->second.up_dom;
+  FFGraph* dag = _usr._dagUsr;
+  if( !dag ) return true;
+  auto is_t_reduction = [&]( FFOp const* op )->bool{
+    if( auto const* pi = mc::type_cast<FFIntegral const>( op ) ) return pi->Indep().expr.size() == 1 && pi->Indep().expr.count( t );
+    if( auto const* pe = mc::type_cast<FFEval const>( op ) )     return pe->Coord().size() == 1 && pe->Coord().count( t );
+    return false; };
+  size_t nlift = 0;
+  std::map<FFVar::pt_idVar,FFVar> lifted;                        // reduction node -> its hidden state (or its operand at the end):
+                                                                   // one per DISTINCT reduction, shared by every output reading it
+  for( auto& fct : _usr._mFctUsr ){
+    FFVar const E = fct.var;
+    FFOp const* root = E.opdef().first;
+    if( !root || is_t_reduction( root ) || fct.kind != FctKind::POINT ) continue;
+    FFSubgraph const sg = dag->subgraph( 1, &E );
+    std::vector<FFVar> cand;
+    for( auto const* op : sg.l_op ) if( op && is_t_reduction( op ) ) for( auto const* vo : op->varout ) if( vo ) cand.push_back( *vo );
+    if( cand.empty() ) continue;
+    std::vector<FFVar> red;                                     // the OUTERMOST reductions in t
+    for( size_t i = 0; i < cand.size(); ++i ){
+      bool inner = false;
+      for( size_t j = 0; j < cand.size() && !inner; ++j ){
+        if( i == j ) continue;
+        for( auto const* vo : dag->subgraph( 1, &cand[j] ).l_op )
+          for( auto const* v : vo->varout ) if( v && v->id() == cand[i].id() && vo->varout[0]->id() != cand[j].id() ){ inner = true; break; }
+      }
+      if( !inner ) red.push_back( cand[i] );
+    }
+    // affine in the reductions?  then the record machinery takes it as before
+    std::vector<FFVar> ph;
+    for( size_t i = 0; i < red.size(); ++i ) ph.push_back( dag->add_var( "lift_ph" + std::to_string( i ) ) );
+    FFVar const h = dag->substitute( std::vector<FFVar>{ E }, red, ph )[0];
+    std::vector<FFVar> const dh = dag->FAD( std::vector<FFVar>{ h }, ph );
+    bool affine = true;
+    for( auto const& d : dh ) if( !d.cst() ){ affine = false; break; }
+    if( affine ) continue;
+    // the hidden states, one per reduction
+    std::vector<FFVar> sub;
+    FFPartial OpP;
+    for( auto const& r : red ){
+      auto itl = lifted.find( r.id() );
+      if( itl != lifted.end() ){ sub.push_back( itl->second ); continue; }
+      FFOp const* op = r.opdef().first;
+      FFVar const operand = *op->varin[0];
+      std::string const nm = "lift_" + std::to_string( lifted.size() );
+      if( mc::type_cast<FFIntegral const>( op ) ){                   // int_0^T g dt  ->  q' = g, q(0) = 0
+        FFVar q = dag->add_var( nm );
+        add_state( q, { t } );  update_ref( q, 0. );
+        add_equation( OpP( q, t ) - operand, { t }, { FFDom::ALL - FFDom::LB }, EqnOptions( EqnRole::INTERIOR, 0 ) );
+        add_equation( q,                     { t }, { FFDom::LB },              EqnOptions( EqnRole::INITIAL, 0 ) );
+        lifted.emplace( r.id(), q );  sub.push_back( q );
+      }
+      else{                                                           // e(x(tau)): frozen after tau, or in place at the end
+        auto const* pe = mc::type_cast<FFEval const>( op );
+        double const tau = pe->Coord().at( t );
+        if( std::fabs( tau - tEnd ) <= 1e-12 * std::max( 1., std::fabs( tEnd ) ) ){ lifted.emplace( r.id(), operand );  sub.push_back( operand );  continue; }
+        FFVar sv = dag->add_var( nm );
+        add_state( sv, { t } );  update_ref( sv, 0. );
+        add_equation( OpP( sv, t ), { t }, { FFDom::ALL - FFDom::LB }, EqnOptions( EqnRole::INTERIOR, 0 ) );
+        add_equation( sv,           { t }, { FFDom::LB },              EqnOptions( EqnRole::INITIAL, 0 ) );
+        add_transition( { operand }, { sv }, t, tau );               // s(tau+) = e(x(tau-))
+        lifted.emplace( r.id(), sv );  sub.push_back( sv );
+      }
+    }
+    FFVar const hq = dag->substitute( std::vector<FFVar>{ E }, red, sub )[0];
+    FFEval OpE;
+    fct.var = OpE( hq, t, tEnd );                                   // ONE point evaluation at the end of the horizon
+    ++nlift;
+  }
+  (void)nlift;
   return true;
 }
 

@@ -254,23 +254,27 @@ FATAL. The base of OCFESLV.Options and of DAESLV.MOLOptions.
   pyCol.def(py::init<>());
   bind_ocfebase_options(pyCol);
 
-  // --- the semi-discretisation's options, for a model distributed in space (DAESLV.options.MOL) ---
-  py::class_<mc::OCFEMOL::Options, mc::OCFEBASE::Options> pyMol(pyDAESLV, "MOLOptions", R"doc(
-Options of the semi-discretisation of a model distributed in space (the method
-of lines): the collocation groups (CollocationOptions) and the method of lines'
-own, IMPOSITION. Its model-level fields (REDUCE, CLASSIFY, DISPLAY_LEVEL, ...)
-are not used: those are DAESLV.options' own.
-)doc");
-  pyMol.def(py::init<>());
-  bind_ocfemol_options(pyMol);
+  // --- the method of lines' own option group, DAESLV.options.MOL (DAESLV.MOLOptions): the collocation groups
+  //     (INTERFACE, ...) are DAESLV.options' own, at the same path as OCFESLV's (phase 7).  OCFEMOL::Options is bound
+  //     under a hidden name only because the generated binder of its group lives on it; DAESLV re-exports the group
+  //     type as MOLOptions and the NeumannNode enumerators on itself.
+  py::class_<mc::OCFEMOL::Options, mc::OCFEBASE::Options> pyMolFull(m, "_OCFEMOLOptions");
+  pyMolFull.def(py::init<>());
+  bind_ocfemol_options(pyMolFull);
+  pyDAESLV.attr("MOLOptions") = pyMolFull.attr("t_Imposition");
+  pyDAESLV.attr("NeumannNode") = pyMolFull.attr("NeumannNode");
+  pyDAESLV.attr("NEUMANN_ALGEBRAIC") = pyMolFull.attr("NEUMANN_ALGEBRAIC");
+  pyDAESLV.attr("NEUMANN_DIFFERENTIAL") = pyMolFull.attr("NEUMANN_DIFFERENTIAL");
 
   // --- DAESLV Options ---
-  py::class_<mc::DAESLV_IDAS::Options, M::Options> pyOpt(pyDAESLV, "Options",
+  py::class_<mc::DAESLV_IDAS::Options, mc::OCFEBASE::Options> pyOpt(pyDAESLV, "Options",
                                                            R"doc(
-Options of DAESLV: the model options (FFModel.Options), the IDAS options
-(integration method, nonlinear and linear solvers, tolerances, sensitivity
-settings), and MOL -- the semi-discretisation's, for a model distributed in
-space (DAESLV.MOLOptions).
+Options of DAESLV: the model options (FFModel.Options), the collocation groups
+(CollocationOptions: INTERFACE, AUDIT, DETERMINACY, FATAL -- the same path as on
+OCFESLV, read for a model distributed in space), the IDAS options (integration
+method, nonlinear and linear solvers, tolerances, sensitivity settings; OUTPUT is
+the integrator's group), and MOL -- the method of lines' own group
+(DAESLV.MOLOptions: NEUMANN_NODE, REDUCE_HIGH_INDEX).
 )doc");
   pyOpt.def(py::init<>()).def(py::init<mc::DAESLV_IDAS::Options const&>());
   bind_idas_options(pyOpt);
@@ -425,6 +429,33 @@ control).
       .def(
           "val_state", [](S const& self) { return self.val_state(); },
           "State values at the stage times after the last solve.")
+      // a model distributed in space (the method of lines, 7): the semi-discrete system's unknowns and their nodes
+      .def(
+          "semidiscrete_states", [](S const& self) { return self.semidiscrete_states(); },
+          R"doc(
+The semi-discrete system's nodal unknowns, in the order of ``val_state`` -- for a model
+distributed in space, which DAESLV integrates by the method of lines. Empty for a
+pointwise model.)doc")
+      .def(
+          "semidiscrete_nodes",
+          [](S const& self, mc::FFVar const& field) {
+            py::list out;
+            auto const* mol = self.semidiscrete_model();
+            if( !mol ) return out;
+            auto const& cols = mol->field_columns( field );
+            auto const& nodes = mol->field_nodes( field );
+            for( size_t j = 0; j < cols.size(); ++j ){
+              py::dict coord;
+              if( j < nodes.size() ) for( auto const& [dv, z] : nodes[j] ) coord[py::cast( dv )] = z;
+              out.append( py::make_tuple( cols[j], coord ) );
+            }
+            return out;
+          },
+          py::arg("field"),
+          R"doc(
+For a model distributed in space: the nodes of ``field``, in mesh order, as a list of
+``(column, {direction: coordinate})`` -- ``column`` indexes ``val_state`` and
+``semidiscrete_states``. Empty for a pointwise model or an unknown field.)doc")
       // sizes
       .def(
           "np", [](S const& self) { return self.np(); },

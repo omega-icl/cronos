@@ -21,6 +21,32 @@
   residual rather than once per output. The backward Jacobian is analytic (it was built by difference quotients),
   and the quadrature sensitivity integrands read the memoised evaluation. The PSA column at 480 states, one
   parameter, two outputs: `solve_fsens` 4.7 s -> 2.6 s, `solve_asens` 6.1 s -> 3.9 s, against 0.6 s for the solve.
+* **Outputs that are NONLINEAR functions of horizon integrals and point evaluations**, on ODESLV, DAESLV and
+  under MoL (refused before: one record or an affine combination). Before the model sets up, each distinct
+  reduction in `t` such an output reads is lifted into a hidden STATE -- an integral into the quadrature state
+  `q' = g`, `q(0) = 0`; an interior point value into a frozen state with the transition `s(tau+) = e(x(tau-))` --
+  and the output becomes one point evaluation at the end of `h` over those states, so the adjoint is one backward
+  problem per output seeded with `dh/d(q, s)` and the forward sensitivities those of a point output. OCFESLV's
+  capture of evolution-direction reductions in outputs (`f(cap)` at completion) is the counterpart on the
+  collocation side. Under MoL a spatial reduction nested inside a nonlinearity (`(int u dz)^2`) becomes a scalar
+  part composed at every `t` -- the collocation's root-level assembly, linear by construction, sums such an
+  integrand per element (a third of the value on three elements, on OCFESLV's monolithic path too: an open item
+  there, reproducer attached).
+* **DAESLV: the collocation options declared once.** `DAESLV::Options` derives from `OCFEBASE::Options` as
+  `OCFESLV::Options` does, so `options.INTERFACE`, `.AUDIT`, `.DETERMINACY`, `.FATAL` are the same path on both
+  solvers; `options.MOL` keeps the method of lines' own group (`NEUMANN_NODE`, `REDUCE_HIGH_INDEX`). The second copy
+  of the groups under `MOL` is gone (`options.MOL.INTERFACE.*` -> `options.INTERFACE.*`, `options.MOL.IMPOSITION.*`
+  -> `options.MOL.*`). `OUTPUT` stays the integrator's group. In Python `DAESLV.Options` is a `CollocationOptions`,
+  `DAESLV.MOLOptions` the MoL group, the `NeumannNode` enumerators on `DAESLV`.
+* **OCFESLV: sensitivities by name.** `solve_fsens` / `solve_asens` take the inputs and constants as `solve` does,
+  every given input a control of the solve, and leave the gradient in `val_function_gradient()`: one row per
+  declared DOF, one column per output -- the layout DAESLV and ODESLV give, so the three solvers read the same.
+  Bound in Python. OCFESLV had only the registry surface, `sens_jacobian()` over the control vector.
+* **Python: a model distributed in space on DAESLV.** `DAESLV.semidiscrete_states()` and
+  `DAESLV.semidiscrete_nodes(field)` expose the semi-discrete system's unknowns and a field's nodes, mesh order,
+  as `(column, {direction: coordinate})`; everything else a PDE model needs was bound since the by-name solve. New
+  `check_daeslv_mol.py`: a rod on DAESLV and on OCFESLV from one declaration, a time-varying inlet with one
+  gradient row per declared DOF, a transition against closed forms, the semi-discrete layout.
 * **OCFEMOL: the residual's Jacobian coloured on the equation rows alone.** The coloured pattern held the output
   rows too, for OCFESLV's single sweep; under MoL an output distributed over space is one row touching every
   node of its fields, so every such column needed its own colour: 121 for a residual whose rows need far fewer,

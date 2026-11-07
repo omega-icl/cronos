@@ -144,7 +144,7 @@ int main()
       if( on_daeslv ){
         DAESLV_IDAS S( &G );  declare_rod( S, G, t, z, u, 3, 5 );
         S.options.SOLVE.RTOL = RTOL;  S.options.SOLVE.ATOL = ATOL;  S.options.SOLVE.VERBOSE = 0;  S.options.DISPLAY_LEVEL = 0;
-        S.options.MOL.IMPOSITION.NEUMANN_NODE = nn;
+        S.options.MOL.NEUMANN_NODE = nn;
         bool const ok = S.setup() && S.solve( std::vector<double>() ) == DAESLV_IDAS::NORMAL;
         if( ok ) xs = S.val_state();
         return ok;

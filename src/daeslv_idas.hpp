@@ -71,11 +71,18 @@ public:
   //! _apply_options() is the single moment the two are reconciled -- without that override a caller's
   //! REDUCE/CLASSIFY settings would be written here and never read by the model.
   struct Options
-  : public FFModel::Options
+  : public OCFEBASE::Options                 // the collocation groups (INTERFACE, OUTPUT, AUDIT, DETERMINACY, FATAL) at the SAME path as OCFESLV's
   , public BASE_IDAS::Options
   {
-    //! @brief The semi-discretisation's options, for a model distributed in space (see setup): the collocation groups (INTERFACE, ...) and the method of lines' own (IMPOSITION.NEUMANN_NODE).  Its model-level fields (REDUCE, CLASSIFY, DISPLAY_LEVEL, ...) are this solver's own, set above.
-    OCFEMOL::Options MOL;
+    //! @brief The method of lines' own group, for a model distributed in space (see setup): what a flux boundary node is
+    //! in the semi-discrete DAE and whether a high-index model is reduced first.  The collocation groups are this
+    //! struct's own, declared once for either solver (phase 7, 6 Nov 2026: they sat in a second copy under MOL).
+    OCFEMOL::Options::t_Imposition MOL;
+    //! @brief OUTPUT is the INTEGRATOR's group (RESRECORD, ...), as always on DAESLV; the collocation base's OUTPUT
+    //! group (marching storage, the distributed-output grid policy) is not read by the semi-discretisation.
+    using BASE_IDAS::Options::OUTPUT;
+    Options()
+      { OCFEMOL::Options const d;  MOL = d.IMPOSITION; }
   } options;
 
 
@@ -1407,7 +1414,8 @@ DAESLV_IDAS::_setup_mol
   // the semi-discretisation, from this model's own declarations
   _mol.reset( new OCFEMOL( _usr._dagUsr ) );
   _mol->copy_declarations_from( *this );
-  _mol->options = options.MOL;                                       // the semi-discretisation's own options ...
+  static_cast<OCFEBASE::Options&>( _mol->options ) = options;  // the collocation groups, declared once
+  _mol->options.IMPOSITION = options.MOL;                        // the method of lines' own                                       // the semi-discretisation's own options ...
   static_cast<FFModel::Options&>( _mol->options ) = static_cast<FFModel::Options const&>( options );   // ... the model's are this solver's
   if( !_mol->setup() )
     return refuse( "its semi-discretisation did not set up" + ( _mol->setup_error().empty()? std::string( " (OCFEMOL::setup)" ): ": " + _mol->setup_error() ) );
@@ -1520,6 +1528,7 @@ DAESLV_IDAS::setup
       _tick = now;
     }
   };
+  if( !_lift_nonlinear_outputs() ) return false;                 // nonlinear outputs into hidden states, before the model sets up
   if( !FFModel::setup() ){ _extractError = "FFModel::setup() failed"; return false; }
   _lap( "FFModel::setup" );
   if( !_extract_dae() ) return false;
@@ -2578,7 +2587,6 @@ DAESLV_IDAS::solve
   if( _dFGrad.size() == _nf*_np )
     for( size_t r = 0; r < _nf; ++r ) for( size_t j = 0; j < _np; ++j ) _fp[j][r] = _dFGrad[ r*_np + j ];
     if( _mol && _molGradRow.size() == _np ){ auto const fw = _fp;  for( size_t r = 0; r < _np; ++r ) _fp[r] = fw[ _molGradRow[r] ]; }
-
   // file the counters under the kind of solve this was
   if     ( _asa ) stats_asens = stats;
   else if( _fsa ) stats_fsens = stats;

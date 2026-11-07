@@ -178,6 +178,20 @@ check(D.last_report().converged, "last_report: the SolveReport of the by-name so
 f_call = list(D.val_function())
 D.solve({w: [2. * c[t] for c in D.input_coordinates(w)]})
 check(list(D.val_function()) == f_call, "a list over input_coordinates == the callable")
+# sensitivities BY NAME (phase 7), the surface DAESLV and ODESLV have: x(1) = int_0^1 w dt is linear in w, so
+# dx(1)/dw_k is the integral of DOF k's basis function -- the rows sum to 1 -- and a central difference is exact
+vals = [2. * c[t] for c in D.input_coordinates(w)]
+check(D.solve_fsens({w: vals}) == OCFESLV.NORMAL, "solve_fsens by name {w: [values by DOF]}")
+G = D.val_function_gradient()
+check(len(G) == len(D.input_dofs(w)) and all(len(r) == 1 for r in G), "one gradient row per declared DOF of w, one column per output")
+check(abs(sum(r[0] for r in G) - 1.) < 1e-10, "the rows sum to 1 (d int w dt / dw_k = the basis integrals)")
+check(D.solve_asens({w: vals}) == OCFESLV.NORMAL, "solve_asens by name")
+Ga = D.val_function_gradient()
+check(max(abs(a[0] - b[0]) for a, b in zip(G, Ga)) < 1e-10, "adjoint = forward, to 1e-10")
+k, h = len(vals) // 2, 1e-4
+vp = list(vals); vp[k] += h; D.solve({w: vp}); fp = D.val_function()[0]
+vm = list(vals); vm[k] -= h; D.solve({w: vm}); fm = D.val_function()[0]
+check(abs((fp - fm) / (2 * h) - G[k][0]) < 1e-8, "a row = the central difference on its DOF, to 1e-8")
 for what, inputs, must in [
         ("a missing input", {}, "missing: w(t)"),
         ("a wrong count", {w: [1., 2.]}, "w(t) has "),

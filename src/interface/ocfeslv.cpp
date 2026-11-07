@@ -333,6 +333,27 @@ naming the entry.
            DOC_SOLVE_ARGS)
               .c_str())
       .def(
+          "solve_fsens", [](O& self, t_Inputs const& in) { return self.solve_fsens(input_vals(in)); },
+          py::arg("inputs"), t_Redirect(),
+          R"doc(
+The forward sensitivity solve with the inputs and constants given BY NAME, as
+``solve`` takes them and as DAESLV and ODESLV do: every given input becomes a
+control of the solve. Returns ``OCFESLV.NORMAL``, ``FAILURE`` or ``FATAL``; the
+outputs are in ``val_function()`` and the gradient in ``val_function_gradient()``,
+one row per declared DOF (the inputs in declared order, each in ``input_dofs``
+order), one column per output.
+)doc")
+      .def(
+          "solve_asens", [](O& self, t_Inputs const& in) { return self.solve_asens(input_vals(in)); },
+          py::arg("inputs"), t_Redirect(),
+          R"doc(
+The adjoint sensitivity solve by name: as ``solve_fsens``, the same gradient
+assembled by one reverse sweep per output.
+)doc")
+      .def(
+          "val_function_gradient", [](O const& self) { return self.val_function_gradient(); },
+          "The gradient of the last by-name sensitivity solve: one row per declared DOF, one column per output.")
+      .def(
           "solve_fsens",
           [](O& self, py::object var, py::object inp,
              std::optional<std::vector<double>> const& cst)

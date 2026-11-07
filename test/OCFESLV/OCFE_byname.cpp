@@ -70,6 +70,50 @@ int main()
     check( refused( { { k0, { K0 } } }, "missing: c_ic" ),                        "(C) a missing input is refused, named" );
     check( refused( { { k0, { K0 } }, { c_ic, { 1., 2. } } }, "c_ic has " ),        "(C) a wrong count is refused, named" );
     check( refused( { { k0, { K0 } }, { k0, { K0 } }, { c_ic, flat } }, "k0 is given more than once" ), "(C) a duplicate is refused, named" );
+    // (D) SENSITIVITIES by name (phase 7): forward and adjoint, one row per declared DOF (k0's one, then c_ic's in
+    //     input_dofs order), one column per output -- = the registry path's sens_jacobian, = central differences
+    {
+      std::vector<FFModel::InputVal> const in{ { k0, { K0 } }, { c_ic, flat } };
+      auto const sf = oc.solve_fsens( in );
+      auto const Gf = oc.val_function_gradient();
+      auto const Ff = oc.val_function();
+      size_t const nd = 1 + oc.input_dofs( c_ic ).size();
+      check( sf == OCFESLV::NORMAL && Gf.size() == nd && Gf.size() && Gf[0].size() == 2,
+             "(D) solve_fsens by name: one row per declared DOF, one column per output" );
+      auto const sa = oc.solve_asens( in );
+      auto const Ga = oc.val_function_gradient();
+      double dfa = 0.;
+      for( size_t r = 0; r < Gf.size() && r < Ga.size(); ++r ) for( size_t f = 0; f < 2; ++f ) dfa = std::max( dfa, std::fabs( Gf[r][f] - Ga[r][f] ) );
+      check( sa == OCFESLV::NORMAL && Ga.size() == Gf.size() && dfa < 1e-9, "(D) solve_asens by name = solve_fsens, to 1e-9" );
+      // the registry path: the same Jacobian, laid out over the control vector
+      oc.register_control( k0 );  oc.register_control( c_ic );
+      std::vector<double> xs, is;  oc.init( xs, is, nullptr );
+      oc.set_input_values( k0, { K0 }, is.data() );  oc.set_input_values( c_ic, flat, is.data() );
+      bool const okr = oc.solve_fsens( xs.data(), is.data(), nullptr );
+      auto const& J = oc.sens_jacobian();  size_t const ncd = oc.n_control_dof();
+      double dreg = 0.;
+      if( okr && ncd == nd ){
+        auto const bk = oc.control_block( k0 ), bc = oc.control_block( c_ic );
+        for( size_t f = 0; f < 2; ++f ){
+          dreg = std::max( dreg, std::fabs( Gf[0][f] - J[ f*ncd + bk.offset ] ) );
+          for( size_t k = 0; k < bc.ndof; ++k ) dreg = std::max( dreg, std::fabs( Gf[1+k][f] - J[ f*ncd + bc.offset + k ] ) );
+        }
+      }
+      check( okr && ncd == nd && dreg == 0., "(D) by name = the registry path's sens_jacobian, bit for bit" );
+      // central differences on k0 and on one c_ic DOF, against the forward rows
+      double const h = 1e-5;  double dfd = 0.;
+      auto J_at = [&]( double k, size_t kdof, double dk ){
+        std::vector<double> fl = flat;  if( kdof < fl.size() ) fl[kdof] += dk;
+        oc.solve( { { k0, { k } }, { c_ic, fl } } );  return oc.val_function(); };
+      { auto fp = J_at( K0 + h, flat.size(), 0. ), fm = J_at( K0 - h, flat.size(), 0. );
+        for( size_t f = 0; f < 2; ++f ) dfd = std::max( dfd, std::fabs( ( fp[f] - fm[f] ) / ( 2*h ) - Gf[0][f] ) ); }
+      { size_t const kd = flat.size() / 2;
+        auto fp = J_at( K0, kd, h ), fm = J_at( K0, kd, -h );
+        for( size_t f = 0; f < 2; ++f ) dfd = std::max( dfd, std::fabs( ( fp[f] - fm[f] ) / ( 2*h ) - Gf[1+kd][f] ) ); }
+      std::cout << "    d(outputs)/dk0: " << Gf[0][0] << ", " << Gf[0][1] << "   max |FD - fwd| " << dfd << "\n";
+      check( dfd < 1e-6, "(D) forward rows = central differences (k0, a c_ic DOF), to 1e-6" );
+      oc.clear_controls();
+    }
   }
   std::cout << "\n==========  OCFE_byname: " << npass << " passed, " << nfail << " failed" << ( nfail? "": " -- ALL PASS" ) << "  ==========\n";
   return nfail? 1: 0;

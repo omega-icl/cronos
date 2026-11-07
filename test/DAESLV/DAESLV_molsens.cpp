@@ -40,7 +40,7 @@ struct Fields { FFVar t, z, c1, c2, q1, q2, T, b01; };
 static void colloc_options( OCFESLV& oc )
 { oc.options.INTERFACE.IMPOSITION = OCFESLV::Options::IC_STRONG;  oc.options.INTERFACE.SAT_SIGMA0 = 10.0; }
 static void colloc_options( DAESLV_IDAS& S )
-{ S.options.MOL.INTERFACE.IMPOSITION = OCFEMOL::Options::IC_STRONG;  S.options.MOL.INTERFACE.SAT_SIGMA0 = 10.0; }
+{ S.options.INTERFACE.IMPOSITION = OCFEMOL::Options::IC_STRONG;  S.options.INTERFACE.SAT_SIGMA0 = 10.0; }
 
 template <typename OC>
 static void declare_psa( OC& oc, FFGraph& G, Fields& F, size_t NEZ, size_t NNZ, size_t NELT, size_t NODT )

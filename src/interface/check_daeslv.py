@@ -286,7 +286,7 @@ check(len(_ga) == 6 and np.abs(_ga[:5] - _dex).max() < 1e-5,
 #
 # The heated rod of DAESLV_molpde: u(t, z) on z in [0, 1], u = 0 at z = 0, a unit flux at z = 1.
 # DAESLV semi-discretises it at setup -- its working model is the semi-discrete DAE, one state per
-# nodal unknown -- and options.MOL holds the semi-discretisation's options.
+# nodal unknown -- options.MOL holds the method of lines' own group, the collocation groups sit on options.
 
 # %%
 import cronos
@@ -308,16 +308,18 @@ R.add_equation(u, [t, z], [TI, FFDom.LB], FFModel.EqnOptions(FFModel.EqnRole.BOU
 R.add_equation(0.1 * OpP(u, z) - 1., [t, z], [TI, FFDom.UB], FFModel.EqnOptions(FFModel.EqnRole.BOUNDARY))
 R.add_equation(u, [t, z], [FFDom.LB, FFDom.ALL], FFModel.EqnOptions(FFModel.EqnRole.INITIAL))
 
-check(isinstance(R.options.MOL, DAESLV.MOLOptions) and isinstance(R.options.MOL, cronos.CollocationOptions),
-      "options.MOL is a DAESLV.MOLOptions, a CollocationOptions")
+check(isinstance(R.options.MOL, DAESLV.MOLOptions) and isinstance(R.options, cronos.CollocationOptions),
+      "options.MOL is a DAESLV.MOLOptions (the method of lines' own group); options itself a CollocationOptions")
+check(R.options.INTERFACE.IMPOSITION == cronos.OCFESLV.Options().INTERFACE.IMPOSITION and hasattr(R.options, "AUDIT"),
+      "the collocation groups (INTERFACE, AUDIT, ...) sit on options, at OCFESLV's path")
 check(isinstance(cronos.OCFESLV.Options(), cronos.CollocationOptions) and isinstance(cronos.OCFESLV.Options(), FFModel.Options),
       "OCFESLV.Options derives from CollocationOptions (and so still from FFModel.Options)")
-check(R.options.MOL.IMPOSITION.NEUMANN_NODE == DAESLV.MOLOptions.NEUMANN_ALGEBRAIC,
-      "options.MOL.IMPOSITION.NEUMANN_NODE defaults to NEUMANN_ALGEBRAIC")
+check(R.options.MOL.NEUMANN_NODE == DAESLV.NEUMANN_ALGEBRAIC,
+      "options.MOL.NEUMANN_NODE defaults to NEUMANN_ALGEBRAIC")
 check(R.setup() and R.solve([]) == DAESLV.NORMAL, "a model distributed in space sets up and solves on DAESLV")
 xa = R.results_solve.x.copy()
 check(xa.ndim == 2 and xa.shape[1] == 30, "results_solve: the trajectory of the 30 nodal unknowns (3 elements x 5 LGL in z, u and Dz_u)")
-R.options.MOL.IMPOSITION.NEUMANN_NODE = DAESLV.MOLOptions.NEUMANN_DIFFERENTIAL
+R.options.MOL.NEUMANN_NODE = DAESLV.NEUMANN_DIFFERENTIAL
 check(R.setup() and R.solve([]) == DAESLV.NORMAL and not np.array_equal(R.results_solve.x[-1], xa[-1]),
       "options.MOL reaches the semi-discretisation (NEUMANN_DIFFERENTIAL changes the result)")
 check(R.distributed_in_space(), "the declared model is still the PDE after setup")

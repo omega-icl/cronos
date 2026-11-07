@@ -172,9 +172,21 @@ public:
   //! t peeled off (re-integrated or re-evaluated over its other directions, which MC++ folds into the same node).
   struct t_OutputTime
   {
-    enum Kind { POINT = 0, INTEGRAL } kind = POINT;
+    enum Kind { POINT = 0, INTEGRAL, COMPOSED, SPATIAL } kind = POINT;   // SPATIAL: a scalar part with no time of its own
     double tau  = 0.;                 //!< POINT: the time
     int    side = FFDom::MINUS;       //!< POINT: the side, at a time where the value may differ on either side
+    //! COMPOSED (7 Nov 2026): the output is a function h of deferred values (reductions in t); each is a spatial
+    //! output of its own, appended to the outputs, and the declaration composes h over their reductions
+    FFVar               h;            //!< the function, in this model's dag, over the deferred inputs dvars
+    std::vector<FFVar>  dvars;        //!< the deferred inputs h reads
+    std::vector<size_t> parts;        //!< their spatial outputs' indices
+    //! A spatial reduction (an integral over the whole of a direction, a value at a point) nested inside a
+    //! NONLINEARITY in the spatial part: the collocation's assembly sums an output's per-element values at the root,
+    //! exact only for what is linear in the reductions -- so each such reduction is a scalar spatial part of its own
+    //! (sparts), and the spatial part is hs composed over them at every t, on the semi-discrete dag.
+    FFVar               hs;           //!< the spatial part as a function of sph (empty: the rows themselves)
+    std::vector<FFVar>  sph;          //!< placeholders for the nested reductions
+    std::vector<size_t> sparts;       //!< the nested reductions' spatial outputs' indices
   };
   std::vector<t_OutputTime> const& outputs_time() const { return _fctTime; }
   //! @brief The number of output values (n_colloc_fct(): a point output one, a distributed one per node), in the
@@ -214,6 +226,12 @@ public:
   //! @brief Output @p k's values in the n_outputs() array: (its first, its count) -- a point output one, a distributed
   //! one per node.
   std::pair<size_t,size_t> output_rows( size_t k ) const { return { _mFct.at( k ).row0, _mFct.at( k ).nrow }; }
+  //! @brief The outputs the model DECLARED: the parts of composed outputs (t_OutputTime::COMPOSED) follow them.
+  size_t n_declared_outputs() const { return _nFctDeclared; }
+  //! @brief This model's constants and their values, for a declaration composing an expression of this model's dag.
+  std::vector<FFVar> const&  constant_vars()   const { return _vCst; }
+  std::vector<double> const& constant_values() const { return _vCstVal; }
+  FFGraph* dag() const { return _dag; }
   //! @brief The pattern of deriv_outputs_full.
   void output_pattern_full
     ( std::vector<size_t>& ptr, std::vector<size_t>& col )
@@ -467,6 +485,8 @@ protected:
   std::set<FFVar,lt_FFVar>     _inpTimeVarying;   //!< inputs whose declared domain held t (setup takes it out)
   std::vector<std::string>     _auditRefusals;    //!< what the INITIAL audit refused, in words
   std::vector<t_OutputTime>    _fctTime;          //!< see outputs_time()
+  std::set<size_t>             _fctSpatial;       //!< the SPATIAL parts' indices, appended by _split_output_time
+  size_t                       _nFctDeclared = 0;  //!< see n_declared_outputs()
   bool _split_output_time
     ( FFVar const& t );
   std::string                  _setupError;       //!< see setup_error()
@@ -1070,7 +1090,7 @@ inline bool
 OCFEMOL::_split_output_time
 ( FFVar const& t )
 {
-  _fctTime.clear();
+  _fctTime.clear();  _fctSpatial.clear();  _nFctDeclared = _mFct.size();
   FFIntegral OpI;  FFEval OpE;
   auto fail = [&]( size_t k, std::string const& why ){
     _setupError = "output " + std::to_string( k ) + ": " + why;
@@ -1085,6 +1105,8 @@ OCFEMOL::_split_output_time
     }
     return false; };
   for( size_t k = 0; k < _mFct.size(); ++k ){
+    if( _fctSpatial.count( k ) ){                              // a SPATIAL part: its rows only, no time of its own
+      t_OutputTime T;  T.kind = t_OutputTime::SPATIAL;  _fctTime.push_back( T );  continue; }
     auto& f = _mFct[k];
     t_OutputTime T;  bool timed = false;
     if( f.grid.count( t ) )
@@ -1109,11 +1131,62 @@ OCFEMOL::_split_output_time
       E = C->source;  timed = true;
     }
     else{
-      FFSubgraph const sg = _dag->subgraph( 1, &E );
-      for( auto const* op : sg.l_op )
-        if( op && op->type == FFOp::VAR && op->varout.size() && op->varout[0] && is_deferred_input( *op->varout[0] ) )
-          return fail( k, "it is a function of a reduction in t (a deferred value), not the reduction itself -- not taken"
-                          " by the method of lines yet" );
+      // a FUNCTION of deferred values: every deferred input it reads becomes a spatial output of its own (appended,
+      // classified by the branch above on a later iteration), and the declaration composes the function over their
+      // reductions -- which BASE_DE takes since 7 Nov 2026.  Its other independents must be constants.
+      // the deferred inputs it reads (FFModel's captures), and the OUTERMOST reductions in t INSIDE it (not at its root:
+      // that case is the outermost-operator branch below) -- under the semi-discretisation FFModel's capture leaves an
+      // outer reduction whose operand holds a spatial one, so the extraction is done here
+      std::vector<FFVar> dv;
+      FFSubgraph const sgE = _dag->subgraph( 1, &E );
+      for( auto const* v : sgE.v_indep ) if( v && is_deferred_input( *v ) ) dv.push_back( *v );
+      auto is_t_reduction = [&]( FFOp const* op )->bool{
+        if( auto const* pi = mc::type_cast<FFIntegral const>( op ) ) return pi->Indep().expr.count( t ) > 0;
+        if( auto const* pe = mc::type_cast<FFEval const>( op ) )     return pe->Coord().count( t ) > 0;
+        return false; };
+      std::vector<FFVar> red;
+      { FFOp const* root = E.opdef().first;
+        std::vector<FFVar> cand;
+        for( auto const* op : sgE.l_op ) if( op && op != root && is_t_reduction( op ) ) for( auto const* vo : op->varout ) if( vo ) cand.push_back( *vo );
+        for( size_t i = 0; i < cand.size(); ++i ){                   // outermost only: not inside another candidate's operand
+          bool inner = false;
+          for( size_t j = 0; j < cand.size() && !inner; ++j ){
+            if( i == j ) continue;
+            for( auto const* vo : _dag->subgraph( 1, &cand[j] ).l_op )
+              for( auto const* v : vo->varout ) if( v && v->id() == cand[i].id() && vo->varout[0]->id() != cand[j].id() ){ inner = true; break; }
+          }
+          if( !inner ) red.push_back( cand[i] );
+        } }
+      if( !dv.empty() || !red.empty() ){
+        if( timed ) return fail( k, "it is a function of reductions in t and is also given a time" );
+        std::vector<FFVar> ph;                                        // placeholders for the inner reductions in h
+        for( size_t i = 0; i < red.size(); ++i ) ph.push_back( _dag->add_var( "fct" + std::to_string( k ) + "_red" + std::to_string( i ) ) );
+        FFVar h = E;
+        if( !red.empty() ) h = _dag->substitute( std::vector<FFVar>{ E }, red, ph )[0];   // node-level, as FFModel replaces its captures
+        // what else h reads must be a constant: a state or an input read directly has no time here
+        for( auto const* v : _dag->subgraph( 1, &h ).v_indep ){
+          if( !v || is_deferred_input( *v ) ) continue;
+          bool ok = false;
+          for( auto const& c : _vCst ) if( c.id() == v->id() ){ ok = true; break; }
+          for( auto const& q : ph )    if( q.id() == v->id() ){ ok = true; break; }
+          if( !ok ) return fail( k, "it is a function of reductions in t and also reads " + v->name()
+                                    + " directly -- a function of reductions may read only the reductions and constants" );
+        }
+        T.kind = t_OutputTime::COMPOSED;  T.h = h;
+        T.dvars = dv;  T.dvars.insert( T.dvars.end(), ph.begin(), ph.end() );
+        t_Fct const base = _mFct[k];     // copied BEFORE any push: f references _mFct, which the pushes may reallocate
+        for( auto const& d : dv ){                                    // a captured value: its record's source, by the branch above
+          t_Fct part = base;  part.var = d;  part.point.clear();  part.side.clear();
+          T.parts.push_back( _mFct.size() );  _mFct.push_back( part );
+        }
+        for( auto const& r : red ){                                   // a reduction: the outermost-operator branch, on its own iteration
+          t_Fct part = base;  part.var = r;  part.point.clear();  part.side.clear();
+          T.parts.push_back( _mFct.size() );  _mFct.push_back( part );
+        }
+        // its own spatial part is never read: it borrows its first part's, once that part is classified (below)
+        _fctTime.push_back( T );
+        continue;
+      }
     }
     // an outermost integral or evaluation in t
     FFOp const* pOp = E.opdef().first;
@@ -1140,9 +1213,42 @@ OCFEMOL::_split_output_time
     if( !timed ) return fail( k, "it gives no time -- evaluate it at a point in t, or integrate it over t" );
     if( has_t_operator( E ) )
       return fail( k, "it holds an operator in t below its outermost one -- not taken by the method of lines" );
-    f.var = E;
+    // the spatial part: a reduction nested inside a nonlinearity becomes a scalar part of its own (see t_OutputTime)
+    { FFOp const* root = E.opdef().first;
+      auto is_space_reduction = [&]( FFOp const* op )->bool{
+        if( auto const* pi = mc::type_cast<FFIntegral const>( op ) ) return !pi->Indep().expr.empty() && !pi->Indep().expr.count( t );
+        if( auto const* pe = mc::type_cast<FFEval const>( op ) )     return !pe->Coord().empty() && !pe->Coord().count( t );
+        return false; };
+      if( root && !is_space_reduction( root ) ){
+        std::vector<FFVar> cand;
+        for( auto const* op : _dag->subgraph( 1, &E ).l_op ) if( op && is_space_reduction( op ) ) for( auto const* vo : op->varout ) if( vo ) cand.push_back( *vo );
+        std::vector<FFVar> red;
+        for( size_t i = 0; i < cand.size(); ++i ){                   // outermost only
+          bool inner = false;
+          for( size_t j = 0; j < cand.size() && !inner; ++j ){
+            if( i == j ) continue;
+            for( auto const* vo : _dag->subgraph( 1, &cand[j] ).l_op )
+              for( auto const* v : vo->varout ) if( v && v->id() == cand[i].id() && vo->varout[0]->id() != cand[j].id() ){ inner = true; break; }
+          }
+          if( !inner ) red.push_back( cand[i] );
+        }
+        if( !red.empty() ){
+          for( size_t i = 0; i < red.size(); ++i ) T.sph.push_back( _dag->add_var( "fct" + std::to_string( k ) + "_sred" + std::to_string( i ) ) );
+          T.hs = _dag->substitute( std::vector<FFVar>{ E }, red, T.sph )[0];
+          t_Fct const base = _mFct[k];   // copied BEFORE any push: f references _mFct, which the pushes may reallocate
+          for( auto const& r : red ){
+            t_Fct part = base;  part.var = r;  part.point.clear();  part.side.clear();
+            _fctSpatial.insert( _mFct.size() );
+            T.sparts.push_back( _mFct.size() );  _mFct.push_back( part );   // a reduction at its root: its rows summed over the elements
+          }
+          E = red[0];                                                 // a valid spatial part of its own; its rows are not read
+        }
+      } }
+    _mFct[k].var = E;                    // by index: f may dangle after the pushes above
     _fctTime.push_back( T );
   }
+  for( size_t k = 0; k < _fctTime.size() && k < _mFct.size(); ++k )     // the composed outputs: a valid spatial part of their own
+    if( _fctTime[k].kind == t_OutputTime::COMPOSED && !_fctTime[k].parts.empty() ) _mFct[k].var = _mFct[ _fctTime[k].parts[0] ].var;
   return true;
 }
 

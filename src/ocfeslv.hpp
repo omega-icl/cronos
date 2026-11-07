@@ -1817,12 +1817,29 @@ public:
   //! inconsistent list.
   STATUS solve
     ( std::vector<FFModel::InputVal> const& vIn );
+  //! @brief By NAME, as solve(): the forward (adjoint) sensitivity solve, every declared, non-fixed input given --
+  //! each becomes a control for the solve (register_control, idempotent) -- with the solution in val_state(), the
+  //! outputs in val_function() and the gradient in val_function_gradient(): ONE ROW PER DECLARED DOF, the inputs in
+  //! declared (canonical) order and each in its input_dofs() order, ONE COLUMN PER OUTPUT -- the layout DAESLV and
+  //! ODESLV give by name, so the three solvers read the same.  (Phase 7, 6 Nov 2026: OCFESLV's sensitivities had
+  //! only the registry surface, sens_jacobian() over the control vector.)  Throws as solve() does.
+  STATUS solve_fsens
+    ( std::vector<FFModel::InputVal> const& vIn );
+  STATUS solve_asens
+    ( std::vector<FFModel::InputVal> const& vIn );
+  //! @brief The gradient of the last by-name sensitivity solve: [ declared DOF ][ output ].
+  std::vector< std::vector<double> > const& val_function_gradient() const { return _valFctGrad; }
+
   //! @brief The collocated solution of the last by-name solve.
   std::vector<double> const& val_state() const { return _valSta; }
   //! @brief The outputs of the last solve, in declaration order -- the name ODESLV_CVODES and DAESLV_IDAS use for
   //! val_functions(): filled by the solve itself, with captures (monolithic) or accumulated across elements
   //! (SOLVE.MARCHING).
   std::vector<double> const& val_function() const { return _valFct; }
+  private:
+  std::vector< std::vector<double> > _valFctGrad;   //!< the by-name gradient, [ declared DOF ][ output ]
+  STATUS _solve_sens_by_name( std::vector<FFModel::InputVal> const& vIn, bool const adjoint );
+  public:
   //! @brief The solver's report of the last by-name solve.
   SolveReport const& last_report() const { return _lastReport; }
 
@@ -11433,6 +11450,63 @@ OCFESLV::solve
   // the solve fills the outputs itself (_valFct), with captures or accumulated over a march: never re-evaluated here
   _lastReport = solve( _valSta.data(), inp.empty()? nullptr: inp.data(), cst.empty()? nullptr: cst.data() );
   return _lastReport.converged? NORMAL: FAILURE;
+}
+
+inline OCFESLV::STATUS
+OCFESLV::solve_fsens
+( std::vector<FFModel::InputVal> const& vIn )
+{ return _solve_sens_by_name( vIn, false ); }
+
+inline OCFESLV::STATUS
+OCFESLV::solve_asens
+( std::vector<FFModel::InputVal> const& vIn )
+{ return _solve_sens_by_name( vIn, true ); }
+
+inline OCFESLV::STATUS
+OCFESLV::_solve_sens_by_name
+( std::vector<FFModel::InputVal> const& vIn, bool const adjoint )
+{
+  char const* who = adjoint? "OCFESLV::solve_asens": "OCFESLV::solve_fsens";
+  if( !_issetup ) return FATAL;
+  _valFctGrad.clear();
+  std::vector< std::pair< FFVar, std::vector<double> > > given;
+  std::vector<double> cst( var_constant().size(), 0. );
+  std::string err;
+  bool const ok = resolve_values( vIn,
+    [&]( FFVar const& u, std::vector<double> const& v, std::string& e ){
+      size_t const n = input_dofs( u ).size();
+      if( !n ){ e = u.name() + " is neither an input nor a constant of the model"; return false; }
+      if( fixed_input( u ) ){ e = u.name() + " is neither an input nor a constant of the model (it is fixed)"; return false; }
+      if( v.size() != n ){ e = u.name() + " has " + std::to_string( n ) + " DOFs, but " + std::to_string( v.size() ) + " values were given"; return false; }
+      given.emplace_back( u, v );  return true; },
+    [&]( size_t k, double v ){ cst[k] = v; },
+    err );
+  if( !ok ) throw std::invalid_argument( std::string( who ) + " ** " + err + "\n" );
+  // every given input is a control of this solve (the registry is keyed canonically; registering twice is a no-op)
+  for( auto const& [u, v] : given ) if( !controls().count( u ) ) register_control( u );
+  std::vector<double> inp;
+  if( !init( _valSta, inp, cst.empty()? nullptr: cst.data() ) ) return FATAL;
+  for( auto const& [u, v] : given )
+    if( !set_input_values( u, v, inp.empty()? nullptr: inp.data() ) )
+      throw std::invalid_argument( std::string( who ) + " ** the values of " + u.name() + " could not be set\n" );
+  double* pv = _valSta.data();  double const* pi = inp.empty()? nullptr: inp.data();  double const* pc = cst.empty()? nullptr: cst.data();
+  bool const conv = adjoint? solve_asens( pv, pi, pc ): solve_fsens( pv, pi, pc );
+  if( !conv ) return FAILURE;
+  _valFct = sens_functions();
+  // the gradient: one row per declared DOF of the GIVEN inputs, in declared (canonical) order, one column per output
+  size_t const nf = _valFct.size(), ncd = n_control_dof();
+  auto const& J = sens_jacobian();                         // nf x ncd, row-major
+  for( auto const& [u, doms] : var_declared_input() ){
+    bool was_given = false;  for( auto const& [g, v] : given ) if( g.id() == u.id() ){ was_given = true; break; }
+    if( !was_given ) continue;
+    ControlSpec const blk = control_block( u );
+    for( size_t k = 0; k < blk.ndof; ++k ){
+      std::vector<double> row( nf, 0. );
+      for( size_t f = 0; f < nf; ++f ) row[f] = J.at( f * ncd + blk.offset + k );
+      _valFctGrad.push_back( std::move( row ) );
+    }
+  }
+  return NORMAL;
 }
 
 } // namespace mc

@@ -20,8 +20,9 @@ bind_daeslv_options(PyOpt& c)
 {
   c.def_readwrite(
       "MOL", &mc::DAESLV_IDAS::Options::MOL,
-      "The semi-discretisation's options, for a model distributed in space "
-      "(see setup): the collocation groups (INTERFACE, ...) and the method of "
-      "lines' own (IMPOSITION.NEUMANN_NODE). Its model-level fields (REDUCE, "
-      "CLASSIFY, DISPLAY_LEVEL, ...) are this solver's own, set above.");
+      "The method of lines' own group, for a model distributed in space (see "
+      "setup): what a flux boundary node is in the semi-discrete DAE and "
+      "whether a high-index model is reduced first. The collocation groups are "
+      "this struct's own, declared once for either solver (phase 7, 6 Nov "
+      "2026: they sat in a second copy under MOL).");
 }

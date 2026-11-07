@@ -34,7 +34,7 @@ static double const ALPHA = 0.1, TEND = 1.;
 static void colloc_options( OCFESLV& oc )
 { oc.options.INTERFACE.IMPOSITION = OCFESLV::Options::IC_STRONG;  oc.options.DISPLAY_LEVEL = 0;  oc.options.SOLVE.MARCHING = false; }
 static void colloc_options( DAESLV_IDAS& S )
-{ S.options.MOL.INTERFACE.IMPOSITION = OCFEMOL::Options::IC_STRONG;  S.options.DISPLAY_LEVEL = 0;
+{ S.options.INTERFACE.IMPOSITION = OCFEMOL::Options::IC_STRONG;  S.options.DISPLAY_LEVEL = 0;
   S.options.SOLVE.RTOL = 1e-10;  S.options.SOLVE.ATOL = 1e-12;  S.options.SOLVE.RTOLB = 1e-10;  S.options.SOLVE.ATOLB = 1e-12;
   S.options.SOLVE.VERBOSE = 0; }
 
@@ -276,6 +276,55 @@ int main()
       std::cout << "    J " << J0 << " (closed form " << Jex << ")   dJ/dp: fwd " << dF << " adj " << dA << " (closed form " << dJex << ")\n";
       check( "(D) J = closed form, to 1e-8",                          rel( J0, Jex ) <= 1e-8 );
       check( "(D) dJ/dp = closed form, forward and adjoint, to 1e-8", rel( dF, dJex ) <= 1e-8 && rel( dA, dJex ) <= 1e-8 );
+    }
+  }
+  // ---- (E) NONLINEAR functions of horizon integrals (7 Nov 2026).  The zero-flux rod with u0 = 1 and the source
+  //      p e^-t: a uniform field is in the operator's kernel, so J(t) = int u dz = 1 + p (1 - e^-t) exactly on any
+  //      mesh, and A = int J dt, B = int J^2 dt, sqrt A, A/B have closed forms.  B's integrand is the SQUARE of a
+  //      spatial integral: a reduction nested inside a nonlinearity, which the collocation's root-level assembly
+  //      sums per element (J^2/3 on three elements, on OCFESLV too -- an open item there); under MoL that reduction
+  //      is a scalar part of its own and the square is composed over it at every t (OCFEMOL::t_OutputTime).
+  std::cout << "(E) nonlinear functions of horizon integrals: A, sqrt A, A/B with B = int (int u dz)^2 dt\n";
+  {
+    double const P = 0.7, e1 = std::exp( -TEND ), e2 = std::exp( -2.*TEND );
+    double const Ae = 1. + P*e1, dAe = e1;
+    double const Be = (1+P)*(1+P) - 2*P*(1+P)*(1-e1) + P*P*(1-e2)/2., dBe = 2*(1+P) - 2*(1+2*P)*(1-e1) + P*(1-e2);
+    double const Fe[3] = { Ae, std::sqrt( Ae ), Ae/Be }, dFe[3] = { dAe, dAe/( 2*std::sqrt( Ae ) ), ( dAe*Be - Ae*dBe )/( Be*Be ) };
+    auto rod = [&]( int mode, double* F, double* dF, std::string& w ){
+      FFGraph G;  DAESLV_IDAS S( &G );
+      FFVar t = G.add_var("t"), z = G.add_var("z"), u = G.add_var("u"), p = G.add_var("p");
+      S.add_domain( t, FFDom( 0., TEND, 2, FFDom::LGR, 3 ) );
+      S.add_domain( z, FFDom( 0., 1., 3, FFDom::LGL, 5 ) );
+      S.set_evolution_domain( t );
+      S.add_state( u, {t,z} ); S.update_ref( u, 1. );
+      S.add_input( p, {} );
+      FFPartial OpP;  FFIntegral OpI;
+      int const TI = FFDom::ALL - FFDom::LB, ZI = FFDom::ALL - FFDom::LB - FFDom::UB;
+      DAESLV_IDAS::EqnOptions io( DAESLV_IDAS::EqnRole::INTERIOR, 0 ), ib( DAESLV_IDAS::EqnRole::BOUNDARY, 0 ), ii( DAESLV_IDAS::EqnRole::INITIAL, 0 );
+      S.add_equation( OpP(u,t) - OpP( ALPHA*OpP(u,z), z ) - p*exp( -t ), {t,z}, {TI, ZI},                io );
+      S.add_equation( OpP(u,z),                                        {t,z}, {TI, FFDom::LB},         ib );
+      S.add_equation( OpP(u,z),                                        {t,z}, {TI, FFDom::UB},         ib );
+      S.add_equation( u - 1.,                                          {t,z}, {FFDom::LB, FFDom::ALL}, ii );
+      FFVar J = OpI( u, z ), A = OpI( J, t ), B = OpI( J*J, t );
+      S.add_output( A );  S.add_output( sqrt( A ) );  S.add_output( A / B );
+      colloc_options( S );
+      if( !S.setup() ){ w = "setup: " + S.extract_error(); return false; }
+      std::vector<FFModel::InputVal> const in{ { p, { P } } };
+      auto const st = mode == 0? S.solve( in ): mode == 1? S.solve_fsens( in ): S.solve_asens( in );
+      if( st != DAESLV_IDAS::NORMAL ){ w = "solve: " + S.extract_error(); return false; }
+      for( int i = 0; i < 3; ++i ){ F[i] = S.val_function().at( i );  if( mode ) dF[i] = S.val_function_gradient().at( 0 ).at( i ); }
+      return S.nf() == 3; };
+    double F0[3], Ff[3], Fa[3], dF[3], dA[3], d0[3];  std::string w;
+    bool const rv = rod( 0, F0, d0, w ), rf = rod( 1, Ff, dF, w ), ra = rod( 2, Fa, dA, w );
+    check( "(E) three nonlinear outputs set up and solve, value, forward and adjoint" + ( rv && rf && ra? std::string(): " -- " + w ), rv && rf && ra );
+    if( rv && rf && ra ){
+      double ev = 0., ef = 0., ea = 0.;
+      for( int i = 0; i < 3; ++i ){ ev = std::max( ev, rel( F0[i], Fe[i] ) );  ef = std::max( ef, rel( dF[i], dFe[i] ) );  ea = std::max( ea, rel( dA[i], dFe[i] ) ); }
+      std::cout << "    A " << F0[0] << " sqrtA " << F0[1] << " A/B " << F0[2] << "   d/dp fwd " << dF[0] << " " << dF[1] << " " << dF[2]
+                << "   max rel: value " << ev << " fwd " << ef << " adj " << ea << "\n";
+      check( "(E) values = closed forms, to 1e-8",                      ev < 1e-8 );
+      check( "(E) forward gradients = closed forms, to 1e-8",           ef < 1e-8 );
+      check( "(E) adjoint gradients = closed forms, to 1e-6",           ea < 1e-6 );
     }
   }
   std::cout << "==========  DAESLV_moltime: " << ( nfail? std::to_string( nfail ) + " FAILED": std::string( "ALL PASS" ) ) << "  ==========\n";

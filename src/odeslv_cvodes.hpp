@@ -531,6 +531,7 @@ private:
       _apply_options();            // the split, via the hook; see the note there on why it is called here too
       // See ODESLV_CVODES::setup(): the DESCRIPTION path populates no FFModel model, so its validation
       // must be skipped -- _SETUP_SEN() takes the staging vectors as given.
+      if( !FFModel::is_setup() && !_lift_nonlinear_outputs() ) return false;   // nonlinear outputs into hidden states
       if( !FFModel::is_setup() && !FFModel::setup() ){
         _extractError = std::string( "model setup refused: " ) + setup_status_str( setup_status() );
         return false;

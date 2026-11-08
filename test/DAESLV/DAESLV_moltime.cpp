@@ -327,6 +327,94 @@ int main()
       check( "(E) adjoint gradients = closed forms, to 1e-6",           ea < 1e-6 );
     }
   }
+  // ---- (F) TRAJECTORIES and (G) TRANSITIONS READING INPUTS (7 Nov 2026), on the zero-flux rod with u0 = 1 and source
+  //      p e^-t: u(t,z) = 1 + p (1 - e^-t) at every node, on any mesh.  (G) also on the pointwise ODE x' = 0, where the
+  //      transition x(tau+) = x(tau-) + g read a time-varying g with NO adjoint gradient (ic_adjoint lacked ic_sens's
+  //      placeholder term; ODESLV was right) -- found here, fixed in BASE_DE.
+  std::cout << "(F) trajectories and (G) transitions reading inputs, on the rod with a uniform field\n";
+  {
+    double const P = 0.7, R = 0.6, TAU = 0.5, e5 = std::exp( -TAU ), e1 = std::exp( -TEND );
+    auto rodF = [&]( int mode, int variant, std::vector<double>& F, std::vector<std::vector<double>>& Gr, std::string& w ){
+      FFGraph G;  DAESLV_IDAS S( &G );
+      FFVar t = G.add_var("t"), z = G.add_var("z"), u = G.add_var("u"), p = G.add_var("p"), r = G.add_var("r"), g = G.add_var("g");
+      S.add_domain( t, FFDom( 0., TEND, 2, FFDom::LGR, 3 ) );  S.add_domain( z, FFDom( 0., 1., 3, FFDom::LGL, 5 ) );
+      S.set_evolution_domain( t );  S.add_state( u, {t,z} );  S.update_ref( u, 1. );  S.add_input( p, {} );
+      if( variant == 1 ) S.add_input( r, {} );
+      if( variant == 2 ) S.add_input( g, {t}, FFDom::LGL, 1 );                   // one level per stage
+      FFPartial OpP;  FFEval OpE;  FFIntegral OpI;
+      int const TI = FFDom::ALL - FFDom::LB, ZI = FFDom::ALL - FFDom::LB - FFDom::UB;
+      DAESLV_IDAS::EqnOptions io( DAESLV_IDAS::EqnRole::INTERIOR, 0 ), ib( DAESLV_IDAS::EqnRole::BOUNDARY, 0 ), ii( DAESLV_IDAS::EqnRole::INITIAL, 0 );
+      S.add_equation( OpP(u,t) - OpP( ALPHA*OpP(u,z), z ) - p*exp( -t ), {t,z}, {TI, ZI}, io );
+      S.add_equation( OpP(u,z), {t,z}, {TI, FFDom::LB}, ib );  S.add_equation( OpP(u,z), {t,z}, {TI, FFDom::UB}, ib );
+      S.add_equation( u - 1., {t,z}, {FFDom::LB, FFDom::ALL}, ii );
+      if( variant == 0 ){ S.add_output( OpE( u, z, 1. ), {t}, std::vector<int>{ FFDom::ALL } );
+                          S.add_output( u, {t,z}, std::vector<int>{ FFDom::ALL - FFDom::LB, FFDom::ALL } ); }
+      if( variant == 1 ){ S.add_transition( { r*u }, { u }, t, TAU );  S.add_output( OpI( u, z ), {t}, {TEND} ); }
+      if( variant == 2 ){ S.add_transition( { u + g }, { u }, t, TAU );  S.add_output( OpI( u, z ), {t}, {TEND} ); }
+      colloc_options( S );
+      if( !S.setup() ){ w = "setup: " + S.extract_error(); return false; }
+      std::vector<FFModel::InputVal> in{ { p, { P } } };
+      if( variant == 1 ) in.push_back( { r, { R } } );
+      if( variant == 2 ) in.push_back( { g, { 0.3, 0.8 } } );
+      auto const st = mode == 0? S.solve( in ): mode == 1? S.solve_fsens( in ): S.solve_asens( in );
+      if( st != DAESLV_IDAS::NORMAL ){ w = "solve: " + S.extract_error(); return false; }
+      F = S.val_function();  if( mode ) Gr = S.val_function_gradient();
+      return true; };
+    for( int v = 0; v < 3; ++v ){
+      std::vector<double> F0, Ff, Fa;  std::vector<std::vector<double>> d0, Gf, Ga;  std::string w;
+      bool const ok = rodF( 0, v, F0, d0, w ) && rodF( 1, v, Ff, Gf, w ) && rodF( 2, v, Fa, Ga, w );
+      char const* name[3] = { "(F) trajectories: u(t,1) at the 3 stage times, the field at the last 2",
+                              "(G) a transition reading a parameter, u(tau+) = r u(tau-)",
+                              "(G) a transition reading a time-varying input, u(tau+) = u(tau-) + g" };
+      check( std::string( name[v] ) + ": set up and solved, value, forward and adjoint" + ( ok? std::string(): " -- " + w ), ok );
+      if( !ok ) continue;
+      double ev = 0., ef = 0., ea = 0.;
+      if( v == 0 ){                                   // every row is 1 + p (1 - e^-t_k), d/dp = 1 - e^-t_k
+        double const tk[3] = { 0., TAU, TEND };
+        ev = F0.size() == 3 + 2*15? 0.: 1.;
+        for( size_t i = 0; i < F0.size(); ++i ){
+          double const tt = i < 3? tk[i]: tk[ 1 + ( i - 3 ) % 2 ];
+          ev = std::max( ev, rel( F0[i], 1. + P*( 1. - std::exp( -tt ) ) ) );
+          ef = std::max( ef, std::fabs( Gf[0][i] - ( 1. - std::exp( -tt ) ) ) );  ea = std::max( ea, std::fabs( Ga[0][i] - ( 1. - std::exp( -tt ) ) ) );
+        }
+      }
+      else if( v == 1 ){                              // J = r (1 + p (1 - e^-tau)) + p (e^-tau - e^-T)
+        ev = rel( F0[0], R*( 1. + P*( 1. - e5 ) ) + P*( e5 - e1 ) );
+        ef = std::max( rel( Gf[0][0], R*( 1. - e5 ) + e5 - e1 ), rel( Gf[1][0], 1. + P*( 1. - e5 ) ) );
+        ea = std::max( rel( Ga[0][0], R*( 1. - e5 ) + e5 - e1 ), rel( Ga[1][0], 1. + P*( 1. - e5 ) ) );
+      }
+      else{                                           // the LEFT level: J = 1 + p (1 - e^-T) + 0.3, dJ/dg = (1, 0)
+        ev = rel( F0[0], 1. + P*( 1. - e1 ) + 0.3 );
+        ef = std::max( std::fabs( Gf[1][0] - 1. ), std::fabs( Gf[2][0] ) );
+        ea = std::max( std::fabs( Ga[1][0] - 1. ), std::fabs( Ga[2][0] ) );
+      }
+      std::cout << "    max error: value " << ev << "  forward " << ef << "  adjoint " << ea << "\n";
+      check( std::string( name[v] ) + ": = closed forms, values and forward to 1e-8, adjoint to 1e-6", ev < 1e-8 && ef < 1e-8 && ea < 1e-6 );
+    }
+    // the pointwise twin of the time-varying case, on both integrators
+    auto ode = [&]( auto* tag, std::vector<std::vector<double>>& Gf, std::vector<std::vector<double>>& Ga, double& J, std::string& w ){
+      using S_t = std::remove_pointer_t<decltype( tag )>;
+      FFGraph G;  S_t s( &G );  FFVar t = G.add_var("t"), x = G.add_var("x"), g = G.add_var("g");
+      s.add_domain( t, FFDom( 0., 1., 2, FFDom::LGR, 3 ) );  s.set_evolution_domain( t );
+      s.add_state( x, {t} );  s.update_ref( x, 1. );  s.add_input( g, {t}, FFDom::LGL, 1 );
+      FFPartial OpP;  FFEval OpE;
+      typename S_t::EqnOptions io( S_t::EqnRole::INTERIOR, 0 ), ii( S_t::EqnRole::INITIAL, 0 );
+      s.add_equation( OpP(x,t), {t}, {FFDom::ALL - FFDom::LB}, io );  s.add_equation( x - 1., {t}, {FFDom::LB}, ii );
+      s.add_transition( { x + g }, { x }, t, 0.5 );  s.add_output( OpE( x, t, 1. ) );
+      s.options.SOLVE.RTOL = 1e-10;  s.options.SOLVE.ATOL = 1e-12;  s.options.SOLVE.VERBOSE = 0;  s.options.DISPLAY_LEVEL = 0;
+      if( !s.setup() ){ w = "setup: " + s.extract_error(); return false; }
+      std::vector<FFModel::InputVal> in{ { g, { 0.3, 0.8 } } };
+      if( s.solve_fsens( in ) != S_t::NORMAL ){ w = "fsens"; return false; }  Gf = s.val_function_gradient();  J = s.val_function()[0];
+      if( s.solve_asens( in ) != S_t::NORMAL ){ w = "asens"; return false; }  Ga = s.val_function_gradient();
+      return true; };
+    for( int which = 0; which < 2; ++which ){
+      std::vector<std::vector<double>> Gf, Ga;  double J = 0.;  std::string w;
+      bool const ok = which == 0? ode( (DAESLV_IDAS*)nullptr, Gf, Ga, J, w ): ode( (ODESLV_CVODES*)nullptr, Gf, Ga, J, w );
+      double const err = ok? std::max( { std::fabs( J - 1.3 ), std::fabs( Gf[0][0] - 1. ), std::fabs( Gf[1][0] ), std::fabs( Ga[0][0] - 1. ), std::fabs( Ga[1][0] ) } ): 1.;
+      check( std::string( "(G) pointwise " ) + ( which == 0? "DAESLV": "ODESLV" ) + ": x(0.5+) = x(0.5-) + g, J = 1.3 and dJ/dg = (1, 0), forward and adjoint"
+             + ( ok? std::string(): " -- " + w ), ok && err < 1e-8 );
+    }
+  }
   std::cout << "==========  DAESLV_moltime: " << ( nfail? std::to_string( nfail ) + " FAILED": std::string( "ALL PASS" ) ) << "  ==========\n";
   return nfail? 1: 0;
 }

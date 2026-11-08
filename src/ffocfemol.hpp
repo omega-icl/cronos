@@ -542,7 +542,7 @@ declare_semidiscrete
   // the integrator's stop machinery does the rest (the algebraic nodes re-solved, the sensitivities carried across)
   for( size_t k = 0; k < mol.n_transitions(); ++k ){
     std::vector<FFVar> lft, rgt;  std::string why;
-    if( !mol.transition_expressions( k, xc, t, lft, rgt, why ) ) return fail( "transition " + std::to_string( k ) + ": " + why );
+    if( !mol.transition_expressions( k, xc, t, lft, rgt, why, U ) ) return fail( "transition " + std::to_string( k ) + ": " + why );
     M.add_transition( lft, rgt, t, mol.transition_time( k ) );
   }
   // the outputs: their spatial parts as ONE operation over (xc, uc), each value given its time part back -- a point in
@@ -578,6 +578,11 @@ declare_semidiscrete
         continue;
       }
       if( !T[k].sparts.empty() ){ M.add_output( reduction( k ) );  continue; }
+      if( T[k].kind == OCFEMOL::t_OutputTime::TRAJECTORY ){          // one trajectory per spatial row: space-major
+        auto const [r0, nr] = mol.output_rows( k );
+        for( size_t r = r0; r < r0 + nr; ++r ) M.add_output( fc.at( r ), { t }, std::vector<int>{ T[k].tmask } );
+        continue;
+      }
       auto const [r0, nr] = mol.output_rows( k );
       for( size_t r = r0; r < r0 + nr; ++r )
         M.add_output( T[k].kind == OCFEMOL::t_OutputTime::INTEGRAL? OpI( fc.at( r ), t ): OpE( fc.at( r ), t, T[k].tau, T[k].side ) );

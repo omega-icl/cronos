@@ -1988,6 +1988,25 @@ BASE_DE::ic_adjoint
       for( size_t e = 0; e < S->nnzP; ++e )
         if( S->jcolP[e] < _np && S->jrowP[e] < n ) dGdp[ S->jcolP[e] ] -= S->dEvalP[e] * mu[ S->jrowP[e] ];
     }
+    // ... and the PLACEHOLDER term, the adjoint of ic_sens's: dG/dp += -( dF/dq . dq/dp )^T mu, dq/dp the interpolant's
+    // weights over the levels of the element at tau.  Missing until 7 Nov 2026: a transition reading a time-varying
+    // input had no adjoint gradient w.r.t. it (x(tau+) = x(tau-) + g: forward dJ/dg = (1, 0), adjoint (0, 0); ODESLV's
+    // adjoint was right) -- found writing the MoL transition gate, then reproduced on a pointwise model.
+    if( S->nnzQ ){
+      S->dag->eval( S->wrk, S->evalQ.size(), S->evalQ.data(), S->dEvalQ.data(),
+                    S->all.size(), S->all.data(), S->dVar.data() );
+      double const tq = S->dVar[0];
+      size_t const nUp = _mTVInp.size();
+      for( size_t e = 0; e < S->nnzQ; ++e ){
+        size_t const r = S->jrowQ[e], c = S->jcolQ[e];
+        if( r >= n ) continue;
+        int const side = c >= nUp? 1: 0;
+        std::vector<size_t> ndx;  std::vector<double> w;
+        _ic_level_weights( tq, side, c - ( side? nUp: 0 ), ndx, w );
+        for( size_t q = 0; q < ndx.size() && q < w.size(); ++q )
+          if( ndx[q] < _np ) dGdp[ ndx[q] ] -= S->dEvalQ[e] * w[q] * mu[r];
+      }
+    }
   }
   F.free();
   SUNContext_Free( &ctx );
@@ -2301,9 +2320,18 @@ BASE_DE::_lift_nonlinear_outputs
     std::vector<FFVar> ph;
     for( size_t i = 0; i < red.size(); ++i ) ph.push_back( dag->add_var( "lift_ph" + std::to_string( i ) ) );
     FFVar const h = dag->substitute( std::vector<FFVar>{ E }, red, ph )[0];
+    // affine in the reductions -- every coefficient dh/dD_i FREE OF THEM, parameters and constants allowed, the record
+    // machinery's own criterion -- is left to it.  (Constant coefficients only, as first written, lifted p int x and
+    // w (x1 x2)(.45) needlessly: an extra state and, for the point value, an extra stop -- ODESLV_evalsum and
+    // ODESLV_EVALadjoint moved at round-off on the 7 Nov sweep.)
     std::vector<FFVar> const dh = dag->FAD( std::vector<FFVar>{ h }, ph );
+    std::set<FFVar::pt_idVar> phid;  for( auto const& v : ph ) phid.insert( v.id() );
     bool affine = true;
-    for( auto const& d : dh ) if( !d.cst() ){ affine = false; break; }
+    for( auto const& d : dh ){
+      if( d.cst() ) continue;
+      for( auto const* v : dag->subgraph( 1, &d ).v_indep ) if( v && phid.count( v->id() ) ){ affine = false; break; }
+      if( !affine ) break;
+    }
     if( affine ) continue;
     // the hidden states, one per reduction
     std::vector<FFVar> sub;

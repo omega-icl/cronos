@@ -172,7 +172,8 @@ public:
   //! t peeled off (re-integrated or re-evaluated over its other directions, which MC++ folds into the same node).
   struct t_OutputTime
   {
-    enum Kind { POINT = 0, INTEGRAL, COMPOSED, SPATIAL } kind = POINT;   // SPATIAL: a scalar part with no time of its own
+    enum Kind { POINT = 0, INTEGRAL, COMPOSED, SPATIAL, TRAJECTORY } kind = POINT;   // SPATIAL: a scalar part with no time of its own
+    int    tmask = FFDom::ALL;        //!< TRAJECTORY: the output's mask in t -- one value per stage time it selects
     double tau  = 0.;                 //!< POINT: the time
     int    side = FFDom::MINUS;       //!< POINT: the side, at a time where the value may differ on either side
     //! COMPOSED (7 Nov 2026): the output is a function h of deferred values (reductions in t); each is a spatial
@@ -384,22 +385,31 @@ public:
   //! input, or determining a lumped state with no INITIAL row here, is refused (false, @p why).
   bool transition_expressions
     ( size_t k, std::vector<FFVar> const& xc, FFVar const& t, std::vector<FFVar>& left, std::vector<FFVar>& right,
-      std::string& why )
+      std::string& why, std::vector<FFVar> const& uc = {} )
     const
     {
       left.clear();  right.clear();
       if( k >= var_transition().size() ){ why = "no such transition"; return false; }
       auto const& tr = var_transition()[k];                       // the WORKING copy: its expressions live in _dag
-      auto states_of = [&]( FFVar const& e, std::set<FFVar,lt_FFVar>& st, bool& inp ){
+      // the states a side reads, and the INPUTS (7 Nov 2026): an input uniform in space -- a parameter, or an input over
+      // t only -- is its one slot of uc, bound by the integrator at tau as any input of a transition; an input
+      // distributed in space is refused (its value at the node would be an interpolant: not taken yet)
+      std::set<FFVar,lt_FFVar> inputs;
+      auto states_of = [&]( FFVar const& e, std::set<FFVar,lt_FFVar>& st, std::string& bad ){
         auto sg = _dag->subgraph( 1, &e );
         for( auto const* v : sg.v_indep ){
-          if( _mVar.count( *v ) ) st.insert( *v );
-          else if( _mInp.count( *v ) ) inp = true;
+          if( _mVar.count( *v ) ){ st.insert( *v );  continue; }
+          if( _evolution_dom_set && v->id() == _evolution_dom_var.id() ) continue;   // t: the integrator's
+          auto iti = _mInp.find( *v );
+          if( iti == _mInp.end() ) continue;
+          if( !iti->second.empty() ){ bad = v->name();  continue; }
+          inputs.insert( *v );
         } };
       for( size_t i = 0; i < tr.right.size() && i < tr.left.size(); ++i ){
-        std::set<FFVar,lt_FFVar> sr, sl;  bool inp = false;
-        states_of( tr.right[i], sr, inp );  states_of( tr.left[i], sl, inp );
-        if( inp ){ why = "a transition component reads an input: not taken by the method of lines yet"; return false; }
+        std::set<FFVar,lt_FFVar> sr, sl;  std::string bad;
+        states_of( tr.right[i], sr, bad );  states_of( tr.left[i], sl, bad );
+        if( !bad.empty() ){ why = "a transition component reads the input " + bad + ", distributed in space: not taken by the method of lines yet"; return false; }
+        if( !inputs.empty() && uc.empty() ){ why = "a transition component reads an input: its semi-discrete variables must be given (uc)"; return false; }
         FFVar s;
         if( i < tr.states.size() && tr.states[i].dag() ) s = tr.states[i];
         else if( sr.size() == 1 ) s = *sr.begin();
@@ -435,6 +445,11 @@ public:
           }
           for( auto const& [dv, z] : coord ){ vars.push_back( dv );  vals.push_back( FFVar( z ) ); }
           if( _evolution_dom_set ){ vars.push_back( _evolution_dom_var );  vals.push_back( t ); }
+          for( auto const& w : inputs ){                             // an input uniform in space: its one slot
+            size_t const c = pos_input( w, {} );
+            if( c >= uc.size() ){ why = "the input " + w.name() + " of a transition has no semi-discrete variable"; return false; }
+            vars.push_back( w );  vals.push_back( uc[c] );
+          }
           for( size_t q = 0; q < _vCst.size() && q < _vCstVal.size(); ++q ){ vars.push_back( _vCst[q] );  vals.push_back( FFVar( _vCstVal[q] ) ); }
           std::vector<FFVar> out( 2 );
           _dag->eval( std::vector<FFVar>{ tr.left[i], tr.right[i] }, out, vars, vals );
@@ -1113,8 +1128,19 @@ OCFEMOL::_split_output_time
       t_OutputTime T;  T.kind = t_OutputTime::SPATIAL;  _fctTime.push_back( T );  continue; }
     auto& f = _mFct[k];
     t_OutputTime T;  bool timed = false;
-    if( f.grid.count( t ) )
-      return fail( k, "it is distributed over the evolution direction (a trajectory) -- not taken by the method of lines yet" );
+    if( f.grid.count( t ) ){
+      // a TRAJECTORY (7 Nov 2026): its spatial part at every stage time its mask selects -- as the integrators take an
+      // output distributed over the evolution direction; distributed over space too, one trajectory per spatial row
+      if( f.point.count( t ) ) return fail( k, "it is both distributed over t and given a point in t" );
+      FFVar const E = f.var;
+      if( has_t_operator( E ) )
+        return fail( k, "it is distributed over t and holds an operator in t -- a trajectory is a value at each stage time" );
+      T.kind = t_OutputTime::TRAJECTORY;  T.tmask = f.grid.at( t );
+      f.grid.erase( t );
+      if( f.grid.empty() ) f.kind = FctKind::POINT;                // a scalar in space at every stage time
+      _fctTime.push_back( T );
+      continue;
+    }
     // a point in t given with the output
     if( auto itp = f.point.find( t ); itp != f.point.end() ){
       T.kind = t_OutputTime::POINT;  T.tau = itp->second;

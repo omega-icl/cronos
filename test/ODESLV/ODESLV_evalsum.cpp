@@ -68,6 +68,17 @@ int main(){
     double const ea = std::fabs( r.Ga[0] - r.Gf[0] ) / std::fabs( r.Gf[0] );
     std::cout << "  solves=" << r.ok << "  value~ref " << ev << "  fwd~ref " << ef << "  adj~fwd " << ea << ( r.ok && ev < 1e-8 && ef < 1e-7 && ea < 1e-6? "  OK": "  BAD" ) << "\n";
   }
+  // a NONLINEAR combination: refused until 7 Nov 2026, lifted into hidden states since (BASE_DE::_lift_nonlinear_outputs)
+  // -- checked by the product rule on the references e0 = x0^2(T1), e2 = x1(tf)
   M nl; bool const su = build( nl, [&]( M& m ){ m.I.add_output( OpE( sqr( m.x0 ), m.t, T1 ) * OpE( m.x1, m.t, tf ) ); } );
-  std::cout << "  x0^2(T1) * x1(tf)  (NONLINEAR)    setup=" << su << "  err=[" << nl.I.extract_error() << "]" << ( !su? "  REFUSED as it should be": "  BAD" ) << "\n";
+  std::cout << "  x0^2(T1) * x1(tf)  (NONLINEAR)    setup=" << su << " nf=" << nl.I.nf();
+  if( !su ) std::cout << "  err=[" << nl.I.extract_error() << "]  BAD\n";
+  else{
+    R const r = solve( nl );
+    double const want = r0.F[0]*r0.F[2], wantg = r0.Gf[0]*r0.F[2] + r0.F[0]*r0.Gf[2];
+    double const ev = std::fabs( r.F[0] - want ) / std::fabs( want ), ef = std::fabs( r.Gf[0] - wantg ) / std::fabs( wantg );
+    double const ea = std::fabs( r.Ga[0] - r.Gf[0] ) / std::fabs( r.Gf[0] );
+    std::cout << "  solves=" << r.ok << "  value~ref " << ev << "  fwd~ref " << ef << "  adj~fwd " << ea
+              << ( r.ok && ev < 1e-8 && ef < 1e-7 && ea < 1e-6? "  OK": "  BAD" ) << "\n";
+  }
 }

@@ -21,6 +21,16 @@
   residual rather than once per output. The backward Jacobian is analytic (it was built by difference quotients),
   and the quadrature sensitivity integrands read the memoised evaluation. The PSA column at 480 states, one
   parameter, two outputs: `solve_fsens` 4.7 s -> 2.6 s, `solve_asens` 6.1 s -> 3.9 s, against 0.6 s for the solve.
+* **MoL: trajectory outputs.** An output distributed over `t` is, for each spatial row of its spatial part, an output
+  distributed over `t` of the semi-discrete model: one value per stage time its mask selects, as the integrators
+  take such an output; distributed over space too, one trajectory per spatial node, space-major.
+* **MoL: transitions reading an input.** An input uniform in space -- a parameter, or an input over `t` only -- is
+  bound to its semi-discrete slot when the transition is composed at the field's nodes; an input distributed in
+  space is refused by name.
+* **DAESLV adjoint: a transition reading a time-varying input.** `ic_adjoint` lacked the placeholder term
+  `-(dF/dq . dq/dp)^T mu` that `ic_sens` has had since 6c, so the adjoint gradient with respect to such an input
+  was zero (`x(tau+) = x(tau-) + g`: forward `dJ/dg = (1, 0)`, adjoint `(0, 0)`; ODESLV was right). Pointwise and
+  under MoL alike.
 * **MoL: the consistent initialisation starts from the declared profile at every node.** An INITIAL row at an
   algebraic node (a Dirichlet node, or by default a Neumann node) is set aside, the node being held by its
   boundary row; `OCFEMOL::init_seed` skipped those rows, so the node started from its reference value, and a

@@ -287,10 +287,24 @@ int main()
   {
     FFGraph G;  DAESLV_IDAS S( &G );  FFVar t, z, u;
     declare_rod( S, G, t, z, u, 3, 5 );
-    S.add_output( u, {t,z}, std::vector<int>{ FFDom::ALL, FFDom::ALL } );   // a trajectory, distributed over t
+    // a TRAJECTORY (7 Nov 2026): the outlet value and the field, at every stage time -- the stored stage states, bit for bit
+    FFEval OpE;
+    S.add_output( OpE( u, z, 1. ), {t}, std::vector<int>{ FFDom::ALL } );
+    S.add_output( u, {t,z}, std::vector<int>{ FFDom::ALL, FFDom::ALL } );
     S.options.DISPLAY_LEVEL = 0;
-    check( !S.setup() && S.extract_error().find( "distributed over the evolution direction" ) != std::string::npos,
-           "(C) an output distributed over t: refused, named" );
+    bool ok = S.setup() && S.solve( std::vector<FFModel::InputVal>{} ) == DAESLV_IDAS::NORMAL;
+    double d = ok? 0.: 1.;  size_t nst = S.val_state().size();
+    if( ok ){
+      auto const& F = S.val_function();  auto const& X = S.val_state();
+      auto const& cols = S.semidiscrete_model()->field_columns( u );
+      ok = F.size() == nst * ( 1 + cols.size() );
+      for( size_t k = 0; ok && k < nst; ++k ){
+        d = std::max( d, std::fabs( F[k] - X[k][ cols.back() ] ) );                       // u(t_k, 1)
+        for( size_t j = 0; j < cols.size(); ++j ) d = std::max( d, std::fabs( F[ nst + j*nst + k ] - X[k][ cols[j] ] ) );   // space-major
+      }
+    }
+    check( ok && d == 0., "(C) outputs distributed over t: u(t_k, 1) and the field at the " + std::to_string( nst )
+                          + " stage times, the stored states bit for bit" + ( ok? std::string(): " -- " + S.extract_error() ) );
   }
   std::cout << "\n==========  DAESLV_molpde: " << npass << " passed, " << nfail << " failed" << ( nfail? "": " -- ALL PASS" ) << "  ==========\n";
   return nfail? 1: 0;

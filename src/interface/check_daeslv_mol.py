@@ -7,13 +7,14 @@ mirror the C++ gates (DAESLV_molpde, DAESLV_moltime) with closed forms where one
   (B) a TIME-VARYING inlet g(t) collocated in t: one gradient row per declared DOF, = central differences;
   (C) a TRANSITION u(tau+) = u(tau-)/2 on a zero-flux rod with a source: J and dJ/dp = closed forms, exact on
       any mesh (a uniform field is in the operator's kernel);
-  (D) the semi-discrete system's unknowns and the fields' nodes, from semidiscrete_states / semidiscrete_nodes.
+  (D) the semi-discrete system's unknowns and the fields' nodes, from semidiscrete_states / semidiscrete_nodes;
+  (E) nonlinear functions of horizon integrals; (F) a trajectory output; (G) a transition reading an input.
 """
 import math, os, sys
 for d in reversed(os.environ.get("CRONOS_PYPATH", "").split(":")):
     if d and d not in sys.path:
         sys.path.insert(0, d)
-from pymcpp import FFGraph, FFPartial, FFIntegral, exp as ffexp, sqrt as ffsqrt
+from pymcpp import FFGraph, FFPartial, FFIntegral, FFEval, exp as ffexp, sqrt as ffsqrt
 from cronos import FFDom, FFModel, DAESLV, OCFESLV, CollocationOptions
 
 npass = nfail = 0
@@ -214,6 +215,51 @@ print("  A %.8e sqrtA %.8e A/B %.8e   d/dp fwd %.6e %.6e %.6e" % (F[0], F[1], F[
 check(max(rel(a, b) for a, b in zip(F, Fe)) < 1e-8, "values = closed forms, to 1e-8")
 check(max(rel(a, b) for a, b in zip(dF, dFe)) < 1e-8, "forward gradients = closed forms, to 1e-8")
 check(max(rel(a, b) for a, b in zip(dA, dFe)) < 1e-6, "adjoint gradients = closed forms, to 1e-6")
+
+# ---- (F) trajectories and (G) a transition reading an input, on the same rod: u(t,z) = 1 + p (1 - e^-t) at every node
+print("(F) trajectories and (G) a transition reading an input")
+PF, RF, TAUF = 0.7, 0.6, 0.5
+def rod_fg(variant):
+    G = FFGraph()
+    t, z, u, p, r = G.add_var("t"), G.add_var("z"), G.add_var("u"), G.add_var("p"), G.add_var("r")
+    S = DAESLV(G)
+    S.add_domain(t, FFDom(0., TEND, 2, FFDom.LGR, 3))
+    S.add_domain(z, FFDom(0., 1., 3, FFDom.LGL, 5))
+    S.set_evolution_domain(t)
+    S.add_state(u, [t, z], ref=1.)
+    S.add_input(p, ref=1.)
+    if variant == 1:
+        S.add_input(r, ref=1.)
+    S.add_equation(OpP(u, t) - OpP(ALPHA * OpP(u, z), z) - p * ffexp(-t), [t, z], [TI, ZI], io)
+    S.add_equation(OpP(u, z), [t, z], [TI, FFDom.LB], ib)
+    S.add_equation(OpP(u, z), [t, z], [TI, FFDom.UB], ib)
+    S.add_equation(u - 1.,    [t, z], [FFDom.LB, FFDom.ALL], ii)
+    if variant == 0:
+        S.add_output(FFEval()(u, {z: 1}, {z: 1.}), [t], masks=[FFDom.ALL])     # a trajectory of u(t, 1)
+    else:
+        S.add_transition([r * u], [u], t, TAUF)
+        S.add_output(OpI(u, z), [t], point=[TEND])
+    S.options.INTERFACE.IMPOSITION = CollocationOptions.IC_STRONG
+    S.options.INTERFACE.SAT_SIGMA0 = 10.
+    tight(S)
+    return S, p, r
+S, p, r = rod_fg(0)
+check(S.setup(), "a trajectory output sets up  (%s)" % (S.extract_error() or "ok"))
+check(S.solve_fsens({p: PF}) == DAESLV.NORMAL, "solve_fsens")
+F, Gf = list(S.val_function()), list(S.val_function_gradient()[0])
+tk = [0., 0.5, 1.]
+check(len(F) == 3 and max(rel(F[i], 1. + PF * (1. - math.exp(-tk[i]))) for i in range(3)) < 1e-8,
+      "u(t_k, 1) at the 3 stage times = 1 + p (1 - e^-t_k), to 1e-8")
+check(max(abs(Gf[i] - (1. - math.exp(-tk[i]))) for i in range(3)) < 1e-8, "d u(t_k, 1) / dp = 1 - e^-t_k, to 1e-8")
+S, p, r = rod_fg(1)
+check(S.setup(), "a transition reading an input sets up  (%s)" % (S.extract_error() or "ok"))
+e5, e1 = math.exp(-TAUF), math.exp(-TEND)
+for name, solve in (("forward", S.solve_fsens), ("adjoint", S.solve_asens)):
+    check(solve({p: PF, r: RF}) == DAESLV.NORMAL, "solve, %s" % name)
+    J, G = S.val_function()[0], S.val_function_gradient()
+    check(rel(J, RF * (1. + PF * (1. - e5)) + PF * (e5 - e1)) < 1e-8
+          and rel(G[0][0], RF * (1. - e5) + e5 - e1) < 1e-6 and rel(G[1][0], 1. + PF * (1. - e5)) < 1e-6,
+          "u(tau+) = r u(tau-): J, dJ/dp and dJ/dr = closed forms (%s)" % name)
 
 print("\ncheck_daeslv_mol: %d passed, %d failed -- %s" % (npass, nfail, "FAILURES" if nfail else "ALL PASS"))
 sys.exit(1 if nfail else 0)

@@ -1714,6 +1714,31 @@ DAESLV_IDAS::solve
     y0 = yv;
     _dXP0 = ypv;
     ++_numIC0;                                   // counted in stats.numIC below
+    // a declared INITIAL row the high-index reduction set aside as IMPLIED by its materialised hidden constraints
+    // (FFModel::initial_set_aside): the hidden constraints hold at the consistent point, so check the declared value
+    // against it and say so when it is contradicted -- as OCFESLV does after its solve (8 Nov 2026)
+    if( !_mol && !initial_set_aside().empty() && !_dT.empty() && options.DISPLAY_LEVEL >= 1 ) try{
+      FFGraph* mdag = FFModel::_dag;                               // the rows and _mX live in the MODEL's DAG, not BASE_DE's
+      for( auto const& e : initial_set_aside() ){
+        auto sg = mdag->subgraph( 1, &e.var );
+        std::vector<FFVar> vars;  std::vector<double> vals;  bool ok = true;
+        for( auto const* v : sg.v_indep ){
+          if( !v ) continue;
+          if( _evolution_dom_set && v->id() == _evolution_dom_var.id() ){ vars.push_back( *v );  vals.push_back( _dT[0] );  continue; }
+          size_t k = 0;  for( ; k < _mX.size(); ++k ) if( _mX[k].id() == v->id() ) break;
+          if( k < _mX.size() && k < y0.size() ){ vars.push_back( *v );  vals.push_back( y0[k] );  continue; }
+          ok = false;  break;                                        // a parameter or constant: not checked here
+        }
+        if( !ok ) continue;
+        std::vector<double> r( 1, 0. );
+        mdag->eval( std::vector<FFVar>{ e.var }, r, vars, vals );
+        if( std::fabs( r[0] ) > 1e-6 )
+          os << "DAESLV_IDAS ** a declared initial condition set aside by the high-index reduction is NOT consistent with its"
+                " hidden constraints: |0 = " << _expr_text( mdag, e.var ) << "| = " << std::fabs( r[0] ) << " at the initial point"
+                " -- the hidden constraints hold there, the declared value does not" << std::endl;
+      }
+    }
+    catch( ... ){}                                                 // a diagnostic: never fails the solve
     // a model distributed in space: an INITIAL row at an algebraic node was set aside (the node is held by its
     // boundary row), so the consistent point may differ from the declared profile there -- say by how much
     if( _mol && !_dT.empty() ){

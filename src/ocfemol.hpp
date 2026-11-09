@@ -6,6 +6,7 @@
 #ifndef CRONOS__OCFEMOL_HPP
 #define CRONOS__OCFEMOL_HPP
 
+#include <functional>
 #include "ocfebase.hpp"
 
 namespace mc
@@ -108,6 +109,7 @@ public:
     size_t n_fields    = 0;   //!< fields (states of the model, auxiliaries included)
     size_t n_diff_fields = 0; //!< fields with a d_t somewhere: the differential ones
     size_t n_diff_cols = 0;   //!< differential UNKNOWNS: columns of xc with a mass entry (the integrator's id vector)
+    size_t n_alg_rank  = 0;   //!< structural rank of the algebraic block (algebraic rows x algebraic unknowns): = n_alg_rows for index 1
     size_t n_alg_rows  = 0;   //!< rows of Rc without a mass entry (plan-owned rows included)
     size_t n_ini_stream = 0;  //!< INITIAL (row, node) pairs at differential nodes: the Ini stream
     size_t n_ini_dropped = 0; //!< INITIAL (row, node) pairs at algebraic nodes: dropped, checked for consistency at t0
@@ -207,9 +209,10 @@ public:
     ( std::vector<size_t>& ptr, std::vector<size_t>& col )
     const
     {
+      auto const& pat = _nsActive? _jacPatternFctRed: _jacPatternFct;  size_t const nred = n_reduced();
       ptr.assign( 1, 0 ); col.clear();
-      for( size_t r = 0; r < _jacPatternFct.size(); ++r ){
-        for( size_t c : _jacPatternFct[r] ) if( c < _nCollVar ) col.push_back( c );
+      for( size_t r = 0; r < pat.size(); ++r ){
+        for( size_t c : pat[r] ) if( c < nred ) col.push_back( c );
         ptr.push_back( col.size() );
       }
     }
@@ -217,10 +220,11 @@ public:
     ( std::vector<size_t>& ptr, std::vector<size_t>& col )
     const
     {
-      size_t const it = _nCollInp? pos_input( _evolution_dom_var, {} ): 0;
+      size_t const it = _nCollInp? pos_input( _evolution_dom_var, {} ): 0, nred = n_reduced();
+      auto const& pat = _nsActive? _jacPatternFctRed: _jacPatternFct;
       ptr.assign( 1, 0 ); col.clear();
-      for( size_t r = 0; r < _jacPatternFct.size(); ++r ){
-        for( size_t c : _jacPatternFct[r] ) if( c >= _nCollVar && c < _nCollVar + _nCollInp && c - _nCollVar != it ) col.push_back( c - _nCollVar );
+      for( size_t r = 0; r < pat.size(); ++r ){
+        for( size_t c : pat[r] ) if( c >= nred && c < nred + _nCollInp && c - nred != it ) col.push_back( c - nred );
         ptr.push_back( col.size() );
       }
     }
@@ -238,10 +242,11 @@ public:
     ( std::vector<size_t>& ptr, std::vector<size_t>& col )
     const
     {
-      size_t const ncol = _nCollVar + _nCollInp;
+      size_t const ncol = n_reduced() + _nCollInp;
+      auto const& pat = _nsActive? _jacPatternFctRed: _jacPatternFct;
       ptr.assign( 1, 0 ); col.clear();
-      for( size_t r = 0; r < _jacPatternFct.size(); ++r ){
-        for( size_t c : _jacPatternFct[r] ) if( c < ncol ) col.push_back( c );
+      for( size_t r = 0; r < pat.size(); ++r ){
+        for( size_t c : pat[r] ) if( c < ncol ) col.push_back( c );
         ptr.push_back( col.size() );
       }
     }
@@ -306,10 +311,11 @@ public:
     ( std::vector<size_t>& ptr, std::vector<size_t>& col )
     const
     {
-      size_t const it = _nCollInp? pos_input( _evolution_dom_var, {} ): 0;
+      size_t const it = _nCollInp? pos_input( _evolution_dom_var, {} ): 0, nred = n_reduced();
+      auto const& pat = _nsActive? _jacPatternRed: _jacPatternEqn;
       ptr.assign( 1, 0 ); col.clear();
-      for( size_t r = 0; r < _jacPatternEqn.size(); ++r ){
-        for( size_t c : _jacPatternEqn[r] ) if( c >= _nCollVar && c < _nCollVar + _nCollInp && c - _nCollVar != it ) col.push_back( c - _nCollVar );
+      for( size_t r = 0; r < pat.size(); ++r ){
+        for( size_t c : pat[r] ) if( c >= nred && c < nred + _nCollInp && c - nred != it ) col.push_back( c - nred );
         ptr.push_back( col.size() );
       }
     }
@@ -500,6 +506,56 @@ protected:
   std::set<FFVar,lt_FFVar>     _inpTimeVarying;   //!< inputs whose declared domain held t (setup takes it out)
   std::vector<std::string>     _auditRefusals;    //!< what the INITIAL audit refused, in words
   std::vector<t_OutputTime>    _fctTime;          //!< see outputs_time()
+
+  //! @brief The structural index of the semi-discrete system (see setup, 5b): a maximum matching of the algebraic rows
+  //! to the algebraic unknowns on Rc's dependency pattern.  Full: index 1, n_alg_rank = n_alg_rows.  Deficient: index
+  //! >= 2 -- the unmatched unknowns and rows are reported by name (a multiplier, or a field and its node; a constraint
+  //! row reading differential unknowns only) and false is returned.
+  bool _structural_index_check( std::ostream& os, std::vector<std::vector<size_t>> const& pat, size_t n, std::vector<bool> const& colDiff,
+                                std::vector<bool> const& rowAlg, size_t ntau, std::vector<size_t>* badCols = nullptr, std::vector<size_t>* badRows = nullptr )
+  {
+    size_t const m = pat.size();
+    std::vector<long> acol_of( n, -1 );  std::vector<size_t> acols;
+    for( size_t j = 0; j < n; ++j ) if( j >= colDiff.size() || !colDiff[j] ){ acol_of[j] = (long)acols.size();  acols.push_back( j ); }
+    std::vector<size_t> arows;  for( size_t r = 0; r < m; ++r ) if( r < rowAlg.size() && rowAlg[r] ) arows.push_back( r );
+    std::vector< std::vector<size_t> > adj( arows.size() );
+    for( size_t i = 0; i < arows.size(); ++i ) for( size_t c : pat[ arows[i] ] ) if( c < n && acol_of[c] >= 0 ) adj[i].push_back( (size_t)acol_of[c] );
+    std::vector<long> mcol( acols.size(), -1 ), mrow( arows.size(), -1 );
+    std::function<bool(size_t,std::vector<bool>&)> aug = [&]( size_t i, std::vector<bool>& seen ){
+      for( size_t c : adj[i] ){ if( seen[c] ) continue;  seen[c] = true;
+        if( mcol[c] < 0 || aug( (size_t)mcol[c], seen ) ){ mcol[c] = (long)i;  mrow[i] = (long)c;  return true; } }
+      return false; };
+    size_t rank = 0;
+    for( size_t i = 0; i < arows.size(); ++i ){ std::vector<bool> seen( acols.size(), false );  if( aug( i, seen ) ) ++rank; }
+    _shape.n_alg_rank = rank;
+    if( rank == acols.size() && rank == arows.size() ){
+      os << "OCFEMOL::setup [mol] structural index of the semi-discrete system: 1 (" << rank << " algebraic rows matched to " << rank << " algebraic unknowns)\n";
+      return true;
+    }
+    std::ostringstream why;
+    why << "the semi-discrete system has structural index > 1: " << rank << " of " << arows.size() << " algebraic rows match "
+        << acols.size() << " algebraic unknowns.";
+    size_t named = 0;
+    for( size_t c = 0; c < acols.size(); ++c ){
+      if( mcol[c] >= 0 ) continue;
+      size_t const j = acols[c];
+      if( badCols ) badCols->push_back( j );
+      if( named >= 6 ) continue;
+      if( j >= n - ntau ) why << "  Unknown " << j << " is an interface multiplier minted by the plan with no algebraic row (its rows are differential: the index-2 form).";
+      else { FFVar f;  double ref = 0.;  column_field( j, f, ref );  why << "  Unknown " << j << " (" << f.name() << " at a node) has no algebraic row of its own."; }
+      ++named;
+    }
+    for( size_t i = 0; i < arows.size(); ++i ){
+      if( mrow[i] >= 0 ) continue;
+      if( badRows ) badRows->push_back( arows[i] );
+      if( named >= 10 ) continue;
+      bool diffOnly = true;  for( size_t c : pat[ arows[i] ] ) if( c < n && acol_of[c] >= 0 ) diffOnly = false;
+      why << "  Row " << arows[i] << " is an algebraic row" << ( diffOnly? " reading differential unknowns only (a constraint on them).": " that no free algebraic unknown is left for." );
+      ++named;
+    }
+    _setupError = why.str();
+    return false;
+  }
   std::set<size_t>             _fctSpatial;       //!< the SPATIAL parts' indices, appended by _split_output_time
   size_t                       _nFctDeclared = 0;  //!< see n_declared_outputs()
   bool _split_output_time
@@ -518,6 +574,40 @@ protected:
     ();
   std::vector<bool>     _colDiff;    //!< per unknown of xc
   std::vector<bool>     _rowAlg;     //!< per row of Rc
+
+  // ---- NULL-SPACE ELIMINATION of plan multipliers that raise the index (phase 9, step 2; 8 Nov 2026).  A multiplier
+  //      lambda that the structural index check finds with no algebraic row enforces a constraint x_L - x_R = 0 between
+  //      two DIFFERENTIAL copies of a node and enters only their two rows, with opposite signs: the Hessenberg index-2
+  //      form.  Its null space is the merge: x_L = x_R = y, the two rows summed (lambda cancels), the constraint row and
+  //      the multiplier column dropped -- exact, drift-free, index 1.  Applied as a layer: the base keeps its full
+  //      layout; the integrator sees the reduced unknowns (expand on entry, contract rows and columns on exit).
+  bool                  _nsActive = false;
+  size_t                _nsN = 0, _nsM = 0, _nsTau = 0;   //!< reduced counts
+  std::vector<size_t>   _nsCol;      //!< full column -> reduced column (npos: an eliminated multiplier)
+  std::vector<size_t>   _nsRow;      //!< full row -> reduced row (npos: a dropped constraint row)
+  std::vector<double>   _nsX, _nsR;  //!< work: the full state and residual
+  std::vector< std::vector<size_t> > _jacPatternRed, _jacPatternFctRed;   //!< the patterns over the reduced columns (+ inputs)
+  size_t n_reduced() const { return _nsActive? _nsN: _nCollVar; }
+  double const* _expand( double const* y )
+    { if( !_nsActive ) return y;  _nsX.assign( _nCollVar, 0. );
+      for( size_t c = 0; c < _nCollVar; ++c ) if( _nsCol[c] != std::string::npos ) _nsX[c] = y[ _nsCol[c] ];
+      return _nsX.data(); }
+  void _contract_rows( double const* rfull, double* r ) const
+    { std::fill( r, r + _nsM, 0. );  for( size_t i = 0; i < _nCollEqn; ++i ) if( _nsRow[i] != std::string::npos ) r[ _nsRow[i] ] += rfull[i]; }
+  size_t _col_red( size_t c ) const { return c < _nCollVar? _nsCol[c]: _nsN + ( c - _nCollVar ); }
+  void _contract_csr( std::vector<size_t>& ptr, std::vector<size_t>& col, std::vector<double>& val, size_t mred ) const
+    { std::vector< std::map<size_t,double> > acc( mred );
+      for( size_t r = 0; r + 1 < ptr.size(); ++r ){ size_t const rr = _nsRow[r];  if( rr == std::string::npos ) continue;
+        for( size_t k = ptr[r]; k < ptr[r+1]; ++k ){ size_t const cc = _col_red( col[k] );  if( cc == std::string::npos ) continue;  acc[rr][cc] += val[k]; } }
+      ptr.assign( 1, 0 ); col.clear(); val.clear();
+      for( auto const& row : acc ){ for( auto const& [c, v] : row ){ col.push_back( c );  val.push_back( v ); }  ptr.push_back( col.size() ); } }
+  void _contract_csr_rows_only( std::vector<size_t>& ptr, std::vector<size_t>& col, std::vector<double>& val, std::vector<size_t> const& rowmap, size_t mred ) const
+    { std::vector< std::map<size_t,double> > acc( mred );
+      for( size_t r = 0; r + 1 < ptr.size(); ++r ){ size_t const rr = rowmap[r];  if( rr == std::string::npos ) continue;
+        for( size_t k = ptr[r]; k < ptr[r+1]; ++k ){ size_t const cc = _col_red( col[k] );  if( cc == std::string::npos ) continue;  acc[rr][cc] += val[k]; } }
+      ptr.assign( 1, 0 ); col.clear(); val.clear();
+      for( auto const& row : acc ){ for( auto const& [c, v] : row ){ col.push_back( c );  val.push_back( v ); }  ptr.push_back( col.size() ); } }
+  bool _eliminate_multipliers( std::ostream& os, std::vector<size_t> const& badCols, std::vector<size_t> const& badRows, std::string& why );
   std::vector<t_Eqn>    _iniEqn;    //!< the INITIAL rows, kept aside from the collocated system
   double                _evoLo = 0., _evoHi = 0.;   //!< the model's t span, taken out of the working _mDom
   t_SemiDiscrete        _shape;
@@ -633,6 +723,14 @@ inline bool
 OCFEMOL::_on_model_discretise
 ()
 {
+  // IC_WEAK under the method of lines takes the ENERGY-STABLE SAT form: the legacy form gives the semi-discrete operator
+  // a growing mode quadratic in SAT_SIGMA0 (measured 8 Nov 2026), which OCFESLV's Radau damps and an integrator cannot
+  // step over.  Switched here, before the interface plan computes its strengths (OCFEBASE::_sat_strength).
+  if( options.INTERFACE.IMPOSITION == Options::IC_WEAK && options.INTERFACE.SAT_FORM == Options::SAT_LEGACY ){
+    options.INTERFACE.SAT_FORM = Options::SAT_ENERGY;
+    _disp( 1 ) << "OCFEMOL::setup [mol] IC_WEAK: the energy-stable SAT form (INTERFACE.SAT_FORM = SAT_ENERGY) -- the legacy"
+                  " form is not stable under the method of lines\n";
+  }
   if( !_evolution_dom_set || !_evolution_dom_var.dag() ){
     std::cerr << "OCFEMOL::setup ** the method of lines needs an evolution direction: set_evolution_domain( t )" << std::endl;
     _setupStatus = SetupStatus::EVOLUTION_DOMAIN_UNSUITABLE;
@@ -769,6 +867,27 @@ OCFEMOL::_on_model_ready
   _disp( 1 ) << "OCFEMOL::setup [mol] Mc: " << _mass.size() << " entries; " << _shape.n_diff_cols << " differential unknowns, "
              << _shape.n_states - _shape.n_diff_cols << " algebraic; " << _shape.n_alg_rows << " algebraic rows\n";
 
+  // 5b. the structural index of the SEMI-DISCRETE system (the design's step 6, 8 Nov 2026): index 1 iff the algebraic
+  //     rows can be matched one-to-one to the algebraic unknowns on Rc's pattern.  A deficiency names its cause -- an
+  //     interface multiplier with no algebraic row, a constraint row on differential unknowns only -- which is how a
+  //     multiplier minted by the plan (every value-continuity multiplier under IC_TRACE) raises the index to 2.
+  _nsActive = false;  _nsN = _nCollVar;  _nsM = _nCollEqn;  _nsTau = _nTraceVar;
+  { std::vector<size_t> badCols, badRows;  std::string why;
+    if( !_structural_index_check( _disp( 1 ), _jacPatternEqn, _nCollVar, _colDiff, _rowAlg, _nTraceVar, &badCols, &badRows ) ){
+      std::string const finding = _setupError;
+      if( !_eliminate_multipliers( _disp( 1 ), badCols, badRows, why ) ){
+        _setupError = finding + "  Not eliminated: " + why;
+        std::cerr << "OCFEMOL::setup ** " << _setupError << std::endl;
+        _setupStatus = SetupStatus::INCONSISTENT_MODEL;
+        return false;
+      }
+      if( !_structural_index_check( _disp( 1 ), _jacPatternRed, _nsN, _colDiff, _rowAlg, _nsTau ) ){
+        _setupError = "after the null-space elimination, " + _setupError;
+        std::cerr << "OCFEMOL::setup ** " << _setupError << std::endl;
+        _setupStatus = SetupStatus::INCONSISTENT_MODEL;
+        return false;
+      }
+    } }
   size_t const bad = _audit_initial_coverage( _disp( 1 ) );
   _disp( 1 ) << "OCFEMOL::setup [mol] Ini stream: " << _shape.n_ini_stream << " INITIAL (row, node) pairs at differential nodes; "
              << _shape.n_ini_dropped << " at algebraic nodes dropped (consistency at t0)\n";
@@ -789,12 +908,104 @@ OCFEMOL::eval_residual
 ( double t, double const* xc, double const* uc, double* rc )
 {
   if( !_shape.ran || !xc || !rc ) return false;
+  xc = _expand( xc );                                            // the full state, when multipliers were eliminated
   // the collocated input vector: the caller's values, t in its own slot
   std::vector<double> inp( _nCollInp, 0. );
   if( uc ) std::copy( uc, uc + _nCollInp, inp.begin() );
   if( _nCollInp ) inp[ pos_input( _evolution_dom_var, {} ) ] = t;
   for( size_t i = 0; i < _vCst.size() && i < _vCstVal.size(); ++i ) _OCCst[i].set( _vCstVal[i] );
-  _eval_eqn( rc, xc, _nCollInp? inp.data(): nullptr, _OCEqn, _OCVar, _OCInp, _OCDom, _OCCst, _wrkOC );
+  if( !_nsActive ){ _eval_eqn( rc, xc, _nCollInp? inp.data(): nullptr, _OCEqn, _OCVar, _OCInp, _OCDom, _OCCst, _wrkOC );  return true; }
+  _nsR.assign( _nCollEqn, 0. );
+  _eval_eqn( _nsR.data(), xc, _nCollInp? inp.data(): nullptr, _OCEqn, _OCVar, _OCInp, _OCDom, _OCCst, _wrkOC );
+  _contract_rows( _nsR.data(), rc );
+  return true;
+}
+
+inline bool
+OCFEMOL::_eliminate_multipliers
+( std::ostream& os, std::vector<size_t> const& badCols, std::vector<size_t> const& badRows, std::string& why )
+{
+  size_t const npos = std::string::npos, n = _nCollVar, m = _nCollEqn;
+  // the Jacobian of the FULL system at the reference point: the multipliers' signs and the constraints' coefficients
+  std::vector<double> xref( n, 0. ), uref( _nCollInp, 0. ), rc( m );
+  for( size_t c = 0; c < n; ++c ){ FFVar f;  double ref = 0.;  if( column_field( c, f, ref ) ) xref[c] = ref; }
+  std::vector<size_t> P, C;  std::vector<double> V;
+  if( !deriv_residual_full( 0., xref.data(), _nCollInp? uref.data(): nullptr, rc.data(), P, C, V ) ){ why = "the Jacobian at the reference point could not be formed"; return false; }
+  auto entry = [&]( size_t r, size_t c )->double{ for( size_t k = P[r]; k < P[r+1]; ++k ) if( C[k] == c ) return V[k];  return 0.; };
+  // row -> its differential unknowns: a row may carry SEVERAL mass entries (the PSA's c1 balance carries F d_t q1 too),
+  // so the copies a multiplier joins are named by its constraint, not by the rows' masses (8 Nov 2026)
+  std::vector< std::set<size_t> > rowMass( m );  for( auto const& e : _mass ) rowMass[e.row].insert( e.col );
+  // union-find over columns and rows
+  std::vector<size_t> ufc( n ), ufr( m );  for( size_t c = 0; c < n; ++c ) ufc[c] = c;  for( size_t r = 0; r < m; ++r ) ufr[r] = r;
+  auto find = []( std::vector<size_t>& uf, size_t i ){ while( uf[i] != i ){ uf[i] = uf[ uf[i] ];  i = uf[i]; }  return i; };
+  std::vector<bool> dropCol( n, false ), dropRow( m, false );
+  size_t eliminated = 0;
+  for( size_t c : badCols ){
+    if( c < n - _nTraceVar ){ why = "unknown " + std::to_string( c ) + " is a field node with no algebraic row, not a multiplier"; return false; }
+    std::vector<size_t> rows;  for( size_t r = 0; r < m; ++r ) if( entry( r, c ) != 0. ) rows.push_back( r );
+    if( rows.size() != 2 ){ why = "multiplier " + std::to_string( c ) + " enters " + std::to_string( rows.size() ) + " rows (two copies of a node expected)"; return false; }
+    size_t const L = rows[0], R = rows[1];
+    if( _rowAlg[L] || _rowAlg[R] || rowMass[L].empty() || rowMass[R].empty() ){ why = "multiplier " + std::to_string( c ) + " enters a row without a differential unknown"; return false; }
+    double const aL = entry( L, c ), aR = entry( R, c );
+    if( std::fabs( aL + aR ) > 1e-10 * std::max( std::fabs( aL ), std::fabs( aR ) ) ){ why = "multiplier " + std::to_string( c ) + " does not enter its two rows with opposite equal weights"; return false; }
+    // its constraint: an unmatched algebraic row, linear, reading exactly two columns -- one differential unknown of each
+    // of the multiplier's rows -- with opposite equal coefficients: those are the copies
+    size_t g = npos, cL = npos, cR = npos;
+    for( size_t r : badRows ){
+      if( dropRow[r] || !_rowAlg[r] || !_jacLinearEqn[r] ) continue;
+      std::vector<size_t> cols;  for( size_t cc : _jacPatternEqn[r] ) if( cc < n ) cols.push_back( cc );
+      if( cols.size() != 2 ) continue;
+      if( rowMass[L].count( cols[0] ) && rowMass[R].count( cols[1] ) ){ g = r;  cL = cols[0];  cR = cols[1];  break; }
+      if( rowMass[L].count( cols[1] ) && rowMass[R].count( cols[0] ) ){ g = r;  cL = cols[1];  cR = cols[0];  break; }
+    }
+    if( g == npos ){ why = "no linear constraint row joining a differential unknown of each of the two rows (" + std::to_string( L ) + ", " + std::to_string( R ) + ") of multiplier " + std::to_string( c ) + " was found"; return false; }
+    double const bL = entry( g, cL ), bR = entry( g, cR );
+    if( std::fabs( bL + bR ) > 1e-10 * std::max( std::fabs( bL ), std::fabs( bR ) ) ){ why = "constraint row " + std::to_string( g ) + " is not a continuity x_L - x_R = 0 (coefficients not opposite and equal)"; return false; }
+    ufc[ find( ufc, cR ) ] = find( ufc, cL );  ufr[ find( ufr, R ) ] = find( ufr, L );
+    dropCol[c] = true;  dropRow[g] = true;  ++eliminated;
+    FFVar f;  double ref = 0.;  column_field( cL, f, ref );
+    os << "OCFEMOL::setup [mol] null-space elimination: multiplier " << c << " and constraint row " << g << " removed, the copies "
+       << cL << " and " << cR << " of " << f.name() << " merged, their rows " << L << " and " << R << " summed\n";
+  }
+  if( !eliminated ){ why = "nothing to eliminate"; return false; }
+  // the reduced numbering, in order of first appearance; the kept multipliers stay last
+  _nsCol.assign( n, npos );  _nsRow.assign( m, npos );
+  std::vector<size_t> numC( n, npos ), numR( m, npos ), repC;  _nsN = 0;  _nsM = 0;
+  for( size_t c = 0; c < n; ++c ){ if( dropCol[c] ) continue;  size_t const rt = find( ufc, c );  if( numC[rt] == npos ){ numC[rt] = _nsN++;  repC.push_back( c ); }  _nsCol[c] = numC[rt]; }
+  for( size_t r = 0; r < m; ++r ){ if( dropRow[r] ) continue;  size_t const rt = find( ufr, r );  if( numR[rt] == npos ) numR[rt] = _nsM++;  _nsRow[r] = numR[rt]; }
+  _nsTau = _nTraceVar - eliminated;
+  // the stored structures, in the reduced numbering
+  { std::map< std::pair<size_t,size_t>, FFVar > acc;
+    for( auto const& e : _mass ){ size_t const rr = _nsRow[e.row], cc = _nsCol[e.col];  if( rr == npos || cc == npos ) continue;
+      auto it = acc.find( { rr, cc } );  if( it == acc.end() ) acc.emplace( std::make_pair( rr, cc ), e.coeff );  else it->second = it->second + e.coeff; }
+    _mass.clear();  for( auto const& [k, v] : acc ){ t_MassEntry e;  e.row = k.first;  e.col = k.second;  e.coeff = v;  _mass.push_back( e ); } }
+  { std::vector<bool> cd( _nsN, false ), ra( _nsM, true );
+    for( size_t c = 0; c < n; ++c ) if( _nsCol[c] != npos && _colDiff[c] ) cd[ _nsCol[c] ] = true;
+    for( size_t r = 0; r < m; ++r ) if( _nsRow[r] != npos && !_rowAlg[r] ) ra[ _nsRow[r] ] = false;
+    _colDiff = cd;  _rowAlg = ra; }
+  for( auto& [f, cols] : _fieldCols ) for( size_t& c : cols ) c = _nsCol[c];
+  { std::vector<size_t> owner( _nsN, npos );  for( size_t c = 0; c < n; ++c ) if( _nsCol[c] != npos && owner[ _nsCol[c] ] == npos ) owner[ _nsCol[c] ] = _colOwner[c];  _colOwner = owner; }
+  { std::vector<t_IniEntry> kept;                                  // (the stream is built AFTER this, by the audit, in the reduced numbering; this covers a rebuilt one)
+    for( auto& e : _iniStream ){
+      size_t const tgt = e.target;
+      if( tgt < n && _nsCol[tgt] != npos && repC[ _nsCol[tgt] ] != tgt ) continue;     // the dependent copy's INITIAL row: one condition per merged unknown
+      e.target = tgt < n? _nsCol[tgt]: tgt;
+      for( auto& fc : e.cols ) fc.second = _nsCol[ fc.second ];
+      kept.push_back( e ); }
+    _iniStream = kept; }
+  auto contract_pattern = [&]( std::vector<std::vector<size_t>> const& full, std::vector<std::vector<size_t>>& red, bool rows ){
+    std::vector< std::set<size_t> > acc( rows? _nsM: full.size() );
+    for( size_t r = 0; r < full.size(); ++r ){ size_t const rr = rows? _nsRow[r]: r;  if( rr == npos ) continue;
+      for( size_t c : full[r] ){ size_t const cc = _col_red( c );  if( cc != npos ) acc[rr].insert( cc ); } }
+    red.assign( acc.size(), {} );  for( size_t r = 0; r < acc.size(); ++r ) red[r].assign( acc[r].begin(), acc[r].end() ); };
+  contract_pattern( _jacPatternEqn, _jacPatternRed, true );
+  contract_pattern( _jacPatternFct, _jacPatternFctRed, false );
+  _shape.n_states = _nsN;  _shape.n_rows = _nsM;  _shape.n_tau = _nsTau;
+  _shape.n_diff_cols = 0;  for( bool b : _colDiff ) _shape.n_diff_cols += b;
+  _shape.n_alg_rows = 0;   for( bool b : _rowAlg )  _shape.n_alg_rows  += b;
+  _nsActive = true;
+  os << "OCFEMOL::setup [mol] null-space elimination: " << eliminated << " multiplier(s) and constraint row(s) removed; " << _nsN << " unknowns ("
+     << _nsTau << " explicit multipliers), " << _nsM << " rows; " << _shape.n_diff_cols << " differential, " << _nsN - _shape.n_diff_cols << " algebraic\n";
   return true;
 }
 
@@ -803,9 +1014,10 @@ OCFEMOL::jacobian_pattern
 ( std::vector<size_t>& jac_ptr, std::vector<size_t>& jac_col )
 const
 {
+  auto const& pat = _nsActive? _jacPatternRed: _jacPatternEqn;  size_t const nred = n_reduced();
   jac_ptr.assign( 1, 0 ); jac_col.clear();
-  for( size_t r = 0; r < _jacPatternEqn.size(); ++r ){
-    for( size_t c : _jacPatternEqn[r] ) if( c < _nCollVar ) jac_col.push_back( c );   // the xc columns only
+  for( size_t r = 0; r < pat.size(); ++r ){
+    for( size_t c : pat[r] ) if( c < nred ) jac_col.push_back( c );   // the xc columns only
     jac_ptr.push_back( jac_col.size() );
   }
 }
@@ -815,10 +1027,11 @@ OCFEMOL::jacobian_pattern_full
 ( std::vector<size_t>& jac_ptr, std::vector<size_t>& jac_col )
 const
 {
-  size_t const ncol = _nCollVar + _nCollInp;
+  auto const& pat = _nsActive? _jacPatternRed: _jacPatternEqn;
+  size_t const ncol = n_reduced() + _nCollInp;
   jac_ptr.assign( 1, 0 ); jac_col.clear();
-  for( size_t r = 0; r < _jacPatternEqn.size(); ++r ){
-    for( size_t c : _jacPatternEqn[r] ) if( c < ncol ) jac_col.push_back( c );
+  for( size_t r = 0; r < pat.size(); ++r ){
+    for( size_t c : pat[r] ) if( c < ncol ) jac_col.push_back( c );
     jac_ptr.push_back( jac_col.size() );
   }
 }
@@ -829,6 +1042,7 @@ OCFEMOL::deriv_residual_full
   std::vector<double>& jac_val )
 {
   if( !_shape.ran || !_jacReady || !xc ) return false;
+  bool const reduce = _nsActive;  xc = _expand( xc );
   size_t const ncol = _nCollVar + _nCollInp;
   // the FAD buffers, seeded by colour exactly as OCFESLV::_reset_autodiff seeds its own -- uc's slots coloured with xc
   std::vector<t_FAD> Fvar( _nCollVar ), Finp( _nCollInp ), Feqn( _nCollEqn );
@@ -845,14 +1059,16 @@ OCFEMOL::deriv_residual_full
   _eval_eqn( Feqn.data(), Fvar.empty()? nullptr: Fvar.data(), Finp.empty()? nullptr: Finp.data(),
              _OCFEqn, _OCFVar, _OCFInp, _OCFDom, _OCFCst, _wrkOCF );
   jac_ptr.assign( 1, 0 ); jac_col.clear(); jac_val.clear();
+  std::vector<double> rfull( reduce? _nCollEqn: 0 );
   for( size_t r = 0; r < _nCollEqn; ++r ){
-    if( rc ) rc[r] = Feqn[r].val();
+    if( rc ){ if( reduce ) rfull[r] = Feqn[r].val(); else rc[r] = Feqn[r].val(); }
     for( size_t c : _jacPatternEqn[r] ){
       if( c >= ncol ) continue;
       jac_col.push_back( c );  jac_val.push_back( _jacNColorEqn? Feqn[r].deriv( _jacColorEqn[c] ): 0. );
     }
     jac_ptr.push_back( jac_col.size() );
   }
+  if( reduce ){ _contract_csr( jac_ptr, jac_col, jac_val, _nsM );  if( rc ) _contract_rows( rfull.data(), rc ); }
   return true;
 }
 
@@ -862,6 +1078,7 @@ OCFEMOL::eval_outputs
 {
   if( !_shape.ran || !xc || !f ) return false;
   if( !_nCollFct ) return true;
+  xc = _expand( xc );
   std::vector<double> inp( _nCollInp, 0. );
   if( uc ) std::copy( uc, uc + _nCollInp, inp.begin() );
   if( _nCollInp ) inp[ pos_input( _evolution_dom_var, {} ) ] = t;
@@ -879,6 +1096,7 @@ OCFEMOL::deriv_outputs_full
   size_t const ncol = _nCollVar + _nCollInp;
   ptr.assign( 1, 0 ); col.clear(); val.clear();
   if( !_nCollFct ) return true;
+  xc = _expand( xc );
   std::vector<t_FAD> Fvar( _nCollVar ), Finp( _nCollInp ), Ffct( _nCollFct );
   for( size_t i = 0; i < _nCollVar; ++i ){ Fvar[i] = xc[i]; if( _jacNColorFct ) Fvar[i].diff( _jacColorFct[i], _jacNColorFct ); }
   size_t const it = _nCollInp? pos_input( _evolution_dom_var, {} ): 0;
@@ -900,6 +1118,7 @@ OCFEMOL::deriv_outputs_full
     }
     ptr.push_back( col.size() );
   }
+  if( _nsActive ){ std::vector<size_t> ident( ptr.size() - 1 );  for( size_t r = 0; r < ident.size(); ++r ) ident[r] = r;  _contract_csr_rows_only( ptr, col, val, ident, ident.size() ); }
   return true;
 }
 
@@ -911,12 +1130,12 @@ OCFEMOL::deriv_residual
   // the xc columns of the full derivative, with t's column apart (one FAD code path)
   std::vector<size_t> P, C;  std::vector<double> V;
   if( !deriv_residual_full( t, xc, nullptr, rc, P, C, V ) ) return false;
-  size_t const tc = _nCollVar + ( _nCollInp? pos_input( _evolution_dom_var, {} ): 0 );
+  size_t const nred = n_reduced(), tc = nred + ( _nCollInp? pos_input( _evolution_dom_var, {} ): 0 );
   jac_ptr.assign( 1, 0 ); jac_col.clear(); jac_val.clear();
   for( size_t r = 0; r + 1 < P.size(); ++r ){
     if( drdt ) drdt[r] = 0.;
     for( size_t k = P[r]; k < P[r+1]; ++k ){
-      if( C[k] < _nCollVar ){ jac_col.push_back( C[k] ); jac_val.push_back( V[k] ); }
+      if( C[k] < nred ){ jac_col.push_back( C[k] ); jac_val.push_back( V[k] ); }
       else if( drdt && _nCollInp && C[k] == tc ) drdt[r] = V[k];
     }
     jac_ptr.push_back( jac_col.size() );
@@ -982,7 +1201,12 @@ OCFEMOL::init_seed
 {
   if( !_shape.ran || !xc ) return false;
   std::vector<double> inp( _nCollInp, 0. );
-  _init_reference( xc, _nCollInp? inp.data(): nullptr, _vCstVal.empty()? nullptr: _vCstVal.data() );
+  if( !_nsActive ) _init_reference( xc, _nCollInp? inp.data(): nullptr, _vCstVal.empty()? nullptr: _vCstVal.data() );
+  else{                                                          // the base fills the FULL layout: take the representatives
+    std::vector<double> full( _nCollVar, 0. );
+    _init_reference( full.data(), _nCollInp? inp.data(): nullptr, _vCstVal.empty()? nullptr: _vCstVal.data() );
+    for( size_t c = 0; c < _nCollVar; ++c ) if( _nsCol[c] != std::string::npos ) xc[ _nsCol[c] ] = full[c];
+  }
   std::vector<double> ini( _iniStream.size() );
   std::vector<size_t> ptr, col; std::vector<double> val;
   for( int sweep = 0; sweep < 8; ++sweep ){
@@ -1455,7 +1679,7 @@ OCFEMOL::_audit_initial_coverage
     if( itv == _mVar.end() || itb == _blkVar.end() ) continue;
     auto const& var_dom = itv->second;  auto const& blk_dim = std::get<2>( itb->second );
     if( var_dom.empty() ){                            // a lumped state (no spatial direction): one node
-      size_t const col = pos_state( x, {} );
+      size_t const colFull0 = pos_state( x, {} ), col = _nsActive? _nsCol[ colFull0 ]: colFull0;
       bool const diff = col < _colDiff.size() && _colDiff[col];
       bool covered = false;
       for( size_t q = 0; q < _iniEqn.size() && !covered; ++q ) covered = ini_dep[q].dep().count( x.id().second ) > 0;
@@ -1465,7 +1689,7 @@ OCFEMOL::_audit_initial_coverage
           if( !ini_dep[q].dep().count( x.id().second ) ) continue;
           t_IniEntry e; e.row = q; e.target = col; e.dropped = !diff;
           for( auto const& y : _peel.states ) if( ini_dep[q].dep().count( y.id().second ) && _mVar.count( y ) && _mVar.at( y ).empty() )
-            e.cols.emplace_back( y, pos_state( y, {} ) );
+            { size_t const cy = pos_state( y, {} );  e.cols.emplace_back( y, _nsActive? _nsCol[ cy ]: cy ); }
           for( auto const& [w, wdom] : _mInp ){                         // the lumped inputs it reads
             if( ( _evolution_dom_set && w.id() == _evolution_dom_var.id() ) || !ini_dep[q].dep().count( w.id().second ) ) continue;
             if( wdom.empty() ) e.icols.emplace_back( w, std::vector< std::pair<size_t,double> >{ { pos_input( w, {} ), 1. } } );
@@ -1486,8 +1710,9 @@ OCFEMOL::_audit_initial_coverage
     while( true ){
       // the column
       std::map<FFVar,size_t,lt_FFVar> ndx_el;  for( size_t d = 0; d < dirs.size(); ++d ) ndx_el[dirs[d]] = iel[d];
-      size_t col = pos_state( x, ndx_el ), stride = 1;
-      for( size_t d = 0; d < dirs.size(); ++d ){ col += ind[d] * stride; stride *= nnd[d]; }
+      size_t colFull = pos_state( x, ndx_el ), stride = 1;
+      for( size_t d = 0; d < dirs.size(); ++d ){ colFull += ind[d] * stride; stride *= nnd[d]; }
+      size_t const col = _nsActive? _nsCol[ colFull ]: colFull;            // the reduced column, when multipliers were eliminated
       bool const diff = col < _colDiff.size() && _colDiff[col];
       // INITIAL coverage: a row reading x whose mask along every direction admits this node
       bool covered = false;
@@ -1528,7 +1753,8 @@ OCFEMOL::_audit_initial_coverage
             if( !ini_dep[q].dep().count( y.id().second ) ) continue;
             auto ity = _mVar.find( y ); auto itby = _blkVar.find( y );
             if( ity == _mVar.end() || itby == _blkVar.end() || ity->second != var_dom ) continue;   // same grid only
-            e.cols.emplace_back( y, pos_state( y, ndx_el ) + ( col - pos_state( x, ndx_el ) ) );
+            size_t const cy = pos_state( y, ndx_el ) + ( colFull - pos_state( x, ndx_el ) );
+            e.cols.emplace_back( y, _nsActive? _nsCol[ cy ]: cy );
           }
           // the inputs it reads, at the node (see over_row_dirs / at_node).  Refusals are reported once per (row, input).
           for( auto const& [w, wdom] : _mInp ){
@@ -1562,6 +1788,12 @@ OCFEMOL::_audit_initial_coverage
       os << "OCFEMOL::setup [mol] DOF audit: differential field " << x << " has " << n_missing << " node(s) with no INITIAL row\n";
       bad += n_missing;
     }
+  }
+  if( _nsActive ){                                               // merged copies: one INITIAL condition per merged unknown
+    std::set<size_t> seen;  std::vector<t_IniEntry> kept;  size_t dup = 0;
+    for( auto& e : _iniStream ){ if( !seen.insert( e.target ).second ){ ++dup;  if( e.dropped ) --_shape.n_ini_dropped; else --_shape.n_ini_stream;  continue; }  kept.push_back( std::move( e ) ); }
+    _iniStream = std::move( kept );
+    if( dup ) os << "OCFEMOL::setup [mol] Ini stream: " << dup << " INITIAL condition(s) at merged copies dropped (one per merged unknown)\n";
   }
   return bad;
 }

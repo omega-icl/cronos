@@ -298,6 +298,36 @@ int main()
       check( "reduced-by-hand: the Ini stream covers u's differential nodes", S.n_ini_stream == S.n_diff_cols );
     }
   }
+  // ---- G2. the STRUCTURAL INDEX of the semi-discrete system (8 Nov 2026): the plan's multipliers can raise it.  The
+  //      rod u_t = D u_zz under IC_TRACE: at every interface the value-continuity multiplier enters only the two copies'
+  //      differential rows and its constraint reads differential unknowns only -- the Hessenberg index-2 form; the
+  //      algebraic block of Rc's pattern has structural rank 19 of 21; the null-space elimination merges the two copies
+  //      and sums their rows (the multiplier cancels), 30 unknowns and index 1 result.  Under IC_STRONG one copy's PDE
+  //      row is replaced by the constraint, that copy is algebraic and pinned: index 1.  IC_WEAK under MoL takes the
+  //      energy-stable SAT form (the legacy one gives the semi-discrete operator a growing mode; see OCFEBASE::_sat_strength).
+  {
+    std::cout << "\n  G2. structural index of the semi-discrete system: the rod under IC_STRONG and IC_TRACE\n";
+    for( int imp = 0; imp < 3; ++imp ){
+      FFGraph G; OCFEMOL oc( &G ); FFPartial OpP;
+      FFVar t = G.add_var("t"), z = G.add_var("z"), u = G.add_var("u");
+      oc.add_domain( t, FFDom( 0., 1., 2, FFDom::LGR, 3 ) ); oc.add_domain( z, FFDom( 0., 1., 3, FFDom::LGL, 5 ) );
+      oc.set_evolution_domain( t ); oc.add_state( u, {t,z} ); oc.update_ref( u, 0.5 );
+      int const TI = FFDom::ALL - FFDom::LB, ZI = FFDom::ALL - FFDom::LB - FFDom::UB;
+      OCFEMOL::EqnOptions io( OCFEMOL::EqnRole::INTERIOR, 0 ), ib( OCFEMOL::EqnRole::BOUNDARY, 0 ), ii( OCFEMOL::EqnRole::INITIAL, 0 );
+      oc.add_equation( OpP(u,t) - 0.1*OpP(OpP(u,z),z), {t,z}, {TI, ZI}, io );
+      oc.add_equation( u, {t,z}, {TI, FFDom::LB}, ib ); oc.add_equation( OpP(u,z), {t,z}, {TI, FFDom::UB}, ib );
+      oc.add_equation( u - sin( 0.5*M_PI*z ), {t,z}, {FFDom::LB, FFDom::ALL}, ii );
+      oc.options.INTERFACE.IMPOSITION = imp == 0? OCFEMOL::Options::IC_STRONG: imp == 1? OCFEMOL::Options::IC_TRACE: OCFEMOL::Options::IC_WEAK;
+      oc.options.INTERFACE.SAT_SIGMA0 = 10.;  oc.options.DISPLAY_LEVEL = 0;
+      bool const ok = oc.setup();
+      auto const& SD = oc.semi_discrete();
+      if( imp == 0 ) check( "rod, IC_STRONG: index 1 -- the algebraic block of full structural rank, no multipliers", ok && SD.n_alg_rank == SD.n_alg_rows && SD.n_tau == 0 );
+      else if( imp == 1 ) check( "rod, IC_TRACE: the 2 value multipliers (index 2) eliminated by null space -- 30 unknowns, 2 flux multipliers kept, index 1",
+                                 ok && SD.n_states == 30 && SD.n_tau == 2 && SD.n_alg_rank == SD.n_alg_rows );
+      else check( "rod, IC_WEAK: the energy-stable SAT form taken under MoL (the legacy form's growing mode), index 1",
+                  ok && oc.options.INTERFACE.SAT_FORM == OCFEMOL::Options::SAT_ENERGY && SD.n_alg_rank == SD.n_alg_rows );
+    }
+  }
   // ---- H. the same index-2 PDE, AUTOMATIC reduction (IMPOSITION.REDUCE_HIGH_INDEX): an experiment, reported, not asserted
   {
     std::cout << "\n  H. index-2 PDE with IMPOSITION.REDUCE_HIGH_INDEX (experiment)\n";

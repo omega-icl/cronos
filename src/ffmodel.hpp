@@ -18,6 +18,7 @@
 // FFIntegral, FFEval) and the OCVar arithmetic they dispatch on; FFModel itself holds no
 // discretisation state -- no mesh, no basis, no FFDom member, no collocation call.
 #include <mutex>
+#include <algorithm>
 #include "ocbase.hpp"
 #if defined(__unix__) || defined(__APPLE__)
 # include <dlfcn.h>     // dlsym: the run-time thread setters (_thread_hooks)
@@ -999,6 +1000,7 @@ public:
     size_t free         = 0;   //!< differential - hidden: what may be chosen
     size_t redundant    = 0;   //!< declared - free, when more is declared than may be chosen
     bool   materialised = false; //!< whether the hidden levels were materialised as rows (REDUCE.HIDDEN_IC)
+    size_t set_aside    = 0;   //!< declared rows IMPLIED by the materialised levels, set aside (see initial_set_aside())
     bool   reduced      = false;
   };
 
@@ -1183,6 +1185,11 @@ protected:
   //! rows of the model, so nothing imposes them anywhere else.  Kept because a consumer that breaks a
   //! state's continuity at a stop has no other way to tell whether its jump left the manifold.
   std::vector<FFVar>                 _mHidLvl;
+  //! Declared INITIAL rows IMPLIED by the materialised hidden constraint levels at the initial point, set aside by
+  //! _set_aside_implied_initial() (8 Nov 2026): the reduced model is then balanced, and a solver checks each of these
+  //! against its solution (OCFESLV::initial_consistency_defect) instead of over-determining the initial point.
+  std::vector<t_Eqn>                 _mIniSetAside;
+  size_t                             _iniNarrowed = 0;   //!< declared INITIAL rows narrowed, not set aside (see there)
 
 public:
 
@@ -2189,6 +2196,24 @@ public:
     { mod.report( os ); return os; }
 
   //! @brief The account of the model's initial data after the last setup() (see t_InitialData).
+  //! @brief The expression of @p v in @p g as text (160 characters at most): for messages.
+  static std::string _expr_text( FFGraph* g, FFVar const& v )
+    {
+      std::string e = v.name();
+      if( g ) try{
+        FFSubgraph sg = g->subgraph( 1, &v );
+        std::vector<FFExpr> const ex = FFExpr::subgraph( g, sg );
+        if( !ex.empty() ){ std::ostringstream o; o << ex[0]; e = o.str(); }
+      }
+      catch( ... ){}
+      return e.size() > 160? e.substr( 0, 157 ) + "...": e;
+    }
+  //! @brief The declared INITIAL rows the high-index reduction found IMPLIED by its materialised hidden constraints at
+  //! the initial point and set aside -- each as declared; a solver reports their consistency with its solution.
+  std::vector<t_Eqn> const& initial_set_aside
+    ()
+    const
+    { return _mIniSetAside; }
   t_InitialData const& initial_data
     ()
     const
@@ -3484,6 +3509,8 @@ protected:
   //! @brief Stage-2 execution layer: realise _reductionPlan by differentiating
   //! the flagged interior constraints in place (FAD chain-rule + pure-RHS subst).
   bool _reduce_high_index();
+  //! @brief Set aside the declared INITIAL rows implied by the materialised hidden constraint levels (see _mIniSetAside).
+  void _set_aside_implied_initial();
 
 
 protected:
@@ -11549,6 +11576,9 @@ const
        << " state(s) differentiated in the evolution direction; the reduction implies " << I.hidden
        << " hidden\n  constraint level(s) at the initial point, so only " << I.free
        << " of the initial values may be CHOSEN.\n";
+    if( I.set_aside )
+      os << "  " << I.set_aside << " declared row(s) IMPLIED by the materialised hidden constraint(s) were SET ASIDE;"
+            " a solver checks them against\n  its solution (OCFESLV::initial_consistency_defect).\n";
     if( I.redundant && I.materialised )
       os << "  the " << I.hidden << " hidden constraint level(s) were MATERIALISED as INITIAL rows at the initial"
             " point (REDUCE.HIDDEN_IC);\n  " << I.redundant << " declared row(s) are REDUNDANT with them: the initial"
@@ -11686,10 +11716,123 @@ FFModel::_collect_findings
           : std::string( "so they must be consistent with constraints this model does not enforce" ) ) } );
 }
 inline void
+FFModel::_set_aside_implied_initial
+()
+{
+  // A high-index reduction materialises its hidden constraint levels as INITIAL rows at the initial point; a declared
+  // INITIAL row that pins nothing those levels leave free is IMPLIED by them (OCFE_PDE20b: x' = y, 0 = x - a(t), the
+  // declared x(0) = a(0) duplicating the materialised x - a(t0)) and over-determined the initial point, which the DOF
+  // audit refused.  The rule is a maximum matching of the INITIAL rows to the differential states, the materialised
+  // levels first (exact, they must hold), then the declared rows in their order: a declared row left unmatched is set
+  // aside -- exactly declared - free of them -- and its consistency with the solution is checked by the solver.
+  _mIniSetAside.clear();  _iniNarrowed = 0;
+  if( !options.REDUCE.HIDDEN_IC || _mHidLvl.empty() || _reductionPlan.assigns.empty() || !_evolution_dom_set ) return;
+  std::set<FFVar::pt_idVar> hid;  for( auto const& g : _mHidLvl ) hid.insert( g.id() );
+  std::map<FFVar::pt_idVar,size_t> colOf;                         // the differential states: the free initial data
+  for( auto const& eqn : _mEqn ){
+    auto sg = _dag->subgraph( 1, &eqn.var );
+    for( auto const& op : sg.l_op ){
+      auto const* pop = op? mc::type_cast<FFPartial const>( op ): nullptr;
+      if( !pop ) continue;
+      for( auto const* operand : op->varin ){
+        if( !operand || _mVar.find( *operand ) == _mVar.end() ) continue;
+        for( auto const& [iv, ord] : pop->Indep().expr )
+          if( iv.id() == _evolution_dom_var.id() && !colOf.count( operand->id() ) ){ size_t const k = colOf.size();  colOf[ operand->id() ] = k; }
+      }
+    }
+  }
+  // which INITIAL rows are the MATERIALISED levels: not by node identity -- a declared row identical to a level is the
+  // same DAG node (OCFE_PDE20b's x(0) = a(0) is x - a(t), as its constraint) -- but by count: the levels are appended
+  // after the declared rows, so the LAST k INITIAL rows on a level's node are its k materialised copies
+  std::map<FFVar::pt_idVar,size_t> quota;  for( auto const& g : _mHidLvl ) ++quota[ g.id() ];
+  std::vector<bool> isHid( _mEqn.size(), false );
+  for( size_t i = _mEqn.size(); i-- > 0; ){
+    auto const& e = _mEqn[i];
+    if( !e.opt || e.opt->role != EqnRole::INITIAL ) continue;
+    auto it = quota.find( e.var.id() );
+    if( it != quota.end() && it->second > 0 ){ isHid[i] = true;  --it->second; }
+  }
+  std::vector<size_t> rows;                                       // INITIAL rows: the materialised levels first
+  for( int pass = 0; pass < 2; ++pass )
+    for( size_t i = 0; i < _mEqn.size(); ++i ){
+      auto const& e = _mEqn[i];
+      if( !e.opt || e.opt->role != EqnRole::INITIAL ) continue;
+      if( isHid[i] == ( pass == 0 ) ) rows.push_back( i );
+    }
+  std::vector< std::vector<size_t> > adj( rows.size() );
+  for( size_t k = 0; k < rows.size(); ++k ){
+    auto sg = _dag->subgraph( 1, &_mEqn[ rows[k] ].var );
+    for( auto const* v : sg.v_indep ){ auto it = v? colOf.find( v->id() ): colOf.end();  if( it != colOf.end() ) adj[k].push_back( it->second ); }
+  }
+  std::vector<long> mcol( colOf.size(), -1 );
+  std::function<bool(size_t,std::vector<bool>&)> aug = [&]( size_t k, std::vector<bool>& seen ){
+    for( size_t c : adj[k] ){ if( seen[c] ) continue;  seen[c] = true;
+      if( mcol[c] < 0 || aug( (size_t)mcol[c], seen ) ){ mcol[c] = (long)k;  return true; } }
+    return false; };
+  // COVERAGE (8 Nov 2026, OCFE_PDE39b): a row covers the nodes its masks admit, and a declared INITIAL row may cover
+  // MORE than the level implying it -- IC_c on every z node, the level from an EOS row absent at z = LB where a
+  // boundary row holds: setting the whole row aside lost that node (18 rows removed for a surplus of 17).  So a
+  // declared row with the same coverage as its level is set aside; one covering more in a single direction is NARROWED
+  // to the nodes the level leaves free; any other mismatch is left to the DOF audit.  Masks are not bit flags (ALL 0,
+  // LB -1, UB -2, ALL - X "all but X"): through the node classes they cover, 1 LB face, 2 interior, 4 UB face.
+  auto nodes = []( int m ) -> int {
+    int n = 0;
+    if( m == FFDom::ALL || m == FFDom::LB || m == FFDom::ALL - FFDom::UB ) n |= 1;
+    if( m == FFDom::ALL || m == FFDom::UB || m == FFDom::ALL - FFDom::LB ) n |= 4;
+    if( m == FFDom::ALL || m == FFDom::ALL - FFDom::LB || m == FFDom::ALL - FFDom::UB || m == FFDom::ALL - FFDom::LB - FFDom::UB ) n |= 2;
+    return n; };
+  auto mask_of = []( int n, int& m ) -> bool {
+    switch( n ){ case 7: m = FFDom::ALL; return true;  case 1: m = FFDom::LB; return true;  case 4: m = FFDom::UB; return true;
+                 case 6: m = FFDom::ALL - FFDom::LB; return true;  case 3: m = FFDom::ALL - FFDom::UB; return true;
+                 case 2: m = FFDom::ALL - FFDom::LB - FFDom::UB; return true;  default: return false; } };
+  std::vector<size_t> drop;
+  for( size_t k = 0; k < rows.size(); ++k ){
+    std::vector<bool> seen( colOf.size(), false );
+    if( aug( k, seen ) ) continue;
+    if( isHid[ rows[k] ] ) return;                                 // a materialised level unmatched: leave it all to the audit
+    // the level implying it: a materialised row reading one of the states this row reads
+    long lev = -1;
+    for( size_t h = 0; h < rows.size() && lev < 0; ++h ){
+      if( !isHid[ rows[h] ] ) continue;
+      for( size_t c : adj[h] ) if( std::find( adj[k].begin(), adj[k].end(), c ) != adj[k].end() ){ lev = (long)rows[h];  break; }
+    }
+    if( lev < 0 ) continue;
+    auto& decl = _mEqn[ rows[k] ].dom;  auto const& hdom = _mEqn[ lev ].dom;
+    FFVar dstar;  int ndiff = 0;  bool ok = decl.size() == hdom.size();
+    for( auto const& [dv, m] : decl ){
+      auto ith = hdom.find( dv );
+      if( ith == hdom.end() ){ ok = false;  break; }
+      if( nodes( m ) != nodes( ith->second ) ){ ++ndiff;  dstar = dv; }
+    }
+    if( !ok || ndiff > 1 ) continue;                               // left to the audit
+    if( ndiff == 0 ){ drop.push_back( rows[k] );  continue; }       // the same coverage: set aside
+    int const dn = nodes( decl.at( dstar ) ), hn = nodes( hdom.at( dstar ) ), keep = dn & ~hn;
+    int mk = 0;
+    if( ( hn & ~dn ) || !keep || !mask_of( keep, mk ) ) continue;    // not a strict superset, or no mask for the rest
+    decl[ dstar ] = mk;  ++_iniNarrowed;
+    if( options.DISPLAY_LEVEL >= 1 )
+      std::cerr << "FFModel::setup ** high-index reduction: the declared INITIAL row 0 = " << _expr_text( _dag, _mEqn[ rows[k] ].var )
+                << " is IMPLIED by the hidden constraint(s) at the initial point except where they are absent: NARROWED along "
+                << dstar.name() << " to the nodes they leave free\n";
+  }
+  if( drop.empty() ) return;
+  std::sort( drop.begin(), drop.end() );
+  for( auto it = drop.rbegin(); it != drop.rend(); ++it ){
+    _mIniSetAside.insert( _mIniSetAside.begin(), _mEqn[*it] );
+    if( options.DISPLAY_LEVEL >= 1 )
+      std::cerr << "FFModel::setup ** high-index reduction: the declared INITIAL row 0 = " << _expr_text( _dag, _mEqn[*it].var )
+                << " is IMPLIED by the hidden constraint(s) materialised at the initial point: set aside (its consistency"
+                   " with the solution is checked after a solve)\n";
+    _mEqn.erase( _mEqn.begin() + *it );
+  }
+}
+
+inline void
 FFModel::_audit_dof_balance
 ()
 {
   _initialData = t_InitialData();
+  _initialData.set_aside = _mIniSetAside.size();
   for( auto const& eqn : _mEqn )
     if( eqn.opt && eqn.opt->role == EqnRole::INITIAL ) ++_initialData.declared;
   for( auto const& a : _reductionPlan.assigns )
@@ -12007,6 +12150,7 @@ FFModel::setup
 
 
   // Solver: counts, dependency map, interface plan, collocated caches and audits.
+  _set_aside_implied_initial();
   _audit_dof_balance();
   _phase( "audit_dof_balance" );
 

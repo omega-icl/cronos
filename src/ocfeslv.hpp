@@ -1487,6 +1487,43 @@ public:
   double eval_solution
     ( FFVar const& state, t_Coord const& pt, t_Side const* side=nullptr ) const;
 
+  //! @brief The consistency of the declared INITIAL rows the high-index reduction SET ASIDE as implied by its
+  //! materialised hidden constraints (FFModel::initial_set_aside): the largest |row| at the initial point of the last
+  //! solve, each row evaluated with the states' values there.  A row reading anything but lumped states, the
+  //! evolution variable and constants is not checked (*nchecked counts those that are).  0 when nothing was set aside.
+  double initial_consistency_defect
+    ( size_t* nchecked = nullptr, std::string* worst = nullptr ) const
+    {
+      double dmax = 0.;  size_t nc = 0;
+      if( nchecked ) *nchecked = 0;
+      if( initial_set_aside().empty() || !_evolution_dom_set ) return 0.;
+      auto itd = _mDom.find( _evolution_dom_var );  if( itd == _mDom.end() ) return 0.;
+      double const t0 = itd->second.lo_dom;
+      for( auto const& e : initial_set_aside() ){
+        auto sg = _dag->subgraph( 1, &e.var );
+        std::vector<FFVar> vars;  std::vector<double> vals;  bool ok = true;
+        for( auto const* v : sg.v_indep ){
+          if( !v ) continue;
+          if( v->id() == _evolution_dom_var.id() ){ vars.push_back( *v );  vals.push_back( t0 );  continue; }
+          auto itv = _mVar.find( *v );
+          if( itv != _mVar.end() ){
+            if( itv->second.size() != 1 || !itv->second.count( _evolution_dom_var ) ){ ok = false;  break; }   // lumped states only
+            vars.push_back( *v );  vals.push_back( eval_solution( *v, t_Coord{ { _evolution_dom_var, t0 } } ) );  continue;
+          }
+          size_t k = 0;  for( ; k < _vCst.size() && k < _vCstVal.size(); ++k ) if( _vCst[k].id() == v->id() ) break;
+          if( k < _vCst.size() && k < _vCstVal.size() ){ vars.push_back( *v );  vals.push_back( _vCstVal[k] );  continue; }
+          ok = false;  break;
+        }
+        if( !ok ) continue;
+        std::vector<double> r( 1, 0. );
+        _dag->eval( std::vector<FFVar>{ e.var }, r, vars, vals );
+        ++nc;
+        if( std::fabs( r[0] ) > dmax ){ dmax = std::fabs( r[0] );  if( worst ) *worst = _expr_text( _dag, e.var ); }
+      }
+      if( nchecked ) *nchecked = nc;
+      return dmax;
+    }
+
   protected:
 
   protected:
@@ -11449,6 +11486,14 @@ OCFESLV::solve
       throw std::invalid_argument( "OCFESLV::solve ** the values of " + u.name() + " could not be set\n" );
   // the solve fills the outputs itself (_valFct), with captures or accumulated over a march: never re-evaluated here
   _lastReport = solve( _valSta.data(), inp.empty()? nullptr: inp.data(), cst.empty()? nullptr: cst.data() );
+  if( _lastReport.converged && !initial_set_aside().empty() && options.DISPLAY_LEVEL >= 1 ){
+    size_t nc = 0;  std::string worst;
+    double const d = initial_consistency_defect( &nc, &worst );
+    if( nc && d > 1e-6 )
+      std::cerr << "OCFESLV::solve ** a declared initial condition set aside by the high-index reduction is NOT consistent"
+                   " with its hidden constraints: |0 = " << worst << "| = " << d << " at the initial point -- the hidden"
+                   " constraints hold there, the declared value does not\n";
+  }
   return _lastReport.converged? NORMAL: FAILURE;
 }
 

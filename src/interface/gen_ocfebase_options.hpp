@@ -42,6 +42,35 @@ bind_ocfebase_options(PyOpt& c)
       .value("IC_TRACE", mc::OCPlan::IMPOSITION_IC_TRACE,
              "OCPlan::IMPOSITION_IC_TRACE")
       .export_values();
+  py::enum_<mc::OCFEBASE::Options::SatForm>(
+      c, "SatForm",
+      "The form of the weak (SAT) interface terms of IC_WEAK (see "
+      "OCFEBASE::_sat_strength)")
+      .value("SAT_LEGACY", mc::OCFEBASE::Options::SAT_LEGACY,
+             "SAT_SIGMA0 * (n-1)^2 / w on both the value and the flux jumps -- "
+             "NOT energy-stable: a growing mode")
+      .value("SAT_ENERGY", mc::OCFEBASE::Options::SAT_ENERGY,
+             "the energy-stable interface fluxes of the summation-by-parts "
+             "estimate (see SAT_FLUX, SAT_PENALTY)")
+      .export_values();
+  py::enum_<mc::OCFEBASE::Options::SatFlux>(
+      c, "SatFlux",
+      "Under SAT_ENERGY, which interface flux. Measured 8 Nov 2026 (nodal "
+      "error, degrees 2..6): on u_t = D u_zz the alternating flux gives p+1 at "
+      "even degree and p at odd, the central flux with SAT_PENALTY = 1 p+1 at "
+      "odd and p-1 at even; on the PSA column (convection, Danckwerts inlet, "
+      "five fields) every variant is 20-25x behind IC_STRONG and the penalised "
+      "central flux fails to integrate -- so the default is the alternating "
+      "flux at every degree.")
+      .value("SAT_FLUX_AUTO", mc::OCFEBASE::Options::SAT_FLUX_AUTO,
+             "the default: ALTERNATING")
+      .value("SAT_FLUX_CENTRAL", mc::OCFEBASE::Options::SAT_FLUX_CENTRAL,
+             "BR1 lifting (1/2, 1/2); p+1 at odd degree on pure diffusion only "
+             "with SAT_PENALTY = 1")
+      .value("SAT_FLUX_ALTERNATING",
+             mc::OCFEBASE::Options::SAT_FLUX_ALTERNATING,
+             "LDG (value and flux from opposite sides)")
+      .export_values();
   py::enum_<mc::OCFEBASE::Options::InterfaceDropPolicy>(
       c, "InterfaceDropPolicy",
       "What setup() does with interface continuity claims the structural "
@@ -106,6 +135,26 @@ bind_ocfebase_options(PyOpt& c)
       "continuity) or CRONOS_SAT_SIGMA1 (C1). When classify_pde() has been "
       "called, the penalty is coupled through the principal symbol: sum_j "
       "A_d[k,j] * sigma * tau_d * Delta u_j.");
+  c_INTERFACE.def_readwrite(
+      "SAT_FORM", &mc::OCFEBASE::Options::t_Interface::SAT_FORM,
+      "The form of the SAT terms: SAT_LEGACY (the default on OCFESLV: as "
+      "accurate as IC_STRONG, its growing mode damped by Radau) or SAT_ENERGY "
+      "(stable under the method of lines, where it is used whatever this "
+      "says). The strength of every term is computed in one place, "
+      "OCFEBASE::_sat_strength.");
+  c_INTERFACE.def_readwrite(
+      "SAT_FLUX", &mc::OCFEBASE::Options::t_Interface::SAT_FLUX,
+      "Under SAT_ENERGY, the interface flux (SatFlux; default SAT_FLUX_AUTO). "
+      "Every choice is energy-stable; they differ in accuracy by the parity of "
+      "the degree -- see SatFlux.");
+  c_INTERFACE.def_readwrite(
+      "SAT_PENALTY", &mc::OCFEBASE::Options::t_Interface::SAT_PENALTY,
+      "Under SAT_ENERGY, the interior penalty on a field's value jump in its "
+      "PDE row, SAT_PENALTY / w_end. Default 0 (off). Dissipative for any "
+      "size; on pure diffusion the CENTRAL flux reaches p+1 at odd degree with "
+      "it at 1, and it is neutral under the alternating flux; on the PSA "
+      "column the penalised central flux fails to integrate. An opt-in for "
+      "diffusion-dominated models.");
   c_INTERFACE.def_readwrite(
       "DROP_POLICY", &mc::OCFEBASE::Options::t_Interface::DROP_POLICY,
       "Policy for the IC_TRACE/IC_STRONG redundant-continuity drop (item 10). "

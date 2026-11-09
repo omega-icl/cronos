@@ -21,6 +21,53 @@
   residual rather than once per output. The backward Jacobian is analytic (it was built by difference quotients),
   and the quadrature sensitivity integrands read the memoised evaluation. The PSA column at 480 states, one
   parameter, two outputs: `solve_fsens` 4.7 s -> 2.6 s, `solve_asens` 6.1 s -> 3.9 s, against 0.6 s for the solve.
+* **An energy-stable SAT form for IC_WEAK** (`INTERFACE.SAT_FORM = SAT_ENERGY`), alongside the legacy one, which stays
+  OCFESLV's default. The legacy SAT gives the semi-discrete operator a growing mode quadratic in `SAT_SIGMA0` -- the
+  value-jump penalty enters the auxiliary flux and the flux-jump penalty multiplies it (`+9.2e4` at 10 on the rod) --
+  damped on OCFESLV by Radau's L-stability, fatal to an integrator. The energy form is the summation-by-parts one:
+  the value jump lifted into the auxiliary's LINK row and the flux jump into the PDE row (`SAT_FLUX`: alternating by
+  default, central available), an upwind term for a constant-coefficient convective part, an optional interior
+  penalty (`SAT_PENALTY`, default 0). Every strength, legacy or energy, is computed in ONE function,
+  `OCFEBASE::_sat_strength`; the frozen interface plan records the form, flux and penalty. Under the method of lines
+  IC_WEAK takes the energy form whatever `SAT_FORM` says. Measured: stable for any penalty and either boundary
+  arrangement; on pure diffusion one order better than IC_STRONG at even degree; on convection-diffusion behind it
+  (2.6x at Peclet 10 on the rod, 20-25x on the PSA column) -- the open question. Gate `DAESLV_molsat`; G2 updated.
+* **High-index reduction: a declared initial condition IMPLIED by the materialised hidden constraints is set aside.**
+  With `REDUCE.HIDDEN_IC` the reduction materialises its hidden constraint levels as INITIAL rows at the initial
+  point; a declared row they already imply over-determined it (OCFE_PDE20b, `x' = y, 0 = x - a(t)` with `x(0) = a(0)`
+  declared: 13 rows for 12 unknowns, refused by the DOF audit -- the gate printed BASELINE since Stage 2). FFModel now
+  matches the INITIAL rows to the differential states, the materialised levels first, and sets aside the declared rows
+  left unmatched (`initial_set_aside()`, `initial_data().set_aside`) -- for every solver. Their consistency with the
+  solution is checked: `OCFESLV::initial_consistency_defect()`, and both OCFESLV and DAESLV warn at DISPLAY_LEVEL >= 1
+  when a declared value contradicts the hidden constraints (which hold). OCFE_PDE20b now passes (REDUCED:PASS, exact
+  to 7e-16); new gate OCFE_PDE20h -- consistent, inconsistent (defect 0.5 reported), and alongside free data (kept).
+  COVERAGE: a declared row covering MORE nodes than the level implying it (OCFE_PDE39b: IC_c on every z node, the level
+  from an EOS row absent at z = LB) is NARROWED to the nodes the level leaves free instead of set aside whole (which
+  removed one node too many: 215 rows for 216 unknowns); any other mismatch is left to the DOF audit. OCFE_PDE20e (B)
+  now gates this convention (it gated the opposite: the declared IC rejected as a surplus).
+* **MoL: null-space elimination of the plan's multipliers that raise the index** (phase 9, step 2). A multiplier the
+  structural check finds with no algebraic row -- entering exactly two differential rows with opposite equal weights,
+  its constraint a linear row `x_L - x_R = 0` on the two copies of a node -- is eliminated: the copies merged, their
+  rows summed (the multiplier cancels), the constraint row and the multiplier column dropped. Exact and drift-free;
+  applied as a layer, the base keeping its full layout and the integrator seeing the reduced unknowns. Keyed on the
+  finding, not the imposition: every value-continuity multiplier under `IC_TRACE`, and any `IC_STRONG` claim that
+  would land the same way; kept-explicit multipliers pinned by algebraic rows are left alone. On the rod under
+  `IC_TRACE` the merged operator's spectrum is `IC_STRONG`'s to every digit, and so are the solution and its
+  sensitivities. Anything else -- a nonlinear constraint, a multiplier joining more than two copies -- is refused by
+  name. Gate `DAESLV_molindex`; `DAESLV_molsetup` G2. The copies a multiplier joins are named by its CONSTRAINT, not by
+  its rows' masses: a balance row may carry several mass entries (the PSA column's c1 balance carries `F d_t q1`), and
+  only the constrained unknowns are merged. On that column under `IC_TRACE` (six value multipliers, five fields, a
+  nonlinear isotherm) the result equals `IC_STRONG` to 4e-11 on values and 4e-10 on forward and adjoint gradients.
+* **MoL: `IC_WEAK` refused** (step 3). Measured on the rod: index 1 and well conditioned, but the semi-discrete
+  operator has a growing mode, `Re lambda = +9.2e4` at `sigma = 10` and quadratic in the penalty, which the
+  integrator cannot step over; OCFESLV does not see it because Radau IIA damps it. An energy-stable SAT is an
+  OCFEBASE open item with its own OCFESLV sweep.
+* **MoL: the structural index of the semi-discrete system is checked at setup** (the MoL design's step 6, missing
+  until now): a maximum matching of the algebraic rows to the algebraic unknowns on `Rc`'s dependency pattern. Full:
+  index 1. Deficient: index >= 2, refused by name -- an interface multiplier minted by the plan with no algebraic row,
+  a constraint row reading differential unknowns only. Under `IC_TRACE` every value-continuity multiplier has that
+  form (the Hessenberg index-2 pattern; KINSOL's IC Jacobian singular); under `IC_STRONG` the replaced copy is
+  algebraic and pinned, index 1 -- verified on every MoL driver of the corpus. `semi_discrete().n_alg_rank` reports it.
 * **MoL: trajectory outputs.** An output distributed over `t` is, for each spatial row of its spatial part, an output
   distributed over `t` of the semi-discrete model: one value per stage time its mask selects, as the integrators
   take such an output; distributed over space too, one trajectory per spatial node, space-major.

@@ -19,8 +19,13 @@
 //
 // REDUCTION (Stage 2, the work this gate measures): differentiate ALG once,
 //   substitute the ODE for the state-derivative -> y - a'(t) = 0 pins y; replace
-//   ALG with that; keep the original ALG as the consistency IC (ICx already does).
-//   Result: square index-1 system solving to x=a(t), y=a'(t).
+//   ALG with that; the original ALG is MATERIALISED at t=0 as the consistency IC
+//   (REDUCE.HIDDEN_IC).  The declared ICx is then IMPLIED by it and SET ASIDE
+//   (FFModel::_set_aside_implied_initial, 8 Nov 2026; until then it over-determined
+//   the initial point -- 13 rows for 12 unknowns -- and this gate printed BASELINE),
+//   its consistency checked after the solve (OCFESLV::initial_consistency_defect).
+//   Result: square index-1 system solving to x=a(t), y=a'(t).  OCFE_PDE20h gates
+//   the set-aside itself: consistent, inconsistent, and alongside free data.
 //
 // GATE SEMANTICS (ADVERSARIAL seed x=1, y=0 -- NOT the exact solution):
 //   * Seeding the exact solution is a FALSE-PASS trap: y at the global LB is unpinned

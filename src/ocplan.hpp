@@ -381,6 +381,9 @@ public:
     int    interface_type  = IC_VALUE;
     double sat_sigma0      = 1.0;
     double sat_sigma1      = 1.0;
+    int    sat_form        = 0;     //!< OCFEBASE::Options::SatForm the SAT strengths were computed with
+    int    sat_flux        = 0;     //!< OCFEBASE::Options::SatFlux, likewise
+    double sat_penalty     = 0.0;   //!< OCFEBASE::Options::t_Interface::SAT_PENALTY, likewise
     double trace_tau_scale = 1.0;
   };
 

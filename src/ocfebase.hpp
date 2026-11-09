@@ -721,6 +721,21 @@ public:
     static constexpr ImpositionType IC_WEAK   = OCPlan::IMPOSITION_IC_WEAK;
     static constexpr ImpositionType IC_STRONG = OCPlan::IMPOSITION_IC_STRONG;
     static constexpr ImpositionType IC_TRACE  = OCPlan::IMPOSITION_IC_TRACE;
+    //! @brief The form of the weak (SAT) interface terms of IC_WEAK (see OCFEBASE::_sat_strength)
+    enum SatForm {
+      SAT_LEGACY = 0,  //!< SAT_SIGMA0 * (n-1)^2 / w on both the value and the flux jumps -- NOT energy-stable: a growing mode
+                       //!< quadratic in SAT_SIGMA0 (8 Nov 2026), damped on OCFESLV by Radau, fatal to the method of lines
+      SAT_ENERGY       //!< the energy-stable interface fluxes of the summation-by-parts estimate (see SAT_FLUX, SAT_PENALTY)
+    };
+    //! @brief Under SAT_ENERGY, which interface flux.  Measured 8 Nov 2026 (nodal error, degrees 2..6): on u_t = D u_zz
+    //! the alternating flux gives p+1 at even degree and p at odd, the central flux with SAT_PENALTY = 1 p+1 at odd and
+    //! p-1 at even; on the PSA column (convection, Danckwerts inlet, five fields) every variant is 20-25x behind IC_STRONG
+    //! and the penalised central flux fails to integrate -- so the default is the alternating flux at every degree.
+    enum SatFlux {
+      SAT_FLUX_AUTO = 0,     //!< the default: ALTERNATING
+      SAT_FLUX_CENTRAL,      //!< BR1 lifting (1/2, 1/2); p+1 at odd degree on pure diffusion only with SAT_PENALTY = 1
+      SAT_FLUX_ALTERNATING   //!< LDG (value and flux from opposite sides)
+    };
     //! @brief What setup() does with interface continuity claims the structural analysis finds redundant -- the
     //! values of INTERFACE.DROP_POLICY: drop and verify after the solve, re-derive what verification flags, or keep all.
     enum InterfaceDropPolicy
@@ -762,6 +777,18 @@ public:
       //! When classify_pde() has been called, the penalty is coupled
       //! through the principal symbol: sum_j A_d[k,j] * sigma * tau_d * Delta u_j.
       double SAT_SIGMA0;
+      //! @brief The form of the SAT terms: SAT_LEGACY (the default on OCFESLV: as accurate as IC_STRONG, its growing mode
+      //! damped by Radau) or SAT_ENERGY (stable under the method of lines, where it is used whatever this says).  The
+      //! strength of every term is computed in one place, OCFEBASE::_sat_strength.
+      SatForm SAT_FORM;
+      //! @brief Under SAT_ENERGY, the interface flux (SatFlux; default SAT_FLUX_AUTO).  Every choice is energy-stable;
+      //! they differ in accuracy by the parity of the degree -- see SatFlux.
+      SatFlux SAT_FLUX;
+      //! @brief Under SAT_ENERGY, the interior penalty on a field's value jump in its PDE row, SAT_PENALTY / w_end.
+      //! Default 0 (off).  Dissipative for any size; on pure diffusion the CENTRAL flux reaches p+1 at odd degree with it
+      //! at 1, and it is neutral under the alternating flux; on the PSA column the penalised central flux fails to
+      //! integrate.  An opt-in for diffusion-dominated models.
+      double SAT_PENALTY;
       //! @brief Policy for the IC_TRACE/IC_STRONG redundant-continuity drop
       //! (item 10).  DROP_VERIFY keeps the structural receiver-B drop and treats a
       //! post-solve over-drop (verify_interface_drop) as a hard failure.
@@ -884,6 +911,9 @@ public:
         INTERFACE.IMPOSITION     = opt.INTERFACE.IMPOSITION;
         INTERFACE.DROP_POLICY = opt.INTERFACE.DROP_POLICY;
         INTERFACE.SAT_SIGMA0          = opt.INTERFACE.SAT_SIGMA0;
+        INTERFACE.SAT_FORM            = opt.INTERFACE.SAT_FORM;
+        INTERFACE.SAT_FLUX            = opt.INTERFACE.SAT_FLUX;
+        INTERFACE.SAT_PENALTY         = opt.INTERFACE.SAT_PENALTY;
         INTERFACE.TRACE_TAU_SCALE     = opt.INTERFACE.TRACE_TAU_SCALE;
         OUTPUT.GRID_POLICY  = opt.OUTPUT.GRID_POLICY;
         AUDIT.EQN_LEGEND    = opt.AUDIT.EQN_LEGEND;
@@ -925,6 +955,9 @@ public:
         INTERFACE.IMPOSITION     = IC_STRONG;  // since 2026-10-06 (formerly IC_WEAK): exact continuity rows
         INTERFACE.DROP_POLICY = DROP_OFF;      // since 2026-10-14 (was DROP_VERIFY); see the field doc
         INTERFACE.SAT_SIGMA0          = 10.0;
+        INTERFACE.SAT_FORM            = SAT_LEGACY;
+        INTERFACE.SAT_FLUX            = SAT_FLUX_AUTO;
+        INTERFACE.SAT_PENALTY         = 0.0;
         INTERFACE.TRACE_TAU_SCALE     = 1.0;
         OUTPUT.GRID_POLICY  = OUT_ELEMENT_LOCAL;
         {
@@ -2796,6 +2829,51 @@ protected:
     { double const nm1 = static_cast<double>( dom.n_node - 1 );
       double const w   = _sat_iface_width( dom, iel_lo );
       return ( w > 0. ) ? ( nm1 * nm1 / w ) : 0.; }
+  //! @brief Whether the state of index @p state_id is an AUXILIARY (an order-reduction flux): see _sat_strength.
+  bool _is_aux_state_id
+    ( size_t const state_id )
+    const
+    { for( auto const& id : _auxVarID ) if( static_cast<size_t>( id.second ) == state_id ) return true;  return false; }
+  //! @brief THE STRENGTH of a weak (SAT) interface term on the face between elements @p iel_lo and @p iel_lo + 1 of
+  //! @p dom, for a claim of @p kind received in element @p receiver_iel -- before the term's coupling and orientation.
+  //! The one place it is computed (8 Nov 2026): every consumer calls this.
+  //!   SAT_LEGACY: SAT_SIGMA0 (n-1)^2 / w_face for a value (C0) claim, SAT_SIGMA1 (n-1)^2 / w_face^2 for a C1 claim.
+  //!   SAT_ENERGY: +-1 / (2 w_end), w_end the end-node quadrature weight of the RECEIVING element -- the central (BR1)
+  //!     flux: the value jump of a field lifted into its auxiliary's LINK row (sign -, @p claim_on_aux false) and the
+  //!     jump of the auxiliary flux into the PDE row (sign +, @p claim_on_aux true), each at half weight.  Only their
+  //!     RELATIVE sign matters, and it is what makes the indefinite cross terms of the energy estimate cancel: measured
+  //!     on the rod u_t = 0.1 u_zz (3 elements of LGL(5)) the same signs give a growing mode +453, opposite signs the
+  //!     stable spectrum [-233, -0.2467], its slowest mode -D (pi/2)^2 to the digit, independent of SAT_SIGMA0.
+  //!     Conservative: each side scaled by its own weight.  Derived for the flux form of second-order operators.
+  //!   SAT_ENERGY, @p penalty: the INTERIOR PENALTY on a field's value jump received in its PDE row (alongside the
+  //!     lifting into its auxiliary's LINK row): SAT_SIGMA0 / w_end of the receiving element.
+  //!   SAT_ENERGY, @p upwind != 0: the UPWIND term of a field's first-order (convective) part, coefficient @p upwind =
+  //!     dR/d(d_z c) of its PDE row, received at the INFLOW copy only: |upwind| / w_end of the receiving element.
+  double _sat_strength
+    ( FFDom const& dom, size_t const iel_lo, size_t const kind, size_t const receiver_iel, bool const claim_on_aux,
+      bool const penalty = false, double const upwind = 0. )
+    const
+    {
+      if( options.INTERFACE.SAT_FORM == Options::SAT_ENERGY ){
+        auto const& w = dom.lgweights();
+        double sw = 0.;  for( double v : w ) sw += v;
+        if( w.empty() || sw <= 0. || receiver_iel >= dom.n_elem ) return 0.;
+        double const wend = w.front() * dom.elem_width( receiver_iel ) / sw;
+        if( upwind != 0. ) return wend > 0.? std::fabs( upwind ) / wend: 0.;   // dissipative with this sign: Pe 100 on the rod
+                                                                                // +0.14 -> -1.6; the other sign gives +70
+        if( penalty ) return wend > 0.? -options.INTERFACE.SAT_PENALTY / wend: 0.;   // dissipative for SAT_PENALTY > 0
+        bool const alternating = options.INTERFACE.SAT_FLUX != Options::SAT_FLUX_CENTRAL;
+        double const beta = alternating? 0.5: 0.;
+        double const side = receiver_iel == iel_lo? 1.: -1.;          // the receiver is the face's left element: +1
+        double const coef = claim_on_aux? 0.5 - beta*side: 0.5 + beta*side;
+        return wend > 0.? ( claim_on_aux? coef: -coef ) / wend: 0.;
+      }
+      if( kind == CLAIM_EXACT_C1 ){
+        double const iface_w = _sat_iface_width( dom, iel_lo );
+        return iface_w > 0.? _eff_sat_sigma1() * _sat_tau_face( dom, iel_lo ) / iface_w: 0.;
+      }
+      return _eff_sat_sigma0() * _sat_tau_face( dom, iel_lo );
+    }
 
   //! @brief Principal-symbol SAT coupling for (symbolic equation ndx, state
   //! _vVar[state_pos], domain dom).  Returns the cached classified coupling
@@ -8747,13 +8825,7 @@ OCFEBASE::_pack_plan_input
       for( auto const& kd : _mDom )
         if( static_cast<size_t>( kd.first.id().second ) == edge.claim_key.dom_id ){ face_dom = &kd.second; break; }
       double tf = 1.;
-      if( face_dom ){
-        tf = _eff_sat_sigma0() * _sat_tau_face( *face_dom, edge.claim_key.iel_lo );
-        if( edge.claim_key.kind == CLAIM_EXACT_C1 ){
-          double const iface_w = _sat_iface_width( *face_dom, edge.claim_key.iel_lo );
-          tf = ( iface_w > 0. ) ? ( _eff_sat_sigma1() * _sat_tau_face( *face_dom, edge.claim_key.iel_lo ) / iface_w ) : 0.;
-        }
-      }
+      if( face_dom ) tf = _sat_strength( *face_dom, edge.claim_key.iel_lo, edge.claim_key.kind, edge.receiver_iel, _is_aux_state_id( edge.claim_key.state_id ) );
       in.edge_trace_coeff.push_back( tf * edge.coupling * edge.orientation );
     }
     // Receiver row copies tagged with the DOF on their side.
@@ -9288,6 +9360,9 @@ OCFEBASE::_assert_frozen_interface_options_current() const
     // compare against the wrong number and either miss a rebuild or force a spurious one.
     || frozen.sat_sigma0      != _eff_sat_sigma0()
     || frozen.sat_sigma1      != _eff_sat_sigma1()
+    || frozen.sat_form        != static_cast<int>( options.INTERFACE.SAT_FORM )
+    || frozen.sat_flux        != static_cast<int>( options.INTERFACE.SAT_FLUX )
+    || frozen.sat_penalty     != options.INTERFACE.SAT_PENALTY
     || frozen.trace_tau_scale != options.INTERFACE.TRACE_TAU_SCALE;
 
   if( changed ){
@@ -9898,6 +9973,9 @@ OCFEBASE::_build_interface_plan_draft
   draft.options.interface_type  = static_cast<int>( options.INTERFACE.TYPE );
   draft.options.sat_sigma0      = _eff_sat_sigma0();   // rev51: record what the plan USES
   draft.options.sat_sigma1      = _eff_sat_sigma1();   // rev51: ditto
+  draft.options.sat_form        = static_cast<int>( options.INTERFACE.SAT_FORM );
+  draft.options.sat_flux        = static_cast<int>( options.INTERFACE.SAT_FLUX );
+  draft.options.sat_penalty     = options.INTERFACE.SAT_PENALTY;
   draft.options.trace_tau_scale = options.INTERFACE.TRACE_TAU_SCALE;
 
   bool const prev_build_allowed = _interfacePlanBuildAllowed;
@@ -10359,14 +10437,7 @@ OCFEBASE::_build_frozen_weak_sat_terms
 
     // rev51: _eff_sat_sigma0/1 apply the B1 audit override (CRONOS_SAT_SIGMA0/1) if set,
     // otherwise return options.INTERFACE.SAT_SIGMA0/1 unchanged.  This is the ONLY consumption site.
-    double tau = _eff_sat_sigma0() * _sat_tau_face( *face_dom, edge.claim_key.iel_lo );
-    if( term.uses_c1 ){
-      double const iface_w = _sat_iface_width( *face_dom, edge.claim_key.iel_lo );
-      tau = ( iface_w > 0. )
-          ? ( _eff_sat_sigma1() * _sat_tau_face( *face_dom, edge.claim_key.iel_lo )
-            / iface_w )
-          : 0.;
-    }
+    double const tau = _sat_strength( *face_dom, edge.claim_key.iel_lo, edge.claim_key.kind, edge.receiver_iel, _is_aux_state_id( edge.claim_key.state_id ) );
 
     term.prefactor = tau * term.coupling * term.orientation;   // (rev320: the IC_CONS flux-form branch retired)
     term.trace_prefactor = term.prefactor * options.INTERFACE.TRACE_TAU_SCALE;
@@ -10445,6 +10516,77 @@ OCFEBASE::_build_frozen_weak_sat_terms
     }
 
     draft.weak_sat_terms.push_back( term );
+  }
+
+  // SAT_ENERGY's INTERIOR PENALTY (8 Nov 2026): a field's value jump, lifted into its auxiliary's LINK row, is also
+  // received in the PDE row of the same node -- the row receiving that auxiliary's flux jump there -- with strength
+  // SAT_SIGMA0 / w_end (_sat_strength, penalty).  0 switches it off.
+  if( options.INTERFACE.IMPOSITION == Options::IC_WEAK && options.INTERFACE.SAT_FORM == Options::SAT_ENERGY && options.INTERFACE.SAT_PENALTY != 0. ){
+    size_t const nterm = draft.weak_sat_terms.size();  size_t nip = 0, nup = 0;
+    for( size_t i = 0; i < nterm; ++i ){
+      auto const tv = draft.weak_sat_terms[i];
+      if( _is_aux_state_id( tv.claim_key.state_id ) || tv.row_id >= _mEqn.size() ) continue;     // a value claim on a field ...
+      std::set<size_t> reads;                                     // ... received in a row reading an AUXILIARY: its LINK row
+      { FFVar const& lv = _mEqn[ tv.row_id ].var;  auto sg = _dag->subgraph( 1, &lv );
+        for( auto const* v : sg.v_indep ) if( v && _is_aux_state_id( static_cast<size_t>( v->id().second ) ) ) reads.insert( static_cast<size_t>( v->id().second ) ); }
+      if( reads.empty() ) continue;
+      for( size_t j = 0; j < nterm; ++j ){
+        auto const& tf = draft.weak_sat_terms[j];                // the flux claim of the auxiliary that row defines, same face and node
+        if( !reads.count( tf.claim_key.state_id ) || tf.claim_key.iel_lo != tv.claim_key.iel_lo || tf.receiver_dom_id != tv.receiver_dom_id
+         || tf.receiver_iel != tv.receiver_iel || tf.receiver_inode != tv.receiver_inode || tf.row_id == tv.row_id ) continue;
+        FFDom const* fd = dom_by_id( tv.claim_key.dom_id );
+        if( !fd ) break;
+        auto ip = tv;
+        ip.row_id = tf.row_id;  ip.receiver_flat = tf.receiver_flat;  ip.receiver_emit_flat = tf.receiver_emit_flat;
+        ip.receiver_block_el = tf.receiver_block_el;  ip.coupling = tf.coupling;
+        ip.prefactor = _sat_strength( *fd, tv.claim_key.iel_lo, tv.claim_key.kind, tv.receiver_iel, false, true ) * ip.coupling * tv.orientation;
+        ip.trace_prefactor = ip.prefactor * options.INTERFACE.TRACE_TAU_SCALE;  ip.trace_tau_allowed = false;
+        ip.sat_coeffs.clear();
+        if( !_sat_claim_coeffs( tv.claim_key, ip.prefactor, ip.sat_coeffs ) ) return false;
+        draft.weak_sat_terms.push_back( ip );  ++nip;
+        // the UPWIND term of the field's convective part (8 Nov 2026): the PDE row's coefficient of d_z c -- after the
+        // order reduction the row reads the auxiliary as a plain operand in the convective term and only through d_z in
+        // the diffusive one, so d(row)/d(aux) is that coefficient; it must be a constant -- received at the INFLOW copy
+        if( tf.row_id < _mEqn.size() ){
+          FFVar auxv;  bool found = false;
+          for( auto const& kv : _mVar ) if( static_cast<size_t>( kv.first.id().second ) == tf.claim_key.state_id ){ auxv = kv.first;  found = true;  break; }
+          if( found ){
+            std::vector<FFVar> dR;
+            try{                                                    // the d_z(aux) nodes become placeholders first: FAD has no rule for d_z
+              FFVar const row = _mEqn[ tf.row_id ].var;
+              std::vector<FFVar> targ, repl;
+              for( auto const* op : _dag->subgraph( 1, &row ).l_op )
+                if( op && mc::type_cast<FFPartial const>( op ) && !op->varin.empty() && op->varin[0] && op->varin[0]->id() == auxv.id() )
+                  for( auto const* vo : op->varout ) if( vo ){ targ.push_back( *vo );  repl.push_back( _dag->add_var( "sat_dz_" + std::to_string( targ.size() ) ) ); }
+              FFVar const plain = targ.empty()? row: _dag->substitute( std::vector<FFVar>{ row }, targ, repl )[0];
+              dR = _dag->FAD( std::vector<FFVar>{ plain }, std::vector<FFVar>{ auxv } );
+            } catch( ... ){ dR.clear(); }
+            if( dR.size() == 1 && !dR[0].cst() ){
+              std::cerr << "OCFESLV::setup ** SAT_ENERGY: the convective coefficient of " << state_name_of_id( tv.claim_key.state_id )
+                        << "'s PDE row is not a constant (" << _expr_text( _dag, dR[0] ) << "): its upwind interface term cannot be"
+                           " formed -- use IC_STRONG or IC_TRACE for this model" << std::endl;
+              return false;
+            }
+            double const U = dR.size() == 1? dR[0].num().val(): 0.;
+            bool const leftCopy = tv.receiver_iel == tv.claim_key.iel_lo;
+            bool const inflow = ( U > 0. && !leftCopy ) || ( U < 0. && leftCopy );
+            if( U != 0. && inflow ){
+              auto up = tv;
+              up.row_id = tf.row_id;  up.receiver_flat = tf.receiver_flat;  up.receiver_emit_flat = tf.receiver_emit_flat;
+              up.receiver_block_el = tf.receiver_block_el;  up.coupling = 1.;
+              up.prefactor = _sat_strength( *fd, tv.claim_key.iel_lo, tv.claim_key.kind, tv.receiver_iel, false, false, U ) * tv.orientation;
+              up.trace_prefactor = up.prefactor * options.INTERFACE.TRACE_TAU_SCALE;  up.trace_tau_allowed = false;
+              up.sat_coeffs.clear();
+              if( !_sat_claim_coeffs( tv.claim_key, up.prefactor, up.sat_coeffs ) ) return false;
+              draft.weak_sat_terms.push_back( up );  ++nup;
+            }
+          }
+        }
+        break;
+      }
+    }
+    _disp( 2 ) << "OCFESLV::setup ** PLAN: SAT_ENERGY interior penalty -- " << nip << " term(s), SAT_PENALTY = " << options.INTERFACE.SAT_PENALTY
+              << "; upwind convective term(s): " << nup << std::endl;
   }
 
   if( exact_nat )

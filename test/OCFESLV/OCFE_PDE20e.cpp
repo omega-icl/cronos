@@ -15,8 +15,8 @@
 //
 // CASES
 //   (A) nothing declared          -> the level pins x@LB; balance 0; audit clean; solve exact
-//   (B) one IC declared (x@LB)    -> SURPLUS 1: the count now SEES over-specified initial data,
-//                                    which the old convention could not (it was "the" correct IC)
+//   (B) one IC declared (x@LB)    -> IMPLIED by the materialised level and SET ASIDE (8 Nov 2026, his decision
+//                                    over the earlier rejection as a surplus): balanced, solved exactly
 //   (C) y pinned twice, x@LB gap, WITH THE SWITCH OFF -> genuine SQUARE rank deficiency; the audit
 //                                    still catches it.  The switch is off deliberately: with the
 //                                    levels materialised this model is merely non-square, so the
@@ -61,7 +61,7 @@ struct CaseResult
   bool   solve_conv  = false;
   double err_x = 0., err_y = 0.;
   std::string balance; bool balanced = false;
-  size_t declared = 0, free = 0, hidden = 0;
+  size_t declared = 0, free = 0, hidden = 0, set_aside = 0;
 };
 
 enum Spec { FREEDATA, OVERSPEC, DEFICIENT };
@@ -146,6 +146,7 @@ static CaseResult run_case( Spec spec, bool fatal, bool marching = false, bool h
   R.balance      = oc.dof_balance().str;
   R.balanced     = oc.dof_balance().balanced;
   R.declared     = oc.initial_data().declared;
+  R.set_aside    = oc.initial_data().set_aside;
   R.free         = oc.initial_data().free;
   R.hidden       = oc.initial_data().hidden;
 
@@ -203,7 +204,7 @@ int main()
   CaseResult A = run_case( FREEDATA, /*fatal=*/true );
   report( "A free data (none)", A );
 
-  std::cout << "\n---- (B) one IC declared: the count should see a SURPLUS ----------\n";
+  std::cout << "\n---- (B) one IC declared: implied by the level, SET ASIDE -----------\n";
   CaseResult B = run_case( OVERSPEC, /*fatal=*/true );
   report( "B over-specified", B );
 
@@ -224,10 +225,10 @@ int main()
                     A.free==0 && A.declared==0 && A.hidden==1 &&
                     A.audit_ran && A.audit_ok && A.audit_def==0 &&
                     A.solved && A.err_x < 1e-8 && A.err_y < 1e-8;
-  // B: the count sees it (+1) AND the existing DOF audit rejects it as non-square -- the check the
-  // old convention could not make, since one IC per differential variable WAS the correct declaration.
-  bool const B_surplus = ( B.balance == "1" ) && !B.balanced && B.declared==1 && B.free==0
-                         && !B.setup_ok && !B.audit_square && !B.solved;
+  // B: the declared x@LB is implied by the materialised level: set aside, the model balanced, solved exactly.
+  // (Until 8 Nov 2026 this gated the opposite: the count saw a SURPLUS and the audit rejected the model.)
+  bool const B_surplus = B.set_aside==1 && B.declared==0 && B.free==0 && B.balanced
+                         && B.setup_ok && B.solved && B.err_x < 1e-8 && B.err_y < 1e-8;
   bool const C_rejected = !C.setup_ok && C.status_inconsistent && C.reduced &&
                           C.audit_ran && C.audit_square && C.audit_def==1 && !C.solved;
   bool const D_warned = D.setup_ok && !D.status_inconsistent && D.reduced &&
@@ -238,13 +239,13 @@ int main()
 
   std::cout << "\n==================== verdict ====================\n";
   std::cout << "  (A) nothing declared -> level pins x@LB, balance 0, exact         : " << (A_ok?"yes":"NO") << "\n";
-  std::cout << "  (B) one IC declared  -> reported SURPLUS of 1                     : " << (B_surplus?"yes":"NO") << "\n";
+  std::cout << "  (B) one IC declared  -> implied, set aside, solved exactly        : " << (B_surplus?"yes":"NO") << "\n";
   std::cout << "  (C) square+singular  -> deficiency 1, setup REJECTED (switch off) : " << (C_rejected?"yes":"NO") << "\n";
   std::cout << "  (D) square+singular  -> opt-out warns + proceeds, answer wrong    : " << (D_warned?"yes":"NO") << "\n";
   std::cout << "  (E) marched          -> invariant re-imposed per window, exact    : " << (E_ok?"yes":"NO") << "\n";
   bool const pass = A_ok && B_surplus && C_rejected && D_warned && E_ok;
   std::cout << "\n  ==> " << ( pass
-        ? "INITIAL-DATA:PASS (free-data convention: the levels pin the model, a declared IC is a surplus,"
+        ? "INITIAL-DATA:PASS (free-data convention: the levels pin the model, a declared IC they imply is set aside,"
           " a genuine deficiency is still caught, and marching re-imposes the invariant)"
         : "INITIAL-DATA:FAIL (did not behave as expected -- read the per-case report above)" ) << "\n";
   return pass ? 0 : 1;

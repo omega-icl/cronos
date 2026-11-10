@@ -964,7 +964,8 @@ protected:
   //! reduction R the output is not affine in (the record machinery's test: every dE/dR free of reductions) becomes a
   //! state J over the directions R does not consume, pinned by the algebraic row `J - R = 0` at every node (linear in
   //! the fields: exact), and the output reads J.  Reductions consuming the evolution direction are left to FFModel's
-  //! capture, which already serves them (`f(cap)` at completion).
+  //! capture, which already serves them (`f(cap)` at completion).  One consuming EVERY direction of its fields gets a
+  //! lumped state and a domain-less row (10 Nov 2026).
   bool _lift_nested_reductions
     ();
   //! @brief FFModel's declaration hook: the nested-reduction lift, before any check processes the declared rows.
@@ -4584,11 +4585,9 @@ OCFESLV::_lift_nested_reductions
         if( itv == _usr._mVarUsr.end() ) continue;
         for( auto const& dv : itv->second ) if( !consumed.count( dv ) ) remaining.insert( dv );
       }
-      if( remaining.empty() ){
-        std::cerr << "OCFESLV::setup ** output " << _expr_text( dag, E ) << ": the reduction " << _expr_text( dag, r )
-                  << " nested in a nonlinearity consumes every direction of its fields -- a scalar hidden state is not taken yet" << std::endl;
-        return false;
-      }
+      // a reduction consuming every direction of its fields (a steady boundary-value problem's int u dz): a LUMPED
+      // hidden state, pinned by a domain-less row -- the row type section 4a assembles element by element, exact for
+      // one linear in its integrals (10 Nov 2026, A2)
       // the reference: the fields' largest reference times the measure of the integrated directions -- a state with a
       // zero reference makes the scaled Newton system singular, one scaled a million times too large is as bad
       double refJ = 0.;
@@ -4602,8 +4601,8 @@ OCFESLV::_lift_nested_reductions
       FFVar J = dag->add_var( "nest_" + std::to_string( lifted.size() ) );
       std::vector<FFVar> doms( remaining.begin(), remaining.end() );
       std::vector<int> masks( doms.size(), FFDom::ALL );
-      add_state( J, doms );  update_ref( J, refJ );
-      add_equation( J - r, doms, masks, EqnOptions( EqnRole::INTERIOR, 0 ) );
+      if( doms.empty() ){ add_state( J, {} );  update_ref( J, refJ );  add_equation( J - r, {}, {}, EqnOptions( EqnRole::INTERIOR, 0 ) ); }
+      else{ add_state( J, doms );  update_ref( J, refJ );  add_equation( J - r, doms, masks, EqnOptions( EqnRole::INTERIOR, 0 ) ); }
       lifted.emplace( r.id(), J );  sub.push_back( J );
       if( options.DISPLAY_LEVEL >= 1 )
         std::cerr << "OCFESLV::setup ** nested reduction " << _expr_text( dag, r ) << " of an output lifted into the hidden state " << J.name()

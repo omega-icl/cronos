@@ -42,6 +42,13 @@
 * **MoL: transitions reading an input.** An input uniform in space -- a parameter, or an input over `t` only -- is
   bound to its semi-discrete slot when the transition is composed at the field's nodes; an input distributed in
   space is refused by name.
+* **MoL: a transition reading an input distributed in space** -- refused until now -- takes it at each node of the
+  state it resets through the input's Lagrange interpolant there, a combination of its slots, exactly as an INITIAL
+  row reads such an input (`OCFEMOL::_input_at_node`, shared; each Ini entry records its node); the stop machinery's
+  sensitivities follow through the slots. An input declared over other directions than the state's is refused by
+  name. DAESLV_moltime (H): `u(tau+) = u(tau-) + w(z)`, `w` on 2 LGL nodes per element against the field's 5 --
+  on a pointwise field the closed forms exactly (value 4e-11, each DOF's gradient exactly h/2, forward and adjoint),
+  on the diffusive rod the adjoint = the forward gradient to 8e-10.
 * **MoL: the consistent initialisation starts from the declared profile at every node.** An INITIAL row at an
   algebraic node (a Dirichlet node, or by default a Neumann node) is set aside, the node being held by its
   boundary row; `OCFEMOL::init_seed` skipped those rows, so the node started from its reference value, and a
@@ -136,6 +143,10 @@
   fields is refused by name (a scalar hidden state, not yet). Gate OCFE_PDE41: the rod's `int J^2 dt`, `J(T)^2` and
   a ratio of spatial integrals to 1e-8 against closed forms; the PSA column's loading fraction, OCFESLV = DAESLV
   under MoL to 5e-8.
+* **OCFESLV: a nested reduction consuming every direction of its fields** -- `(int u dz)^2` on a steady boundary-value
+  problem, refused until now -- is lifted into a LUMPED hidden state pinned by a domain-less row `J - int u dz = 0`,
+  the row type section 4a assembles element by element. OCFE_PDE41 (D): `-u'' = 1`, `(int u dz)^2 = 1/144` and a ratio
+  of two such integrals to round-off.
 * **A row integrating over a direction it is not distributed over counted the field-free part of its integrand on
   ONE element** (`J - int (1 + u) dz = 0` over t pinned J to `int u dz + 1/n_el`). OCFEBASE's section 4a assembles
   such a row element by element and subtracts `(n_el - 1) g` for its non-integrated part g, which it evaluated with
@@ -255,9 +266,6 @@
 * **`SAT_ENERGY` on convective models:** stable, but behind `IC_STRONG` in accuracy (3x on a Peclet-10 rod, ~19x on
   the PSA column at 12 elements of degree 4) -- structural to the weak interface treatment of convection here; for
   convective models under MoL, `IC_STRONG` and `IC_TRACE` are recommended.
-* **MoL: transitions reading an input distributed in space** are refused by name.
-* **OCFESLV: a nested spatial reduction consuming every direction of its fields** (a scalar hidden state) is refused
-  by name.
 
 ## 5.1.0 (2026-10-27)
 

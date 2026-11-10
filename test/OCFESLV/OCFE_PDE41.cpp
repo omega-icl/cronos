@@ -13,6 +13,9 @@
 //       row section 4a assembles element by element counted its field-free part once -- g was evaluated with the
 //       integrated FIELDS zeroed, which left int 1 dz standing on one element (1 - 1/n_el short); g is now the residual
 //       with its integral NODES replaced by 0 (9 Nov 2026) -- and a ratio with a constant inside (lifted);
+//   (D) a reduction consuming EVERY direction of its fields -- the steady BVP -u'' = 1, u(0) = u(1) = 0, int u dz = 1/12
+//       exactly at degree >= 2: lifted into a LUMPED hidden state pinned by a domain-less row (10 Nov 2026; refused
+//       before), (int u dz)^2 and int u dz / int 2u dz to round-off;
 //   (B) the DAESLV_molsens PSA column: the bed loading fraction int q1 dz / int (q1 + q2) dz at the end, OCFESLV
 //       (lifted) against DAESLV under the method of lines (composed), one declaration.
 #include <iostream>
@@ -134,6 +137,24 @@ int main()
     std::cout << "    int (1+u) dz " << F0 << " (" << 1.+JT << ")  int (u+p) dz " << F1 << " (" << JT+P << ")  ratio " << F2 << " (" << JT/(1.+JT) << ")\n";
     check( "(C) int (1 + u) dz and int (u + p) dz at T = closed forms to 1e-8 (2/3 of the constant missing before)", ok && rel( F0, 1.+JT ) < 1e-8 && rel( F1, JT+P ) < 1e-8 );
     check( "(C) int u dz / int (1 + u) dz at T, lifted = closed form to 1e-8", ok && rel( F2, JT/(1.+JT) ) < 1e-8 );
+  }
+  std::cout << "(D) a reduction consuming every direction: the steady BVP -u'' = 1, lumped hidden states\n";
+  {
+    FFGraph G; OCFESLV S( &G ); FFPartial OpP; FFIntegral OpI;
+    FFVar z = G.add_var("z"), u = G.add_var("u");
+    S.add_domain( z, FFDom( 0., 1., 3, FFDom::LGL, 5 ) );  S.add_state( u, {z} );  S.update_ref( u, 0.1 );
+    OCFESLV::EqnOptions io( OCFESLV::EqnRole::INTERIOR, 0 ), ib( OCFESLV::EqnRole::BOUNDARY, 0 );
+    S.add_equation( -OpP( OpP(u,z), z ) - 1., {z}, { FFDom::ALL - FFDom::LB - FFDom::UB }, io );
+    S.add_equation( u, {z}, { FFDom::LB }, ib );  S.add_equation( u, {z}, { FFDom::UB }, ib );
+    S.add_output( OpI( u, z ) * OpI( u, z ) );  S.add_output( OpI( u, z ) / OpI( 2.*u, z ) );  S.add_output( OpI( u, z ) );
+    S.options.INTERFACE.IMPOSITION = OCFESLV::Options::IC_STRONG;  S.options.SOLVE.RES_TOL = 1e-12;  S.options.DISPLAY_LEVEL = 0;
+    bool const su = S.setup();
+    bool const ok = su && S.solve( std::vector<FFModel::InputVal>{} ) == OCFESLV::NORMAL;
+    size_t nlump = 0;  for( auto const& kv : S.var_state() ) if( kv.first.name().rfind( "nest_", 0 ) == 0 && kv.second.empty() ) ++nlump;
+    double const F0 = ok? S.val_function()[0]: NAN, F1 = ok? S.val_function()[1]: NAN, F2 = ok? S.val_function()[2]: NAN;
+    std::cout << "    lumped hidden states " << nlump << ";  (int u)^2 " << F0 << " (" << 1./144. << ")  ratio " << F1 << " (0.5)  int u dz " << F2 << " (" << 1./12. << ")\n";
+    check( "(D) sets up and solves; the two reductions lifted into LUMPED hidden states (refused before)", ok && nlump == 2 );
+    check( "(D) (int u dz)^2 = 1/144 and the ratio = 1/2 to 1e-12; the linear int u dz = 1/12 untouched", ok && rel( F0, 1./144. ) < 1e-12 && rel( F1, 0.5 ) < 1e-12 && rel( F2, 1./12. ) < 1e-12 );
   }
   std::cout << "(B) the PSA column: the bed loading fraction int q1 dz / int (q1 + q2) dz at the end, OCFESLV vs DAESLV (MoL)\n";
   {

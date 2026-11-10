@@ -342,7 +342,16 @@ public:
     std::vector< std::pair<FFVar,size_t> > cols;        //!< (field, column of its value at the node)
     std::vector< std::pair<FFVar,double> > coord;       //!< (direction, coordinate of the node)
     bool dropped = false;                               //!< at an algebraic node: not in the stream, checked for consistency at t0
+    //! the node itself, for an input read at it by something else than the row -- a transition (10 Nov 2026): the
+    //! field's directions, its element in each and its local node there (empty for a lumped state)
+    std::vector<FFVar> dirs;  std::map<FFVar,size_t,lt_FFVar> ndx_el;  std::vector<size_t> ind;
   };
+  //! @brief The combination of the slots of input @p w giving its value at a field node -- element @p ndx_el, local
+  //! node @p ind in the field's directions @p dirs: its Lagrange interpolant there (one slot, weight 1, where the
+  //! input's collocation is the field's).  As the INITIAL rows read an input; shared with the transitions.
+  bool _input_at_node
+    ( FFVar const& w, std::vector<FFVar> const& dirs, std::map<FFVar,size_t,lt_FFVar> const& ndx_el,
+      std::vector<size_t> const& ind, std::vector< std::pair<size_t,double> >& comb ) const;
   //! @brief The Ini stream (entries with dropped == false) and the dropped pairs (dropped == true), after setup.
   std::vector<t_IniEntry> const& ini_stream() const { return _iniStream; }
 
@@ -387,8 +396,9 @@ public:
   //! of the state it determines (the nodes that carry INITIAL rows), its left side and its right side composed at the
   //! node -- the fields they read as their columns in @p xc, the coordinates by value, the evolution variable as @p t,
   //! the constants by value.  The algebraic nodes are re-solved by their rows at tau^+ (the integrator's stop system).
-  //! The determined state is the record's, or inferred as the ONE state the right side reads.  A component reading an
-  //! input, or determining a lumped state with no INITIAL row here, is refused (false, @p why).
+  //! The determined state is the record's, or inferred as the ONE state the right side reads.  An input is bound at the
+  //! node (uniform: its slot; distributed in space: its interpolant); a component determining a lumped state with no
+  //! INITIAL row here is refused (false, @p why).
   bool transition_expressions
     ( size_t k, std::vector<FFVar> const& xc, FFVar const& t, std::vector<FFVar>& left, std::vector<FFVar>& right,
       std::string& why, std::vector<FFVar> const& uc = {} )
@@ -399,8 +409,9 @@ public:
       auto const& tr = var_transition()[k];                       // the WORKING copy: its expressions live in _dag
       // the states a side reads, and the INPUTS (7 Nov 2026): an input uniform in space -- a parameter, or an input over
       // t only -- is its one slot of uc, bound by the integrator at tau as any input of a transition; an input
-      // distributed in space is refused (its value at the node would be an interpolant: not taken yet)
-      std::set<FFVar,lt_FFVar> inputs;
+      // distributed in space is its interpolant at the node, a combination of its slots, as an INITIAL row reads it
+      // (10 Nov 2026)
+      std::set<FFVar,lt_FFVar> inputs, dinputs;                 // uniform in space; distributed in space (10 Nov 2026)
       auto states_of = [&]( FFVar const& e, std::set<FFVar,lt_FFVar>& st, std::string& bad ){
         auto sg = _dag->subgraph( 1, &e );
         for( auto const* v : sg.v_indep ){
@@ -408,14 +419,13 @@ public:
           if( _evolution_dom_set && v->id() == _evolution_dom_var.id() ) continue;   // t: the integrator's
           auto iti = _mInp.find( *v );
           if( iti == _mInp.end() ) continue;
-          if( !iti->second.empty() ){ bad = v->name();  continue; }
+          if( !iti->second.empty() ){ dinputs.insert( *v );  continue; }
           inputs.insert( *v );
         } };
       for( size_t i = 0; i < tr.right.size() && i < tr.left.size(); ++i ){
         std::set<FFVar,lt_FFVar> sr, sl;  std::string bad;
         states_of( tr.right[i], sr, bad );  states_of( tr.left[i], sl, bad );
-        if( !bad.empty() ){ why = "a transition component reads the input " + bad + ", distributed in space: not taken by the method of lines yet"; return false; }
-        if( !inputs.empty() && uc.empty() ){ why = "a transition component reads an input: its semi-discrete variables must be given (uc)"; return false; }
+        if( ( !inputs.empty() || !dinputs.empty() ) && uc.empty() ){ why = "a transition component reads an input: its semi-discrete variables must be given (uc)"; return false; }
         FFVar s;
         if( i < tr.states.size() && tr.states[i].dag() ) s = tr.states[i];
         else if( sr.size() == 1 ) s = *sr.begin();
@@ -455,6 +465,21 @@ public:
             size_t const c = pos_input( w, {} );
             if( c >= uc.size() ){ why = "the input " + w.name() + " of a transition has no semi-discrete variable"; return false; }
             vars.push_back( w );  vals.push_back( uc[c] );
+          }
+          for( auto const& w : dinputs ){                            // distributed in space: its interpolant at the node,
+            auto const& wdom = _mInp.at( w );                        // as an INITIAL row reads it (10 Nov 2026)
+            std::set<FFVar,lt_FFVar> const sdom( e.dirs.begin(), e.dirs.end() );
+            if( e.dirs.empty() || wdom != sdom ){ why = "a transition component reads the input " + w.name() + ", declared over other directions"
+                                                        " than the state " + s.name() + "'s: it has no value at its nodes"; return false; }
+            std::vector< std::pair<size_t,double> > comb;
+            if( !_input_at_node( w, e.dirs, e.ndx_el, e.ind, comb ) ){ why = "the input " + w.name() + " of a transition could not be"
+                                                                                " interpolated at the nodes of " + s.name(); return false; }
+            FFVar val( 0. );
+            for( auto const& [c, a] : comb ){
+              if( c >= uc.size() ){ why = "the input " + w.name() + " of a transition has no semi-discrete variable"; return false; }
+              val += a * uc[c];
+            }
+            vars.push_back( w );  vals.push_back( val );
           }
           for( size_t q = 0; q < _vCst.size() && q < _vCstVal.size(); ++q ){ vars.push_back( _vCst[q] );  vals.push_back( FFVar( _vCstVal[q] ) ); }
           std::vector<FFVar> out( 2 );
@@ -1625,6 +1650,34 @@ OCFEMOL::_build_mass
                             << " folded from rows the exact interface elimination dropped\n";
 }
 
+inline bool
+OCFEMOL::_input_at_node
+( FFVar const& w, std::vector<FFVar> const& dirs, std::map<FFVar,size_t,lt_FFVar> const& ndx_el,
+  std::vector<size_t> const& ind, std::vector< std::pair<size_t,double> >& comb )
+const
+{
+    comb.clear();
+  size_t const nd = dirs.size();
+  std::vector< std::vector<double> > wts( nd );
+  std::vector<size_t> nni( nd );
+  for( size_t d = 0; d < nd; ++d ){
+    FFDom const& di = _input_dom( w, dirs[d] );  FFDom const& dx = _mDom.at( dirs[d] );
+    nni[d] = di.n_node;
+    if( di.type == dx.type && di.n_node == dx.n_node ){             // the field's own nodes: the unit weight
+      wts[d].assign( di.n_node, 0. );  wts[d].at( ind[d] ) = 1.;  continue; }
+    if( !di.w_eval_lagrange( wts[d], dx.lgnodes().at( ind[d] ), 0 ) || wts[d].size() != di.n_node ) return false;
+  }
+  size_t const base = pos_input( w, ndx_el );
+  std::vector<size_t> j( nd, 0 );
+  for( bool more = true; more; ){
+    double a = 1.;  size_t c = base, stride = 1;
+    for( size_t d = 0; d < nd; ++d ){ a *= wts[d][ j[d] ];  c += j[d]*stride;  stride *= nni[d]; }
+    if( a != 0. ) comb.emplace_back( c, a );
+    more = false;  for( size_t d = 0; d < nd; ++d ){ if( ++j[d] < nni[d] ){ more = true; break; }  j[d] = 0; }
+  }
+  return !comb.empty();
+}
+
 inline size_t
 OCFEMOL::_audit_initial_coverage
 ( std::ostream& os )
@@ -1646,29 +1699,9 @@ OCFEMOL::_audit_initial_coverage
     std::ostringstream m;  m << "the INITIAL row of " << x << " reads the input " << w << ", declared over other directions"
                               << " than the row's: it has no value at the row's nodes";
     refuse( m.str() );  return false; };
-  // the combination of w's slots giving its value at the field node ( ndx_el, ind ), w over the field's directions dirs
   auto at_node = [&]( FFVar const& w, std::vector<FFVar> const& dirs, std::map<FFVar,size_t,lt_FFVar> const& ndx_el,
                       std::vector<size_t> const& ind, std::vector< std::pair<size_t,double> >& comb ) -> bool {
-    comb.clear();
-    size_t const nd = dirs.size();
-    std::vector< std::vector<double> > wts( nd );
-    std::vector<size_t> nni( nd );
-    for( size_t d = 0; d < nd; ++d ){
-      FFDom const& di = _input_dom( w, dirs[d] );  FFDom const& dx = _mDom.at( dirs[d] );
-      nni[d] = di.n_node;
-      if( di.type == dx.type && di.n_node == dx.n_node ){             // the field's own nodes: the unit weight
-        wts[d].assign( di.n_node, 0. );  wts[d].at( ind[d] ) = 1.;  continue; }
-      if( !di.w_eval_lagrange( wts[d], dx.lgnodes().at( ind[d] ), 0 ) || wts[d].size() != di.n_node ) return false;
-    }
-    size_t const base = pos_input( w, ndx_el );
-    std::vector<size_t> j( nd, 0 );
-    for( bool more = true; more; ){
-      double a = 1.;  size_t c = base, stride = 1;
-      for( size_t d = 0; d < nd; ++d ){ a *= wts[d][ j[d] ];  c += j[d]*stride;  stride *= nni[d]; }
-      if( a != 0. ) comb.emplace_back( c, a );
-      more = false;  for( size_t d = 0; d < nd; ++d ){ if( ++j[d] < nni[d] ){ more = true; break; }  j[d] = 0; }
-    }
-    return !comb.empty(); };
+    return _input_at_node( w, dirs, ndx_el, ind, comb ); };
   // the INITIAL rows reading each field, with their spatial masks
   std::vector<FFDep> ini_dep;  ini_dep.reserve( _iniEqn.size() );
   for( auto const& e : _iniEqn ) ini_dep.push_back( _deps_of( e.var ) );
@@ -1743,6 +1776,7 @@ OCFEMOL::_audit_initial_coverage
           }
           if( !ok ) continue;
           t_IniEntry e; e.row = q; e.target = col; e.dropped = !diff;
+          e.dirs = dirs;  e.ndx_el = ndx_el;  e.ind = ind;
           for( size_t d = 0; d < dirs.size(); ++d ){
             FFDom const& dm = _mDom.at( dirs[d] );
             double const lo = dm.elem_lo( iel[d] ), hi = dm.elem_up( iel[d] ), xi = dm.lgnodes().at( ind[d] );

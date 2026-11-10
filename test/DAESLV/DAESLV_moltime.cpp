@@ -236,6 +236,66 @@ int main()
         else check( "(C) ODESLV adjoint: the same (its initial-condition chain through ic_sens, as DAESLV's)" + ( ok? std::string(): " -- " + w ), good ); }
     }
   }
+  // ---- (H) a transition reading an input DISTRIBUTED IN SPACE (10 Nov 2026; refused before): the zero-flux rod with
+  //      u0 = 1 and source p e^-t, u(tau+) = u(tau-) + w(z), w on its OWN coarser collocation (2 LGL nodes per element
+  //      against the field's 5), so it is read at the field's nodes through its Lagrange interpolant.  (H1) a POINTWISE
+  //      field, u_t = p e^-t (1 + z) (z read, as FFModel requires of an equation declared over it): u (T, z) is linear
+  //      per element, the field's quadrature exact for it -- int u dz (T) = 1 + 3/2 p (1 - e^-T) + int w dz EXACTLY on
+  //      the mesh, int w dz = sum_e h/2 (w_l + w_r), d/dw_k = h/2 for each of w's 6 DOFs.  (H2) the diffusive rod: strong-form collocation conserves the discrete integral only to ~2e-4 once
+  //      the field is not uniform, so its gate is forward = adjoint.
+  std::cout << "(H) a transition reading an input distributed in space: u(tau+) = u(tau-) + w(z), w on 2 LGL nodes per element\n";
+  {
+    double const P = 0.7, TE = 1., TAU = 0.5;
+    std::vector<double> const wv{ 0.1, 0.2, 0.3, 0.4, 0.5, 0.6 };
+    double const h = 1./3., Iw = 0.5*h*( wv[0]+wv[1] + wv[2]+wv[3] + wv[4]+wv[5] );
+    for( int diffusive = 0; diffusive < 2; ++diffusive ){
+    double const Je = 1. + ( diffusive? 1.: 1.5 )*P*( 1. - std::exp( -TE ) ) + Iw;
+    std::vector<double> F[3];  std::vector< std::vector<double> > Gr[3];  bool ok = true;  std::string w;
+    std::string const tag = diffusive? "(H2) the diffusive rod": "(H1) a pointwise field";
+    for( int mode = 0; mode < 3 && ok; ++mode ){
+      FFGraph G;  DAESLV_IDAS S( &G );
+      FFVar t = G.add_var( "t" ), z = G.add_var( "z" ), u = G.add_var( "u" ), p = G.add_var( "p" ), wz = G.add_var( "w" );
+      S.add_domain( t, FFDom( 0., TE, 2, FFDom::LGR, 3 ) );  S.add_domain( z, FFDom( 0., 1., 3, FFDom::LGL, 5 ) );
+      S.set_evolution_domain( t );  S.add_state( u, {t,z} );  S.update_ref( u, 1. );  S.add_input( p, {} );
+      S.add_input( wz, {z}, FFDom::LGL, 2 );
+      FFPartial OpP;  FFIntegral OpI;
+      int const TI = FFDom::ALL - FFDom::LB, ZI = FFDom::ALL - FFDom::LB - FFDom::UB;
+      DAESLV_IDAS::EqnOptions io( DAESLV_IDAS::EqnRole::INTERIOR, 0 ), ib( DAESLV_IDAS::EqnRole::BOUNDARY, 0 ), ii( DAESLV_IDAS::EqnRole::INITIAL, 0 );
+      if( diffusive ){
+        S.add_equation( OpP(u,t) - OpP( 0.1*OpP(u,z), z ) - p*exp( -t ), {t,z}, {TI, ZI}, io );
+        S.add_equation( OpP(u,z), {t,z}, {TI, FFDom::LB}, ib );  S.add_equation( OpP(u,z), {t,z}, {TI, FFDom::UB}, ib );
+      }
+      else S.add_equation( OpP(u,t) - p*exp( -t )*( 1. + z ), {t,z}, {TI, FFDom::ALL}, io );
+      S.add_equation( u - 1., {t,z}, {FFDom::LB, FFDom::ALL}, ii );
+      S.add_transition( { u + wz }, { u }, t, TAU );
+      S.add_output( OpI( u, z ), {t}, {TE} );
+      S.options.SOLVE.RTOL = S.options.SOLVE.ATOL = 1e-11;  S.options.SOLVE.VERBOSE = 0;  S.options.DISPLAY_LEVEL = 0;
+      if( !S.setup() ){ ok = false;  w = "setup: " + S.extract_error();  break; }
+      std::vector<FFModel::InputVal> in{ { p, { P } }, { wz, wv } };
+      auto const st = mode == 0? S.solve( in ): mode == 1? S.solve_fsens( in ): S.solve_asens( in );
+      if( st != DAESLV_IDAS::NORMAL ){ ok = false;  w = "solve: " + S.extract_error();  break; }
+      F[mode] = S.val_function();  if( mode ) Gr[mode] = S.val_function_gradient();
+    }
+    check( tag + ": set up and solved, value, forward and adjoint (refused before)" + ( ok? std::string(): " -- " + w ), ok );
+    double ev = NAN, ef = 0., ea = 0., efa = 0.;  size_t nw = 0;
+    if( ok ){
+      ev = rel( F[0].at(0), Je );
+      // the gradient rows: p first, then w's DOFs in declaration order
+      for( size_t k = 1; k < Gr[1].size() && k < Gr[2].size(); ++k ){
+        ef = std::max( ef, rel( Gr[1][k].at(0), 0.5*h ) );  ea = std::max( ea, rel( Gr[2][k].at(0), 0.5*h ) );
+        efa = std::max( efa, rel( Gr[2][k].at(0), Gr[1][k].at(0) ) );  ++nw; }
+      std::cout << std::scientific << std::setprecision(3) << "    " << tag << ": int u dz (T) rel err " << ev << ";  " << nw
+                << " w DOFs, d/dw_k vs h/2: forward " << ef << ", adjoint " << ea << ";  adjoint vs forward " << efa << "\n";
+    }
+    if( !diffusive )
+      check( tag + ": int u dz (T) and d/dw_k = h/2 for all 6 DOFs = closed forms, value and forward to 1e-8, adjoint to 1e-6",
+             ok && nw == 6 && ev < 1e-8 && ef < 1e-8 && ea < 1e-6 );
+    else
+      check( tag + ": the adjoint gradient = the forward one to 1e-6 for all 6 DOFs (value within 1e-3: collocation's conservation)",
+             ok && nw == 6 && efa < 1e-6 && ev < 1e-3 );
+    }
+  }
+
   // ---- (D)
   std::cout << "(D) a transition on a field: u(tau+) = u(tau-)/2 at tau = 0.5\n";
   {

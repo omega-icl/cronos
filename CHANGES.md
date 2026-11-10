@@ -2,10 +2,31 @@
 
 ## Unreleased
 
-* **DAESLV: the consistent initialisation converges to the integrator's tolerance.** KINSOL's point met the
-  residual tolerance but pinned an ill-conditioned algebraic unknown only to ~1e-12, which IDAS error-tests at
-  `ATOL`; a polish pass with KINSOL's scaled-step criterion in the error-weighted norm `1/(RTOL|y|+ATOL)` now ends
-  every IC solve, at t0 and at each stop (`BASE_KINSOL::Knobs::RTOL/ATOL/WSTEPTOL`). This is what IDACalcIC did.
+### DAESLV: models distributed in space by the method of lines
+
+* **DAESLV takes a model distributed in space**, declared through FFModel exactly as for OCFESLV, and integrates it by
+  the method of lines: the declared model is validated as by any solver, semi-discretised internally (OCFEMOL), and
+  the semi-discrete DAE becomes the working model -- one solver, the declared model staying the user's. What MoL does
+  not take yet is refused by name at setup.
+* **OCFEMOL, the semi-discretisation (MoL phases 1-5).** It shares the collocation base with OCFESLV (OCFEBASE, below):
+  the layout, the interface plan, the DOF audit and the sparse Jacobian. The model is read along `t` as
+  `M(x) d_t x = R` (`FFModel::peel_evolution`, the per-row peel hoisted from BASE_DE); the mass matrix comes from the row
+  provenance with the node-level DOF audit and the INITIAL rows as a stream of scalar expressions; the structural index
+  along `t` is checked on the full model, and an index-2 PDE is reduced to index 1 automatically under
+  `REDUCE_HIGH_INDEX`; a model with no spatial direction (an ODE, a DAE) is the DAE itself. The residual and its sparse
+  Jacobian (compressed forward AD over the base's colouring) enter the integrator's DAG as external operations
+  (`FFMOLRES` / `FFGradMOLRES`); algebraic components are kept out of IDAS's error test; a field without a continuity
+  claim follows the fold rule. Gates: DAESLV_molsetup, DAESLV_molgate (the heated rod and PDE5's 2-D heat equation
+  against OCFESLV and exact solutions), DAESLV_molbench, DAESLV_molsens (the PSA column).
+* **DAESLV: the collocation options declared once.** `DAESLV::Options` derives from `OCFEBASE::Options` as
+  `OCFESLV::Options` does, so `options.INTERFACE`, `.AUDIT`, `.DETERMINACY`, `.FATAL` are the same path on both
+  solvers; `options.MOL` keeps the method of lines' own group (`NEUMANN_NODE`, `REDUCE_HIGH_INDEX`). The second copy
+  of the groups under `MOL` is gone (`options.MOL.INTERFACE.*` -> `options.INTERFACE.*`, `options.MOL.IMPOSITION.*`
+  -> `options.MOL.*`). `OUTPUT` stays the integrator's group. In Python `DAESLV.Options` is a `CollocationOptions`,
+  `DAESLV.MOLOptions` the MoL group, the `NeumannNode` enumerators on `DAESLV`.
+* **MoL on DAESLV (6a, 6b):** a model distributed in space declared through FFModel, solved by DAESLV with inputs,
+  outputs and sensitivities by name; `tools/ci/build_deps.sh` patches SUNDIALS IDAS's order decision (an exactly
+  constant state with an error-controlled quadrature stalled it at order 1).
 * **MoL on DAESLV (6c): time-varying inputs.** Each spatial slot of a declared input over `t` becomes an input over
   `t` of the semi-discrete DAE with the declared collocation; declared DOFs and working parameters are matched as
   a bijection, so by-name values and gradient rows read as the declared DOFs. `ic_sens` now differentiates through
@@ -15,36 +36,25 @@
   component composed pointwise there (`OCFEMOL::transition_expressions`, the INITIAL rows' form: the integrator
   peels these rows, so no vectorised operation); the integrator's stop machinery re-solves the algebraic nodes and
   carries the sensitivities across. `FFMOLINI`/`FFGradMOLINI`, the vectorised Ini stream, retired for that reason.
-* **DAESLV adjoint: one backward problem for every adjoined output.** The outputs' multipliers are stacked into
-  one IDA instance with one step sequence and one block-diagonal matrix (KLU whenever there is more than one
-  block or the forward factorises sparse), so the forward rows and Jacobian are evaluated once per backward
-  residual rather than once per output. The backward Jacobian is analytic (it was built by difference quotients),
-  and the quadrature sensitivity integrands read the memoised evaluation. The PSA column at 480 states, one
-  parameter, two outputs: `solve_fsens` 4.7 s -> 2.6 s, `solve_asens` 6.1 s -> 3.9 s, against 0.6 s for the solve.
-* **An energy-stable SAT form for IC_WEAK** (`INTERFACE.SAT_FORM = SAT_ENERGY`), alongside the legacy one, which stays
-  OCFESLV's default. The legacy SAT gives the semi-discrete operator a growing mode quadratic in `SAT_SIGMA0` -- the
-  value-jump penalty enters the auxiliary flux and the flux-jump penalty multiplies it (`+9.2e4` at 10 on the rod) --
-  damped on OCFESLV by Radau's L-stability, fatal to an integrator. The energy form is the summation-by-parts one:
-  the value jump lifted into the auxiliary's LINK row and the flux jump into the PDE row (`SAT_FLUX`: alternating by
-  default, central available), an upwind term for a constant-coefficient convective part, an optional interior
-  penalty (`SAT_PENALTY`, default 0). Every strength, legacy or energy, is computed in ONE function,
-  `OCFEBASE::_sat_strength`; the frozen interface plan records the form, flux and penalty. Under the method of lines
-  IC_WEAK takes the energy form whatever `SAT_FORM` says. Measured: stable for any penalty and either boundary
-  arrangement; on pure diffusion one order better than IC_STRONG at even degree; on convection-diffusion behind it
-  (2.6x at Peclet 10 on the rod, 20-25x on the PSA column) -- the open question. Gate `DAESLV_molsat`; G2 updated.
-* **High-index reduction: a declared initial condition IMPLIED by the materialised hidden constraints is set aside.**
-  With `REDUCE.HIDDEN_IC` the reduction materialises its hidden constraint levels as INITIAL rows at the initial
-  point; a declared row they already imply over-determined it (OCFE_PDE20b, `x' = y, 0 = x - a(t)` with `x(0) = a(0)`
-  declared: 13 rows for 12 unknowns, refused by the DOF audit -- the gate printed BASELINE since Stage 2). FFModel now
-  matches the INITIAL rows to the differential states, the materialised levels first, and sets aside the declared rows
-  left unmatched (`initial_set_aside()`, `initial_data().set_aside`) -- for every solver. Their consistency with the
-  solution is checked: `OCFESLV::initial_consistency_defect()`, and both OCFESLV and DAESLV warn at DISPLAY_LEVEL >= 1
-  when a declared value contradicts the hidden constraints (which hold). OCFE_PDE20b now passes (REDUCED:PASS, exact
-  to 7e-16); new gate OCFE_PDE20h -- consistent, inconsistent (defect 0.5 reported), and alongside free data (kept).
-  COVERAGE: a declared row covering MORE nodes than the level implying it (OCFE_PDE39b: IC_c on every z node, the level
-  from an EOS row absent at z = LB) is NARROWED to the nodes the level leaves free instead of set aside whole (which
-  removed one node too many: 215 rows for 216 unknowns); any other mismatch is left to the DOF audit. OCFE_PDE20e (B)
-  now gates this convention (it gated the opposite: the declared IC rejected as a surplus).
+* **MoL: trajectory outputs.** An output distributed over `t` is, for each spatial row of its spatial part, an output
+  distributed over `t` of the semi-discrete model: one value per stage time its mask selects, as the integrators
+  take such an output; distributed over space too, one trajectory per spatial node, space-major.
+* **MoL: transitions reading an input.** An input uniform in space -- a parameter, or an input over `t` only -- is
+  bound to its semi-discrete slot when the transition is composed at the field's nodes; an input distributed in
+  space is refused by name.
+* **MoL: the consistent initialisation starts from the declared profile at every node.** An INITIAL row at an
+  algebraic node (a Dirichlet node, or by default a Neumann node) is set aside, the node being held by its
+  boundary row; `OCFEMOL::init_seed` skipped those rows, so the node started from its reference value, and a
+  boundary row with several roots could be met on the wrong one. On the heated rod with `D(u) = D0 (1 + beta u)`
+  the flux row was met at `1 + beta u < 0`, a negative diffusivity: `u(2,1) = -1.02` against OCFESLV's `2.79`.
+  The set-aside rows now seed their nodes too; DAESLV reports, at `DISPLAY_LEVEL >= 1`, how far the consistent
+  initialisation moved such a node from its declared value (`initial_consistency_defect`, unread before).
+* **MoL: the structural index of the semi-discrete system is checked at setup** (the MoL design's step 6, missing
+  until now): a maximum matching of the algebraic rows to the algebraic unknowns on `Rc`'s dependency pattern. Full:
+  index 1. Deficient: index >= 2, refused by name -- an interface multiplier minted by the plan with no algebraic row,
+  a constraint row reading differential unknowns only. Under `IC_TRACE` every value-continuity multiplier has that
+  form (the Hessenberg index-2 pattern; KINSOL's IC Jacobian singular); under `IC_STRONG` the replaced copy is
+  algebraic and pinned, index 1 -- verified on every MoL driver of the corpus. `semi_discrete().n_alg_rank` reports it.
 * **MoL: null-space elimination of the plan's multipliers that raise the index** (phase 9, step 2). A multiplier the
   structural check finds with no algebraic row -- entering exactly two differential rows with opposite equal weights,
   its constraint a linear row `x_L - x_R = 0` on the two copies of a node -- is eliminated: the copies merged, their
@@ -58,37 +68,47 @@
   its rows' masses: a balance row may carry several mass entries (the PSA column's c1 balance carries `F d_t q1`), and
   only the constrained unknowns are merged. On that column under `IC_TRACE` (six value multipliers, five fields, a
   nonlinear isotherm) the result equals `IC_STRONG` to 4e-11 on values and 4e-10 on forward and adjoint gradients.
-* **MoL: `IC_WEAK` refused** (step 3). Measured on the rod: index 1 and well conditioned, but the semi-discrete
-  operator has a growing mode, `Re lambda = +9.2e4` at `sigma = 10` and quadratic in the penalty, which the
-  integrator cannot step over; OCFESLV does not see it because Radau IIA damps it. An energy-stable SAT is an
-  OCFEBASE open item with its own OCFESLV sweep.
-* **MoL: the structural index of the semi-discrete system is checked at setup** (the MoL design's step 6, missing
-  until now): a maximum matching of the algebraic rows to the algebraic unknowns on `Rc`'s dependency pattern. Full:
-  index 1. Deficient: index >= 2, refused by name -- an interface multiplier minted by the plan with no algebraic row,
-  a constraint row reading differential unknowns only. Under `IC_TRACE` every value-continuity multiplier has that
-  form (the Hessenberg index-2 pattern; KINSOL's IC Jacobian singular); under `IC_STRONG` the replaced copy is
-  algebraic and pinned, index 1 -- verified on every MoL driver of the corpus. `semi_discrete().n_alg_rank` reports it.
-* **MoL: trajectory outputs.** An output distributed over `t` is, for each spatial row of its spatial part, an output
-  distributed over `t` of the semi-discrete model: one value per stage time its mask selects, as the integrators
-  take such an output; distributed over space too, one trajectory per spatial node, space-major.
-* **MoL: transitions reading an input.** An input uniform in space -- a parameter, or an input over `t` only -- is
-  bound to its semi-discrete slot when the transition is composed at the field's nodes; an input distributed in
-  space is refused by name.
+
+### DAESLV: initialisation, sensitivities and adjoints
+
+* **DAESLV: IDACalcIC retired.** The KINSOL consistent initialisation is the one corrector, at t0 and at every
+  stage boundary; its `(y0, y'0)` now starts IDAS (the derivative was computed and discarded, with IDACalcIC
+  repairing it after the solve by default). Gone with it: `INITIAL.SOLVER`, `CALCIC`, `TOUT1`, `NMAXIC`,
+  `MAXJACIC`, `MAXNLIIC`, `LSOFFIC`, `STEPTOLIC` and DAESLV's unused `BYPASS_EXPLICIT` (ODESLV keeps its own).
+  `stats.numIC` counts the t0 solve. Results move at tolerance level: IDAS starts from KINSOL's point.
+* **DAESLV: the consistent initialisation converges to the integrator's tolerance.** KINSOL's point met the
+  residual tolerance but pinned an ill-conditioned algebraic unknown only to ~1e-12, which IDAS error-tests at
+  `ATOL`; a polish pass with KINSOL's scaled-step criterion in the error-weighted norm `1/(RTOL|y|+ATOL)` now ends
+  every IC solve, at t0 and at each stop (`BASE_KINSOL::Knobs::RTOL/ATOL/WSTEPTOL`). This is what IDACalcIC did.
+* **DAESLV: the consistent initialisation follows the integrator's linear algebra.** With `LINSOL = SPARSE` the IC
+  solve (and its polish) factorises with KLU; it factorised dense whatever `LINSOL` said. `DAESLV_mol`, whose leg 1
+  drives a 12 000-unknown space-time system through DAESLV: 514 s -> 48 s in the sandbox.
+* **DAESLV: `ic_sens` and `ic_adjoint` factorise as the IC solve does.** One `_ic_factor` builds the IC system's
+  Jacobian in the pattern the IC solve uses, transposed for the adjoint, on KLU under `LINSOL = SPARSE` and dense
+  otherwise; the sensitivity seeds at t0 and the sensitivities across a stop, forward and adjoint, were dense
+  whatever `LINSOL` said.
+* **BASE_KINSOL: an automatic Newton-step bound** -- unbounded under the line search, KINSOL's own without it.
+* **DAESLV adjoint: one backward problem for every adjoined output.** The outputs' multipliers are stacked into
+  one IDA instance with one step sequence and one block-diagonal matrix (KLU whenever there is more than one
+  block or the forward factorises sparse), so the forward rows and Jacobian are evaluated once per backward
+  residual rather than once per output. The backward Jacobian is analytic (it was built by difference quotients),
+  and the quadrature sensitivity integrands read the memoised evaluation. The PSA column at 480 states, one
+  parameter, two outputs: `solve_fsens` 4.7 s -> 2.6 s, `solve_asens` 6.1 s -> 3.9 s, against 0.6 s for the solve.
 * **DAESLV adjoint: a transition reading a time-varying input.** `ic_adjoint` lacked the placeholder term
   `-(dF/dq . dq/dp)^T mu` that `ic_sens` has had since 6c, so the adjoint gradient with respect to such an input
   was zero (`x(tau+) = x(tau-) + g`: forward `dJ/dg = (1, 0)`, adjoint `(0, 0)`; ODESLV was right). Pointwise and
   under MoL alike.
-* **MoL: the consistent initialisation starts from the declared profile at every node.** An INITIAL row at an
-  algebraic node (a Dirichlet node, or by default a Neumann node) is set aside, the node being held by its
-  boundary row; `OCFEMOL::init_seed` skipped those rows, so the node started from its reference value, and a
-  boundary row with several roots could be met on the wrong one. On the heated rod with `D(u) = D0 (1 + beta u)`
-  the flux row was met at `1 + beta u < 0`, a negative diffusivity: `u(2,1) = -1.02` against OCFESLV's `2.79`.
-  The set-aside rows now seed their nodes too; DAESLV reports, at `DISPLAY_LEVEL >= 1`, how far the consistent
-  initialisation moved such a node from its declared value (`initial_consistency_defect`, unread before).
-* **Notebooks: `MOL_tutorial` and `PSA_tutorial`.** The OCFESLV tutorial's heated rod on DAESLV by the method of
-  lines, one declaration for both solvers: outputs, profiles, OCFESLV's spectral convergence in its time order,
-  gradients by name in the shared layout. A non-isothermal two-component adsorption column, by MoL or by space-time
-  collocation behind one switch: breakthrough, thermal front, sensitivities to the affinity, a cross-check.
+* **ODESLV adjoint: an INITIAL row reading a time-varying input** (`x(0) = u(t0)`) had a zero adjoint gradient in `u`:
+  ODESLV closed its adjoint at t0 by differentiating `f0 + lambda . IC(p)` symbolically, and `u(t0)` reaches the IC
+  expressions through a placeholder that derivative does not see. When the start system carries input placeholders,
+  the initial-condition chain is now taken as DAESLV takes it -- `(lambda + df0/dx)(t0) . dx0/dp`, `dx0/dp` from
+  `ic_sens` on the start system -- the symbolic route unchanged otherwise. DAESLV_moltime (C) now asserts ODESLV's
+  adjoint (it reported it).
+* **DAESLV adjoint: one backward matrix and linear solver per backward problem, all freed** -- all but the last leaked
+  with two or more adjoined outputs (valgrind on DAESLV_quadacc). Backward problems honour the step controls.
+
+### Outputs
+
 * **Outputs that are NONLINEAR functions of horizon integrals and point evaluations**, on ODESLV, DAESLV and
   under MoL (refused before: one record or an affine combination). Before the model sets up, each distinct
   reduction in `t` such an output reads is lifted into a hidden STATE -- an integral into the quadrature state
@@ -100,44 +120,144 @@
   part composed at every `t` -- the collocation's root-level assembly, linear by construction, sums such an
   integrand per element (a third of the value on three elements, on OCFESLV's monolithic path too: an open item
   there, reproducer attached).
-* **DAESLV: the collocation options declared once.** `DAESLV::Options` derives from `OCFEBASE::Options` as
-  `OCFESLV::Options` does, so `options.INTERFACE`, `.AUDIT`, `.DETERMINACY`, `.FATAL` are the same path on both
-  solvers; `options.MOL` keeps the method of lines' own group (`NEUMANN_NODE`, `REDUCE_HIGH_INDEX`). The second copy
-  of the groups under `MOL` is gone (`options.MOL.INTERFACE.*` -> `options.INTERFACE.*`, `options.MOL.IMPOSITION.*`
-  -> `options.MOL.*`). `OUTPUT` stays the integrator's group. In Python `DAESLV.Options` is a `CollocationOptions`,
-  `DAESLV.MOLOptions` the MoL group, the `NeumannNode` enumerators on `DAESLV`.
+* **Quadratures accumulate over the horizon** in ODESLV and DAESLV, with no per-stage reset; an integral over t is
+  the quadrature's value at the end. Fixes DAESLV failing at a stage boundary without a state restart (a large
+  integrand against ATOL) and integral outputs that could come out wrong on a multi-stage horizon.
+* **OCFESLV: a spatial reduction nested inside a nonlinearity of an output is lifted into a hidden algebraic state.**
+  The collocation evaluates an output element by element and sums at the root: exact for anything linear in a
+  reduction, wrong for `(int u dz)^2` -- a third of the value on three equal elements, for every ratio of spatial
+  integrals a user writes (a bed loading fraction). Mirroring OCFEMOL's spatial parts under the method of lines and
+  BASE_DE's lift of nonlinear outputs, `OCFESLV::_lift_nested_reductions` (behind the new `FFModel::_on_declaration`
+  hook, before any check processes the declared rows) rewrites the DECLARATION: each distinct spatial reduction R an
+  output is not affine in (every dE/dR free of reductions) becomes a state J over the directions R does not consume,
+  pinned by the algebraic row `J - R = 0` at every node (linear: exact), with a reference of the fields' times the
+  integrated measure (a zero reference made the scaled Newton system singular), and the output reads J. Reductions
+  consuming the evolution direction are left to FFModel's capture; a reduction consuming every direction of its
+  fields is refused by name (a scalar hidden state, not yet). Gate OCFE_PDE41: the rod's `int J^2 dt`, `J(T)^2` and
+  a ratio of spatial integrals to 1e-8 against closed forms; the PSA column's loading fraction, OCFESLV = DAESLV
+  under MoL to 5e-8.
+* **A row integrating over a direction it is not distributed over counted the field-free part of its integrand on
+  ONE element** (`J - int (1 + u) dz = 0` over t pinned J to `int u dz + 1/n_el`). OCFEBASE's section 4a assembles
+  such a row element by element and subtracts `(n_el - 1) g` for its non-integrated part g, which it evaluated with
+  the integrated FIELDS zeroed -- leaving `int 1 dz` (or `int p dz`) standing on the one element used. g is now the
+  residual with its FFIntegral NODES over the free directions replaced by 0 (one substitution at setup, exact for a
+  residual linear in its integrals; a constant g broadcast). It reached outputs through FFModel's capture, which
+  materialises a point-evaluated `int (1 + u) dz` as exactly such a row; integrated over t too it was exact (no g
+  correction there). OCFE_PDE41 (C): `int (1 + u) dz`, `int (u + p) dz` and a ratio with a constant inside, at T, to
+  1e-8 on three elements. The corpus drivers with integral rows (OCFE_scalar_*, OCFE_capture_nested, OCFE_byname,
+  OCFE_hybrid_adequacy) are unchanged: none has a field-free part under such an integral.
+
+### OCFESLV and the collocation base
+
+* **OCFEBASE, the collocation base, in its own header `src/ocfebase.hpp`** -- the OCVar environment and evaluation
+  kernels, the interface plan (frozen realisations, redundancy detection, trace projection, weak SAT terms, plan
+  packing), the determinacy verdict, the collocated layout, the sparse Jacobian and the output evaluation
+  (`_eval_fct`), moved out of OCFESLV and shared with OCFEMOL; the evolution window (ALL / ONE / NONE) replaces the
+  marching hooks. Four dead OCFESLV internals removed.
+* **Options split:** `OCFEBASE::Options` holds `INTERFACE`, `OUTPUT`, `AUDIT`, `DETERMINACY` and `FATAL`;
+  `OCFESLV::Options` derives from it and adds `SOLVE`, `SENSITIVITY` and `HOMOTOPY`. The spelling at the user's side
+  (`options.INTERFACE.IMPOSITION`, ...) is unchanged.
+* **OCFESLV: `solve` by name**, as ODESLV and DAESLV (`FFModel::resolve_values` shared; coordinate generators;
+  `input_dofs` / `input_ndof`).
 * **OCFESLV: sensitivities by name.** `solve_fsens` / `solve_asens` take the inputs and constants as `solve` does,
   every given input a control of the solve, and leave the gradient in `val_function_gradient()`: one row per
   declared DOF, one column per output -- the layout DAESLV and ODESLV give, so the three solvers read the same.
   Bound in Python. OCFESLV had only the registry surface, `sens_jacobian()` over the control vector.
+* **An energy-stable SAT form for IC_WEAK** (`INTERFACE.SAT_FORM = SAT_ENERGY`), alongside the legacy one, which stays
+  OCFESLV's default. The legacy SAT gives the semi-discrete operator a growing mode quadratic in `SAT_SIGMA0` -- the
+  value-jump penalty enters the auxiliary flux and the flux-jump penalty multiplies it (`+9.2e4` at 10 on the rod) --
+  damped on OCFESLV by Radau's L-stability, fatal to an integrator. The energy form is the summation-by-parts one:
+  the value jump lifted into the auxiliary's LINK row and the flux jump into the PDE row (`SAT_FLUX`: alternating by
+  default, central available), an upwind term for a constant-coefficient convective part, an optional interior
+  penalty (`SAT_PENALTY`, default 0). Every strength, legacy or energy, is computed in ONE function,
+  `OCFEBASE::_sat_strength`; the frozen interface plan records the form, flux and penalty. Under the method of lines
+  IC_WEAK takes the energy form whatever `SAT_FORM` says. Measured: stable for any penalty and either boundary
+  arrangement; on pure diffusion one order better than IC_STRONG at even degree; on convection-diffusion behind it
+  (2.6x at Peclet 10 on the rod, 20-25x on the PSA column) -- the open question. Gate `DAESLV_molsat`; G2 updated.
+* **SAT_ENERGY: the upwind term of a convective part was generated only when SAT_PENALTY != 0** -- it sat in the
+  interior-penalty block, switched off with the penalty when its default became 0 -- so the delivered energy form had
+  NO upwind term: a growing mode at Peclet 100 (+0.46 in the semi-discrete spectrum; u(20,1) = -1240 on the rod under
+  MoL). The block now runs for every SAT_ENERGY model and gates only the penalty. Peclet 10 on 6 elements: 4.75e-5 ->
+  3.78e-5 (IC_STRONG 1.51e-5). Gate DAESLV_molsat (B2): Peclet 100 to t = 20 settles to u = 1. Found by the
+  convective-gap probe, which also located the remaining gap AT THE INTERFACES (one element: every variant equal to the
+  digit) and its mechanism: after order reduction the PDE row reads U q, q the auxiliary whose LINK row receives the
+  value-jump lifting -- so the diffusive flux choice also sets a convective interface term.
+* **SAT_ENERGY: the central flux is refused on a field with a convective part** (it diverges under MoL: 5e28 at 12
+  elements, Peclet 10, with or without the upwind term), named at setup; taken on pure diffusion. Gate DAESLV_molsat
+  (D). CLOSES the convective-gap probe (9-10 Nov 2026), measured on the rod and the PSA column against fine IC_STRONG
+  references, degree 4: the gap is entirely at the INTERFACES (one element: every variant equal to the digit); it is
+  not specific to the column (without adsorption the column's c1 is plain convection-diffusion, IC_WEAK's error stays
+  ~4e-6 at 12 elements while IC_STRONG's falls to 4e-9 -- the energy form's interface error is roughly constant across
+  problems, IC_STRONG exploits each problem's smoothness); the diffusive side is not the lever (SAT_PENALTY 0..100
+  makes it slightly worse); the convective side is, but only so far -- the upwind term at 2x and 4x the textbook
+  |U|/w narrows the column's gap from 19x to 7x, at 8x and 16x the rate collapses (0.6) and the error grows; cancelling
+  the lifting's convective effect in the PDE row (the row reads U q) makes it slightly worse. The textbook |U|/w is
+  kept. Conclusion: the limit is structural to the weak interface treatment of convection here; for convective models
+  under MoL, IC_STRONG and IC_TRACE remain the recommended impositions.
+* **OCPlan:** the aux-implied rule only where a face has one tangential direction -- fixes OCFESLV on `(t,x,y)`
+  models when a time element has more nodes than a spatial one; the tangential-derivative implication read from the
+  plan's own decisions; the definition-row lookup supplies every leaf of a LINK row.
+
+### Index reduction
+
+* **High-index reduction: a declared initial condition IMPLIED by the materialised hidden constraints is set aside.**
+  With `REDUCE.HIDDEN_IC` the reduction materialises its hidden constraint levels as INITIAL rows at the initial
+  point; a declared row they already imply over-determined it (OCFE_PDE20b, `x' = y, 0 = x - a(t)` with `x(0) = a(0)`
+  declared: 13 rows for 12 unknowns, refused by the DOF audit -- the gate printed BASELINE since Stage 2). FFModel now
+  matches the INITIAL rows to the differential states, the materialised levels first, and sets aside the declared rows
+  left unmatched (`initial_set_aside()`, `initial_data().set_aside`) -- for every solver. Their consistency with the
+  solution is checked: `OCFESLV::initial_consistency_defect()`, and both OCFESLV and DAESLV warn at DISPLAY_LEVEL >= 1
+  when a declared value contradicts the hidden constraints (which hold). OCFE_PDE20b now passes (REDUCED:PASS, exact
+  to 7e-16); new gate OCFE_PDE20h -- consistent, inconsistent (defect 0.5 reported), and alongside free data (kept).
+  COVERAGE: a declared row covering MORE nodes than the level implying it (OCFE_PDE39b: IC_c on every z node, the level
+  from an EOS row absent at z = LB) is NARROWED to the nodes the level leaves free instead of set aside whole (which
+  removed one node too many: 215 rows for 216 unknowns); any other mismatch is left to the DOF audit. OCFE_PDE20e (B)
+  now gates this convention (it gated the opposite: the declared IC rejected as a surplus).
+
+### Python and notebooks
+
+* **Python: one by-name convention for every solver** -- a value is a number, a list, or a function of the
+  coordinates; `OCFESLV.solve` by name; `input_coordinates`.
 * **Python: a model distributed in space on DAESLV.** `DAESLV.semidiscrete_states()` and
   `DAESLV.semidiscrete_nodes(field)` expose the semi-discrete system's unknowns and a field's nodes, mesh order,
   as `(column, {direction: coordinate})`; everything else a PDE model needs was bound since the by-name solve. New
   `check_daeslv_mol.py`: a rod on DAESLV and on OCFESLV from one declaration, a time-varying inlet with one
   gradient row per declared DOF, a transition against closed forms, the semi-discrete layout.
+* **Notebooks: `MOL_tutorial` and `PSA_tutorial`.** The OCFESLV tutorial's heated rod on DAESLV by the method of
+  lines, one declaration for both solvers: outputs, profiles, OCFESLV's spectral convergence in its time order,
+  gradients by name in the shared layout. A non-isothermal two-component adsorption column, by MoL or by space-time
+  collocation behind one switch: breakthrough, thermal front, sensitivities to the affinity, a cross-check.
+
+### Performance
+
 * **OCFEMOL: the residual's Jacobian coloured on the equation rows alone.** The coloured pattern held the output
   rows too, for OCFESLV's single sweep; under MoL an output distributed over space is one row touching every
   node of its fields, so every such column needed its own colour: 121 for a residual whose rows need far fewer,
   paid at every Jacobian and every sensitivity or backward residual. OCFEMOL sweeps the residual and the outputs
   separately and now colours them separately. PSA column: `solve_fsens` 2.6 s -> 1.95 s, `solve_asens` 3.9 s -> 2.7 s.
-* **DAESLV: `ic_sens` and `ic_adjoint` factorise as the IC solve does.** One `_ic_factor` builds the IC system's
-  Jacobian in the pattern the IC solve uses, transposed for the adjoint, on KLU under `LINSOL = SPARSE` and dense
-  otherwise; the sensitivity seeds at t0 and the sensitivities across a stop, forward and adjoint, were dense
-  whatever `LINSOL` said.
-* **DAESLV: the consistent initialisation follows the integrator's linear algebra.** With `LINSOL = SPARSE` the IC
-  solve (and its polish) factorises with KLU; it factorised dense whatever `LINSOL` said. `DAESLV_mol`, whose leg 1
-  drives a 12 000-unknown space-time system through DAESLV: 514 s -> 48 s in the sandbox.
-* **DAESLV: IDACalcIC retired.** The KINSOL consistent initialisation is the one corrector, at t0 and at every
-  stage boundary; its `(y0, y'0)` now starts IDAS (the derivative was computed and discarded, with IDACalcIC
-  repairing it after the solve by default). Gone with it: `INITIAL.SOLVER`, `CALCIC`, `TOUT1`, `NMAXIC`,
-  `MAXJACIC`, `MAXNLIIC`, `LSOFFIC`, `STEPTOLIC` and DAESLV's unused `BYPASS_EXPLICIT` (ODESLV keeps its own).
-  `stats.numIC` counts the t0 solve. Results move at tolerance level: IDAS starts from KINSOL's point.
-* **Quadratures accumulate over the horizon** in ODESLV and DAESLV, with no per-stage reset; an integral over t is
-  the quadrature's value at the end. Fixes DAESLV failing at a stage boundary without a state restart (a large
-  integrand against ATOL) and integral outputs that could come out wrong on a multi-stage horizon.
-* **MoL on DAESLV (6a, 6b):** a model distributed in space declared through FFModel, solved by DAESLV with inputs,
-  outputs and sensitivities by name; `tools/ci/build_deps.sh` patches SUNDIALS IDAS's order decision (an exactly
-  constant state with an error-controlled quadrature stalled it at order 1).
+* **OCFEBASE: `_defining_rows()` computed once per plan build**, not per node.
+
+### Build, tests and tools
+
+* **Build and docs follow `ocfebase.hpp`:** install lists, the options generator (`src/interface/gen_options.py`,
+  which formats with MC++'s `.clang-format` when `MCPP_ROOT` is set), the Doxygen input and the environment table.
+  `check_daeslv_mol.py` runs with the other Python checks under `make check`; `check_ffodeslv` / `check_ffdaeslv`: the
+  coordinate case no longer shadows the solver.
+* **`tools/ci/snapshot_corpus.sh`:** a driver without a baseline entry is NEW, recorded on first sight and gated from
+  the next check; an advisory names the drivers whose output prints a FAIL verdict line; the concurrency guard names
+  the processes it saw; DAESLV and ODESLV timing families; clocks suppressed under `CRONOS_SNAPSHOT`.
+* **New gates:** DAESLV_molsetup, DAESLV_molpeel, DAESLV_molgate, DAESLV_molbench, DAESLV_mol, DAESLV_molpde,
+  DAESLV_molpsa, DAESLV_molsens, DAESLV_moltime, DAESLV_molindex, DAESLV_molsat; OCFE_PDE20h, OCFE_PDE41;
+  ODESLV_evalsum's NONLINEAR case.
+
+### Known gaps
+
+* **`SAT_ENERGY` on convective models:** stable, but behind `IC_STRONG` in accuracy (3x on a Peclet-10 rod, ~19x on
+  the PSA column at 12 elements of degree 4) -- structural to the weak interface treatment of convection here; for
+  convective models under MoL, `IC_STRONG` and `IC_TRACE` are recommended.
+* **MoL: transitions reading an input distributed in space** are refused by name.
+* **OCFESLV: a nested spatial reduction consuming every direction of its fields** (a scalar hidden state) is refused
+  by name.
 
 ## 5.1.0 (2026-10-27)
 

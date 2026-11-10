@@ -957,6 +957,21 @@ protected:
   bool _on_setup_begin
     ()
     override;
+  //! @brief Lift a SPATIAL reduction nested inside a nonlinearity of an output into a hidden algebraic state (9 Nov 2026).
+  //! The collocation evaluates an output element by element and sums at the root: exact for anything linear in a
+  //! reduction, wrong for `(int u dz)^2` -- a third of the value on three equal elements.  Mirroring OCFEMOL's spatial
+  //! parts and BASE_DE's lift of nonlinear outputs, on the DECLARATION before FFModel::setup: each distinct spatial
+  //! reduction R the output is not affine in (the record machinery's test: every dE/dR free of reductions) becomes a
+  //! state J over the directions R does not consume, pinned by the algebraic row `J - R = 0` at every node (linear in
+  //! the fields: exact), and the output reads J.  Reductions consuming the evolution direction are left to FFModel's
+  //! capture, which already serves them (`f(cap)` at completion).
+  bool _lift_nested_reductions
+    ();
+  //! @brief FFModel's declaration hook: the nested-reduction lift, before any check processes the declared rows.
+  bool _on_declaration
+    ()
+    override
+    { return _lift_nested_reductions(); }
 
   //! @brief Preflight the declared model before it is imported (overrides FFModel::_validate_model): the
   //! solver's check, which also validates against the marching grid.
@@ -4511,6 +4526,92 @@ OCFESLV::_validate_model
   return _check_consistency( _usr._dagUsr, _usr._vCstUsr, &_usr._vCstValUsr,
                              _usr._mDomUsr, _usr._mVarUsr, _usr._mInpUsr,
                              _usr._mEqnUsr, _usr._mFctUsr );
+}
+
+inline bool
+OCFESLV::_lift_nested_reductions
+()
+{
+  FFGraph* dag = _usr._dagUsr;
+  if( !dag || _usr._mFctUsr.empty() ) return true;
+  bool const hasT = _usr._evolution_dom_setUsr;
+  FFVar const tvar = hasT? _usr._evolution_dom_varUsr: FFVar();
+  auto is_spatial_reduction = [&]( FFOp const* op )->bool{
+    if( auto const* pi = mc::type_cast<FFIntegral const>( op ) ) return !pi->Indep().expr.empty() && !( hasT && pi->Indep().expr.count( tvar ) );
+    if( auto const* pe = mc::type_cast<FFEval const>( op ) )     return !pe->Coord().empty() && !( hasT && pe->Coord().count( tvar ) );
+    return false; };
+  std::map<FFVar::pt_idVar,FFVar> lifted;                        // reduction node -> its hidden state, one per DISTINCT reduction
+  for( auto& fct : _usr._mFctUsr ){
+    FFVar const E = fct.var;
+    FFOp const* root = E.opdef().first;
+    if( !root ) continue;
+    std::vector<FFVar> cand;
+    for( auto const* op : dag->subgraph( 1, &E ).l_op ) if( op && is_spatial_reduction( op ) ) for( auto const* vo : op->varout ) if( vo ) cand.push_back( *vo );
+    if( cand.empty() ) continue;
+    std::vector<FFVar> red;                                       // the OUTERMOST spatial reductions
+    for( size_t i = 0; i < cand.size(); ++i ){
+      bool inner = false;
+      for( size_t j = 0; j < cand.size() && !inner; ++j ){
+        if( i == j ) continue;
+        for( auto const* vo : dag->subgraph( 1, &cand[j] ).l_op )
+          for( auto const* v : vo->varout ) if( v && v->id() == cand[i].id() && vo->varout[0]->id() != cand[j].id() ){ inner = true; break; }
+      }
+      if( !inner ) red.push_back( cand[i] );
+    }
+    // affine in them (every dE/dR free of the reductions): the element-wise assembly is exact -- leave it
+    std::vector<FFVar> ph;  for( size_t i = 0; i < red.size(); ++i ) ph.push_back( dag->add_var( "nest_ph" + std::to_string( i ) ) );
+    FFVar const h = dag->substitute( std::vector<FFVar>{ E }, red, ph )[0];
+    std::vector<FFVar> dh;
+    try{ dh = dag->FAD( std::vector<FFVar>{ h }, ph ); } catch( ... ){ dh.clear(); }
+    std::set<FFVar::pt_idVar> phid;  for( auto const& v : ph ) phid.insert( v.id() );
+    bool affine = dh.size() == ph.size();
+    for( auto const& d : dh ){ if( !affine ) break;  if( d.cst() ) continue;
+      for( auto const* v : dag->subgraph( 1, &d ).v_indep ) if( v && phid.count( v->id() ) ){ affine = false; break; } }
+    if( affine ) continue;
+    // the hidden states, one per distinct reduction, over the directions the reduction does not consume
+    std::vector<FFVar> sub;
+    for( auto const& r : red ){
+      auto itl = lifted.find( r.id() );
+      if( itl != lifted.end() ){ sub.push_back( itl->second ); continue; }
+      FFOp const* op = r.opdef().first;
+      std::set<FFVar,lt_FFVar> consumed, remaining;
+      if( auto const* pi = mc::type_cast<FFIntegral const>( op ) ) for( auto const& [dv, o] : pi->Indep().expr ) consumed.insert( dv );
+      if( auto const* pe = mc::type_cast<FFEval const>( op ) )     for( auto const& [dv, c] : pe->Coord() ) consumed.insert( dv );
+      FFVar const operand = *op->varin[0];
+      for( auto const* v : dag->subgraph( 1, &operand ).v_indep ){
+        if( !v ) continue;
+        auto itv = _usr._mVarUsr.find( *v );
+        if( itv == _usr._mVarUsr.end() ) continue;
+        for( auto const& dv : itv->second ) if( !consumed.count( dv ) ) remaining.insert( dv );
+      }
+      if( remaining.empty() ){
+        std::cerr << "OCFESLV::setup ** output " << _expr_text( dag, E ) << ": the reduction " << _expr_text( dag, r )
+                  << " nested in a nonlinearity consumes every direction of its fields -- a scalar hidden state is not taken yet" << std::endl;
+        return false;
+      }
+      // the reference: the fields' largest reference times the measure of the integrated directions -- a state with a
+      // zero reference makes the scaled Newton system singular, one scaled a million times too large is as bad
+      double refJ = 0.;
+      for( auto const* v : dag->subgraph( 1, &operand ).v_indep ){
+        if( !v || !_usr._mVarUsr.count( *v ) ) continue;
+        try{ refJ = std::max( refJ, std::fabs( ref( *v ) ) ); } catch( ... ){}
+      }
+      if( refJ == 0. ) refJ = 1.;
+      if( mc::type_cast<FFIntegral const>( op ) )
+        for( auto const& dv : consumed ){ auto itd = _usr._mDomUsr.find( dv );  if( itd != _usr._mDomUsr.end() ) refJ *= std::fabs( itd->second.up_dom - itd->second.lo_dom ); }
+      FFVar J = dag->add_var( "nest_" + std::to_string( lifted.size() ) );
+      std::vector<FFVar> doms( remaining.begin(), remaining.end() );
+      std::vector<int> masks( doms.size(), FFDom::ALL );
+      add_state( J, doms );  update_ref( J, refJ );
+      add_equation( J - r, doms, masks, EqnOptions( EqnRole::INTERIOR, 0 ) );
+      lifted.emplace( r.id(), J );  sub.push_back( J );
+      if( options.DISPLAY_LEVEL >= 1 )
+        std::cerr << "OCFESLV::setup ** nested reduction " << _expr_text( dag, r ) << " of an output lifted into the hidden state " << J.name()
+                  << " (an algebraic row at every node of its " << doms.size() << " remaining direction(s))" << std::endl;
+    }
+    fct.var = dag->substitute( std::vector<FFVar>{ E }, red, sub )[0];
+  }
+  return true;
 }
 
 inline bool

@@ -406,6 +406,10 @@ protected:
 
   //! @brief pointer to adjoint discontinuity function in current stage of ODE system
   FFVar* _pSAFCT;
+  //! @brief The adjoint's initial-condition chain is taken NUMERICALLY, from ic_sens on the start system, because that
+  //! system binds time-varying inputs through placeholders the symbolic derivative of the IC expressions does not see
+  //! (A1, 10 Nov 2026: x(0) = u(t0) had a zero adjoint gradient in u).  Set by _IC_SET_ASA, read by _IC_D_QUAD_ASA.
+  bool _icPhASA = false;
 
   //! @brief number of variables for DAG evaluation
   unsigned _nVARS;
@@ -1308,7 +1312,9 @@ ODESLV_BASE::_IC_SET_ASA
 {
   FFVar const* pIC = _vIC.at( 0 ).data();
   FFVar pHAM = (!_vFCT.at( 0 ).empty()? _vFCT.at( 0 )[ifct]: 0.);
-  for( unsigned ix=0; ix<_nx; ix++ ) pHAM += _pY[ix] * pIC[ix];
+  // with input placeholders in the start system the IC chain comes from ic_sens (_IC_D_QUAD_ASA): pHAM keeps f0 alone
+  _icPhASA = _icStart.ok && !_icStart.evalQ.empty();
+  if( !_icPhASA ) for( unsigned ix=0; ix<_nx; ix++ ) pHAM += _pY[ix] * pIC[ix];
   //_dag->output( _dag->subgraph( 1, &pHAM ) );
 #ifndef CRONOS__ODESLVS_USE_BAD
   delete[] _pSACFCT; _pSACFCT = _dag->FAD( 1, &pHAM, _nx+_np, _pVARS+_ny );
@@ -1324,7 +1330,7 @@ ODESLV_BASE::_IC_SET_ASA
     // expression w.r.t. the parameter.  It used to multiply by the initial VALUE x0 instead, so an output at the
     // initial time had a wrong adjoint gradient (1.0 for x0 = 1, whatever the parameter) -- WORKPLAN 1.8, 2026-10-06.
     // Only a function at stage 0 makes df0/dx non-zero: skip the derivative of the initial condition otherwise.
-    if( df0dx_nonzero ){
+    if( df0dx_nonzero && !_icPhASA ){
       FFVar* dIC = _dag->FAD( _nx, pIC, 1, _pP + _ndxSEN[is] );
       for( unsigned ix=0; ix<_nx; ix++ ) _pSAFCT[is] += _pSACFCT[ix] * dIC[ix];
       delete[] dIC;
@@ -1595,6 +1601,25 @@ ODESLV_BASE::_IC_D_QUAD_ASA
   _vec2D( yq, _nsen, _Dyq );
   static double const one = 1.;
   _dag->eval( _nsen, _pSAFCT, (double*)yq, _nVAR0S, _pVARS, _DVARS, &one );
+  if( _icPhASA ){
+    // the initial-condition chain, as DAESLV takes it: dG/dp += ( lambda + df0/dx )(t0) . dx0/dp, dx0/dp from ic_sens on
+    // the START system -- which differentiates through the input placeholders (A1, 10 Nov 2026)
+    std::vector< std::vector<double> > dxdp, ddxdp;
+    t_ICSys* const keep = _icLast;  _icLast = &_icStart;
+    bool const ok = ic_sens( dxdp, ddxdp );
+    _icLast = keep;
+    if( !ok ) return false;
+    std::vector<double> h( _nx, 0. );                        // df0/dx: the first _nx entries of d(f0)/d[x | p]
+    _dag->eval( _nx, _pSACFCT, h.data(), _nVAR0S, _pVARS, _DVARS );
+    for( unsigned ix=0; ix<_nx; ix++ ) h[ix] += _Dy[ix];       // + lambda(t0)
+    for( unsigned is=0; is<_nsen; is++ ){
+      size_t const j = _ndxSEN[is];
+      if( j >= dxdp.size() ) continue;
+      double acc = 0.;
+      for( unsigned ix=0; ix<_nx && ix<dxdp[j].size(); ix++ ) acc += h[ix] * dxdp[j][ix];
+      yq[is] += acc;
+    }
+  }
   _vec2D( yq, _nsen, _Dyq );
   return true;
 }

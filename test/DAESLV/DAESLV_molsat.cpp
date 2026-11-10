@@ -9,7 +9,13 @@
 //       below IC_STRONG at 12 elements (measured 8.8e-9 vs 5.7e-8);
 //   (B) the same rod with convection, u_t + u_z = 0.1 u_zz (Peclet 10), Dirichlet inflow: stable, within the measured 3x
 //       of IC_STRONG at 6 elements (the convective accuracy gap is recorded, not closed);
+//   (B2) Peclet 100 on 3 elements of degree 4, to t = 20: the column settles to its steady state u = 1.  The upwind term
+//       of the convective part had been generated only when SAT_PENALTY != 0 -- switched off with the penalty's
+//       default of 0 -- leaving a growing mode (+0.46 in the semi-discrete spectrum): u(20,1) = -1240 without the term,
+//       1.000000 with it (9 Nov 2026).  IC_STRONG is printed for comparison.
 //   (C) OCFESLV under SAT_ENERGY = DAESLV under MoL on (A): one spatial scheme; and SAT_LEGACY still OCFESLV's default.
+//   (D) the central flux (SAT_FLUX_CENTRAL): refused on a field with a convective part (it diverges: 5e28 at 12
+//       elements, Peclet 10, with or without the upwind term), taken on pure diffusion.
 ////////////////////////////////////////////////////////////////////////
 #include <iostream>
 #include <iomanip>
@@ -43,15 +49,35 @@ template <typename S> static void declare( S& s, FFGraph& G, FFVar& t, FFVar& z,
   s.add_output( OpE( u, {{t,1},{z,1}}, {{t,TEND},{z,1.}} ) );
   s.add_output( OpI( u, z ), {t}, {TEND} );
 }
-static bool mol( int nel, int nnz, double U, bool strong, std::vector<double>& F, int* form = nullptr )
+static bool mol( int nel, int nnz, double U, bool strong, std::vector<double>& F, int* form = nullptr, bool central = false )
 {
   FFGraph G; DAESLV_IDAS S( &G ); FFVar t, z, u;  declare( S, G, t, z, u, nel, nnz, U, 2, 3 );
   S.options.INTERFACE.IMPOSITION = strong? OCFEMOL::Options::IC_STRONG: OCFEMOL::Options::IC_WEAK;   // SAT_FORM left at its default
+  if( central ) S.options.INTERFACE.SAT_FLUX = OCFEMOL::Options::SAT_FLUX_CENTRAL;
   S.options.SOLVE.RTOL = S.options.SOLVE.ATOL = 1e-12;  S.options.SOLVE.VERBOSE = 0;  S.options.SOLVE.NMAX = 100000;  S.options.DISPLAY_LEVEL = 0;
   if( !S.setup() || S.solve( std::vector<FFModel::InputVal>{} ) != DAESLV_IDAS::NORMAL ) return false;
   F = S.val_function();
   if( form ) *form = (int)S.semidiscrete_model()->options.INTERFACE.SAT_FORM;
   return true;
+}
+// (B2): u_t + u_z = Dd u_zz on [0,1], u(t,0) = 1, u_z(t,1) = 0, to t = TE; the outlet value at TE
+static bool mol_pe( int nel, double Dd, double TE, bool strong, double& uT )
+{
+  FFGraph G; DAESLV_IDAS S( &G ); FFPartial OpP; FFEval OpE;
+  FFVar t = G.add_var("t"), z = G.add_var("z"), u = G.add_var("u");
+  S.add_domain( t, FFDom( 0., TE, 2, FFDom::LGR, 3 ) ); S.add_domain( z, FFDom( 0., 1., nel, FFDom::LGL, 5 ) );
+  S.set_evolution_domain( t ); S.add_state( u, {t,z} ); S.update_ref( u, 0.5 );
+  int const TI = FFDom::ALL - FFDom::LB, ZI = FFDom::ALL - FFDom::LB - FFDom::UB;
+  DAESLV_IDAS::EqnOptions io( DAESLV_IDAS::EqnRole::INTERIOR, 0 ), ib( DAESLV_IDAS::EqnRole::BOUNDARY, 0 ), ii( DAESLV_IDAS::EqnRole::INITIAL, 0 );
+  S.add_equation( OpP(u,t) + OpP(u,z) - Dd*OpP(OpP(u,z),z), {t,z}, {TI, ZI}, io );
+  S.add_equation( u - 1., {t,z}, {TI, FFDom::LB}, ib );  S.add_equation( OpP(u,z), {t,z}, {TI, FFDom::UB}, ib );
+  S.add_equation( u - 0.5 - 0.5*(1.-z)*(1.-z), {t,z}, {FFDom::LB, FFDom::ALL}, ii );
+  S.add_output( OpE( u, {{t,1},{z,1}}, {{t,TE},{z,1.}} ) );
+  S.options.INTERFACE.IMPOSITION = strong? OCFEMOL::Options::IC_STRONG: OCFEMOL::Options::IC_WEAK;
+  S.options.SOLVE.RTOL = S.options.SOLVE.ATOL = 1e-9;  S.options.SOLVE.VERBOSE = 0;  S.options.SOLVE.NMAX = 200000;  S.options.DISPLAY_LEVEL = 0;
+  if( !S.setup() || S.solve( std::vector<FFModel::InputVal>{} ) != DAESLV_IDAS::NORMAL ) return false;
+  uT = S.val_function()[0];
+  return std::isfinite( uT );
 }
 static double err( std::vector<double> const& F, double a, double b ){ return std::max( std::fabs( F[0] - a )/std::fabs( a ), std::fabs( F[1] - b )/std::fabs( b ) ); }
 
@@ -78,6 +104,12 @@ int main()
     check( "(B) solves under MoL with the upwind convective term", okr && okw && oks );
     check( "(B) error within 4x of IC_STRONG's (measured 2.6x: the convective gap, recorded)", okr && okw && oks && ew < 4.*es ); }
 
+  std::cout << "(B2) Peclet 100, 3 elements of degree 4, to t = 20: settles to u = 1\n";
+  { double uw = NAN, us = NAN;
+    bool const okw = mol_pe( 3, 0.01, 20., false, uw ), oks = mol_pe( 3, 0.01, 20., true, us );
+    std::cout << "    u(20, 1): IC_WEAK " << ( okw? std::to_string( uw ): std::string( "FAILED" ) ) << "   IC_STRONG " << ( oks? std::to_string( us ): std::string( "FAILED" ) ) << " (for comparison)\n";
+    check( "(B2) IC_WEAK under MoL stays bounded and settles: |u(20,1) - 1| < 1e-3 (the upwind term active)", okw && std::fabs( uw - 1. ) < 1e-3 ); }
+
   std::cout << "(C) OCFESLV: SAT_ENERGY = DAESLV under MoL on (A); SAT_LEGACY still the default\n";
   { std::vector<double> Fm;  bool const okm = mol( 6, 5, 0., false, Fm );
     FFGraph G; OCFESLV O( &G ); FFVar t, z, u;  declare( O, G, t, z, u, 6, 5, 0., 4, 8 );
@@ -89,6 +121,12 @@ int main()
     std::cout << "    OCFESLV vs DAESLV, 6 elements: " << gap << "\n";
     check( "(C) SAT_LEGACY is OCFESLV's default", legacyDefault );
     check( "(C) OCFESLV under SAT_ENERGY = DAESLV under MoL to 1e-8 (one spatial scheme, time errors apart)", okm && oko && gap < 1e-8 ); }
+
+  std::cout << "(D) the central flux: refused with convection, taken on pure diffusion\n";
+  { std::vector<double> F;
+    bool const conv = mol( 3, 5, 1., false, F, nullptr, true ), diff = mol( 3, 5, 0., false, F, nullptr, true );
+    check( "(D) SAT_FLUX_CENTRAL refused at setup on the Peclet 10 rod (a convective part)", !conv );
+    check( "(D) SAT_FLUX_CENTRAL taken on the pure-diffusion rod", diff ); }
 
   std::cout << "==========  DAESLV_molsat: " << ( nfail? std::to_string( nfail ) + " FAILED": "ALL PASS" ) << "  ==========\n";
   return nfail? 1: 0;

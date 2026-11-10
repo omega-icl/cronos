@@ -233,7 +233,7 @@ int main()
       { FFGraph G;  ODESLV_CVODES S( &G );  bool const ok = ode( S, G, mode, x1, a, b, w );
         bool const good = ok && rel( x1, 0.8*e1 ) <= 1e-8 && rel( a, e1 ) <= 1e-8 && std::fabs( b ) <= 1e-12;
         if( mode == 1 ) check( "(C) ODESLV forward: the same (the explicit bypass yields to the solve)" + ( ok? std::string(): " -- " + w ), good );
-        else std::cout << "  (C) ODESLV adjoint: dx(1)/du0 " << a << " (exact " << e1 << ") -- its initial term is derived symbolically, not from ic_sens: open item, not gated\n"; }
+        else check( "(C) ODESLV adjoint: the same (its initial-condition chain through ic_sens, as DAESLV's)" + ( ok? std::string(): " -- " + w ), good ); }
     }
   }
   // ---- (D)

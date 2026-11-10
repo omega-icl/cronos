@@ -206,7 +206,7 @@ int main()
 
   std::cout << "\n---- (B) one IC declared: implied by the level, SET ASIDE -----------\n";
   CaseResult B = run_case( OVERSPEC, /*fatal=*/true );
-  report( "B over-specified", B );
+  report( "B implied, set aside", B );
 
   std::cout << "\n---- (C) RANK-DEFICIENT, switch OFF: square but singular, fatal -\n";
   CaseResult C = run_case( DEFICIENT, /*fatal=*/true, /*marching=*/false, /*hidden=*/false );

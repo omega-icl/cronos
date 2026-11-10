@@ -1082,6 +1082,12 @@ public:
 protected:
   //! @brief vector of equation subgraphs
   mutable std::vector<FFSubgraph>    _sgEqn;
+  //! @brief Per equation, the residual with its FFIntegral nodes over FREE (integrated) directions replaced by 0 --
+  //! the "g" of section 4a, exact for a residual linear in those integrals -- and its subgraph.  Empty FFVar: no
+  //! such node (the g pass then zeroes the integrated fields, as before).  (9 Nov 2026: zeroing the fields left the
+  //! integral of a constant part standing on one element -- `J - int (1 + u) dz` pinned J to int u + 1/n_elem.)
+  mutable std::vector<FFVar>         _eqnVarNoInt;
+  mutable std::vector<std::shared_ptr<FFSubgraph>> _sgEqnNoInt;   // FFSubgraph is not assignable: held by pointer
 
   //! @brief Count of collocated equation residuals during setup
   size_t                             _nCollEqn = 0;
@@ -2859,7 +2865,8 @@ protected:
         double sw = 0.;  for( double v : w ) sw += v;
         if( w.empty() || sw <= 0. || receiver_iel >= dom.n_elem ) return 0.;
         double const wend = w.front() * dom.elem_width( receiver_iel ) / sw;
-        if( upwind != 0. ) return wend > 0.? std::fabs( upwind ) / wend: 0.;   // dissipative with this sign: Pe 100 on the rod
+        if( upwind != 0. ) return wend > 0.? std::fabs( upwind ) / wend: 0.;   // the textbook |U|/w: 2x and 4x it narrow the
+                                                                                // convective gap at most 3x, beyond it the rate collapses   // dissipative with this sign: Pe 100 on the rod
                                                                                 // +0.14 -> -1.6; the other sign gives +70
         if( penalty ) return wend > 0.? -options.INTERFACE.SAT_PENALTY / wend: 0.;   // dissipative for SAT_PENALTY > 0
         bool const alternating = options.INTERFACE.SAT_FLUX != Options::SAT_FLUX_CENTRAL;
@@ -10521,7 +10528,9 @@ OCFEBASE::_build_frozen_weak_sat_terms
   // SAT_ENERGY's INTERIOR PENALTY (8 Nov 2026): a field's value jump, lifted into its auxiliary's LINK row, is also
   // received in the PDE row of the same node -- the row receiving that auxiliary's flux jump there -- with strength
   // SAT_SIGMA0 / w_end (_sat_strength, penalty).  0 switches it off.
-  if( options.INTERFACE.IMPOSITION == Options::IC_WEAK && options.INTERFACE.SAT_FORM == Options::SAT_ENERGY && options.INTERFACE.SAT_PENALTY != 0. ){
+  // (9 Nov 2026) the block runs for SAT_ENERGY whatever the penalty: it had been gated on SAT_PENALTY != 0, which
+  // switched the UPWIND term off with the penalty when the penalty's default became 0.
+  if( options.INTERFACE.IMPOSITION == Options::IC_WEAK && options.INTERFACE.SAT_FORM == Options::SAT_ENERGY ){
     size_t const nterm = draft.weak_sat_terms.size();  size_t nip = 0, nup = 0;
     for( size_t i = 0; i < nterm; ++i ){
       auto const tv = draft.weak_sat_terms[i];
@@ -10536,14 +10545,16 @@ OCFEBASE::_build_frozen_weak_sat_terms
          || tf.receiver_iel != tv.receiver_iel || tf.receiver_inode != tv.receiver_inode || tf.row_id == tv.row_id ) continue;
         FFDom const* fd = dom_by_id( tv.claim_key.dom_id );
         if( !fd ) break;
-        auto ip = tv;
-        ip.row_id = tf.row_id;  ip.receiver_flat = tf.receiver_flat;  ip.receiver_emit_flat = tf.receiver_emit_flat;
-        ip.receiver_block_el = tf.receiver_block_el;  ip.coupling = tf.coupling;
-        ip.prefactor = _sat_strength( *fd, tv.claim_key.iel_lo, tv.claim_key.kind, tv.receiver_iel, false, true ) * ip.coupling * tv.orientation;
-        ip.trace_prefactor = ip.prefactor * options.INTERFACE.TRACE_TAU_SCALE;  ip.trace_tau_allowed = false;
-        ip.sat_coeffs.clear();
-        if( !_sat_claim_coeffs( tv.claim_key, ip.prefactor, ip.sat_coeffs ) ) return false;
-        draft.weak_sat_terms.push_back( ip );  ++nip;
+        if( options.INTERFACE.SAT_PENALTY != 0. ){                  // the interior penalty, when asked for
+          auto ip = tv;
+          ip.row_id = tf.row_id;  ip.receiver_flat = tf.receiver_flat;  ip.receiver_emit_flat = tf.receiver_emit_flat;
+          ip.receiver_block_el = tf.receiver_block_el;  ip.coupling = tf.coupling;
+          ip.prefactor = _sat_strength( *fd, tv.claim_key.iel_lo, tv.claim_key.kind, tv.receiver_iel, false, true ) * ip.coupling * tv.orientation;
+          ip.trace_prefactor = ip.prefactor * options.INTERFACE.TRACE_TAU_SCALE;  ip.trace_tau_allowed = false;
+          ip.sat_coeffs.clear();
+          if( !_sat_claim_coeffs( tv.claim_key, ip.prefactor, ip.sat_coeffs ) ) return false;
+          draft.weak_sat_terms.push_back( ip );  ++nip;
+        }
         // the UPWIND term of the field's convective part (8 Nov 2026): the PDE row's coefficient of d_z c -- after the
         // order reduction the row reads the auxiliary as a plain operand in the convective term and only through d_z in
         // the diffusive one, so d(row)/d(aux) is that coefficient; it must be a constant -- received at the INFLOW copy
@@ -10568,6 +10579,15 @@ OCFEBASE::_build_frozen_weak_sat_terms
               return false;
             }
             double const U = dR.size() == 1? dR[0].num().val(): 0.;
+            if( U != 0. && options.INTERFACE.SAT_FLUX == Options::SAT_FLUX_CENTRAL ){
+              // measured 9-10 Nov 2026: the central flux with a convective part DIVERGES under MoL (the PDE row reads U q,
+              // q the auxiliary whose LINK row receives the lifting -- central lifting puts half of a convective interface
+              // term on each side; 5e28 at 12 elements, Peclet 10) -- with or without the upwind term
+              std::cerr << "OCFESLV::setup ** SAT_ENERGY: the central flux (INTERFACE.SAT_FLUX = SAT_FLUX_CENTRAL) is not taken for "
+                        << state_name_of_id( tv.claim_key.state_id ) << ", whose PDE row has a convective part (coefficient " << U
+                        << "): it diverges -- use the alternating flux (SAT_FLUX_AUTO)" << std::endl;
+              return false;
+            }
             bool const leftCopy = tv.receiver_iel == tv.claim_key.iel_lo;
             bool const inflow = ( U > 0. && !leftCopy ) || ( U < 0. && leftCopy );
             if( U != 0. && inflow ){
@@ -15652,12 +15672,23 @@ const
             default: throw Exceptions( Exceptions::INTERNAL );
           }
         }
-        _dag->eval( _sgEqn[ndx], OCwrk,
-                    1, &eqnvar, &OCres,
-                    _vVar.size(), _vVar.data(), OCvar.data(),
-                    _vInp.size(), _vInp.data(), OCinp.data(),
-                    _vCst.size(), _vCst.data(), OCcst.data(),
-                    _vDom.size(), _vDom.data(), OCdom.data() );
+        // the g pass: the residual with its integral nodes removed, when that expression exists (section 4a, 9 Nov 2026)
+        bool const noint = zero_integrated && ndx < _eqnVarNoInt.size() && _eqnVarNoInt[ndx].dag() && !_eqnVarNoInt[ndx].cst()
+                        && ndx < _sgEqnNoInt.size() && _sgEqnNoInt[ndx];
+        if( noint )
+          _dag->eval( *_sgEqnNoInt[ndx], OCwrk,
+                      1, &_eqnVarNoInt[ndx], &OCres,
+                      _vVar.size(), _vVar.data(), OCvar.data(),
+                      _vInp.size(), _vInp.data(), OCinp.data(),
+                      _vCst.size(), _vCst.data(), OCcst.data(),
+                      _vDom.size(), _vDom.data(), OCdom.data() );
+        else
+          _dag->eval( _sgEqn[ndx], OCwrk,
+                      1, &eqnvar, &OCres,
+                      _vVar.size(), _vVar.data(), OCvar.data(),
+                      _vInp.size(), _vInp.data(), OCinp.data(),
+                      _vCst.size(), _vCst.data(), OCcst.data(),
+                      _vDom.size(), _vDom.data(), OCdom.data() );
       };
 
       // section 4 (OpEval): point-reduced directions of this equation.  pt_el pins the resident
@@ -15717,10 +15748,16 @@ const
             throw Exceptions( Exceptions::INTERNAL );
           std::map<FFVar,size_t,lt_FFVar> g_el = ndx_el;   // block dirs + one free element
           for( auto const& [fdv, fiel] : free_el0 ) g_el[fdv] = fiel;
-          assemble( g_el, true );
-          if( OCres.coef().size() != buf.size() ) throw Exceptions( Exceptions::INTERNAL );
           U const corr = U( static_cast<double>( n_iter - 1 ) );
-          for( size_t i = 0; i < buf.size(); ++i ) buf[i] -= corr * OCres.coef()[i];
+          if( ndx < _eqnVarNoInt.size() && _eqnVarNoInt[ndx].dag() && _eqnVarNoInt[ndx].cst() ){   // g a constant: broadcast
+            U const g0( _eqnVarNoInt[ndx].num().val() );
+            for( size_t i = 0; i < buf.size(); ++i ) buf[i] -= corr * g0;
+          }
+          else{
+            assemble( g_el, true );
+            if( OCres.coef().size() != buf.size() ) throw Exceptions( Exceptions::INTERNAL );
+            for( size_t i = 0; i < buf.size(); ++i ) buf[i] -= corr * OCres.coef()[i];
+          }
         }
       }
       else if( !pt_el.empty() ){
@@ -17096,6 +17133,33 @@ OCFEBASE::_setup_eval_plans
       if( !present )
         _depPlanEqn[ne].push_back( t_DepUpdate{ DOMAIN, itdep->second.second } );
     }
+  }
+
+  // section 4a's g: each equation's residual with the FFIntegral nodes over its FREE directions replaced by 0
+  _eqnVarNoInt.assign( _sgEqn.size(), FFVar() );
+  _sgEqnNoInt.assign( _sgEqn.size(), nullptr );
+  for( size_t ne = 0; ne < _sgEqn.size() && ne < _mEqn.size(); ++ne ){
+    std::set<FFVar,lt_FFVar> freed;
+    for( auto const& dv : _eqnEvalDom[ne] ){
+      if( _mEqn[ne].dom.count( dv ) ) continue;
+      if( ne < _eqnEvalPoint.size() && _eqnEvalPoint[ne].count( dv ) ) continue;
+      freed.insert( dv );
+    }
+    if( freed.empty() ) continue;
+    std::vector<FFVar> targ, repl;
+    for( auto const* op : _sgEqn[ne].l_op ){
+      auto const* pi = op? mc::type_cast<FFIntegral const>( op ): nullptr;
+      if( !pi ) continue;
+      bool over_free = false;
+      for( auto const& [dv, o] : pi->Indep().expr ) if( freed.count( dv ) ){ over_free = true; break; }
+      if( !over_free ) continue;
+      for( auto const* vo : op->varout ) if( vo ){ targ.push_back( *vo );  repl.push_back( FFVar( 0. ) ); }
+    }
+    if( targ.empty() ) continue;
+    try{
+      _eqnVarNoInt[ne] = _dag->substitute( std::vector<FFVar>{ _mEqn[ne].var }, targ, repl )[0];
+      if( !_eqnVarNoInt[ne].cst() ) _sgEqnNoInt[ne] = std::make_shared<FFSubgraph>( _dag->subgraph( 1, &_eqnVarNoInt[ne] ) );
+    } catch( ... ){ _eqnVarNoInt[ne] = FFVar();  _sgEqnNoInt[ne].reset(); }
   }
 
   _fctEvalDom.clear();

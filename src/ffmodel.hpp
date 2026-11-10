@@ -352,6 +352,14 @@ protected:
     ()
     {}
 
+  //! @brief The DECLARATION is about to be processed (before the transition and reduction checks); does nothing in
+  //! FFModel.  A derived solver that rewrites its own declaration -- OCFESLV lifting nested reductions of outputs into
+  //! hidden states -- does it here, so the rows it adds go through every check the declared ones do.
+  //! @return false to fail the setup
+  virtual bool _on_declaration
+    ()
+    { return true; }
+
   //! @brief A setup is starting; does nothing in FFModel.  A derived solver clears what a re-setup invalidates.
   //! @return false to fail the setup
   virtual bool _on_setup_begin
@@ -11942,6 +11950,8 @@ FFModel::setup
   _apply_options();
   _phase( "B1 apply_options" );
   Options::_force_display_from_env( options.DISPLAY_LEVEL );   // a defaultfrom CRONOS_DISPLAY_LEVEL; see the helper
+  if( !_on_declaration() ){ _setupStatus = SetupStatus::INCONSISTENT_MODEL;  return false; }   // a solver rewriting its declaration
+  _phase( "B1b on_declaration" );
   _phase( "B2 pre-check_transitions" );
   if( !_check_transitions() ){ _setupStatus = SetupStatus::INCONSISTENT_MODEL;  return false; }   // see add_transition
   _phase( "B3 check_transitions" );

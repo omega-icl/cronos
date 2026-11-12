@@ -46,6 +46,25 @@ bind_ocfeslv_options(PyOpt& c)
       .value("SOLVE_SPQR", mc::OCFESLV::Options::SOLVE_SPQR,
              "sparse rank-revealing QR (SuiteSparseQR) min-2-norm least "
              "squares on")
+      .value(
+          "SOLVE_KLU", mc::OCFESLV::Options::SOLVE_KLU,
+          "KLU -- under SOLVE.NLSOLVER = KINSOL only (SUNDIALS' own sparse LU)")
+      .value("SOLVE_UMFPACK", mc::OCFESLV::Options::SOLVE_UMFPACK,
+             "UMFPACK -- under SOLVE.NLSOLVER = KINSOL only (CRONOS' "
+             "SUNLinearSolver)")
+      .export_values();
+  py::enum_<mc::OCFESLV::Options::SolveNLSolver>(
+      c, "SolveNLSolver",
+      "The nonlinear solver of a collocation system (10 Nov 2026). KINSOL "
+      "(Newton with a line search, the SUNDIALS solver behind DAESLV's and "
+      "ODESLV's consistent initialisation) takes a SQUARE system; it "
+      "factorises with SOLVE.FACTORIZATION (SUPERLU, SPQR, KLU, UMFPACK "
+      "sparse; LAPACK dense), scales by the equilibration (SOLVE.EQUILIBRATE) "
+      "and accepts on RES_TOL as LM does. Its knobs are SOLVE.KIN.")
+      .value("LEVENBERG_MARQUARDT", mc::OCFESLV::Options::LEVENBERG_MARQUARDT,
+             "the damped Levenberg-Marquardt on the normal equations (default)")
+      .value("KINSOL", mc::OCFESLV::Options::KINSOL,
+             "SUNDIALS KINSOL, through BASE_KINSOL")
       .export_values();
   py::enum_<mc::OCFESLV::Options::SolveWarmstart>(
       c, "SolveWarmstart",
@@ -72,6 +91,18 @@ bind_ocfeslv_options(PyOpt& c)
   c_SOLVE.def_readwrite("FACTORIZATION",
                         &mc::OCFESLV::Options::t_Solve::FACTORIZATION,
                         "linear backend (default SOLVE_SUPERLU; see note)");
+  c_SOLVE.def_readwrite(
+      "NLSOLVER", &mc::OCFESLV::Options::t_Solve::NLSOLVER,
+      "the nonlinear solver (default LEVENBERG_MARQUARDT; see SolveNLSolver)");
+#if defined(CRONOS__OCFESLV_KINSOL)
+  c_SOLVE.def_readwrite(
+      "KIN", &mc::OCFESLV::Options::t_Solve::KIN,
+      "KINSOL's knobs, as DAESLV's and ODESLV's INITIAL.KIN. FTOL = 0 (the "
+      "default) DERIVES it from RES_TOL: RES_TOL times the smallest row weight "
+      "of the equilibration, so the scaled stop implies max|r| <= RES_TOL (a "
+      "fixed 1e-10 sat at a rod's round-off floor, K0); SPARSE and "
+      "SPARSE_SOLVER follow FACTORIZATION.");
+#endif
   c_SOLVE.def_readwrite("MARCHING", &mc::OCFESLV::Options::t_Solve::MARCHING,
                         "auto-march when AVAILABLE (evolution domain + >=1 "
                         "differential state); else monolithic (default true)");

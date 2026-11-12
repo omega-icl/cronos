@@ -3,12 +3,12 @@
 
 # # One Declaration, Two Solvers: the Heated Rod by the Method of Lines
 # 
-# The [OCFESLV tutorial](OCFESLV_tutorial.ipynb) solved a nonlinear heat-conduction problem by
+# The [OCFESLV tutorial](OCFESLV_tutorial.ipynb) solves a nonlinear heat-conduction problem by
 # collocating **space and time together**: one large algebraic system over the whole space-time mesh,
 # or a sequence of them when marching. This tutorial takes the **same declaration** and hands it to
 # `DAESLV`, which treats it differently. It collocates **space only** -- the same finite elements and
 # nodes in $z$, by the same collocation machinery -- and integrates the resulting system of
-# differential-algebraic equations in time with SUNDIALS IDAS, an adaptive BDF integrator. This is
+# differential-algebraic equations in time with SUNDIALS IDAS:
 # the **method of lines** (MoL).
 # 
 # Nothing in the model changes to make that happen. `DAESLV` recognises at setup that the model is
@@ -31,58 +31,72 @@
 # In[1]:
 
 
-import time
-import numpy as np
-import matplotlib.pyplot as plt
 from pymcpp import FFGraph, FFPartial, FFEval, FFIntegral, sqrt
 from cronos import FFDom, FFModel, OCFESLV, DAESLV, CollocationOptions
 
 
 # ## The model
 # 
-# The rod $z\in[0,1]$ conducts heat with a temperature-dependent diffusivity $D(u) = D_0(1+\beta u)$,
-# is held at $u=0$ at $z=0$ and heated at $z=1$ by a time-varying flux $q(t)$:
+# A rod $z \in [0,1]$ is held at temperature $0$ at $z=0$ and heated at $z=1$ by a heater of power $q(t)$. Its thermal conductivity increases with temperature, so heat conduction is **nonlinear**:
 # $$\begin{align*}
-#   \partial_t u &= \partial_z\big(D(u)\,\partial_z u\big), && 0<z<1,\\
-#   u(t,0) &= 0, \qquad D(u)\,\partial_z u\,(t,1) = q(t), \\
-#   u(0,z) &= a\,z, && \text{with } D_0(1+\beta a)\,a = q(0) = 1,
+#   \frac{\partial u}{\partial t} &= \frac{\partial}{\partial z}\left( D(u)\,\frac{\partial u}{\partial z} \right), \qquad D(u) = D_0\,(1 + \beta u), && (t,z) \in (0,2]\times (0,1) \\
+#   u(t,0) &= 0, \qquad D(u)\,\frac{\partial u}{\partial z}(t,1) = q(t) && t \in (0,2]\\
+#   u(0,z) &= a\,z && z \in [0,1]
 # \end{align*}$$
-# so the initial profile is consistent with both boundary conditions. The heater follows a schedule
-# $q(t) = 0.625 + 0.375\cos 2\pi t$, collocated in time on three LGL nodes per element.
+# with $D_0 = 0.1$ and $\beta = 1$. 
 # 
-# The declaration is written once, as a function of the solver, and used for both. Three outputs:
-# the end temperature $u(2,1)$; the space-time mean $\int\!\!\int u\,dz\,dt$; and the $L^2$ norm of the
-# end temperature over the horizon, $\big(\int_0^2 u(t,1)^2\,dt\big)^{1/2}$ -- a **nonlinear** function of an
-# integral, which both solvers take as an ordinary output.
+# The initial profile is the linear one that carries the initial heater power, $D_0(1+\beta a)\,a = q(0)$, so that the initial and boundary data are compatible.
+# 
+# The heater is cycled, from full power down to a quarter of it and back, twice over the horizon: $q(t) = 0.625 + 0.375\cos(2\pi t)$.
+# 
+# The outputs of interest are:
+# - the temperature at the heated end at the final time, $u(2,1)$
+# - the space-time mean temperature $\int_0^2\!\int_0^1 u(t,z)\,dt\,dz$.
+# - the $L^2$ norm of the end temperature over the horizon, $\sqrt{\int_0^2 u(t,1)^2\,dt}$
+# 
+# The declaration is written once, as a function of the solver, and used for both. 
 
 # In[2]:
 
 
+import numpy as np
+
+# initial profile a z, with D0 (1 + beta a) a = q(0) = 1
 D0, beta = 0.1, 1.0
-a = (-1. + np.sqrt(1. + 4. * beta / D0)) / (2. * beta)   # D0 (1 + beta a) a = q(0) = 1
+a = (-1. + np.sqrt(1. + 4. * beta / D0)) / (2. * beta)
+print("initial slope a = %.6f" % a)
+
 def heater(t):
+    """Heater power at time t"""
     return 0.625 + 0.375 * np.cos(2. * np.pi * t)
 
 def declare(S, G, NT=10, ORD_T=4, NZ=8):
+    """Model declaration for the solver S and DAG G"""
     t, z = G.add_var("t"), G.add_var("z")
     u, q = G.add_var("u"), G.add_var("q")
-    OpP, OpE, OpI = FFPartial(), FFEval(), FFIntegral()
+
     S.add_domain(t, FFDom(0., 2., NT, FFDom.LGR, ORD_T))
     S.add_domain(z, FFDom(0., 1., NZ, FFDom.LGL, 5))
     S.set_evolution_domain(t)
+
     S.add_state(u, [t, z], ref=0.)
     S.add_input(q, [t], ref=1., type=FFDom.LGL, n_node=3)
+
     D = D0 * (1. + beta * u)
+    OpP, OpE, OpI = FFPartial(), FFEval(), FFIntegral()
     TI, ZI = FFDom.ALL - FFDom.LB, FFDom.ALL - FFDom.LB - FFDom.UB
-    S.add_equation(OpP(u, t) - OpP(D * OpP(u, z), z), [t, z], [TI, ZI],                FFModel.EqnRole.INTERIOR)
-    S.add_equation(u,                                  [t, z], [TI, FFDom.LB],          FFModel.EqnRole.BOUNDARY)
-    S.add_equation(D * OpP(u, z) - q,                  [t, z], [TI, FFDom.UB],          FFModel.EqnRole.BOUNDARY)
-    S.add_equation(u - a * z,                          [t, z], [FFDom.LB, FFDom.ALL],   FFModel.EqnRole.INITIAL)
+    S.add_equation(OpP(u, t) - OpP(D * OpP(u, z), z), [t, z], [TI, ZI],              FFModel.EqnRole.INTERIOR)
+    S.add_equation(u,                                 [t, z], [TI, FFDom.LB],        FFModel.EqnRole.BOUNDARY)
+    S.add_equation(D * OpP(u, z) - q,                 [t, z], [TI, FFDom.UB],        FFModel.EqnRole.BOUNDARY)
+    S.add_equation(u - a * z,                         [t, z], [FFDom.LB, FFDom.ALL], FFModel.EqnRole.INITIAL)
+
     S.add_output(OpE(u, {t: 1, z: 1}, {t: 2., z: 1.}))                  # u(2,1)
     S.add_output(OpI(u, {t: 1, z: 1}))                                  # space-time mean
     S.add_output(sqrt(OpI(OpE(u, {z: 1}, {z: 1.}) ** 2, {t: 1})))      # L2 norm of the end temperature
+
     S.options.INTERFACE.IMPOSITION = CollocationOptions.IC_STRONG      # the same path on both solvers
-    S.options.DISPLAY_LEVEL = 0
+    S.options.DISPLAY_LEVEL        = 0
+
     return t, z, u, q
 
 
@@ -94,15 +108,20 @@ def declare(S, G, NT=10, ORD_T=4, NZ=8):
 # In[3]:
 
 
+import time
+
 Go = FFGraph()
-O = OCFESLV(Go)
+O  = OCFESLV(Go)
 t, z, u, q = declare(O, Go)
+
 O.options.SOLVE.MARCHING = False
-O.options.SOLVE.RES_TOL = 1e-10
+O.options.SOLVE.RES_TOL  = 1e-10
 O.setup()
+
 t0 = time.perf_counter()
 status = O.solve({q: lambda c: heater(c[t])})
 cpu_o = time.perf_counter() - t0
+
 F_o = list(O.val_function())
 print(status, " (%.2f s)" % cpu_o)
 print("u(2,1) = %.8f   mean = %.8f   ||u(.,1)|| = %.8f" % tuple(F_o))
@@ -126,12 +145,14 @@ print("u(2,1) = %.8f   mean = %.8f   ||u(.,1)|| = %.8f" % tuple(F_o))
 
 
 Gd = FFGraph()
-S = DAESLV(Gd)
+S  = DAESLV(Gd)
 td, zd, ud, qd = declare(S, Gd)
-S.options.SOLVE.RTOL = S.options.SOLVE.ATOL = 1e-10
-S.options.SOLVE.VERBOSE = False
+
+S.options.SOLVE.RTOL       = S.options.SOLVE.ATOL = 1e-10
+S.options.SOLVE.VERBOSE    = False
 S.options.OUTPUT.RESRECORD = 20
 S.setup()
+
 nodes = S.semidiscrete_nodes(ud)
 print("semi-discrete DAE: %d states; u has %d nodes, its z = 1 node is state %d"
       % (S.nx(), len(nodes), nodes[-1][0]))
@@ -144,6 +165,7 @@ print("Neumann node:", S.options.MOL.NEUMANN_NODE)
 t0 = time.perf_counter()
 status = S.solve({qd: lambda c: heater(c[td])})
 cpu_d = time.perf_counter() - t0
+
 F_d = list(S.val_function())
 print(status, " (%.2f s, %d steps)" % (cpu_d, S.stats_solve.numSteps))
 print("u(2,1) = %.8f   mean = %.8f   ||u(.,1)|| = %.8f" % tuple(F_d))
@@ -163,17 +185,22 @@ print("relative gap to OCFESLV:", ["%.1e" % (abs(x - y) / abs(y)) for x, y in zi
 # In[6]:
 
 
+import matplotlib.pyplot as plt
+
 R = S.results_solve
 cols = [c for c, _ in nodes]
 zs = [coord[zd] for _, coord in nodes]
 zz = np.linspace(0., 1., 101)
+
 fig, ax = plt.subplots(figsize=(7, 4))
 for tk, col in zip([0.5, 1.0, 1.5, 2.0], ["C0", "C1", "C2", "C3"]):
     k = int(np.argmin(np.abs(R.t - tk)))
     ax.plot(zz, [O.eval_solution(u, {t: tk, z: zi}) for zi in zz], color=col, label="t = %.1f" % tk)
     ax.plot(zs, R.x[k, cols], "o", color=col, ms=3)
-ax.set_xlabel("z"); ax.set_ylabel("u(t, z)"); ax.legend(); ax.set_title("lines: OCFESLV;  markers: DAESLV nodes")
-plt.show()
+ax.set_xlabel("z")
+ax.set_ylabel("u(t, z)")
+ax.legend()
+ax.set_title("lines: OCFESLV;  markers: DAESLV nodes")
 
 
 # ## Convergence in time
@@ -205,9 +232,17 @@ for order in [3, 4, 5, 6]:
 
 
 heat_d = {qd: lambda c: heater(c[td])}
-t0 = time.perf_counter(); S.solve_fsens(heat_d); Gf = np.array(S.val_function_gradient()); cpu_f = time.perf_counter() - t0
-t0 = time.perf_counter(); S.solve_asens(heat_d); Ga = np.array(S.val_function_gradient()); cpu_a = time.perf_counter() - t0
-Ok.solve_fsens({qk: lambda c: heater(c[tk])}); Go_ = np.array(Ok.val_function_gradient())   # OCFESLV at 6 Radau nodes, from above
+
+t0 = time.perf_counter()
+S.solve_fsens(heat_d); Gf = np.array(S.val_function_gradient())
+cpu_f = time.perf_counter() - t0
+
+t0 = time.perf_counter()
+S.solve_asens(heat_d); Ga = np.array(S.val_function_gradient())
+cpu_a = time.perf_counter() - t0
+
+Ok.solve_fsens({qk: lambda c: heater(c[tk])}); 
+Go_ = np.array(Ok.val_function_gradient())   # OCFESLV at 6 Radau nodes, from above
 print("gradient: %d rows (the DOFs of q) x %d columns (the outputs)" % Gf.shape)
 print("DAESLV forward %.2f s, adjoint %.2f s;  max |adjoint - forward| = %.1e" % (cpu_f, cpu_a, np.abs(Ga - Gf).max()))
 for j, name in enumerate(("u(2,1)", "mean", "||u(.,1)||")):
@@ -218,13 +253,16 @@ for j, name in enumerate(("u(2,1)", "mean", "||u(.,1)||")):
 
 
 tq = [c[td] for c in S.input_coordinates(qd)]
+
 fig, axs = plt.subplots(1, 2, figsize=(11, 3.5))
 for ax, j, lab in zip(axs, (1, 0), ("d mean / d q_k", "d u(2,1) / d q_k")):
     ax.plot(tq, Go_[:, j], "-", color="0.6", lw=3, label="OCFESLV")
     ax.plot(tq, Gf[:, j], "o", ms=4, label="DAESLV forward")
     ax.plot(tq, Ga[:, j], "x", ms=5, label="DAESLV adjoint")
-    ax.set_xlabel("time of the heater's degree of freedom"); ax.set_ylabel(lab)
-axs[0].legend(); plt.tight_layout(); plt.show()
+    ax.set_xlabel("time of the heater's degree of freedom")
+    ax.set_ylabel(lab)
+axs[0].legend()
+plt.tight_layout()
 
 
 # Each solver's gradient is the exact derivative of its own discrete solution -- a central
@@ -242,18 +280,3 @@ axs[0].legend(); plt.tight_layout(); plt.show()
 # sees the new piece from the stage's first instant, the Radau collocation only at its interior and
 # right-end nodes, and the two split the jump's effect between the pieces differently -- while agreeing
 # on its sum, which is what a change of the heater at that instant does.
-# 
-# ## What to take away
-# 
-# * One declaration serves both solvers; the inputs, the outputs, the gradients and the collocation
-#   options have the same names and layout on both.
-# * `OCFESLV` collocates space and time: one nonlinear solve (or one per time element when marching),
-#   spectrally accurate in the time order, and the natural choice inside an optimisation that treats
-#   the whole trajectory as unknowns.
-# * `DAESLV` collocates space and integrates time: adaptive steps at a requested tolerance, and
-#   sensitivities by forward or adjoint integration; the natural choice for long horizons, stiff
-#   dynamics, or many outputs against few parameters.
-# * Algebraic nodes -- Dirichlet nodes, and by default Neumann nodes -- are solved for at $t_0$ from
-#   the declared profile, which should therefore be consistent with the boundary conditions.
-# * Gradients with respect to a piecewise input's degrees of freedom are exact for each solver's own
-#   discretisation; compare them across solvers on smooth outputs, and per instant at the pieces' ends.

@@ -4,8 +4,8 @@
 
 CRONOS is configured through its **options** (`FFModel::Options`, `OCFESLV::Options`, the ODESLV options), which
 travel with the source.  The environment variables below are what remains (2026-10-07): diagnostics that instrument a
-whole corpus sweep without editing any driver, one resource setting, and three test switches kept for the drivers that
-exercise them.  **None of them is needed to run a model**, and none changes a result except the test switches.
+whole corpus sweep without editing any driver, one resource setting, and six test switches kept for the drivers
+that exercise them.  **None of them is needed to run a model**, and none changes a result except the test switches.
 
 Most switches read `0`, `false`, `off` and `no` as off; a few are on as soon as they are SET, whatever the value --
 leave a variable unset to keep it off.  Variables shown with `=<...>` take a value.
@@ -102,6 +102,7 @@ Change behaviour; kept ONLY for the corpus drivers that exercise them.  A model 
 | `CRONOS_DROP_POLICY` | Override of `INTERFACE.DROP_POLICY` for every model: `0`, `1` or `2` for DROP_VERIFY, DROP_REDERIVE or DROP_OFF (the default since 2026-10-14).  `0` restores the redundant-continuity drop.  Unset leaves each driver's own value.  For sweeping the corpus with the redundant-continuity drop disabled without editing drivers (WORKPLAN 4R.28). | `ocfebase.hpp` |
 | `CRONOS_FORCE_BAD_KEEP_EXPLICIT` | Fault injector for `OCFE_hybrid_adequacy`: makes the tau elimination stall, which is that driver's PASS condition. | `ocfebase.hpp` |
 | `CRONOS_RESCUE_C2` | Receiver policy of the C2/C2b study (default on; 0 forces the original +1 everywhere).  Kept for `OCFE_receiver` until the receiver-policy study concludes. | `ocfebase.hpp` |
+| `CRONOS_SOLVE_NLSOLVER` | Override of `SOLVE.NLSOLVER` for every OCFESLV solve: `KINSOL`, or `LEVENBERG_MARQUARDT` (also `LM`), applied at the top of `solve()` so marching windows and homotopy steps alike.  Unset leaves each driver's own value (default `LEVENBERG_MARQUARDT`).  For sweeping the corpus with KINSOL forced without editing drivers (RELEASE_PLAN K5); such a sweep is informational, never promoted. | `ocfeslv.hpp` |
 | `CRONOS_SYMROW_B2` | Restores the pre-4R.26 value-slaved row routing, in which rule (b2) exempted a materialised order-reduction auxiliary from the (b1) uniqueness test, so a row could be routed out of the principal symbol even when it was the LAST provider of a derivative.  For bisection; `OCFE_intermediate_dae` reproduces the old verdict under it. | `ffmodel.hpp` |
 | `CRONOS_WEAK_NATURAL_PENALTY` | IC_WEAK receiver policy for continuity claims: 0, 1 or 2 (default).  Kept for `OCFE_receiver`, as above. | `ocfebase.hpp` |
 

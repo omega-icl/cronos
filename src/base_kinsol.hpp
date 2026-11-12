@@ -16,6 +16,8 @@
 #include <nvector/nvector_serial.h>
 #include <sunmatrix/sunmatrix_dense.h>
 #include <sunlinsol/sunlinsol_dense.h>
+#include <sunmatrix/sunmatrix_sparse.h>
+#include "sunlinsol_cronos.hpp"
 #if defined (CRONOS__WITH_KLU)
   #include <sunmatrix/sunmatrix_sparse.h>
   #include <sunlinsol/sunlinsol_klu.h>
@@ -77,8 +79,14 @@ public:
     bool LINESEARCH = true;
     //! @brief Jacobian refresh interval: 1 = every iteration (KINSetMaxSetupCalls)
     int MAXSETUP = 1;
-    //! @brief use the sparse KLU linear solver (needs CRONOS__WITH_KLU) rather than dense LU
+    //! @brief use a sparse direct linear solver (SPARSE_SOLVER, below) rather than dense LU
     bool SPARSE = false;
+    //! @brief Under SPARSE, the direct solver factorising the CSC Jacobian: KLU (SUNDIALS' own, the default), or one of
+    //! CRONOS' SUNLinearSolvers (sunlinsol_cronos.hpp) -- SuperLU, UMFPACK, SPQR -- each where its build flag is set.
+    //! (10 Nov 2026; SuperLU_MT, which SUNDIALS wraps natively, kept as a future option.)
+    //! SUPERLU_SPQR: sparse LU, the rank-revealing QR for a setup whose LU is singular (OCFESLV's SOLVE_SPQR tiers).
+    enum SparseSolver { KLU = 0, SUPERLU, UMFPACK, SPQR, SUPERLU_SPQR };
+    SparseSolver SPARSE_SOLVER = KLU;
     //! @brief iteration count above which a CONVERGED solve is read as linearly convergent, i.e. the
     //! rank-deficiency signature.  Newton at a simple root is quadratic -- a handful of iterations from any
     //! sane guess (4 on the §3.12 full-rank system from far away) -- while at a double root it halves the
@@ -123,9 +131,12 @@ public:
   };
 
   //! @brief Solve F(y) = 0 from the starting point in @p y, which holds the solution on return
+  //! @p uscale, @p fscale: KINSOL's scalings of the unknowns and of the residual (all 1 when absent); @p what: the
+  //! system named in the messages ("initial-condition" for the consistent initialisation, its first caller).
   static Report solve
     ( int const n, ResFn res, JacFn jac, void* user, std::vector<double>& y, Knobs const& k,
-      Sparsity const* sp = nullptr );
+      Sparsity const* sp = nullptr, std::vector<double> const* uscale = nullptr,
+      std::vector<double> const* fscale = nullptr, char const* what = "initial-condition" );
 
 protected:
   BASE_KINSOL() {}
@@ -155,8 +166,8 @@ private:
 inline
 BASE_KINSOL::Report
 BASE_KINSOL::solve
-( int const n, ResFn res, JacFn jac, void* user, std::vector<double>& y, Knobs const& k,
-  Sparsity const* sp )
+( int const n, ResFn res, JacFn jac, void* user, std::vector<double>& y, Knobs const& k, Sparsity const* sp,
+  std::vector<double> const* uscale, std::vector<double> const* fscale, char const* what )
 {
   Report R;
   bool const polish = ( k.RTOL > 0. || k.ATOL > 0. );
@@ -194,23 +205,42 @@ BASE_KINSOL::solve
   KINSetNumMaxIters( mem, k.MAXIT );
   KINSetMaxSetupCalls( mem, k.MAXSETUP );
   SUNMatrix A = nullptr; SUNLinearSolver LS = nullptr;
-#if defined (CRONOS__WITH_KLU)
   if( sparse ){
     // the same shape the integrator's KLU path uses: CSC, pattern copied in, analytic values per call
     sunindextype const nnz = sp->rowidx.size();
     A = SUNSparseMatrix( n, n, nnz? nnz: 1, CSC_MAT, ctx );
     for( int c = 0; c <= n; ++c )      SM_INDEXPTRS_S( A )[c] = sp->colptr[c];
     for( sunindextype e = 0; e < nnz; ++e ) SM_INDEXVALS_S( A )[e] = sp->rowidx[e];
-    LS = SUNLinSol_KLU( uu, A, ctx );
+    if( k.SPARSE_SOLVER == Knobs::KLU ){
+#if defined (CRONOS__WITH_KLU)
+      LS = SUNLinSol_KLU( uu, A, ctx );
+#endif
+    }
+    else{
+      SunLinSolCronos::Backend const be = k.SPARSE_SOLVER == Knobs::SUPERLU? SunLinSolCronos::SUPERLU:
+                                          k.SPARSE_SOLVER == Knobs::UMFPACK? SunLinSolCronos::UMFPACK:
+                                          k.SPARSE_SOLVER == Knobs::SPQR?    SunLinSolCronos::SPQR: SunLinSolCronos::SUPERLU_SPQR;
+      LS = SunLinSolCronos::create( uu, A, be, ctx );
+    }
+    if( !LS ){
+      R.message = std::string( "the sparse direct solver " ) + ( k.SPARSE_SOLVER == Knobs::KLU? "KLU":
+                  SunLinSolCronos::name( k.SPARSE_SOLVER == Knobs::SUPERLU? SunLinSolCronos::SUPERLU:
+                  k.SPARSE_SOLVER == Knobs::UMFPACK? SunLinSolCronos::UMFPACK:
+                  k.SPARSE_SOLVER == Knobs::SPQR? SunLinSolCronos::SPQR: SunLinSolCronos::SUPERLU_SPQR ) ) + " is not available in this build";
+      SUNMatDestroy( A );  N_VDestroy( uu );  N_VDestroy( sc );  KINFree( &mem );  SUNContext_Free( &ctx );
+      return R;
+    }
   }
   else
-#endif
   { A = SUNDenseMatrix( n, n, ctx ); LS = SUNLinSol_Dense( uu, A, ctx ); }
   KINSetLinearSolver( mem, LS, A );
   if( sparse )        KINSetJacFn( mem, _spjac );        // analytic, CSC
   else if( jac )      KINSetJacFn( mem, _jac );          // analytic, dense
 
-  R.kin_flag = KINSol( mem, uu, k.LINESEARCH? KIN_LINESEARCH: KIN_NONE, sc, sc );
+  N_Vector sf = N_VClone( sc );  N_VScale( 1., sc, sf );
+  if( uscale && (int)uscale->size() == n ) for( int i = 0; i < n; ++i ) N_VGetArrayPointer( sc )[i] = (*uscale)[i];
+  if( fscale && (int)fscale->size() == n ) for( int i = 0; i < n; ++i ) N_VGetArrayPointer( sf )[i] = (*fscale)[i];
+  R.kin_flag = KINSol( mem, uu, k.LINESEARCH? KIN_LINESEARCH: KIN_NONE, sc, sf );
   KINGetNumNonlinSolvIters( mem, &R.iterations );
   KINGetFuncNorm( mem, &R.fnorm );
   for( int i = 0; i < n; ++i ) y[i] = N_VGetArrayPointer( uu )[i];
@@ -221,8 +251,9 @@ BASE_KINSOL::solve
     // The LU setup itself failed: the Jacobian is SINGULAR at this point, not merely ill-conditioned.
     // That is the same rank deficiency as the plateau below, seen earlier and more plainly.
     R.status = RANK_DEFICIENT;
-    R.message = "the linear solve failed (" + std::to_string( R.kin_flag ) + "): the initial-condition"
-                " Jacobian is SINGULAR at this configuration -- the free initial data is degenerate here";
+    R.message = "the linear solve failed (" + std::to_string( R.kin_flag ) + "): the " + std::string( what )
+              + " Jacobian is SINGULAR at this configuration"
+              + ( std::string( what ) == "initial-condition"? " -- the free initial data is degenerate here": "" );
   }
   else if( converged || R.kin_flag == KIN_STEP_LT_STPTOL || R.kin_flag == KIN_MAXITER_REACHED ){
     // the §3.12 signature: the error has been HALVING rather than squaring.  At a double root F ~ y^2, so a
@@ -230,7 +261,7 @@ BASE_KINSOL::solve
     // The Jacobian is rank-deficient at this root; no corrector does better, and the caller should know.
     R.status = RANK_DEFICIENT;
     R.message = std::string( converged? "converged LINEARLY": "stalled" ) + " (" + std::to_string( R.iterations )
-              + " iterations, |F| = " + std::to_string( R.fnorm ) + "): the initial-condition Jacobian is"
+              + " iterations, |F| = " + std::to_string( R.fnorm ) + "): the " + std::string( what ) + " Jacobian is"
                 " rank-deficient at this configuration -- the free initial data is degenerate here, and the"
                 " solution is accurate only to about sqrt(FTOL)";
   }
@@ -258,7 +289,7 @@ BASE_KINSOL::solve
                 + " iterations, |F| = " + std::to_string( nrm ) + "): the consistent point is accurate only to the residual";
     }
   }
-  SUNLinSolFree( LS ); SUNMatDestroy( A ); N_VDestroy( uu ); N_VDestroy( sc );
+  SUNLinSolFree( LS ); SUNMatDestroy( A ); N_VDestroy( uu ); N_VDestroy( sc ); N_VDestroy( sf );
   KINFree( &mem ); SUNContext_Free( &ctx );
   return R;
 }

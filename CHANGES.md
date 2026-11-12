@@ -94,6 +94,66 @@
   Jacobian in the pattern the IC solve uses, transposed for the adjoint, on KLU under `LINSOL = SPARSE` and dense
   otherwise; the sensitivity seeds at t0 and the sensitivities across a stop, forward and adjoint, were dense
   whatever `LINSOL` said.
+* **OCFESLV::solve() restores the caller's `std::cout` format** -- its diagnostics write through `_disp`
+  (`std::cout` when the display level allows) and set `std::scientific` and precisions they never reset, so a
+  driver's output after a solve printed in OCFESLV's format, not its own (OCFE_PDE5: `9.646e-08` where the driver
+  asks for `9.6458e-08`). A guard at the top of `solve()` restores flags and precision at every return, nested
+  marching and homotopy solves included. Output changes only in drivers that relied on the leaked format.
+* **OCFESLV: KINSOL as an alternative nonlinear solver; Levenberg-Marquardt stays the default** -- `SOLVE.NLSOLVER =
+  KINSOL` is an OPT-IN; the default stays `LEVENBERG_MARQUARDT`, decided after two corpus-wide sweeps with KINSOL
+  forced (11 Nov 2026). KINSOL's limitations, as measured: it needs a SQUARE system (non-square ones are refused by
+  name; LM solves them in the least-squares sense); a regular Jacobian at its iterates, or the QR fallback past a
+  singular one (now taken automatically under SuperLU and SPQR); and on a problem with several roots the root it
+  finds depends on the start, more sensitively than LM's (OCFE_AE2: from the driver's cold start KINSOL reaches a
+  non-physical root, LM the physical one -- though LM too goes wrong from a warmer start). On the corpus, where both
+  converge, the roots agree to round-off, KINSOL often converging tighter, at 1.1-1.25x LM's time on the
+  continuation-heavy models. Details: `SOLVE.NLSOLVER = KINSOL`
+  solves the collocation system with SUNDIALS KINSOL through BASE_KINSOL, inside `OCFESLV::solve()` on its own
+  residual and assembly, so monolithic solves, marching windows and homotopy steps alike. Its knobs are `SOLVE.KIN`,
+  the same `BASE_KINSOL::Knobs` as DAESLV's and ODESLV's `INITIAL.KIN`; `KIN.FTOL = 0` (the default) derives it from
+  `RES_TOL` (times the smallest row weight, so the scaled stop implies `max|r| <= RES_TOL`); the factorisation follows
+  `SOLVE.FACTORIZATION` (SUPERLU, KLU, UMFPACK, SPQR sparse, LAPACK dense -- `SOLVE_KLU` and `SOLVE_UMFPACK` are new,
+  taken under KINSOL only); the scaling is OCFESLV's equilibration. Measured first (K0, five models, three starts each):
+  the same roots as LM, KINSOL 15/15 once FTOL follows RES_TOL and the rows are equilibrated (a fixed 1e-10 had sat at
+  a rod's round-off floor). `solve()`'s ending is shared by both solvers (`_solve_epilogue`). BASE_KINSOL takes the
+  unknowns' and the residual's scaling separately and names the system in its messages (defaults unchanged). Taken
+  where SUNDIALS' KINSOL headers are found; `CRONOS__WITHOUT_KINSOL` opts out. Gate OCFE_KINSOL: KINSOL = LM to 1e-10
+  with every factorisation on a nonlinear-diffusion rod (monolithic and marching), steady Bratu, the PSA column, the
+  rod under IC_TRACE and IC_WEAK; `SOLVE_KLU` under LM refused by name; forward sensitivities after KINSOL = LM's;
+  homotopy (Bratu continued in lambda to 3.4 from zero) the same path and solution. `CRONOS_SOLVE_NLSOLVER = KINSOL`
+  (or `LEVENBERG_MARQUARDT`) forces the nonlinear solver whatever a driver sets, for a corpus-wide comparison.
+  After the corpus-wide comparison (11 Nov 2026): ONE unscaled assembly at the start serves the scaling, the pattern
+  check and KINSOL's first Jacobian; the pattern is kept across solves of a plan and widened, with a restart, if an
+  entry appears outside it; KINSOL stops at the first point whose unscaled `max|r|` meets `RES_TOL` (LM's own
+  acceptance -- the derived scaled tolerance over-solved by orders of magnitude); `SOLVE_SPQR` maps to the new
+  `SUPERLU_SPQR` (sparse LU, the QR for a setup whose LU is singular: LM's tiers under that setting); SPQR solves in
+  one call; `[solve-cost]` under `SOLVE.VERBOSE`. Continuation-heavy models (OCFE_MBC2b, OCFE_MBC4): from 1.32-1.36x
+  LM's time to ~1.2x, the rest in the linear algebra (not the QR-versus-LU choice, nor structural zeros: measured).
+  KINSOL now solves the EQUILIBRATED system, as LM does -- unknowns y / c, residual r o F, Jacobian diag(r) J diag(c),
+  with the core's own weights -- so every factorisation sees a scaled matrix; the SPQR backend also equilibrates what
+  it is given. Diagnosed on OCFE_MBC5c (it failed at lambda = 0.01, residual 1.1e-5, in the forced sweep): SPQR's rank
+  tolerance, relative to the largest column, discarded columns small only by their units on the UNSCALED Jacobian,
+  so KINSOL took a minimum-norm step, not Newton's, and stalled; the stopping rule played no part (measured
+  separately). Now OCFE_MBC5c passes in 1.25x LM's time; OCFE_MBC2b 1.12x, OCFE_MBC4 1.16x (from 1.32x and 1.36x).
+  `SOLVE_SUPERLU` under KINSOL is now LU with the QR where the LU is singular (`SUPERLU_SPQR`, as `SOLVE_SPQR`): a
+  singular start -- OCFE_ALGFIELD2's state x state product at zero, the Jacobian's p block zero at the first iterate --
+  becomes a minimum-norm step instead of a failure; where the LU succeeds nothing changes, and a build without SPQR
+  keeps SuperLU alone. A structurally rank-deficient system the caller opted past (`FATAL.REDUCED_DOF = false`, the
+  setup audit's deficiency > 0) goes to the QR directly: SuperLU, handed one, called BLAS with an invalid dimension
+  ('DGEMV parameter number 2', OCFE_PDE20e's case D), which aborts on some BLAS builds. `SolveReport::linear_solver`
+  records the factorisation KINSOL used (Python: `SolveReport.linear_solver`). Gate OCFE_KINSOL (E) the singular
+  start, (F) the deficient system routed to the QR -- each failing without its change.
+* **KINSOL's sparse direct solvers: KLU, SuperLU, UMFPACK, SPQR** -- `BASE_KINSOL::Knobs::SPARSE_SOLVER` (`KLU`, the
+  default; `SUPERLU`; `UMFPACK`; `SPQR`) chooses the factorisation under `SPARSE`, for DAESLV's and ODESLV's consistent
+  initialisation (`options.INITIAL.KIN.SPARSE_SOLVER`) and for what builds on BASE_KINSOL. SUNDIALS wraps KLU itself;
+  the other three are CRONOS' own SUNLinearSolvers (`src/sunlinsol_cronos.hpp`: SuperLU through its C API with the
+  column ordering kept per pattern, UMFPACK with the symbolic analysis kept, SPQR by Q^T then R), each where its
+  build flag is set (`CRONOS__WITH_SUPERLU`, now set by `CRONOS_WITH_SUPERLU` in CMake and `FLAG_SUPERLU` in
+  `makeoptions.mk`, with `-lsuperlu` linked). Where Armadillo uses SuperLU, its declarations are used: both copies
+  share SuperLU's include guards. The sparse path no longer needs KLU to be built; an unavailable solver is named.
+  SuperLU_MT (threaded), which SUNDIALS wraps natively, is kept as a future option. Gate DAESLV_kinls: 2-D Bratu
+  (1600 unknowns) to KLU's root with every backend in KLU's iteration count; DAESLV's consistent initialisation under
+  MoL with each backend, KLU's outputs to 1e-14. Valgrind: clean. (The KINSOL extension of OCFESLV, K1b.)
 * **BASE_KINSOL: an automatic Newton-step bound** -- unbounded under the line search, KINSOL's own without it.
 * **DAESLV adjoint: one backward problem for every adjoined output.** The outputs' multipliers are stacked into
   one IDA instance with one step sequence and one block-diagonal matrix (KLU whenever there is more than one

@@ -213,6 +213,8 @@ Example -- the heat equation u_t = u_zz with an output:
                     "accepted damped-LM steps")
       .def_readonly("initial_residual", &O::SolveReport::initial_residual,
                     "max|r| at the supplied guess")
+      .def_readonly("linear_solver", &O::SolveReport::linear_solver,
+                    "under SOLVE.NLSOLVER = KINSOL: the factorisation used (e.g. 'SuperLU/SPQR', 'SPQR')")
       .def_readonly("final_residual", &O::SolveReport::final_residual,
                     "max|r| at return")
       .def_readonly("final_merit", &O::SolveReport::final_merit,

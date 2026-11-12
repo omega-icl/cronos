@@ -587,7 +587,9 @@ if(CRONOS_WITH_EIGEN)
   target_compile_definitions(cronos_headers INTERFACE CRONOS__WITH_EIGEN)
 endif()
 if(CRONOS_WITH_SUPERLU)
-  target_compile_definitions(cronos_headers INTERFACE ARMA_USE_SUPERLU)
+  # ARMA_USE_SUPERLU: Armadillo's spsolve (OCFESLV's LM); CRONOS__WITH_SUPERLU: SuperLU as a SUNDIALS linear solver for
+  # KINSOL (sunlinsol_cronos.hpp: BASE_KINSOL::Knobs::SPARSE_SOLVER)
+  target_compile_definitions(cronos_headers INTERFACE ARMA_USE_SUPERLU CRONOS__WITH_SUPERLU)
 endif()
 
 # Match the classical Make warning flags and add backend-specific compile options such as -frounding-math only

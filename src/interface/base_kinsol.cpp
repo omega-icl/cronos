@@ -40,7 +40,16 @@ integrator's.
   pyKnobs.def_readwrite("MAXSETUP", &mc::BASE_KINSOL::Knobs::MAXSETUP,
                         "Jacobian refresh interval: 1 = every iteration");
   pyKnobs.def_readwrite("SPARSE", &mc::BASE_KINSOL::Knobs::SPARSE,
-                        "use the sparse KLU linear solver rather than dense LU");
+                        "use a sparse direct linear solver (SPARSE_SOLVER) rather than dense LU");
+  py::enum_<mc::BASE_KINSOL::Knobs::SparseSolver>( pyKnobs, "SparseSolver",
+      "Under SPARSE, the direct solver factorising the CSC Jacobian (each where the build includes it)." )
+      .value( "KLU", mc::BASE_KINSOL::Knobs::KLU, "SUNDIALS' KLU (the default)" )
+      .value( "SUPERLU", mc::BASE_KINSOL::Knobs::SUPERLU, "SuperLU (serial), CRONOS' SUNLinearSolver" )
+      .value( "UMFPACK", mc::BASE_KINSOL::Knobs::UMFPACK, "UMFPACK, CRONOS' SUNLinearSolver" )
+      .value( "SPQR", mc::BASE_KINSOL::Knobs::SPQR, "SuiteSparseQR, CRONOS' SUNLinearSolver" )
+      .value( "SUPERLU_SPQR", mc::BASE_KINSOL::Knobs::SUPERLU_SPQR, "SuperLU, SuiteSparseQR where the LU is singular" );
+  pyKnobs.def_readwrite("SPARSE_SOLVER", &mc::BASE_KINSOL::Knobs::SPARSE_SOLVER,
+                        "under SPARSE, the direct solver: KLU (default), SUPERLU, UMFPACK or SPQR");
   pyKnobs.def_readwrite("SLOW_ITERS", &mc::BASE_KINSOL::Knobs::SLOW_ITERS,
                         "iteration count above which a CONVERGED solve is read as linearly convergent, "
                         "i.e. the rank-deficiency signature");

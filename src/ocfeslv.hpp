@@ -24,7 +24,15 @@
 #include "ocbase.hpp"
 #include "ffmodel.hpp"   // rev195: the model layer (class FFModel)
 #include "ocplan.hpp"
-#include "ocfebase.hpp"  // the direction-agnostic base: OCVar environment, interface plan, kernels
+#include "ocfebase.hpp"
+// KINSOL as OCFESLV's alternative nonlinear solver (SOLVE.NLSOLVER, 10 Nov 2026): taken where SUNDIALS' KINSOL headers
+// are found, as for DAESLV and ODESLV; CRONOS__WITHOUT_KINSOL opts out
+#if !defined(CRONOS__WITHOUT_KINSOL) && defined(__has_include)
+#  if __has_include(<kinsol/kinsol.h>)
+#    include "base_kinsol.hpp"
+#    define CRONOS__OCFESLV_KINSOL 1
+#  endif
+#endif  // the direction-agnostic base: OCVar environment, interface plan, kernels
 // rev265: the ocplan family is one header now   // rev152a: plan decision-layer contract (phase 0)
 // rev264: ocplan_build_legacy.hpp DELETED (954 lines) -- its builder was never applied.
    // rev153a: GLOBAL builder (phase 1a: shadow only)
@@ -174,13 +182,24 @@ public:
                           //!< Jacobians; sparse + fast on the large multi-block systems. Falls
                           //!< back to dense LAPACK (with a one-time notice) if not linked.
       SOLVE_LAPACK  = 1,  //!< densify the damped operator and use dense LU (debug / small systems)
-      SOLVE_SPQR    = 2   //!< sparse rank-revealing QR (SuiteSparseQR) min-2-norm least squares on
+      SOLVE_SPQR    = 2,  //!< sparse rank-revealing QR (SuiteSparseQR) min-2-norm least squares on
                           //!< Js directly -- no Js^T Js, so no fill/condition squaring, and the
                           //!< rank-revealing factor resolves the singular interface-augmented saddle
                           //!< natively (the sparse analogue of the dense min-norm tier).  Requires a build
                           //!< with SuiteSparseQR (-DCRONOS__WITH_SPQR, the GPL build); otherwise setup()
                           //!< REFUSES it (BACKEND_UNAVAILABLE).  Always defined (2026-10-09), so a model
                           //!< compiles -- and Python lists it -- in every build.
+      SOLVE_KLU     = 3,  //!< KLU -- under SOLVE.NLSOLVER = KINSOL only (SUNDIALS' own sparse LU)
+      SOLVE_UMFPACK = 4   //!< UMFPACK -- under SOLVE.NLSOLVER = KINSOL only (CRONOS' SUNLinearSolver)
+    };
+    //! @brief The nonlinear solver of a collocation system (10 Nov 2026).  KINSOL (Newton with a line search, the
+    //! SUNDIALS solver behind DAESLV's and ODESLV's consistent initialisation) takes a SQUARE system; it factorises
+    //! with SOLVE.FACTORIZATION (SUPERLU, SPQR, KLU, UMFPACK sparse; LAPACK dense), scales by the equilibration
+    //! (SOLVE.EQUILIBRATE) and accepts on RES_TOL as LM does.  Its knobs are SOLVE.KIN.
+    enum SolveNLSolver
+    {
+      LEVENBERG_MARQUARDT = 0,  //!< the damped Levenberg-Marquardt on the normal equations (default)
+      KINSOL              = 1   //!< SUNDIALS KINSOL, through BASE_KINSOL
     };
     //! @brief Warm-start strategy for the per-element step of a SOLVE.MARCHING solve.
     enum SolveWarmstart
@@ -195,6 +214,13 @@ public:
     struct t_Solve
     {
       SolveFactorization FACTORIZATION;  //!< linear backend (default SOLVE_SUPERLU; see note)
+      SolveNLSolver NLSOLVER;            //!< the nonlinear solver (default LEVENBERG_MARQUARDT; see SolveNLSolver)
+#if defined(CRONOS__OCFESLV_KINSOL)
+      //! @brief KINSOL's knobs, as DAESLV's and ODESLV's INITIAL.KIN.  FTOL = 0 (the default) DERIVES it from RES_TOL:
+      //! RES_TOL times the smallest row weight of the equilibration, so the scaled stop implies max|r| <= RES_TOL (a
+      //! fixed 1e-10 sat at a rod's round-off floor, K0); SPARSE and SPARSE_SOLVER follow FACTORIZATION.
+      BASE_KINSOL::Knobs KIN;
+#endif
       bool   MARCHING;       //!< auto-march when AVAILABLE (evolution domain + >=1 differential state); else monolithic (default true)
       double RES_TOL;        //!< accept on max|r| (1e-9)
       //! @name Internal nonlinear-solve (LM/Newton) controls — see OCFESLV::solve().
@@ -323,6 +349,10 @@ public:
         SOLVE.ARMIJO_C      = opt.SOLVE.ARMIJO_C;
         SOLVE.EQUILIBRATE   = opt.SOLVE.EQUILIBRATE;
         SOLVE.FACTORIZATION = opt.SOLVE.FACTORIZATION;
+        SOLVE.NLSOLVER      = opt.SOLVE.NLSOLVER;
+#if defined(CRONOS__OCFESLV_KINSOL)
+        SOLVE.KIN           = opt.SOLVE.KIN;
+#endif
         SOLVE.VERBOSE       = opt.SOLVE.VERBOSE;
         _force_verbose_from_env( SOLVE.VERBOSE );   // rev115: AFTER the driver, not only before
         SENSITIVITY.SPARSE      = opt.SENSITIVITY.SPARSE;
@@ -387,6 +417,11 @@ public:
         //   perturbation and keep the better answer.  UNVERIFIED -- this hook exists to
         //   test it.
         SOLVE.FACTORIZATION = SOLVE_SUPERLU;
+        SOLVE.NLSOLVER      = LEVENBERG_MARQUARDT;
+#if defined(CRONOS__OCFESLV_KINSOL)
+        SOLVE.KIN           = BASE_KINSOL::Knobs();
+        SOLVE.KIN.FTOL      = 0.;   // derived from RES_TOL
+#endif
 
         // rev114: let the environment FORCE solver verbosity on.
         //
@@ -1836,6 +1871,7 @@ public:
   //! @brief Outcome and diagnostics of the internal LM/Newton solve (OCFESLV::solve()).
   struct SolveReport
   {
+    std::string linear_solver;  //!< under SOLVE.NLSOLVER = KINSOL: the factorisation used ("SuperLU/SPQR", "SPQR", ...)
     bool   converged       = false;  //!< max|r| <= options.SOLVE.RES_TOL at return
     bool   reused          = false;  //!< returned from the SOLVE.REUSE primal cache (no Newton run)
     int    iterations      = 0;      //!< accepted outer iterations
@@ -3565,6 +3601,36 @@ protected:
     ( double const* var, double const* inp, double const* cst, double* r, t_JacAssembly& A, bool ic_override );
   //! @brief cache the IC_WEAK SAT re-injection stencil for the override rows.
   void _ensure_ic_sat( t_JacAssembly& A, bool ic_override );
+  //! @brief solve()'s ending, shared by both nonlinear solvers: the outputs and the REUSE cache on convergence, the
+  //! read-only post-solve audits.
+  SolveReport _solve_epilogue( double* var, double const* inp, double const* cst, SolveReport const& rep );
+  //! @brief SOLVE.NLSOLVER = KINSOL: the collocation system solved by BASE_KINSOL from var, on solve()'s own residual
+  //! and assembly (so marching windows and homotopy steps alike); false if not taken (named on stderr), rep filled.
+  bool _solve_kinsol( double* var, double const* inp, double const* cst, t_JacAssembly& A, bool ic_override, SolveReport& rep );
+#if defined(CRONOS__OCFESLV_KINSOL)
+  struct t_KinCtx
+  {
+    OCFESLV* self = nullptr;  double const* inp = nullptr;  double const* cst = nullptr;  bool ic_override = false;
+    t_JacAssembly* A = nullptr;  std::vector<sunindextype> colptr, rowidx;  bool outside = false;
+    //! the EXACT stop (10 Nov 2026): the first point KINSOL evaluates whose unscaled max|r| <= res_tol is the solution
+    //! -- LM's own acceptance, where a scaled tolerance tight enough to imply it over-solved by orders of magnitude
+    double res_tol = 0.;  std::vector<double> ybest;  bool hit = false;  double rbest = 0.;
+    //! the Jacobian at the start, already assembled for the scaling and the pattern: KINSOL's first one
+    std::vector<double> y0, val0;  bool used0 = false;  long njac = 0;
+    long nres = 0;  double t_res = 0., t_jac = 0.;      // the cost split ([solve-cost], as LM's)
+    //! KINSOL solves the EQUILIBRATED system, as LM does: unknowns yt = y / cw, residual r o F( cw o yt ), Jacobian
+    //! diag(r) J diag(cw) -- so every factorisation sees a scaled matrix (11 Nov 2026: unscaled, SPQR's rank tolerance
+    //! discarded columns small only by their units and OCFE_MBC5c stalled).  Empty: no equilibration.
+    std::vector<double> rw, cw, ybuf;
+  };
+  //! @brief the fixed CSC pattern of the KINSOL path, kept across solves of a plan (marching windows, homotopy steps):
+  //! checked against each start's Jacobian and rebuilt as their union if that has an entry outside it
+  std::vector<sunindextype> _kinColptr, _kinRowidx;
+  static bool _kin_fill( t_KinCtx& c, double* val );
+  static int _kin_res( int n, double const* y, double* f, void* user );
+  static int _kin_spjac( int n, double const* y, double* val, void* user );
+  static int _kin_jac( int n, double const* y, double* J, void* user );
+#endif
   //! @brief override row -> pin column, from the row's own sparsity.
   long _ic_col_for_row( t_JacAssembly const& A, FFVar const& st, t_MarchICRow const& rr ) const;
 
@@ -4940,6 +5006,7 @@ OCFESLV::_on_model_ready
   // override rows (_marchICRows, indexed into the OLD plan) and found a deficiency the new plan does not have --
   // the W-test then REVERTED a correct restore (OCFE_MMPDE1, adaptive monitor: "worst excess 9 >= 3").
   _primalValid = false;   // model (re)built -> any cached primal solution is stale
+  _kinColptr.clear();  _kinRowidx.clear();   // ... and the KINSOL path's cached pattern
   _reducedDepValid = false;   // ... and the structural dependency pattern
   _rowProvenanceReady = false; _rowEqnNdx.clear();   // ... and the residual-row provenance
   _eqnDiffInReady = false; _eqnDiffIn.clear();       // ... and the row x direction Partial table
@@ -8680,6 +8747,21 @@ OCFESLV::solve( double* var, double const* inp, double const* cst )
   // dispatch on purpose -- the ramp is the outer loop, and each of its steps re-enters solve()
   // here, where a marching model then takes the marching path as usual.  Sensitivity solves that
   // re-enter solve() (e.g. via _mono_fsens_setup) therefore inherit the continuation for free.
+  // The caller's std::cout format, restored at every return (11 Nov 2026): the diagnostics below write through _disp --
+  // std::cout when the display level allows -- setting std::scientific and precisions they never reset, so a driver's
+  // later output printed in OCFESLV's format, not its own (OCFE_PDE5: 9.646e-08 under LM, 9.6458e-08 under KINSOL)
+  struct t_CoutFormat
+  {
+    std::ios_base::fmtflags const f = std::cout.flags();  std::streamsize const p = std::cout.precision();
+    ~t_CoutFormat(){ std::cout.flags( f );  std::cout.precision( p ); }
+  } const coutFormat;
+  // CRONOS_SOLVE_NLSOLVER = KINSOL | LEVENBERG_MARQUARDT forces the nonlinear solver whatever the caller set -- an
+  // informational corpus-wide comparison (RELEASE_PLAN_20261110 K5), as CRONOS_DISPLAY_LEVEL forces the display
+  if( char const* e = std::getenv( "CRONOS_SOLVE_NLSOLVER" ) ){
+    std::string const v( e );
+    if( v == "KINSOL" ) options.SOLVE.NLSOLVER = Options::KINSOL;
+    else if( v == "LEVENBERG_MARQUARDT" || v == "LM" ) options.SOLVE.NLSOLVER = Options::LEVENBERG_MARQUARDT;
+  }
   if( options.HOMOTOPY.ENABLE && !_vHom.empty() && !_inHomotopy )
     return _solve_homotopy( var, inp, cst );
 
@@ -8759,6 +8841,17 @@ OCFESLV::solve( double* var, double const* inp, double const* cst )
   if( !_residual_core( var, inp, cst, r.data(), A, ic_override ) ) return rep;
   double norm = 0.0; for( double v : r ) norm = std::max( norm, std::fabs(v) );
   rep.initial_residual = norm;
+
+  // SOLVE.NLSOLVER = KINSOL (10 Nov 2026): the same system, residual and assembly, solved by BASE_KINSOL; the ending shared
+  if( options.SOLVE.NLSOLVER == Options::KINSOL ){
+    if( !_solve_kinsol( var, inp, cst, A, ic_override, rep ) ) return rep;
+    return _solve_epilogue( var, inp, cst, rep );
+  }
+  if( options.SOLVE.FACTORIZATION == Options::SOLVE_KLU || options.SOLVE.FACTORIZATION == Options::SOLVE_UMFPACK ){
+    std::cerr << "OCFESLV::solve ** SOLVE.FACTORIZATION = " << ( options.SOLVE.FACTORIZATION == Options::SOLVE_KLU? "SOLVE_KLU": "SOLVE_UMFPACK" )
+              << " is taken under SOLVE.NLSOLVER = KINSOL only -- LEVENBERG_MARQUARDT factorises with SUPERLU, LAPACK or SPQR" << std::endl;
+    return rep;
+  }
 
   // Newton linear solve A dy = b through the configured sparse factorization backend.
   auto solve_linear = [&]( arma::sp_mat const& A, arma::vec const& b, arma::vec& xsol ) -> bool {
@@ -10172,6 +10265,225 @@ OCFESLV::solve( double* var, double const* inp, double const* cst )
     _disp( 2 ) << "ms line_search=" << _ts_ls << "ms (over " << rep.iterations
               << " accepted it)\n";
   }
+  return _solve_epilogue( var, inp, cst, rep );
+}
+
+#if defined(CRONOS__OCFESLV_KINSOL)
+inline int
+OCFESLV::_kin_res
+( int n, double const* y, double* f, void* user )
+{
+  t_KinCtx& c = *static_cast<t_KinCtx*>( user );
+  double const* ye = y;
+  if( !c.cw.empty() ){ c.ybuf.resize( n );  for( int j = 0; j < n; ++j ) c.ybuf[j] = c.cw[j]*y[j];  ye = c.ybuf.data(); }
+  auto const t0 = std::chrono::steady_clock::now();
+  bool const okr = c.self->_residual_core( ye, c.inp, c.cst, f, *c.A, c.ic_override );
+  c.t_res += std::chrono::duration<double,std::milli>( std::chrono::steady_clock::now() - t0 ).count();  ++c.nres;
+  if( !okr ) return 1;
+  if( c.res_tol > 0. ){                                    // the exact stop, on the UNSCALED residual
+    double mx = 0.;  for( int i = 0; i < n; ++i ) mx = std::max( mx, std::fabs( f[i] ) );
+    if( std::isfinite( mx ) && mx <= c.res_tol ){ c.ybest.assign( ye, ye + n );  c.rbest = mx;  c.hit = true;  return -1; }   // stop KINSOL here
+  }
+  if( !c.rw.empty() ) for( int i = 0; i < n; ++i ) f[i] *= c.rw[i];
+  return 0;
+}
+
+// the CSC values from the assembly's J (both sorted by row within a column: a merge); false if an entry lies outside
+inline bool
+OCFESLV::_kin_fill
+( t_KinCtx& c, double* val )
+{
+  arma::sp_mat const& J = c.A->J;
+  J.sync();
+  size_t const m = c.colptr.size() - 1;
+  std::fill( val, val + c.rowidx.size(), 0. );
+  bool inside = true;
+  for( size_t j = 0; j < m && j < J.n_cols; ++j ){
+    sunindextype e = c.colptr[j];
+    for( arma::uword k = J.col_ptrs[j]; k < J.col_ptrs[j+1]; ++k ){
+      sunindextype const i = (sunindextype)J.row_indices[k];
+      while( e < c.colptr[j+1] && c.rowidx[e] < i ) ++e;
+      if( e < c.colptr[j+1] && c.rowidx[e] == i ) val[e] = J.values[k];
+      else inside = false;
+    }
+  }
+  if( !c.rw.empty() )
+    for( size_t j = 0; j < m; ++j ) for( sunindextype e = c.colptr[j]; e < c.colptr[j+1]; ++e ) val[e] *= c.rw[ c.rowidx[e] ]*c.cw[j];
+  return inside;
+}
+
+inline int
+OCFESLV::_kin_spjac
+( int n, double const* y, double* val, void* user )
+{
+  t_KinCtx& c = *static_cast<t_KinCtx*>( user );
+  ++c.njac;
+  if( !c.used0 && (int)c.y0.size() == n && std::equal( y, y + n, c.y0.begin() ) ){     // the start: assembled already
+    c.used0 = true;  std::copy( c.val0.begin(), c.val0.end(), val );  return 0; }
+  c.used0 = true;
+  double const* ye = y;
+  if( !c.cw.empty() ){ c.ybuf.resize( n );  for( int j = 0; j < n; ++j ) c.ybuf[j] = c.cw[j]*y[j];  ye = c.ybuf.data(); }
+  auto const t0 = std::chrono::steady_clock::now();
+  bool const oka = c.self->_assemble_core( ye, c.inp, c.cst, *c.A, false, c.ic_override, nullptr );
+  if( oka && !_kin_fill( c, val ) ) c.outside = true;
+  c.t_jac += std::chrono::duration<double,std::milli>( std::chrono::steady_clock::now() - t0 ).count();
+  return ( !oka || c.outside )? 1: 0;
+}
+
+inline int
+OCFESLV::_kin_jac
+( int n, double const* y, double* Jd, void* user )
+{
+  t_KinCtx& c = *static_cast<t_KinCtx*>( user );
+  double const* ye = y;
+  if( !c.cw.empty() ){ c.ybuf.resize( n );  for( int j = 0; j < n; ++j ) c.ybuf[j] = c.cw[j]*y[j];  ye = c.ybuf.data(); }
+  if( !c.self->_assemble_core( ye, c.inp, c.cst, *c.A, false, c.ic_override, nullptr ) ) return 1;
+  std::fill( Jd, Jd + (size_t)n*n, 0. );
+  for( auto it = c.A->J.begin(); it != c.A->J.end(); ++it )
+    if( (int)it.col() < n && (int)it.row() < n )
+      Jd[ it.row() + (size_t)n*it.col() ] = *it * ( c.rw.empty()? 1.: c.rw[ it.row() ]*c.cw[ it.col() ] );
+  return 0;
+}
+#endif
+
+inline bool
+OCFESLV::_solve_kinsol
+( double* var, double const* inp, double const* cst, t_JacAssembly& A, bool ic_override, SolveReport& rep )
+{
+#if defined(CRONOS__OCFESLV_KINSOL)
+  size_t const n = n_colloc_eqn(), m = n_colloc_sta();
+  if( n != m || ( A.m && A.m != m ) ){
+    std::cerr << "OCFESLV::solve ** SOLVE.NLSOLVER = KINSOL needs a square collocation system over the states: " << n << " rows, "
+              << m << " state columns" << ( A.m > m? ", " + std::to_string( A.m - m ) + " multiplier columns": std::string() )
+              << " -- use LEVENBERG_MARQUARDT" << std::endl;
+    return false;
+  }
+  if( std::isfinite( rep.initial_residual ) && rep.initial_residual <= options.SOLVE.RES_TOL ){   // already a solution
+    rep.converged = true;  rep.iterations = 0;  rep.final_residual = rep.initial_residual;  return true; }
+  // ONE unscaled assembly at the start serves the scaling, the pattern and KINSOL's first Jacobian (a second,
+  // equilibrated one cost a Jacobian per solve -- a third of a marching window's or a continuation step's work)
+  auto const t_start = std::chrono::steady_clock::now();
+  if( !_assemble_core( var, inp, cst, A, false, ic_override, nullptr ) ) return false;
+  double const t_asm0 = std::chrono::duration<double,std::milli>( std::chrono::steady_clock::now() - t_start ).count();
+  A.J.sync();
+  bool const equil = options.SOLVE.EQUILIBRATE && A.J.n_rows == n && A.J.n_cols >= m;
+  std::vector<double> fs, us;
+  double rwmin = 1.;
+  if( equil ){                                         // the core's equilibration: 1/max(1, row max), then columns
+    std::vector<double> rmax( n, 0. ), cmax( m, 0. );
+    for( size_t j = 0; j < m; ++j ) for( arma::uword k = A.J.col_ptrs[j]; k < A.J.col_ptrs[j+1]; ++k )
+      rmax[ A.J.row_indices[k] ] = std::max( rmax[ A.J.row_indices[k] ], std::fabs( A.J.values[k] ) );
+    fs.resize( n );  for( size_t i = 0; i < n; ++i ){ fs[i] = 1./std::max( 1., rmax[i] );  rwmin = std::min( rwmin, fs[i] ); }
+    for( size_t j = 0; j < m; ++j ) for( arma::uword k = A.J.col_ptrs[j]; k < A.J.col_ptrs[j+1]; ++k )
+      cmax[j] = std::max( cmax[j], std::fabs( A.J.values[k] )*fs[ A.J.row_indices[k] ] );
+    us.resize( m );  for( size_t j = 0; j < m; ++j ) us[j] = std::max( 1., cmax[j] );      // 1 / column weight
+  }
+  t_KinCtx ctx;  ctx.self = this;  ctx.inp = inp;  ctx.cst = cst;  ctx.ic_override = ic_override;  ctx.A = &A;
+  ctx.res_tol = options.SOLVE.RES_TOL;
+  if( equil ){ ctx.rw = fs;  ctx.cw.resize( m );  for( size_t j = 0; j < m; ++j ) ctx.cw[j] = 1./us[j]; }
+  // the pattern: the cached one if this start's Jacobian lies inside it, else rebuilt (their union)
+  ctx.colptr = _kinColptr;  ctx.rowidx = _kinRowidx;
+  ctx.val0.assign( ctx.rowidx.size(), 0. );
+  if( ctx.colptr.size() != m + 1 || !_kin_fill( ctx, ctx.val0.data() ) ){
+    std::vector< std::vector<sunindextype> > rows_of( m );
+    if( _kinColptr.size() == m + 1 )
+      for( size_t j = 0; j < m; ++j ) rows_of[j].assign( _kinRowidx.begin() + _kinColptr[j], _kinRowidx.begin() + _kinColptr[j+1] );
+    // the STRUCTURAL row lists and this start's nonzeros.  (Measured 11 Nov 2026: a pattern of the numerically nonzero
+    // entries alone -- what Armadillo keeps for LM -- made the LU of the first MBC continuation step 40x SLOWER.)
+    for( size_t i = 0; i < n && i < A.rownnz.size(); ++i )
+      for( size_t k = 0; k < A.rownnz[i]; ++k ){ size_t const c = A.rowcol[i][k];  if( c < m ) rows_of[c].push_back( (sunindextype)i ); }
+    for( size_t j = 0; j < m; ++j ) for( arma::uword k = A.J.col_ptrs[j]; k < A.J.col_ptrs[j+1]; ++k ) rows_of[j].push_back( (sunindextype)A.J.row_indices[k] );
+    _kinColptr.assign( m + 1, 0 );  _kinRowidx.clear();
+    for( size_t j = 0; j < m; ++j ){
+      auto& rr = rows_of[j];  std::sort( rr.begin(), rr.end() );  rr.erase( std::unique( rr.begin(), rr.end() ), rr.end() );
+      _kinRowidx.insert( _kinRowidx.end(), rr.begin(), rr.end() );  _kinColptr[j+1] = (sunindextype)_kinRowidx.size();
+    }
+    ctx.colptr = _kinColptr;  ctx.rowidx = _kinRowidx;
+    ctx.val0.assign( ctx.rowidx.size(), 0. );
+    if( !_kin_fill( ctx, ctx.val0.data() ) ) return false;
+  }
+  ctx.y0.assign( var, var + m );
+  if( equil ) for( size_t j = 0; j < m; ++j ) ctx.y0[j] = var[j]/ctx.cw[j];      // KINSOL starts at the SCALED point
+  // the knobs: KIN's, FTOL and the factorisation derived where they follow OCFESLV's own settings
+  BASE_KINSOL::Knobs k = options.SOLVE.KIN;
+  auto const fz = options.SOLVE.FACTORIZATION;
+  k.SPARSE = ( fz != Options::SOLVE_LAPACK );
+  k.SPARSE_SOLVER = fz == Options::SOLVE_KLU? BASE_KINSOL::Knobs::KLU: fz == Options::SOLVE_UMFPACK? BASE_KINSOL::Knobs::UMFPACK:
+                    BASE_KINSOL::Knobs::SUPERLU_SPQR;   // SOLVE_SUPERLU and SOLVE_SPQR alike: sparse LU for the Newton
+                    // step, the QR where the LU is singular (11 Nov 2026, your decision: a singular start -- OCFE_ALGFIELD2,
+                    // a state x state product at zero -- became a minimum-norm step instead of a failure; where the LU
+                    // succeeds nothing changes, and a build without SPQR keeps SuperLU alone)
+  if( k.FTOL <= 0. ) k.FTOL = options.SOLVE.RES_TOL * ( equil? rwmin: 1. );
+  // a STRUCTURALLY rank-deficient system -- the setup audit found it, the caller opted past FATAL.REDUCED_DOF: the QR
+  // directly, the factorisation meant for it.  (11 Nov 2026: SuperLU, handed such a matrix, called BLAS with an
+  // invalid dimension inside its supernodes -- 'DGEMV parameter number 2', OCFE_PDE20e (D) -- which aborts on some
+  // BLAS builds.  LM never meets it: its damped matrix is never singular.)
+  if( k.SPARSE && _dofAudit.ran && _dofAudit.deficiency > 0 && k.SPARSE_SOLVER != BASE_KINSOL::Knobs::KLU
+   && k.SPARSE_SOLVER != BASE_KINSOL::Knobs::UMFPACK && SunLinSolCronos::available( SunLinSolCronos::SPQR ) )
+    k.SPARSE_SOLVER = BASE_KINSOL::Knobs::SPQR;
+  k.RTOL = k.ATOL = 0.;                                                     // no polish: there is no integrator
+  std::vector<double> y( ctx.y0 );                                           // the scaled unknowns
+  BASE_KINSOL::Report R;
+  long its_done = 0;
+  for( int pass = 0; pass < 4; ++pass ){
+    BASE_KINSOL::Sparsity sp;  sp.colptr = ctx.colptr;  sp.rowidx = ctx.rowidx;  sp.jac = _kin_spjac;
+    ctx.outside = false;
+    R = BASE_KINSOL::solve( (int)m, _kin_res, k.SPARSE? nullptr: _kin_jac, &ctx, y, k, k.SPARSE? &sp: nullptr,
+                            nullptr, nullptr, "collocation" );             // the system is scaled already
+    its_done += R.iterations;
+    if( !ctx.outside || ctx.hit || !k.SPARSE ) break;
+    // an entry outside the pattern appeared at the last Jacobian (A.J holds it): widen to the union, restart from y
+    std::vector< std::vector<sunindextype> > rows_of( m );
+    for( size_t j = 0; j < m; ++j ) rows_of[j].assign( _kinRowidx.begin() + _kinColptr[j], _kinRowidx.begin() + _kinColptr[j+1] );
+    A.J.sync();
+    for( size_t j = 0; j < m; ++j ) for( arma::uword kk = A.J.col_ptrs[j]; kk < A.J.col_ptrs[j+1]; ++kk ) rows_of[j].push_back( (sunindextype)A.J.row_indices[kk] );
+    _kinColptr.assign( m + 1, 0 );  _kinRowidx.clear();
+    for( size_t j = 0; j < m; ++j ){
+      auto& rr = rows_of[j];  std::sort( rr.begin(), rr.end() );  rr.erase( std::unique( rr.begin(), rr.end() ), rr.end() );
+      _kinRowidx.insert( _kinRowidx.end(), rr.begin(), rr.end() );  _kinColptr[j+1] = (sunindextype)_kinRowidx.size();
+    }
+    ctx.colptr = _kinColptr;  ctx.rowidx = _kinRowidx;
+    ctx.y0.clear();  ctx.used0 = true;                                       // the cached first Jacobian is the old pattern's
+  }
+  R.iterations = its_done;
+  double const t_all = std::chrono::duration<double,std::milli>( std::chrono::steady_clock::now() - t_start ).count();
+  if( options.SOLVE.VERBOSE )
+    _disp( 2 ) << "  [solve-cost] KINSOL total=" << t_all << "ms: assembly(start)=" << t_asm0 << " residual=" << ctx.t_res << " (" << ctx.nres
+               << ") jacobian=" << ctx.t_jac << " (" << ctx.njac << ", the first reused) linear-algebra+KINSOL=" << t_all - t_asm0 - ctx.t_res - ctx.t_jac
+               << "ms; pattern " << ctx.rowidx.size() << " entries" << std::endl;
+  if( ctx.hit ) std::copy( ctx.ybest.begin(), ctx.ybest.end(), var );      // the exact stop: an unscaled point
+  else for( size_t j = 0; j < m; ++j ) var[j] = ( equil? ctx.cw[j]: 1. )*y[j];
+  std::vector<double> r( n, 0. );
+  double maxr = NAN, merit = 0.;
+  if( _residual_core( var, inp, cst, r.data(), A, ic_override ) ){
+    maxr = 0.;  for( size_t i = 0; i < n; ++i ){ maxr = std::max( maxr, std::fabs( r[i] ) );  double const s = equil? fs[i]*r[i]: r[i];  merit += 0.5*s*s; }
+  }
+  int const its = (int)std::max( R.iterations, ctx.njac );                   // KINSOL's count, or the Jacobians it asked for
+  rep.iterations = its;  rep.newton_steps = its;  rep.lm_steps = 0;
+  rep.final_residual = maxr;  rep.final_merit = merit;
+  rep.linear_solver = !k.SPARSE? "dense": k.SPARSE_SOLVER == BASE_KINSOL::Knobs::KLU? "KLU": k.SPARSE_SOLVER == BASE_KINSOL::Knobs::UMFPACK? "UMFPACK":
+                      k.SPARSE_SOLVER == BASE_KINSOL::Knobs::SPQR? "SPQR": k.SPARSE_SOLVER == BASE_KINSOL::Knobs::SUPERLU_SPQR? "SuperLU/SPQR": "SuperLU";
+  rep.converged = ( ctx.hit || R.kin_flag >= 0 ) && !ctx.outside && std::isfinite( maxr ) && maxr <= options.SOLVE.RES_TOL;
+  if( _solve_display_level() >= 1 || ( !rep.converged && options.DISPLAY_LEVEL >= 1 ) )
+    _disp( 2 ) << "OCFESLV::solve [KINSOL/" << ( !k.SPARSE? "dense": k.SPARSE_SOLVER == BASE_KINSOL::Knobs::KLU? "KLU":
+                  k.SPARSE_SOLVER == BASE_KINSOL::Knobs::UMFPACK? "UMFPACK": k.SPARSE_SOLVER == BASE_KINSOL::Knobs::SPQR? "SPQR":
+                  k.SPARSE_SOLVER == BASE_KINSOL::Knobs::SUPERLU_SPQR? "SuperLU/SPQR": "SuperLU" )
+               << "] " << its << " it  max|r| " << maxr << "  " << ( rep.converged? "converged": "NOT converged" )
+               << ( ctx.outside? " (a Jacobian entry fell outside the pattern fixed at the start)": "" )
+               << ( rep.converged? std::string(): " -- " + R.message ) << std::endl;
+  return true;
+#else
+  (void)var; (void)inp; (void)cst; (void)A; (void)ic_override; (void)rep;
+  std::cerr << "OCFESLV::solve ** SOLVE.NLSOLVER = KINSOL: this build has no KINSOL (SUNDIALS' kinsol headers not found)" << std::endl;
+  return false;
+#endif
+}
+
+inline OCFESLV::SolveReport
+OCFESLV::_solve_epilogue
+( double* var, double const* inp, double const* cst, SolveReport const& rep0 )
+{
+  SolveReport rep = rep0;
   // Unified value-function cache: on a genuine (non-marching) monolithic solve, evaluate the
   // output functions so val_functions() works for monolithic just as _solve_marching populates
   // it for marching.  Skipped inside the march driver (_inMarch=true): the marching loop

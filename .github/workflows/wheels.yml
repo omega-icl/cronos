@@ -10,10 +10,10 @@ name: wheels
 
 on:
   push:
-    branches: ["5.0"]
+    branches: ["5.x"]          # the development branch (was "5.0" before its rename: pushes stopped triggering)
     tags: ["v*"]
   pull_request:
-    branches: ["5.0"]
+    branches: ["5.x"]
   workflow_dispatch:
 
 env:

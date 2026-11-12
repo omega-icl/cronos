@@ -1,6 +1,6 @@
 # Changes
 
-## 5.2.0 (unreleased)
+## 5.2.0 (2026-11-12)
 
 ### Results that change from 5.1.0
 

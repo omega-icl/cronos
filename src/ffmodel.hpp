@@ -547,12 +547,12 @@ public:
       if( level != UNSET_DISPLAY_LEVEL ) return;              // the driver set it: it stands
       level = 0;                                               // else the default, unless the environment says
       char const* v = std::getenv( "CRONOS_DISPLAY_LEVEL" );
-      if( !v ) return;
+      if( !v || !*v ) return;                                  // unset, or set to nothing: no override
       char* end = nullptr;
       long const n = std::strtol( v, &end, 10 );
       if( end == v || *end != '\0' || n < 0 || n > 9 ){
-        std::cerr << "OCFESLV ** CRONOS_DISPLAY_LEVEL='" << v << "' not recognised (an integer 0..9);"
-                     " leaving DISPLAY_LEVEL as the driver set it." << std::endl;
+        std::cerr << "CRONOS ** CRONOS_DISPLAY_LEVEL='" << v << "' not recognised (an integer 0..9);"
+                     " DISPLAY_LEVEL keeps its default." << std::endl;
         return;
       }
       level = static_cast<int>( n );
@@ -560,11 +560,11 @@ public:
     static void _force_verbose_from_env( bool& flag )
     {
       char const* v = std::getenv( "CRONOS_SOLVE_VERBOSE" );
-      if( !v ) return;
+      if( !v || !*v ) return;                                  // unset, or set to nothing: no override
       std::string const w( v );
       if( w == "1" || w == "true" || w == "TRUE" ) flag = true;
       else if( w != "0" && w != "false" && w != "FALSE" )
-        std::cerr << "OCFESLV ** CRONOS_SOLVE_VERBOSE='" << w << "' not recognised (1|0);"
+        std::cerr << "CRONOS ** CRONOS_SOLVE_VERBOSE='" << w << "' not recognised (1|0);"
                      " leaving SOLVE.VERBOSE as the driver set it." << std::endl;
     }
 

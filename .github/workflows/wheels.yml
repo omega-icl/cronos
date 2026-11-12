@@ -5,7 +5,7 @@
 #   * GPL build -- tools/wheel_variant.py gpl: UMFPACK and SPQR (GPL-2.0-or-later), licence metadata GPL-2.0-or-later.
 #     Its wheels get build tag 1 and are attached to the GitHub release, never uploaded to PyPI; pip and uv prefer them
 #     when given the release page:  pip install cronos-mcpp -f https://github.com/omega-icl/cronos/releases/expanded_assets/<tag>
-# Every wheel is tested by the five check scripts, run against the installed wheel.  A release requires both builds.
+# Every wheel is tested by the eight check scripts, run against the installed wheel.  A release requires both builds.
 name: wheels
 
 on:
@@ -19,7 +19,7 @@ on:
 env:
   # The MC++ sources the module is compiled against.  They must be those of the pymcpp release pinned in
   # pyproject.toml (objects cross between the two modules): the pymcpp release's tag, once it is published.
-  MCPP_REF: v5.1.0
+  MCPP_REF: v5.1.1
 
 jobs:
   build_wheels:
@@ -45,7 +45,7 @@ jobs:
         run: python3 tools/wheel_variant.py gpl
       - uses: pypa/cibuildwheel@v4.3
         env:
-          CIBW_BUILD: "cp310-* cp311-* cp312-* cp313-* cp314-*"
+          CIBW_BUILD: "cp310-* cp311-* cp312-* cp313-* cp314-* cp315-*"
           CIBW_SKIP: "*-musllinux*"
           CIBW_ARCHS: auto64
           CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_28
@@ -74,6 +74,9 @@ jobs:
             python {project}/src/interface/check_odeslv.py &&
             python {project}/src/interface/check_ffodeslv.py &&
             python {project}/src/interface/check_ocfeslv.py &&
+            python {project}/src/interface/check_daeslv.py &&
+            python {project}/src/interface/check_daeslv_mol.py &&
+            python {project}/src/interface/check_ffdaeslv.py &&
             python {project}/src/interface/check_ffocfe.py &&
             python -c "import cronos; i = cronos.build_info(); print(i); assert i['license'] == ('GPL-2.0-or-later' if '${{ matrix.variant }}' == 'gpl' else 'EPL-2.0')"
       - name: Every bundled library has a third-party notice

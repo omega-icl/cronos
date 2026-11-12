@@ -45,7 +45,7 @@ Print reports at setup; none changes what is computed.  Those marked "default of
 | `CRONOS_AUDIT_TAG` | A one-line machine-readable `[cov1]` summary per setup, for corpus sweeps. | `ocfeslv.hpp` |
 | `CRONOS_AUDIT_TAUCOL` | The `[taucol/plan]` report: the plan's tau columns. | `ocfebase.hpp` |
 | `CRONOS_DETERMINACY_GAP_MIN` | Determinacy audit: a gap at the rank cut below this triggers a re-evaluation at 1.3x the reference point (default 1e2). | `ocfebase.hpp` |
-| `CRONOS_DISPLAY_LEVEL` | Default for `DISPLAY_LEVEL`, an integer `0`..`9`: applies wherever a driver has NOT set it -- a value the driver sets, `0` included, stands -- and does nothing when unset (the default is then `0`).  Resolved in the solvers' Options constructors and at setup; a floor until 2026-10-25, which raised a driver's explicit `0`. | `ffmodel.hpp` |
+| `CRONOS_DISPLAY_LEVEL` | Default for `DISPLAY_LEVEL`, an integer `0`..`9`: applies wherever a driver has NOT set it -- a value the driver sets, `0` included, stands -- and does nothing when unset or empty (the default is then `0`).  Resolved in the solvers' Options constructors and at setup; a floor until 2026-10-25, which raised a driver's explicit `0`. | `ffmodel.hpp` |
 | `CRONOS_HEADER_FULL` | Print the solver header's revision summary at setup (display level 2). | `ocfeslv.hpp` |
 | `CRONOS_KEEP_EXPLICIT_AUDIT` | Check that every explicit tau column arrives with its row (the keep-explicit invariant). | `ocfebase.hpp` |
 | `CRONOS_KPRIME_STRUCTURAL` | With the numeric determinacy audit on, print the structural determinacy line beside it (a corpus-wide equality check). | `ocfeslv.hpp` |

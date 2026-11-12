@@ -2,6 +2,31 @@
 
 ## 5.2.0 (unreleased)
 
+### Results that change from 5.1.0
+
+Each was measured on the 5.1.0 tag against a closed form; the entries further down give the cause and the gate.
+Work that used one of these should be run again.
+
+* **ODESLV, forward sensitivities across a transition whose map reads a state it resets** -- `x(tau+) = d x(tau-)`,
+  `x(tau+) = x(tau-)^2`, a coupled two-state map: off by 9e-2 to 0.75 on the gate models. An additive dose, a reset
+  to a value and a map of states continuous at `tau` were exact, and so was the adjoint.
+* **DAESLV, an output at a stop** (a transition): a value at `tau+` returned the value at `tau-`, and its forward
+  sensitivities with it; the adjoint gradient of a value at `tau-` was taken on the `tau+` side.
+* **DAESLV, point-form outputs** `add_output( f, {t}, {tau}, {side} )` returned `f` at the FINAL time.
+* **DAESLV adjoint gradients:** an interior value of an algebraic state lost its direct dependence on a parameter
+  (`z = u x`: `dz(0.25)/du = 0`); a value at `t0` was scaled by the mass matrix of its row (`2 x' = ...`: 2 for 1)
+  and zero for an algebraic state; an integral whose integrand reads a parameter directly had that part NEGATED
+  (`d/du int u dt = -1`).
+* **DAESLV, sensitivities with respect to a time-varying input read by a transition or by an INITIAL row**
+  (`x(tau+) = x(tau-) + g`, `x(0) = u(t0)`): zero, forward and adjoint. ODESLV was right on the transition;
+  its `solve_fsens` failed on the INITIAL row.
+* **Failures that are now results:** `SYMDIFF` on a model with a transition crashed (a segmentation fault, in Python
+  too); a point-form output reading a time-varying input threw ("missing variable") in DAESLV.
+
+Not measured again on 5.1.0, and described below: a row integrating over a direction it is not distributed over
+(OCFESLV, `int (1 + u) dz` at a point), integrals on a multi-stage horizon (ODESLV, DAESLV), the interface plan on
+`(t,x,y)` models whose time elements have more nodes than the spatial ones.
+
 ### DAESLV: models distributed in space by the method of lines
 
 * **DAESLV takes a model distributed in space**, declared through FFModel exactly as for OCFESLV, and integrates it by
@@ -385,6 +410,12 @@
   which formats with MC++'s `.clang-format` when `MCPP_ROOT` is set), the Doxygen input and the environment table.
   `check_daeslv_mol.py` runs with the other Python checks under `make check`; `check_ffodeslv` / `check_ffdaeslv`: the
   coordinate case no longer shadows the solver.
+* **Wheels:** built against MC++ 5.1.1, for CPython 3.15 too; every wheel is now tested by the three DAESLV checks
+  as well (`check_daeslv`, `check_daeslv_mol`, `check_ffdaeslv` -- the wheels ran five of the eight `make check`
+  scripts, none of them on DAESLV).
+* **`CRONOS_DISPLAY_LEVEL` and `CRONOS_SOLVE_VERBOSE` set to nothing count as unset** (an empty value was reported
+  as not recognised, by every solver, under the name OCFESLV); the message for a value that is not recognised names
+  CRONOS.
 * **`tools/ci/snapshot_corpus.sh`:** a driver without a baseline entry is NEW, recorded on first sight and gated from
   the next check; an advisory names the drivers whose output prints a FAIL verdict line; the concurrency guard names
   the processes it saw; DAESLV and ODESLV timing families; clocks suppressed under `CRONOS_SNAPSHOT`.
@@ -397,6 +428,15 @@
 * **`SAT_ENERGY` on convective models:** stable, but behind `IC_STRONG` in accuracy (3x on a Peclet-10 rod, ~19x on
   the PSA column at 12 elements of degree 4) -- structural to the weak interface treatment of convection here; for
   convective models under MoL, `IC_STRONG` and `IC_TRACE` are recommended.
+* **No `FFModel::bdiff`:** a model is differentiated symbolically in forward mode only (`fdiff`, `SYMDIFF`); the
+  adjoint model as an FFModel is the next release's.
+* **Transition times are fixed:** no sensitivity with respect to `tau`.
+* **ODESLV takes explicit transition maps only**; DAESLV and OCFESLV take implicit ones.
+* **Method of lines:** an input that is FIXED and varies in time is refused (its values go by name); the mesh is
+  fixed.
+* **KINSOL in OCFESLV is an opt-in** with the limitations listed under its entry (a square system, a regular
+  Jacobian or the QR fallback, the root found on a problem with several).
+* The gaps listed under 5.1.0 (the static dummy pivot, where dummy derivatives decline) stand.
 
 ## 5.1.0 (2026-10-27)
 

@@ -28,7 +28,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-14, windows-latest]
+        # macos pinned (not -latest), as MC++'s: the Homebrew libraries (Boost, Armadillo, Eigen, OpenBLAS) target the
+        # runner's OS version, which must match MACOSX_DEPLOYMENT_TARGET below or delocate refuses the wheel.  macos-14
+        # was retired on 2026-11-02; macos-15 is the oldest supported arm64 label, the widest compatibility.
+        os: [ubuntu-latest, macos-15, windows-latest]
         variant: [epl, gpl]
     steps:
       - uses: actions/checkout@v5
@@ -40,7 +43,7 @@ jobs:
       - name: GPL build -- licence, licence files and backends
         if: matrix.variant == 'gpl'
         run: python3 tools/wheel_variant.py gpl
-      - uses: pypa/cibuildwheel@v4.1
+      - uses: pypa/cibuildwheel@v4.3
         env:
           CIBW_BUILD: "cp310-* cp311-* cp312-* cp313-* cp314-*"
           CIBW_SKIP: "*-musllinux*"
@@ -52,7 +55,7 @@ jobs:
             MCPP_ROOT=/project/mcpp SUNDIALS_ROOT=/usr/local SUITESPARSE_ROOT=/usr/local SUPERLU_ROOT=/usr/local
           CIBW_BEFORE_ALL_MACOS: bash tools/ci/build_deps.sh macos ${{ matrix.variant }} $HOME/deps
           CIBW_ENVIRONMENT_MACOS: >
-            MACOSX_DEPLOYMENT_TARGET=14.0 MCPP_ROOT=$PWD/mcpp
+            MACOSX_DEPLOYMENT_TARGET=15.0 MCPP_ROOT=$PWD/mcpp
             SUNDIALS_ROOT=$HOME/deps SUITESPARSE_ROOT=$HOME/deps SUPERLU_ROOT=$HOME/deps
           CIBW_REPAIR_WHEEL_COMMAND_MACOS: >
             DYLD_LIBRARY_PATH=$HOME/deps/lib delocate-wheel --require-archs {delocate_archs} -w {dest_dir} -v {wheel}

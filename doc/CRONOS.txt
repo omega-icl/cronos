@@ -25,8 +25,10 @@ CRONOS extends <A href="https://github.com/omega-icl/mcpp">MC++</A>: models are 
 - <b>DAE integration</b> (mc::DAESLV_IDAS, header <tt>daeslv_idas.hpp</tt>): with SUNDIALS IDAS, on the UNDIVIDED
   form -- a mass matrix and a residual, so an implicit or singular mass matrix needs no division -- with
   consistent initialisation including high-index hidden constraints, and the same sensitivities, stage
-  structure, transitions and recording as ODESLV.  The two solvers expose the same interface.
-- <b>Orthogonal collocation on finite elements</b> (mc::OCFESLV, header <tt>ocfeslv.hpp</tt>, on the shared collocation base mc::OCFEBASE in <tt>ocfebase.hpp</tt>): PDE/DAE models on tensor domains, solved either as one monolithic system or by marching through the time elements -- both solve the same discretisation, since the monolithic time discretisation is causal -- with strong, weak (penalty) or trace imposition of the interface conditions, forward and adjoint sensitivities, and state transitions.
+  structure, transitions and recording as ODESLV.  The two solvers expose the same interface.  A model distributed
+  in space is integrated by the \ref page_MOL "method of lines".
+- <b>Orthogonal collocation on finite elements</b> (mc::OCFESLV, header <tt>ocfeslv.hpp</tt>, on the shared collocation base mc::OCFEBASE in <tt>ocfebase.hpp</tt>): PDE/DAE models on tensor domains, solved either as one monolithic system or by marching through the time elements -- both solve the same discretisation, since the monolithic time discretisation is causal -- with strong, weak (penalty) or trace imposition of the interface conditions, forward and adjoint sensitivities, and state transitions; the nonlinear solver is Levenberg-Marquardt by default, or SUNDIALS KINSOL as an opt-in (<tt>SOLVE.NLSOLVER</tt>).
+- <b>Method of lines</b> (mc::DAESLV_IDAS, with the semi-discretisation mc::OCFEMOL in <tt>ocfemol.hpp</tt>): a model distributed in space, declared through mc::FFModel exactly as for mc::OCFESLV, collocated in space by the same collocation and integrated in time by IDAS -- the semi-discrete DAE becomes DAESLV's working model, while the inputs, outputs and gradients keep the names and layout of the model as declared.  See \ref page_MOL.
 - <b>Embedding in DAGs</b> (mc::FFODESLV, mc::FFDAESLV, mc::FFOCFESLV, mc::FFOCFERES, headers <tt>ffde.hpp</tt>, <tt>ffocfe.hpp</tt>): a solver, or the collocation residuals, as an external operation of an MC++ DAG: the simulation becomes a function that can be composed with other DAG operations, evaluated and sampled in parallel, and differentiated -- forward and reverse -- through the solver's own sensitivities.
 - <b>Python</b> (module <tt>cronos</tt>): all of the above from Python, on top of PyMC++ (MC++'s Python library, module <tt>pymcpp</tt>), with NumPy arrays for results and a <tt>.pyi</tt> type stub for editors.
 .
@@ -55,7 +57,7 @@ $ cmake --install build --prefix &lt;prefix&gt;
 The files <tt>INSTALL.md</tt> and <tt>BUILD_CMAKE.md</tt> in the main directory give the installation guide and the complete list of build options.  The main directory holds:
 - <tt>src</tt>: the CRONOS headers;
 - <tt>src/interface</tt>: the Python binders, the generated option headers and the check scripts;
-- <tt>test/ODESLV</tt> and <tt>test/OCFESLV</tt>: the test drivers -- the corpus the solvers are validated against;
+- <tt>test/ODESLV</tt>, <tt>test/DAESLV</tt> and <tt>test/OCFESLV</tt>: the test drivers -- the corpus the solvers are validated against;
 - <tt>notebook</tt>: the tutorials, as Jupyter notebooks and Python scripts;
 - <tt>doc</tt>: this documentation -- generated with <tt>cd doc && doxygen CRONOS.dox</tt>, then opened at <tt>doc/html/index.html</tt>.
 .
@@ -66,10 +68,13 @@ The files <tt>INSTALL.md</tt> and <tt>BUILD_CMAKE.md</tt> in the main directory 
 The tutorials in <tt>notebook</tt> walk through the main features:
 - <tt>FFModel_tutorial</tt>: analysing a model before solving it -- classification of the equations, index and order reduction, initial data for high-index DAEs, and the model report;
 - <tt>ODESLV_tutorial</tt>: a serial batch-reactor network -- ODE simulation, and forward and adjoint sensitivities;
-- <tt>OCFESLV_tutorial</tt>: nonlinear heat conduction in a rod with a heater schedule -- both solve modes, sensitivities, and the embedding in a DAG.
+- <tt>DAESLV_tutorial</tt>: a constant-pressure vented batch reactor, an index-2 DAE with a closed form to check against -- why it is index 2, consistent initialisation, forward and adjoint sensitivities, the solver as a DAG operation, and parallel scenario evaluation;
+- <tt>OCFESLV_tutorial</tt>: nonlinear heat conduction in a rod with a heater schedule -- both solve modes, sensitivities, and the embedding in a DAG;
+- <tt>MOL_tutorial</tt>: the same rod by the \ref page_MOL "method of lines" on DAESLV -- one declaration for both solvers, the semi-discrete system, convergence in time, and sensitivities to the heater schedule;
+- <tt>PSA_tutorial</tt>: breakthrough in a non-isothermal two-component adsorption column, by either solver -- the breakthrough curves, their sensitivities, and the affinity's effect.
 .
 
-CRONOS is configured through its options -- mc::FFModel::Options for the model, mc::OCFESLV::Options and the ODESLV options for the solvers -- which are also available in Python as <tt>options</tt> on each object.  A few <tt>CRONOS_*</tt> environment variables remain -- diagnostics, a thread cap and test switches; none is needed to run a model.  They are listed in \ref md_ENVIRONMENT "Environment variables".
+CRONOS is configured through its options -- mc::FFModel::Options for the model, mc::OCFESLV::Options, the DAESLV options and the ODESLV options for the solvers -- which are also available in Python as <tt>options</tt> on each object.  A few <tt>CRONOS_*</tt> environment variables remain -- diagnostics, a thread cap and test switches; none is needed to run a model.  They are listed in \ref md_ENVIRONMENT "Environment variables".
 
 <CENTER><TABLE border="1">
 <TR>
@@ -83,5 +88,162 @@ CRONOS is configured through its options -- mc::FFModel::Options for the model, 
   </TABLE></CENTER></TD>
 </TR>
 </TABLE></CENTER>
+
+*/
+
+/*!
+
+@page page_MOL Models distributed in space: the method of lines
+
+mc::DAESLV_IDAS integrates a model distributed in space -- declared through mc::FFModel exactly as for mc::OCFESLV --
+by the <b>method of lines</b>: the spatial directions are collocated by the same orthogonal collocation on finite
+elements as OCFESLV's, through the shared base mc::OCFEBASE, and the resulting system of differential-algebraic
+equations is integrated in time by SUNDIALS IDAS.  The same declaration can therefore be solved either way:
+
+<table>
+<tr><th></th><th>in space (z)</th><th>in time (t)</th></tr>
+<tr><td>mc::OCFESLV</td><td>collocation, finite elements</td><td>collocation, finite elements (a fixed order per element)</td></tr>
+<tr><td>mc::DAESLV_IDAS</td><td>the same collocation</td><td>adaptive BDF steps; the time elements become <b>stages</b></td></tr>
+</table>
+
+
+\section sec_MOL_what What setup() does
+
+A model is distributed in space when a state is declared over a direction other than the evolution one.
+mc::DAESLV_IDAS::setup recognises it, validates the declared model as any solver does, and hands its declarations to
+mc::OCFEMOL.  OCFEMOL reads the model along the evolution direction as <tt>M(x) d_t x = R(t, z, x, d_z x, u)</tt>,
+collocates the spatial directions -- the same elements, nodes, interface plan and imposition as OCFESLV -- and
+produces the semi-discrete DAE
+
+<tt>Mc(xc) d_t xc = Rc(t, xc)</tt>,
+
+with one unknown per nodal value of each field and the declared INITIAL rows as its initial conditions.  That DAE
+becomes the solver's working model: the solves, the sensitivities, the results and the statistics are DAESLV's own,
+while the inputs, the outputs and the gradients keep the names and layout of the model as declared.  The residual
+<tt>Rc</tt> and its sparse Jacobian enter the integrator's DAG as external operations (mc::FFMOLRES,
+mc::FFGradMOLRES); setup selects the sparse linear algebra a semi-discrete system needs
+(<tt>SOLVE.LINSOL = SPARSE</tt>, <tt>INITIAL.KIN.SPARSE</tt>) and keeps the algebraic unknowns out of IDAS's error
+test (<tt>SOLVE.SUPPRESSALG</tt>).
+
+The time mesh of the declaration still matters: its element boundaries are where the integrator stops and restarts,
+which is where a piecewise input changes its piece and where transitions happen.
+
+Anything the method of lines does not take is <b>refused by name</b> at setup, rather than solved approximately;
+mc::OCFEMOL::setup_error gives the reason.
+
+
+\section sec_MOL_use Declaring and solving
+
+The declaration is OCFESLV's.  The heated rod -- <tt>d_t u = d_z( 0.1 d_z u )</tt>, <tt>u = 0</tt> at
+<tt>z = 0</tt>, a heat flux at <tt>z = 1</tt>, <tt>u = 0</tt> at <tt>t = 0</tt> -- in C++:
+
+@code
+mc::FFGraph G;
+mc::DAESLV_IDAS S( &G );                     // mc::OCFESLV S( &G ) takes the same declaration
+mc::FFVar t = G.add_var( "t" ), z = G.add_var( "z" ), u = G.add_var( "u" );
+S.add_domain( t, mc::FFDom( 0., 1., 2, mc::FFDom::LGR, 3 ) );   // in t: the integrator's stages
+S.add_domain( z, mc::FFDom( 0., 1., 3, mc::FFDom::LGL, 5 ) );   // in z: the collocation
+S.set_evolution_domain( t );
+S.add_state( u, { t, z } );
+
+mc::FFPartial OpP;
+int const TI = mc::FFDom::ALL - mc::FFDom::LB, ZI = mc::FFDom::ALL - mc::FFDom::LB - mc::FFDom::UB;
+mc::DAESLV_IDAS::EqnOptions io( mc::DAESLV_IDAS::EqnRole::INTERIOR, 0 ),
+                            ib( mc::DAESLV_IDAS::EqnRole::BOUNDARY, 0 ),
+                            ii( mc::DAESLV_IDAS::EqnRole::INITIAL,  0 );
+S.add_equation( OpP( u, t ) - OpP( 0.1 * OpP( u, z ), z ), { t, z }, { TI, ZI },                     io );
+S.add_equation( u,                                         { t, z }, { TI, mc::FFDom::LB },          ib );
+S.add_equation( 0.1 * OpP( u, z ) - 1.,                    { t, z }, { TI, mc::FFDom::UB },          ib );
+S.add_equation( u,                                         { t, z }, { mc::FFDom::LB, mc::FFDom::ALL }, ii );
+
+bool const ok = S.setup() && S.solve( std::vector<double>() ) == mc::DAESLV_IDAS::NORMAL;
+@endcode
+
+In Python, with the declaration written once as a function of the solver, as in the <tt>MOL_tutorial</tt> notebook:
+
+@code{.py}
+S = DAESLV(G)                                # OCFESLV(G) takes the same declaration
+t, z, u, q = declare(S, G)
+S.options.SOLVE.RTOL = S.options.SOLVE.ATOL = 1e-10
+S.setup()
+status = S.solve({q: lambda c: heater(c[t])})
+print(S.val_function())
+nodes = S.semidiscrete_nodes(u)              # where u's nodes sit among the DAE's states
+@endcode
+
+
+\section sec_MOL_system The semi-discrete system
+
+Every node of a field is a state of the DAE, and so is every node of an auxiliary the collocation introduces (the
+flux <tt>D(u) d_z u</tt> of a flux-form operator, after order reduction).  A node held by a <b>boundary</b> condition
+rather than by the PDE is <b>algebraic</b>: a Dirichlet node, and by default a Neumann or Robin node too
+(<tt>options.MOL.NEUMANN_NODE = NEUMANN_ALGEBRAIC</tt>, OCFESLV's rule; <tt>NEUMANN_DIFFERENTIAL</tt> keeps the
+field differential there, with its initial condition).  mc::DAESLV_IDAS::semidiscrete_states lists the DAE's states
+in the order of the solver's state values, and mc::DAESLV_IDAS::semidiscrete_model gives the semi-discretisation,
+whose mc::OCFEMOL::field_columns and mc::OCFEMOL::field_nodes map a field to its nodal unknowns and their
+coordinates; in Python, <tt>semidiscrete_nodes</tt>.
+
+The <b>consistent initialisation</b> -- the shared KINSOL corrector, as for any DAE -- starts from the declared initial
+profile at every node, the algebraic nodes included, and solves for the algebraic ones: the initial profile should be
+consistent with the boundary conditions, and at <tt>DISPLAY_LEVEL</tt> 1 or more DAESLV reports how far the
+initialisation moved an algebraic node from its declared value.
+
+The <b>structural index</b> of the semi-discrete system is checked at setup, by a maximum matching of its algebraic
+rows to its algebraic unknowns (<tt>semi_discrete().n_alg_rank</tt> reports it): the integrator needs index 1.  A
+declared model of structural index above 1 along <tt>t</tt> is refused, unless
+<tt>options.MOL.REDUCE_HIGH_INDEX</tt> asks for FFModel's index reduction first; a declared initial condition already
+implied by the hidden constraints that reduction materialises is then set aside rather than imposed twice.
+
+
+\section sec_MOL_interface Interface conditions
+
+<tt>options.INTERFACE</tt> is the same option group on DAESLV and OCFESLV, and so is the imposition of the
+continuity conditions between elements, <tt>INTERFACE.IMPOSITION</tt>:
+- <tt>IC_STRONG</tt>: the conditions replace collocation rows; the semi-discrete system has index 1.
+- <tt>IC_TRACE</tt>: trace multipliers.  A value-continuity multiplier would raise the index to 2; setup eliminates
+  each one exactly -- the two copies of the node merged, their rows summed -- so the integrator sees index 1, and the
+  result equals IC_STRONG's.  A multiplier that cannot be eliminated so (a nonlinear constraint, more than two
+  copies) is refused by name.
+- <tt>IC_WEAK</tt>: penalty (SAT) terms, always in the <b>energy-stable</b> form under the method of lines, whatever
+  <tt>INTERFACE.SAT_FORM</tt> says -- the legacy form OCFESLV keeps by default gives the semi-discrete operator a
+  growing mode, harmless to OCFESLV's L-stable time collocation but not to an integrator.  The flux is alternating by
+  default (<tt>INTERFACE.SAT_FLUX</tt>), with an upwind term for a convective part, and an optional interior penalty
+  (<tt>INTERFACE.SAT_PENALTY</tt>, default 0); the central flux is refused on a field with a convective part.
+.
+
+On <b>convective</b> models, the energy-stable weak imposition is stable but less accurate than the strong one
+(about 3x on a Peclet-10 rod, about 20x on an adsorption column at 12 elements of degree 4): <tt>IC_STRONG</tt> and
+<tt>IC_TRACE</tt> are recommended there.  On pure diffusion the weak imposition is one order more accurate than the
+strong one at even degree.
+
+
+\section sec_MOL_io Inputs, transitions, outputs and sensitivities
+
+- <b>Inputs</b> are set by name, as for any model.  A time-invariant input is a parameter of the integrator; an input
+  varying in time becomes, for each of its spatial slots, an input over <tt>t</tt> of the DAE with its declared
+  collocation; an input distributed in space is read at each node through its Lagrange interpolant.  Values and
+  gradient rows read as the declared degrees of freedom.
+- <b>Transitions</b> (jumps at stage boundaries) are applied at the differential nodes of the state they reset,
+  each composed pointwise there; the algebraic nodes are re-solved, and the sensitivities carried across.  A
+  transition may read an input, the inputs distributed in space included.
+- <b>Outputs</b> are split at setup into a spatial part, which the collocation evaluates at a given <tt>t</tt>, and a
+  time part the integrator applies: a point in <tt>t</tt>, an integral over <tt>t</tt>, or a trajectory -- one value
+  per selected stage time, one trajectory per spatial node for an output distributed in space too.
+- <b>Sensitivities</b>: forward (<tt>solve_fsens</tt>) and adjoint (<tt>solve_asens</tt>, several outputs in one
+  backward sweep), with respect to the declared inputs, as for any DAE; and the solver can be embedded in an MC++ DAG
+  (mc::FFDAESLV), evaluated in parallel and differentiated through these sensitivities.
+.
+
+
+\section sec_MOL_more Where to look further
+
+- The <tt>MOL_tutorial</tt> notebook solves the heated rod both ways and compares them; the <tt>PSA_tutorial</tt>
+  notebook solves a non-isothermal adsorption column either way, chosen by one switch.
+- The test drivers <tt>test/DAESLV/DAESLV_mol*.cpp</tt> validate the method of lines: against OCFESLV and closed
+  forms (<tt>DAESLV_molgate</tt>, <tt>DAESLV_molpde</tt>), on the adsorption column with its sensitivities
+  (<tt>DAESLV_molsens</tt>, <tt>DAESLV_molpsa</tt>), the index checks and the elimination of trace multipliers
+  (<tt>DAESLV_molindex</tt>), the energy-stable weak imposition (<tt>DAESLV_molsat</tt>), and inputs, transitions and
+  outputs in time (<tt>DAESLV_moltime</tt>).
+.
 
 */

@@ -32,7 +32,17 @@ for model development and analysis -- can compose, evaluate and differentiate.
 * **Orthogonal collocation on finite elements** (`OCFESLV`, header `ocfeslv.hpp`, on the shared collocation base `OCFEBASE` in `ocfebase.hpp`): PDE/DAE models on tensor
   domains, solved either as one monolithic system or by marching through the time elements -- both solve the
   same discretisation, since the monolithic time discretisation is causal -- with strong, weak (penalty) or
-  trace imposition of the interface conditions, forward and adjoint sensitivities, and state transitions.
+  trace imposition of the interface conditions, forward and adjoint sensitivities, and state transitions; the
+  nonlinear solver is Levenberg-Marquardt by default, or SUNDIALS KINSOL as an opt-in (`SOLVE.NLSOLVER`).
+* **Method of lines** (`DAESLV`, with the semi-discretisation `OCFEMOL` in `ocfemol.hpp`): a model distributed in
+  space, declared through `FFModel` exactly as for `OCFESLV`, collocated in space by the same collocation and
+  integrated in time by IDAS.  The semi-discrete DAE becomes `DAESLV`'s working model, while the inputs, outputs and
+  gradients keep the names and layout of the model as declared; the two solvers share their collocation options
+  (`options.INTERFACE`, `.AUDIT`, ...), so a model moves from one to the other by constructing the other solver.
+  Strong, trace or weak (energy-stable SAT) imposition of the interface conditions, the semi-discrete system's index
+  checked at setup (the index raised by trace multipliers removed exactly), inputs varying in time or distributed in
+  space, transitions, outputs at points of, over or along `t`, and forward and adjoint sensitivities; what it does
+  not take is refused by name at setup.
 * **Embedding in DAGs** (`FFODESLV`, `FFDAESLV`, `FFOCFESLV`, `FFOCFERES`): a solver, or the collocation residuals, as an
   external operation of an MC++ DAG: the simulation becomes a function that can be composed with other DAG
   operations, evaluated and sampled in parallel, and differentiated -- forward and reverse -- through the
@@ -49,14 +59,18 @@ The tutorials in `notebook/`, each a Jupyter notebook and a Python script:
   against: why it is index 2, consistent initialisation, forward and adjoint sensitivities, the solver as a
   DAG operation, and parallel scenario evaluation;
 * `OCFESLV_tutorial` -- nonlinear heat conduction in a rod with a heater schedule: both solve modes, sensitivities,
-  and the embedding in a DAG.
+  and the embedding in a DAG;
+* `MOL_tutorial` -- the same rod by the method of lines on `DAESLV`: one declaration for both solvers, the
+  semi-discrete system, convergence in time, and sensitivities to the heater schedule;
+* `PSA_tutorial` -- breakthrough in a non-isothermal two-component adsorption column, by either solver: the
+  breakthrough curves, their sensitivities, and the affinity's effect.
 
 ## Configuration
 
 CRONOS is configured through its options -- `FFModel::Options` for the model, `OCFESLV::Options` and the ODESLV/DAESLV
 options for the solvers -- available in Python as `options` on each object, with their documentation.  A few
 `CRONOS_*` environment variables remain: diagnostics that instrument a whole test sweep without editing any driver,
-a thread cap, and three test switches.  None is needed to run a model; they are listed in
+a thread cap, and a few test switches.  None is needed to run a model; they are listed in
 [doc/ENVIRONMENT.md](doc/ENVIRONMENT.md).
 
 ## Installing from PyPI

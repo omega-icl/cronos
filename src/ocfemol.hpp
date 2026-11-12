@@ -17,9 +17,11 @@ namespace mc
 //! mc::OCFEMOL reads a model declared on an evolution direction t and spatial directions z as
 //! M(x) d_t x = R(t, z, x, d_z x, u) (FFModel::peel_evolution), collocates the spatial directions through the
 //! shared base OCFEBASE -- nodes, interface plan, imposition -- and hands the semi-discrete DAE to an
-//! integrator: Mc d_t xc = Rc(t, xc), with the INITIAL rows as the Ini stream.  Phase 3 (setup): the peel, the
-//! working model without t, the collocated layout and plan, the per-node DOF audit.  Phases 4-5 add the
-//! residual and initial-condition operations and the DAESLV hand-over.  MoL workplan 2026-10-31, section 2.1.
+//! integrator: Mc d_t xc = Rc(t, xc), with the INITIAL rows as the Ini stream.  Setup takes the peel, the working
+//! model without t, the collocated layout and plan, the per-node DOF audit and the structural index of the
+//! semi-discrete system; the residual and its sparse Jacobian enter the integrator's DAG as external operations
+//! (mc::FFMOLRES, mc::FFGradMOLRES).  A user reaches it through mc::DAESLV_IDAS, which takes a model distributed in
+//! space this way -- see @ref page_MOL.
 ////////////////////////////////////////////////////////////////////////
 class OCFEMOL
 : public OCFEBASE

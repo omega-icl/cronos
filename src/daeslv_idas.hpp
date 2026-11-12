@@ -29,20 +29,21 @@ namespace mc
 //!
 //! and hands it to IDAS as the residual, with the id vector marking which unknowns are differential.
 //!
-//! WHAT v0 DOES NOT DO YET, each deliberate rather than overlooked:
-//!   * ONE SET OF ROWS -- a model with TIME-VARYING INPUTS is refused by setup(), since its rows differ
-//!     stage by stage; without them the _ns stages hold identical rows and one set covers the horizon;
-//!   * DIFFERENCE-QUOTIENT Jacobian (IDAS supplies it when no IDALsJacFn is set).  The analytic one is a
-//!     later step; the residual is symbolic, so it is available, just not wired;
-//!   * no quadratures, no point outputs, no sensitivities.  The eight BASE_IDAS sensitivity callbacks are
-//!     present and REFUSE, so phases 5/6 fill them in rather than finding a silent wrong answer;
-//!   * consistent initialisation is the KINSOL solve of the shared system (plan D4 / §3.12), at t0 and at every
-//!     stage boundary; IDACalcIC was retired on 5 Nov 2026.
+//! What it provides:
+//!   * consistent initialisation by the shared KINSOL corrector (mc::BASE_KINSOL), at the initial time and at every
+//!     stage boundary, the high-index hidden constraints included, so a model declares only its free initial data;
+//!   * an analytic Jacobian, dense or sparse (KLU): SOLVE.LINSOL = DENSE or SPARSE, or DENSEDQ for IDAS's own
+//!     difference quotient;
+//!   * inputs varying in time, piecewise per stage -- the integrator restarts where their pieces change --,
+//!     transitions at stage boundaries, and point, integral and trajectory outputs;
+//!   * forward sensitivities (solve_fsens), and adjoint sensitivities of several outputs in one backward sweep
+//!     (solve_asens), across stops and transitions;
+//!   * a model DISTRIBUTED IN SPACE, by the method of lines: setup() semi-discretises it (mc::OCFEMOL) and the
+//!     semi-discrete DAE becomes this solver's working model -- see @ref page_MOL.
 //!
 //! The residual is evaluated in the MODEL's dag rather than a solver-local copy, so nothing is inserted
 //! or renamed; the coefficients and remainders come out of one subgraph in a single eval, and the
-//! derivative values are folded in afterwards.  That keeps v0 small; a solver-local dag is what
-//! ODESLV_CVODES does, and is the thing to revisit when threads or a second concurrent solve appear.
+//! derivative values are folded in afterwards.
 ////////////////////////////////////////////////////////////////////////
 class DAESLV_IDAS
 : public virtual DAESLV_BASE
@@ -110,9 +111,9 @@ public:
   //! semi-discrete system -- one state per nodal unknown, on the declared t domain -- becomes THIS solver's working
   //! model, while the declared model stays the user's.  Solve, sensitivities, results and statistics are then this
   //! solver's own; val_state() holds the nodal unknowns, in the order of semidiscrete_states().  Setup sets
-  //! SOLVE.LINSOL = SPARSE, INITIAL.KIN.SPARSE and SOLVE.SUPPRESSALG, which a semi-discrete system needs.  Time-invariant
-  //! inputs are the integrator's parameters, set by name as for any model; constants and outputs are taken from MoL
-  //! phase 6a, time-varying inputs and transitions from 6c -- until then refused by name.
+  //! SOLVE.LINSOL = SPARSE, INITIAL.KIN.SPARSE and SOLVE.SUPPRESSALG, which a semi-discrete system needs.  Inputs are
+  //! set by name as for any model -- time-invariant ones are the integrator's parameters --, and transitions and
+  //! outputs are taken as declared; what the method of lines does not take is refused by name (@ref page_MOL).
   bool setup
     ();
 

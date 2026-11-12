@@ -4,7 +4,8 @@
 // Checks: values and FORWARD gradients w.r.t. (k, d, x0) against the closed form; the IDENTITY transition reproduces
 // the model without one; ADJOINT gradients (incl. a registered subset of controls) == closed form; implicit maps REFUSED.
 // The SAME model through OCFESLV (monolithic and marching; mesh {0, 0.4, 0.5, 1} so tau is an element boundary):
-// values and forward / adjoint gradients == closed form, and values == ODESLV's (three-way agreement).
+// values and forward / adjoint gradients == closed form, and values == ODESLV's (three-way agreement); OCFESLV::fdiff
+// carries the transition into the product (s(tau+) = s(tau-) + d_d): f[i*nf+j] == the forward Jacobian and the closed form.
 #include <cmath>
 #include <cstdio>
 #include <sstream>
@@ -46,7 +47,7 @@ static std::vector<double> P_of( Model& m, double k, double d, double x0 ){
   std::vector<double> P( m.I.np() ); P[ m.I.parameter_index( m.k )[0] ] = k; P[ m.I.parameter_index( m.d )[0] ] = d; P[ m.I.parameter_index( m.x0 )[0] ] = x0; return P; }
 
 //! The dose model through OCFESLV: values and control Jacobian (5 outputs x 3 controls k, d, x0, row-major)
-struct OcOut { bool ok = false; std::vector<double> F, Jf, Ja; };
+struct OcOut { bool ok = false; std::vector<double> F, Jf, Ja, Fd; };  // Fd: the fdiff product's outputs, f[i*nf+j] = dF_j/d(dir_i)
 static OcOut run_oc( bool march, double k, double d, double x0 ){
   OcOut R; FFGraph G; OCFESLV I( &G ); FFPartial OpP; FFEval OpE; FFIntegral OpI;
   FFVar t = G.add_var( "t" ), x = G.add_var( "x(t)" ), y = G.add_var( "y(t)" ), pk = G.add_var( "k" ), pd = G.add_var( "d" ), p0 = G.add_var( "x0" );
@@ -70,6 +71,12 @@ static OcOut run_oc( bool march, double k, double d, double x0 ){
   if( ok ) ok = I.solve( x1.data(), inp.data(), nullptr ).converged;  if( ok ) R.F = I.val_functions();
   if( ok ) ok = I.solve_fsens( x2.data(), inp.data(), nullptr );     if( ok ) R.Jf = I.sens_jacobian();
   if( ok ) ok = I.solve_asens( x3.data(), inp.data(), nullptr );     if( ok ) R.Ja = I.sens_jacobian();
+  if( ok ){ std::string err;  OCFESLV* Pd = I.fdiff( { { pk, 0 }, { pd, 0 }, { p0, 0 } }, err );   // the product holds the transition and its derivatives
+    std::vector<double> xd, id;  bool okd = Pd && Pd->setup() && Pd->init( xd, id, nullptr );
+    if( okd ){ Pd->set_input_values( pk, { k }, id.data() ); Pd->set_input_values( pd, { d }, id.data() ); Pd->set_input_values( p0, { x0 }, id.data() );
+               okd = Pd->solve( xd.data(), id.data(), nullptr ).converged; }
+    if( okd ) R.Fd = Pd->val_functions();
+    delete Pd; }
   std::cerr.rdbuf( old );
   R.ok = ok && R.F.size() == 5 && R.Jf.size() == 15 && R.Ja.size() == 15;
   return R; }
@@ -125,6 +132,12 @@ int main(){
         for( size_t j = 0; j < 5; ++j ){ double const Dq = ( fp[j]-fm[j] )/( 2.*h ); ef = std::max( ef, std::fabs( R.Jf[j*3+q]-Dq ) ); ea = std::max( ea, std::fabs( R.Ja[j*3+q]-Dq ) ); } }
       check( ef < 1e-7, tag + "FORWARD gradients w.r.t. (k, d, x0) == closed form", ef );
       check( ea < 1e-7, tag + "ADJOINT gradients w.r.t. (k, d, x0) == closed form", ea );
+      double ed = R.Fd.size() == 15? 0.: 1., ec = ed;
+      for( int q = 0; q < 3 && R.Fd.size() == 15; ++q ){ double h = 1e-6*std::max( 1., pr[q] ); double a[3] = { K, D, X0 }, b[3] = { K, D, X0 }; a[q] += h; b[q] -= h;
+        auto const fp = closed( a[0], a[1], a[2] ), fm = closed( b[0], b[1], b[2] );
+        for( size_t j = 0; j < 5; ++j ){ ed = std::max( ed, std::fabs( R.Fd[q*5+j]-R.Jf[j*3+q] ) ); ec = std::max( ec, std::fabs( R.Fd[q*5+j]-( fp[j]-fm[j] )/( 2.*h ) ) ); } }
+      check( ed < 1e-9, tag + "fdiff product f[i*nf+j] == the forward Jacobian (was refused)", ed );
+      check( ec < 1e-7, tag + "fdiff product == closed form", ec );
     }
   }
   std::printf( "\n  TRANS_ode: %d passed, %d failed -- %s\n", npass, nfail, nfail? "FAILURES": "ALL PASS" );

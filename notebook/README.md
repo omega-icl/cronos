@@ -18,6 +18,5 @@ The tutorials:
 | `MOL_tutorial` | the same PDE by the method of lines on `DAESLV`, compared with `OCFESLV` |
 | `PSA_tutorial` | breakthrough in a non-isothermal two-component adsorption column, by either solver |
 
-`MOL_tutorial` and `PSA_tutorial` use CRONOS features newer than the 5.1.0 release (sensitivities by
-name on `OCFESLV`, the collocation options at `options.INTERFACE` on both solvers, nonlinear outputs
-under the method of lines): run them against CRONOS built from this tree until the next release.
+`MOL_tutorial` and `PSA_tutorial` need CRONOS 5.2.0 or later (the method of lines on `DAESLV`, sensitivities
+by name on `OCFESLV`, the collocation options at `options.INTERFACE` on both solvers).

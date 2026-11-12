@@ -131,6 +131,57 @@ int main()
     M.solve( {} );
     check( "solve() idempotent on f0", M.val_function()[ M.blk_fct(0).first ], std::exp(-1.), 1e-8 ); }
 
+  { std::cout << "\n--- E. the POINT FORM add_output( f, {t}, {tau}, {side} ) == the expression form OpE( f, t, tau, side )\n";
+    // x' = u - k x, x(0) = a, u piecewise constant on {0, 0.5, 1} (u0, u1).  Until 12 Nov 2026 DAESLV read a
+    // point-form output at the FINAL time whatever its point (ODESLV converted it since 9 Oct; now BASE_DE does).
+    FFGraph G; DAESLV_IDAS M; M.set_dag( &G );
+    FFVar t = G.add_var("t"), x = G.add_var("x(t)"), u = G.add_var("u"), k = G.add_var("k"), a = G.add_var("a");
+    M.add_domain( t, FFDom( 0., 1., 2, FFDom::LGR, 4 ) );
+    M.add_state( x, {t} ); M.add_input( u, {t}, FFDom::LGR, 1 ); M.add_input( k ); M.add_input( a );
+    M.set_evolution_domain( t ); M.update_ref( x, 1. );
+    auto io = FFModel::EqnOptions( FFModel::EqnRole::INTERIOR, 0 );
+    auto ii = FFModel::EqnOptions( FFModel::EqnRole::INITIAL,  0 );
+    M.add_equation( OpP( x, t ) + k*x - u, {t}, {TI}, io );
+    M.add_equation( x - a,                 {t}, {FFDom::LB}, ii );
+    char const* const nm[6] = { "x(0.25)", "x(0.5-)", "u(0.5-)", "u(0.5+)", "x^2(0.25)", "x(1)" };
+    M.add_output( OpE( x, t, 0.25 ) );          M.add_output( OpE( x, t, 0.5, FFDom::MINUS ) );
+    M.add_output( OpE( u, t, 0.5, FFDom::MINUS ) );  M.add_output( OpE( u, t, 0.5, FFDom::PLUS ) );
+    M.add_output( OpE( sqr( x ), t, 0.25 ) );   M.add_output( OpE( x, t, 1. ) );
+    M.add_output( x, {t}, {0.25} );             M.add_output( x, {t}, {0.5}, {FFDom::MINUS} );
+    M.add_output( u, {t}, {0.5}, {FFDom::MINUS} );   M.add_output( u, {t}, {0.5}, {FFDom::PLUS} );
+    M.add_output( sqr( x ), {t}, {0.25} );      M.add_output( x, {t}, {1.} );
+    M.options.SOLVE.RTOL = M.options.SOLVE.ATOL = M.options.SOLVE.RTOLS = M.options.SOLVE.ATOLS = 1e-11;
+    M.options.SOLVE.RTOLB = M.options.SOLVE.ATOLB = 1e-11;
+    M.options.DISPLAY_LEVEL = 0;
+    if( !M.setup() ){ std::cout << "    setup failed: " << M.extract_error() << "\n"; return 1; }
+    double const K = 1.3, A = 2.1, U0 = 0.8, U1 = 1.7;
+    std::vector<double> P( M.np(), 0. );
+    P[ M.parameter_index( k )[0] ] = K;  P[ M.parameter_index( a )[0] ] = A;
+    P[ M.parameter_index( u )[0] ] = U0; P[ M.parameter_index( u )[1] ] = U1;
+    auto xe = [&]( double s ){ return U0/K + ( A - U0/K )*std::exp( -K*s ); };      // on [0, 0.5]
+    double const want[5] = { xe( 0.25 ), xe( 0.5 ), U0, U1, xe( 0.25 )*xe( 0.25 ) };
+    // the solves' status is checked: solve_asens refused the input-only outputs u(0.5-) and u(0.5+) until 12 Nov 2026,
+    // and the gradient compared below was then the forward one left behind
+    bool const okf = M.solve_fsens( P ) == DAESLV_IDAS::NORMAL;
+    auto const F = M.val_function();  auto const Gf = M.val_function_gradient();
+    bool const oka = M.solve_asens( P ) == DAESLV_IDAS::NORMAL;
+    auto const Ga = M.val_function_gradient();
+    check( "solve_fsens and solve_asens succeed", ( okf && oka )? 0.: 1., 0., 0. );
+    for( size_t j = 0; j < 5; ++j )
+      check( std::string( "expression form " ) + nm[j] + " == closed form", F[ M.blk_fct(j).first ], want[j], 1e-9 );
+    for( size_t j = 0; j < 6; ++j )
+      check( std::string( "point form " ) + nm[j] + " == expression form", F[ M.blk_fct(6+j).first ], F[ M.blk_fct(j).first ], 1e-12 );
+    double ef = 0., ea = 0.;
+    for( size_t i = 0; i < Gf.size(); ++i ) for( size_t j = 0; j < 6; ++j ){
+      ef = std::max( ef, std::fabs( Gf[i][ M.blk_fct(6+j).first ] - Gf[i][ M.blk_fct(j).first ] ) );
+      ea = std::max( ea, std::fabs( Ga[i][ M.blk_fct(6+j).first ] - Ga[i][ M.blk_fct(j).first ] ) ); }
+    check( "point form: FORWARD gradients (k, a, u0, u1) == the expression form's",  ef, 0., 1e-12 );
+    check( "point form: ADJOINT gradients (k, a, u0, u1) == the expression form's",  ea, 0., 1e-12 );
+    double efa = 0.;
+    for( size_t i = 0; i < Gf.size() && i < Ga.size(); ++i ) for( size_t j = 0; j < 12; ++j )
+      efa = std::max( efa, std::fabs( Ga[i][ M.blk_fct(j).first ] - Gf[i][ M.blk_fct(j).first ] ) );
+    check( "every output: ADJOINT gradients == FORWARD gradients",                    efa, 0., 1e-8 ); }
+
   std::cout << "\n==========  DAESLV_outputs: " << n_pass << " passed, " << n_fail << " failed -- "
             << ( n_fail? "FAILURES": "ALL PASS" ) << "  ==========\n\n";
   return n_fail? 1: 0;

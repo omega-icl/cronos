@@ -2414,6 +2414,12 @@ ODESLV_CVODES::_states_FSA
       // Account for state/sensitivity discontinuities (if any) at stage times
       // and solver reinitialization (if applicable)
       _pos_ic = ( _vIC.size()>=_ns? _istg:0 );
+      // The sensitivities jump by the map's LINEARISATION AT THE STATE BEFORE THE JUMP, s(t+) = M_x( x(t-), p ) s(t-)
+      // + M_p( x(t-), p ): that state is kept here, _CC_D_STA overwriting _Nx with x(t+).  (Until 12 Nov 2026 the
+      // linearisation was read at x(t+): exact where the map's derivatives read no state that jumps -- an additive
+      // dose, a reset to a value, a map of continuous states -- and wrong otherwise, x(t+) = d x(t-) included.  The
+      // adjoint reads _xk, x(t-).)
+      std::vector<double> xm;  if( _pos_ic ) xm.assign( NV_DATA_S( _Nx ), NV_DATA_S( _Nx ) + _nx );
       if( _pos_ic
        && ( !ODESLV_BASE::_CC_D_SET( _pos_ic )
          || !ODESLV_BASE::_CC_D_STA( _t, NV_DATA_S( _Nx ) )
@@ -2428,7 +2434,7 @@ ODESLV_CVODES::_states_FSA
       for( _isen=0; _isen<_nsen; _isen++ ){
         if( _pos_ic
          && ( !_CC_SET_FSA( _pos_ic, _isen )
-           || !_CC_D_SEN( _t, NV_DATA_S( _Nx ), NV_DATA_S(_Ny[_isen]) )
+           || !_CC_D_SEN( _t, xm.data(), NV_DATA_S(_Ny[_isen]) )
            || ( _isen==_nsen-1 && !_CC_CVODES_FSA() ) ) )
             { _END_STA(); _END_SEN( stats_fsens ); return STATUS::FATAL; }
         if( _istg                                                       // the quadrature sensitivity, carried likewise

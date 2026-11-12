@@ -80,6 +80,47 @@ int main()
   check( "  == solve_fsens on d/dk", dG[0], Gs[jk][b], 1e-9 );
   check( "  == solve_fsens on d/da", dG[1], Gs[ja][b], 1e-9 );
 
+  // ------------------------------------------------------------------ C: a model with a TRANSITION, SYMDIFF
+  // x(0.5+) = x(0.5-) + d: the numeric route takes the forward sensitivities across the jump; the symbolic route
+  // (SYMDIFF) is fdiff's, whose product carries the transition and its derivative per direction (refused until 12 Nov 2026)
+  std::cout << "\n--- C. a model with a transition: numeric and symbolic (SYMDIFF) derivatives\n";
+  { FFGraph GT;  DAESLV_IDAS MT;  MT.set_dag( &GT );
+    FFVar tt = GT.add_var("t"), xt = GT.add_var("x(t)"), kt = GT.add_var("k"), at = GT.add_var("a"), dt = GT.add_var("d");
+    FFEval OpE;
+    MT.add_domain( tt, FFDom( 0., 1., 2, FFDom::LGR, 5 ) );
+    MT.add_state( xt, {tt} );  MT.add_input( kt );  MT.add_input( at );  MT.add_input( dt );
+    MT.set_evolution_domain( tt );  MT.update_ref( xt, 1. );
+    MT.add_equation( OpP( xt, tt ) + kt*xt, {tt}, {TI}, io );
+    MT.add_equation( xt - at,               {tt}, {FFDom::LB}, ii );
+    MT.add_transition( xt + dt, xt, tt, 0.5 );
+    MT.add_output( OpE( xt, tt, 1. ) );
+    MT.options.SOLVE.RTOL = MT.options.SOLVE.ATOL = 1e-11;  MT.options.DISPLAY_LEVEL = 0;
+    bool const su = MT.setup();
+    check_bool( "setup of the model with a transition", su );
+    if( su ){
+      double const DV = 0.7;  std::vector<FFVar> vP{ kt, at, dt };  std::vector<double> dPT{ K, A, DV };
+      std::vector<FFModel::InputArg> vA{ { kt, std::vector<FFVar>{ kt } }, { at, std::vector<FFVar>{ at } }, { dt, std::vector<FFVar>{ dt } } };
+      std::vector<FFVar> vFT = OpDAE( vA, &MT, FFDAESLV::SHALLOW );
+      // x(1) = ( a e^{-k/2} + d ) e^{-k/2}
+      double const eh = std::exp( -0.5*K ), dFdd = eh;
+      FFDAESLV::options.SYMDIFF.clear();
+      std::vector<FFVar> const dFT = GT.FAD( vFT, vP );
+      std::vector<double> dGT( dFT.size(), 0. );
+      GT.eval( dFT.size(), dFT.data(), dGT.data(), vP.size(), vP.data(), dPT.data() );
+      check( "numeric d x(1)/dd through the DAG", dGT[2], dFdd, 1e-7 );
+      std::vector<double> dST( 3, 1e30 );  bool sym = true;
+      FFDAESLV::options.SYMDIFF = vP;
+      try{ std::vector<FFVar> const dFS = GT.FAD( vFT, vP );
+           GT.eval( dFS.size(), dFS.data(), dST.data(), vP.size(), vP.data(), dPT.data() ); }
+      catch( std::exception const& e ){ sym = false;  std::cout << "    SYMDIFF threw: " << e.what() << "\n"; }
+      FFDAESLV::options.SYMDIFF.clear();
+      check_bool( "SYMDIFF differentiates across the transition (was refused)", sym );
+      check( "symbolic d x(1)/dk", dST[0], -A*eh*eh - 0.5*DV*eh, 1e-7 );
+      check( "symbolic d x(1)/da", dST[1], eh*eh,                1e-7 );
+      check( "symbolic d x(1)/dd", dST[2], dFdd,                 1e-7 );
+      check( "  == the numeric route on d/dk", dST[0], dGT[0], 1e-8 );
+    } }
+
   std::cout << "\n==========  DAESLV_ffdae: " << n_pass << " passed, " << n_fail << " failed -- "
             << ( n_fail? "FAILURES": "ALL PASS" ) << "  ==========\n\n";
   return n_fail? 1: 0;

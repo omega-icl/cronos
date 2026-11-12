@@ -1,6 +1,6 @@
 # Changes
 
-## Unreleased
+## 5.2.0 (unreleased)
 
 ### DAESLV: models distributed in space by the method of lines
 
@@ -75,6 +75,19 @@
   its rows' masses: a balance row may carry several mass entries (the PSA column's c1 balance carries `F d_t q1`), and
   only the constrained unknowns are merged. On that column under `IC_TRACE` (six value multipliers, five fields, a
   nonlinear isotherm) the result equals `IC_STRONG` to 4e-11 on values and 4e-10 on forward and adjoint gradients.
+* **MoL: registered controls, fixed inputs and `fdiff`.** The working model under the method of lines is the
+  semi-discrete one, swapped in for the declared one; three facts about the declared model did not follow the swap.
+  (1) The control registry was not swapped with the declarations, so the working model set up with controls it does
+  not hold and a model with a registered control was refused ("the control p has 0 DOFs in its declared function
+  space but 1 parameters in the extracted model") -- and with it every `fdiff` product, whose direction inputs are
+  registered: the registry is swapped with the declarations, and the sensitivity index is resolved once the
+  bijection of declared DOFs and working parameters exists, through it. (2) `parameter_index` of a declared input
+  was empty after setup, so the legacy `fdiff( {p} )` and `SYMDIFF` refused it ("p is not an input of the extracted
+  model"); it now reads the same bijection. (3) A declared input FIXED with `fix_input` was silently free in the
+  semi-discrete model -- a product's direction inputs lost their unit seeds, `dJ/dp` off by O(1): its values are
+  carried to the semi-discrete slots; a fixed input varying in time is refused by name. Gate: DAESLV_fdiff (C), the
+  rod with a transition and its source registered -- the Gateaux form by name and by `fdiff_seed_all`, and the
+  legacy layout, each equal to `solve_fsens` to 3e-11.
 
 ### DAESLV: initialisation, sensitivities and adjoints
 
@@ -171,11 +184,51 @@
   the initial-condition chain is now taken as DAESLV takes it -- `(lambda + df0/dx)(t0) . dx0/dp`, `dx0/dp` from
   `ic_sens` on the start system -- the symbolic route unchanged otherwise. DAESLV_moltime (C) now asserts ODESLV's
   adjoint (it reported it).
+* **ODESLV forward sensitivities: a transition's jump is linearised at the state BEFORE it.** At a transition the
+  sensitivities jump by the map's linearisation, `s(tau+) = M_x s(tau-) + M_p`; the forward sweep read it at the
+  state AFTER the jump, the states being overwritten first. Exact where the map's derivatives read no state that
+  jumps there -- an additive dose, a reset to a value, a map of states continuous at `tau`: every transition gated
+  until now -- and wrong otherwise: `x(tau+) = d x(tau-)` gave gradients off by 9e-2, `x(tau+) = x(tau-)^2` by
+  0.12. The adjoint (it reads the recorded state at `tau-`), DAESLV and OCFESLV were right; the `fdiff` product
+  found it, agreeing with them and not with `solve_fsens`. In 5.1.0 too. Gate: ODESLV_TRANSmulti (B), a two-component
+  map reading both states it resets -- forward, adjoint and the `fdiff` product against the closed form (forward off
+  by up to 0.31 on the unfixed tree; A, the driver's model until now, is blind to it).
 * **DAESLV adjoint: one backward matrix and linear solver per backward problem, all freed** -- all but the last leaked
   with two or more adjoined outputs (valgrind on DAESLV_quadacc). Backward problems honour the step controls.
+* **DAESLV: one-sided outputs at a stop.** At a stage time where the integrator stops, a value at `tau+` now reads
+  the stop system's solution -- the jumps applied, the algebraic states re-solved on the new rows -- with the
+  forward sensitivities there, and the adjoint seeds each output on its own side of the stop's transpose: `tau+` on
+  the arriving stage's rows at the stop's solution, `tau-` beyond the transpose on the stage before. The forward
+  read `tau-` for `tau+` and the adjoint `tau+` for `tau-` -- on differential states across a transition, explicit
+  or implicit, on algebraic states at an input jump or across a transition, and under the method of lines. BASE_DE
+  routes a `tau+` term after the stop for a solver whose stops are SOLVED (`_stop_is_solved`, which
+  `_transitions_in_ic_system` becomes: one fact, two consequences); ODESLV, whose stops are explicit maps, keeps
+  composing the map into the term. Gate: DAESLV_sides (new), ODESLV_SIDESgate's model and six DAE cases.
+* **DAESLV adjoint: four defects DAESLV_sides found beside it.** (1) An interior value of an ALGEBRAIC state lost
+  its parameter derivative through its row (z = u x: dz(0.25)/du = 0): the interior re-seed now returns the direct
+  term `-F_p^T w` of the extended system, as the final-time seed did. (2) A value at t0 had `(df/dx)(t0)` added to
+  the multipliers, in EQUATION space -- scaled by a mass matrix, an algebraic state's lost; it now joins
+  `Jyp^T lambda(t0)` in state space in the initial-condition term. (3) An integral whose integrand reads a parameter
+  directly (`int u dt`, `int u x dt`) had that part of its gradient NEGATED: the backward quadrature's sign. (4) With
+  several adjoined outputs, every output received the first one's direct term `df/dp`; each now has its own. And an
+  output reading neither a state nor a quadrature (an input's value at a time), refused, has its direct term as its
+  gradient, as in ODESLV.
+* **DAESLV: a transition reading a FIXED input.** The stop system's transition rows were assembled without the
+  fixed inputs' values, which the residual rows already substitute ("missing variable d1[d]" at the first stop of a
+  product whose transition reads a direction input): the one substitution is applied to both. Gate: DAESLV_fdiff (B),
+  legacy layout.
+* **DAESLV: transition times off the element boundaries**, as in ODESLV. The integrator stops at every transition
+  time, so `tau` need not be an element boundary of `t` (it was refused, by OCFESLV's rule, which OCFESLV keeps): a
+  declared transition, the transition the lift of a nonlinear output at an interior time declares, and under the
+  method of lines. A `tau` outside the horizon stays refused. Gates: DAESLV_trans (C) (it asserted the refusal) and
+  (C2), DAESLV_moltime (D2).
 
 ### Outputs
 
+* **DAESLV: point-form outputs.** `add_output( f, {t}, {tau}, {side} )` read `f` at the FINAL time whatever `tau` (or
+  failed on a time-varying input: "missing variable"); the conversion to `FFEval( f, t, tau, side )` that ODESLV has
+  had since 9 Oct is hoisted into BASE_DE, so both integrators share it. Gate: DAESLV_outputs (E), the point form =
+  the expression form in value, forward and adjoint gradients (it aborted on the unfixed tree).
 * **Outputs that are NONLINEAR functions of horizon integrals and point evaluations**, on ODESLV, DAESLV and
   under MoL (refused before: one record or an affine combination). Before the model sets up, each distinct
   reduction in `t` such an output reads is lifted into a hidden STATE -- an integral into the quadrature state
@@ -284,6 +337,24 @@
   from an EOS row absent at z = LB) is NARROWED to the nodes the level leaves free instead of set aside whole (which
   removed one node too many: 215 rows for 216 unknowns); any other mismatch is left to the DOF audit. OCFE_PDE20e (B)
   now gates this convention (it gated the opposite: the declared IC rejected as a surplus).
+
+### DAG operations
+
+* **`fdiff` carries transitions**, on ODESLV, DAESLV (under the method of lines too) and OCFESLV -- refused until
+  now, and with it `SYMDIFF` on such a model. The product holds every transition `left(tau-) = right(tau+)` and, per
+  direction, its derivative `dleft(tau-) = dright(tau+)` at the same `tau`: the same rows on the sensitivity states
+  and the direction inputs, the derivative of a state being its sensitivity. So an explicit map stays explicit for
+  ODESLV, an implicit one is one more row of the stop DAESLV solves, and a transition from the lift of a nonlinear
+  output is lifted again in the product, at its own setup. `tau` is fixed: no switching-time term. Gates, each against
+  `solve_fsens` of the original, with `fdiff` called before and after setup and in the legacy layout:
+  ODESLV_TRANSode (the dose, with and without a lifted output; `SYMDIFF` = the numeric derivative), DAESLV_fdiff (B)
+  (explicit off the grid, implicit, lifted, an algebraic state re-solved at the stop, and the declaration through
+  evaluations), DAESLV_ffdae (C) (`SYMDIFF` against the closed form), OCFE_TRANSode (monolithic and marching: the
+  product = the forward Jacobian to 5e-15); in Python, check_ffodeslv (F) and check_ffdaeslv (F, an implicit
+  transition), `fdiff` and `bdiff`.
+* **FFODESLV / FFDAESLV: `SYMDIFF` on a model `fdiff` refuses** crashed (a segmentation fault, in Python too): the
+  null product was set up. It now throws with `fdiff`'s reason. The drivers that reached it did so through a
+  transition, which `fdiff` now takes; no driver reaches the throw any more.
 
 ### Python and notebooks
 

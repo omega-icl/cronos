@@ -941,7 +941,11 @@ const
     }
 
     FFDE<SOLVER> ResDer;
-    auto pODESLVSEN = _pODESLV->fdiff( vPar );
+    // fdiff refuses a model it cannot differentiate (an expression with no derivative, say): its reason, not a null product
+    std::string whyd;
+    auto pODESLVSEN = _pODESLV->fdiff( vPar.size(), vPar.data(), whyd );
+    if( !pODESLVSEN )
+      throw std::runtime_error( "FFODESLV ** SYMDIFF: the model cannot be forward-differentiated: " + whyd + "\n" );
     if( !pODESLVSEN->setup() ){
       std::string const why = pODESLVSEN->extract_error();  delete pODESLVSEN;
       throw std::runtime_error( "FFODESLV ** SYMDIFF: the forward-differentiated model failed to set up: " + why + "\n" );
@@ -1010,7 +1014,11 @@ const
     }
 
     FFDE<SOLVER> ResDer;
-    auto pODESLVSEN = _pODESLV->fdiff( vPar );
+    // fdiff refuses a model it cannot differentiate (an expression with no derivative, say): its reason, not a null product
+    std::string whyd;
+    auto pODESLVSEN = _pODESLV->fdiff( vPar.size(), vPar.data(), whyd );
+    if( !pODESLVSEN )
+      throw std::runtime_error( "FFODESLV ** SYMDIFF: the model cannot be forward-differentiated: " + whyd + "\n" );
     if( !pODESLVSEN->setup() ){
       std::string const why = pODESLVSEN->extract_error();  delete pODESLVSEN;
       throw std::runtime_error( "FFODESLV ** SYMDIFF: the forward-differentiated model failed to set up: " + why + "\n" );

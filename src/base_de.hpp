@@ -47,6 +47,10 @@ class BASE_DE
   std::vector<FFVar>                   _mC;     //!< constants
   std::vector<FFVar>                   _mQ;     //!< quadrature variables
   std::map<std::string,std::vector<FFVar>> _mInpLevels;
+  //! @brief The FIXED time-invariant inputs and their values: constants of the extracted model, substituted into every
+  //! expression read from the declaration -- the transitions' rows of a solved stop too, which _assemble_ic reads
+  //! from the declaration after extraction (a transition reading a fixed input left it a free variable there).
+  std::vector<FFVar> _mFixTgt, _mFixRep;
 
   //! @brief Per time-varying input, its node positions WITHIN an element, normalised to [0,1].  Size 1 and
   //! value 0 for a piecewise-constant control, in which case the interpolant is just the nodal value.
@@ -217,7 +221,41 @@ class BASE_DE
   std::vector<std::vector<FFVar>>      _mIC;    //!< initial values (one entry: no state discontinuities)
   std::vector<std::vector<FFVar>>      _mDE;    //!< right-hand sides (one entry)
   std::vector<std::vector<FFVar>>      _mQUAD;  //!< quadrature integrands (one entry)
-  std::vector<std::map<size_t,FFVar>>  _mFCT;   //!< functions, per stage: index -> expression
+  std::vector<std::map<size_t,FFVar>>  _mFCT;   //!< functions, per stage time: index -> expression (tau_k^-)
+  //! @brief Function terms read on the PLUS side of an interior stage time tau_k, where the stop is SOLVED
+  //! (_stop_is_solved): evaluated on the stop system's solution, at the start of stage k.  Empty otherwise -- a
+  //! mapped stop composes its map into the term, which then sits in _mFCT[k] -- and at t0 and the final time, whose
+  //! two sides are one point.
+  std::vector<std::map<size_t,FFVar>>  _mFCTp;
+
+  //! @brief 4.10 (2026-10-09): a POINT-FORM output, add_output( f, {t}, {tau}, {side} ), becomes the evaluation
+  //! FFEval( f, t, tau, side ) before the evolution-direction reduction, so it is served like the expression form
+  //! add_output( OpE( f, t, tau, side ) ).  Before, the integrator ignored an output's point: it read f at the FINAL
+  //! time (a state: silently the wrong value) or failed on a time-varying input ("missing variable").  Hoisted from
+  //! ODESLV_BASE (2026-11-12): DAESLV had kept that defect.  Under the method of lines the working model's outputs
+  //! are expressions already (declare_semidiscrete), so this finds nothing to do there.
+  bool _on_before_reduction
+    ()
+    override
+    {
+      if( !_evolution_dom_var.dag() ) return true;
+      FFEval OpE;
+      for( auto& fct : _mFct ){
+        auto const it = fct.point.find( _evolution_dom_var );
+        if( it == fct.point.end() ) continue;
+        if( fct.point.size() != 1 ){
+          _extractError = "a point output fixes a coordinate other than the evolution direction (" + fct.var.name()
+                        + "): the integrator has no other direction";
+          return false;
+        }
+        auto const is = fct.side.find( _evolution_dom_var );
+        int const side = ( is != fct.side.end() && is->second == FFDom::PLUS )? (int)FFDom::PLUS: (int)FFDom::MINUS;
+        fct.var = OpE( fct.var, _evolution_dom_var, it->second, side );
+        fct.point.clear();  fct.side.clear();
+      }
+      return true;
+    }
+
   //! @brief Lift the NONLINEAR outputs of the DECLARATION into hidden STATES (7 Nov 2026): before FFModel::setup, an
   //! output that is a nonlinear function h of reductions in t -- integrals over the horizon, values at a time -- is
   //! rewritten as ONE point evaluation at the end of the horizon of h over hidden states: an integral int g dt
@@ -306,10 +344,13 @@ class BASE_DE
     const
     { return BASE_KINSOL::Knobs(); }
 
-  //! @brief Does the consumer apply transitions as ROWS of its stop system (DAESLV) rather than through
-  //! the divided per-stage map _mIC (ODESLV)?  The divided form can only express an EXPLICIT map, so it
-  //! refuses an implicit one -- a refusal that must not reach a consumer which has no use for _mIC.
-  virtual bool _transitions_in_ic_system
+  //! @brief Is the state just after a stop the SOLUTION of a stop system (DAESLV: the stage's rows, with continuity
+  //! or the declared jumps as rows, the algebraic states re-solved) rather than an explicit map of the state just
+  //! before it (ODESLV: the divided per-stage map _mIC)?  Two consequences, both read from here: a solved stop takes
+  //! a transition as rows -- the divided form can only express an EXPLICIT map, so it refuses an implicit one, a
+  //! refusal that must not reach a consumer with no use for _mIC -- and an output term on the PLUS side of a stage
+  //! time reads that solution (_mFCTp), where a mapped stop composes its map into the term instead.
+  virtual bool _stop_is_solved
     ()
     const
     { return false; }
@@ -960,7 +1001,7 @@ BASE_DE::_extract_from_model
     }
   };
   _dT.clear(); _mT.clear(); _mX.clear(); _mP.clear(); _mC.clear(); _mQ.clear(); _mLHS.clear();
-  _mIC.clear(); _mDE.clear(); _mQUAD.clear(); _mFCT.clear();
+  _mIC.clear(); _mDE.clear(); _mQUAD.clear(); _mFCT.clear(); _mFCTp.clear();
   if( distributed_in_space() ){                    // DAESLV takes such a model before extraction (method of lines)
     _extractError = "a state is declared over a direction other than the evolution one: the model is distributed in"
                     " space -- solve it with DAESLV, which semi-discretises it by the method of lines";
@@ -1065,7 +1106,8 @@ BASE_DE::_extract_from_model
   // variable inside the right-hand side, which is not implemented, so it is REFUSED rather than left dangling.
   // Fixed time-invariant inputs are constants of the extracted model: substituted into EVERY expression that
   // is read from the declaration -- right-hand sides, initial conditions, functions and quadratures alike.
-  std::vector<FFVar> fx_tgt, fx_rep;
+  std::vector<FFVar>& fx_tgt = _mFixTgt;  std::vector<FFVar>& fx_rep = _mFixRep;
+  fx_tgt.clear();  fx_rep.clear();
   for( auto const& w : fixed_scalar ){ fx_tgt.push_back( w ); fx_rep.push_back( FFVar( (*fixed_input( w ))[0] ) ); }
   auto subst_fixed = [&]( std::vector<FFVar> const& v ){ return fx_tgt.empty()? v: FFModel::_dag->compose( v, fx_tgt, fx_rep ); };
   auto subst1 = [&]( FFVar const& f ){ if( fx_tgt.empty() ) return f; std::vector<FFVar> v{ f }; return FFModel::_dag->compose( v, fx_tgt, fx_rep )[0]; };
@@ -1327,7 +1369,7 @@ BASE_DE::_extract_from_model
   // x_i itself), identity elsewhere.  ODESLV evaluates entry k with the state reached at the end of stage k-1, i.e.
   // x(tau^-), and reinitialises the integrator with the result.  Implicit maps are refused (DAESLV's business).
   std::vector< std::pair< double, std::map<size_t,FFVar> > > jumps;   // (tau, state index -> x_i(tau^+)) for PLUS evaluations
-  if( !var_transition().empty() && !_transitions_in_ic_system() ){
+  if( !var_transition().empty() && !_stop_is_solved() ){
     _mIC.assign( _ns, std::vector<FFVar>( _nx ) );
     _mIC[0] = ic;
     for( size_t k = 1; k < _ns; ++k ) for( size_t i = 0; i < _nx; ++i ) _mIC[k][i] = _mX[i];
@@ -1369,6 +1411,7 @@ BASE_DE::_extract_from_model
   // stage map at tau_j (an evaluation) or at the last stage (an integral); ODESLV sums the stage contributions of a
   // function, for the value and for the forward and adjoint sensitivities alike.  A NONLINEAR combination is refused.
   _mFCT.assign( _ns + 1, std::map<size_t,FFVar>() );
+  _mFCTp.assign( _ns + 1, std::map<size_t,FFVar>() );
   auto const& vDef = var_deferred();
   std::vector<FFVar> quad;
   for( auto const& C : vDef ){
@@ -1387,9 +1430,10 @@ BASE_DE::_extract_from_model
         " evaluates functions at stage times only -- add a stage boundary there (one more element in the domain)";
       _extractError = os.str();  return false;
     }
-  auto add_to = [&]( size_t const stg, size_t const idx, FFVar const& term ){
-    auto it = _mFCT[stg].find( idx );
-    if( it == _mFCT[stg].end() ) _mFCT[stg][idx] = term;  else it->second = it->second + term; };
+  auto add_in = [&]( std::vector<std::map<size_t,FFVar>>& set, size_t const stg, size_t const idx, FFVar const& term ){
+    auto it = set[stg].find( idx );
+    if( it == set[stg].end() ) set[stg][idx] = term;  else it->second = it->second + term; };
+  auto add_to = [&]( size_t const stg, size_t const idx, FFVar const& term ){ add_in( _mFCT, stg, idx, term ); };
   // the term a * (value of record C) of function idx; a == nullptr for a unit coefficient.  An INTEGRAL with a
   // non-constant coefficient (a parameter or constant, never a state or time) is carried as its OWN quadrature of
   // a * source -- a int f dt = int a f dt -- because a function in which a parameter multiplies a quadrature
@@ -1403,8 +1447,14 @@ BASE_DE::_extract_from_model
     }
     FFVar v = C.accumulate? subst1( _in_model_dag( C.input ) )
             : subst_inputs( { subst1( _in_model_dag( C.source ) ) }, elem_of_point( C.tau, C.side ) )[0];
-    if( !C.accumulate && C.side == FFDom::PLUS )            // at a transition: the state JUST AFTER the jump, x(tau^+) =
-      for( auto const& [t0, mp] : jumps )                   // the map applied to x(tau^-) -- evaluated at the stage end
+    // A value at tau^+ of an interior stage time reads the state JUST AFTER the stop.  Where the stop is SOLVED, that
+    // state is the stop system's solution -- the term is evaluated there, at the start of stage k (_mFCTp).  Where it
+    // is MAPPED, x(tau^+) is the map applied to x(tau^-), composed into the term, which is then evaluated at the end of
+    // stage k-1 with the others.  At t0 and at the final time the two sides are one point.
+    long const kst = C.accumulate? (long)_ns: stage_of( C.tau );
+    bool const plus = !C.accumulate && C.side == FFDom::PLUS && kst > 0 && (size_t)kst < _ns;
+    if( plus && !_stop_is_solved() )
+      for( auto const& [t0, mp] : jumps )
         if( std::fabs( t0 - C.tau ) <= options.TTOL && !mp.empty() ){
           std::vector<FFVar> tgt, rep;  for( auto const& [i, g] : mp ){ tgt.push_back( _mX[i] ); rep.push_back( g ); }
           v = FFModel::_dag->compose( std::vector<FFVar>{ v }, tgt, rep )[0];
@@ -1412,8 +1462,7 @@ BASE_DE::_extract_from_model
     FFVar const term = !a? v: a->cst()? FFVar( a->num().val() * v ): subst1( _in_model_dag( *a ) ) * v;
     // an integral over the evolution direction is the quadrature's value at the END: the integrators accumulate it over
     // the whole horizon (no reset at stage boundaries), so it is one term, at the final stage
-    if( C.accumulate ) add_to( _ns, idx, term );
-    else add_to( (size_t)stage_of( C.tau ), idx, term ); };
+    add_in( plus && _stop_is_solved()? _mFCTp: _mFCT, (size_t)kst, idx, term ); };
   // the records whose inputs occur in expression e (full ids)
   auto records_in = [&]( FFVar const& e ){
     std::vector<size_t> r;
@@ -1607,14 +1656,15 @@ BASE_DE::_assemble_ic
         // LEFT is at tau^-: states, inputs and derivatives all take their left-limit placeholders, and
         // they are swapped HERE so the global passes below find nothing raw left in this row to rebind
         // to the tau^+ set.  RIGHT is at tau^+ and is left to those passes.
-        std::vector<FFVar> lhs{ _in_model_dag( tr.left[ic] ) };
+        std::vector<FFVar> lhs{ _in_model_dag( tr.left[ic] ) }, rhs{ _in_model_dag( tr.right[ic] ) };
         try{
+          if( !_mFixTgt.empty() ){ lhs = FFModel::_dag->compose( lhs, _mFixTgt, _mFixRep );  rhs = FFModel::_dag->compose( rhs, _mFixTgt, _mFixRep ); }
           if( !_mDotLftVar.empty() ) lhs = FFModel::_dag->substitute( lhs, _mDOT, _mDotLftVar );
           if( !_mUmVar.empty() )     lhs = FFModel::_dag->compose( lhs, _mTVInp, _mUmVar );
           lhs = FFModel::_dag->compose( lhs, _mX, _mLftVar );
         }
         catch( ... ){ _extractError = "substituting the left limits of a transition failed"; return false; }
-        rows.push_back( lhs[0] - _in_model_dag( tr.right[ic] ) );
+        rows.push_back( lhs[0] - rhs[0] );
       }
     }
   }
@@ -2254,27 +2304,22 @@ BASE_DE::_resolve_sensitivity_index
     _nsen = _np;
     return true;
   }
+  // A control's DOFs are its parameters, parameter_index() -- the one map from a declared input to the extracted
+  // parameter vector, which a solver whose working model is not the declared one (DAESLV under the method of lines)
+  // answers through its own bijection.
   for( auto const& [u,spec] : controls() ){       // canonical control order: offsets ascending
-    std::vector<FFVar> dofs;
-    auto const itl = _mInpLevels.find( u.name() );
-    if( itl != _mInpLevels.cend() ) dofs = itl->second;
-    else                            dofs.assign( 1, u );
-    if( dofs.size() != spec.ndof ){
+    std::vector<size_t> const ndx = parameter_index( u );
+    if( ndx.empty() ){
+      _extractError = "the registered control " + u.name() + " is not a parameter of the extracted model";
+      return false;
+    }
+    if( ndx.size() != spec.ndof ){
       _extractError = "the control " + u.name() + " has " + std::to_string( spec.ndof )
-                    + " DOFs in its declared function space but " + std::to_string( dofs.size() )
+                    + " DOFs in its declared function space but " + std::to_string( ndx.size() )
                     + " parameters in the extracted model";
       return false;
     }
-    for( auto const& d : dofs ){
-      bool found = false;
-      for( size_t i=0; i<_np; ++i )
-        if( _mP[i].id().second == d.id().second ){ _ndxSEN.push_back( i ); found = true; break; }
-      if( !found ){
-        _extractError = "the registered control " + u.name()
-                      + " is not a parameter of the extracted model";
-        return false;
-      }
-    }
+    _ndxSEN.insert( _ndxSEN.end(), ndx.begin(), ndx.end() );
   }
   _nsen = _ndxSEN.size();
   return true;

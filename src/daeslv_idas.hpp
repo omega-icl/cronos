@@ -172,6 +172,20 @@ public:
       return solve( P, c, os );
     }
 
+  //! @brief The parameter indices of the DOFs of declared input @p w.  For a model distributed in space the declared
+  //! input is not the working model's: its DOFs are its working parameters through the bijection setup built
+  //! (_molParam, in input_dofs order) -- so the control registry, fdiff's seeding and the legacy fdiff by parameter all
+  //! read the declared model as such.  Otherwise, and for a working input, BASE_DE's.
+  std::vector<size_t> parameter_index
+    ( FFVar const& w ) const override
+    {
+      if( _mol && !_molSetupRunning && w.dag() && w.dag() == _usr._dagUsr ){   // not during the working model's own setup
+        auto const itp = _molParam.find( w.id().second );
+        if( itp != _molParam.end() ) return itp->second;
+      }
+      return BASE_DE::parameter_index( w );
+    }
+
   //! @brief The by-name values @p vIn as the working model's parameters @p P and constants @p C -- ONE resolution for
   //! solve, solve_fsens and solve_asens.  For a model distributed in space each declared input maps to its working
   //! parameters (_molParam), which setup lays out in the declared inputs' DOF order (checked there), so P and the
@@ -203,8 +217,9 @@ public:
       return BASE_DE::solve_ic( y, yp, _ic_knobs(), par ); }
 
   //! @brief DAESLV implements transitions: a jump is a ROW of the stop system, replacing the continuity
-  //! of the state it determines.  Not lifted -- the stop IS where it is applied -- so the times must
-  //! still be validated, or a tau between two stage boundaries would be silently ignored (WORKPLAN 1.6).
+  //! of the state it determines.  Not lifted -- the stop IS where it is applied, and BASE_DE puts a stage
+  //! boundary at every transition time, so a tau need not be an element boundary (12 Nov 2026, as ODESLV;
+  //! until then DAESLV took OCFESLV's rule).  The transitions' form is still validated, unlifted.
   bool _transitions_supported
     ()
     const
@@ -217,7 +232,10 @@ public:
     override
     { return true; }
 
-  bool _transitions_in_ic_system
+  //! @brief A stop is a consistent initialisation, solved (restart_ic): the state after it -- the jumps applied, the
+  //! algebraic states re-solved on the new rows -- is that system's solution, and the outputs read on its PLUS side
+  //! are evaluated there (BASE_DE::_mFCTp).
+  bool _stop_is_solved
     ()
     const
     override
@@ -228,24 +246,6 @@ public:
     const
     override
     { return true; }
-
-  //! @brief A tau must coincide with an ELEMENT BOUNDARY, which is where a stop already exists.  Same
-  //! policy and the same words as OCFESLV, so the two solvers refuse the same models for the same reason.
-  bool _accept_transition_tau
-    ( double const tau, std::string& why )
-    const
-    override
-    {
-      auto const it = _issetup? _mDom.find( _evolution_dom_var )
-                              : _usr._mDomUsr.find( _usr._evolution_dom_varUsr );
-      auto const& M = _issetup? _mDom: _usr._mDomUsr;
-      if( it == M.end() ){ why = "no evolution domain"; return false; }
-      for( size_t k = 1; k < it->second.n_elem; ++k )
-        if( std::fabs( it->second.elem_bnd[k] - tau ) <= 64.*DBL_EPSILON*std::max( 1., std::fabs( tau ) ) )
-          return true;
-      why = "tau must be an ELEMENT BOUNDARY of the evolution direction (add one there)";
-      return false;
-    }
 
   //! @brief The IC knobs, from this solver's INITIAL group.
   BASE_KINSOL::Knobs _ic_knobs
@@ -561,6 +561,10 @@ protected:
   std::vector<double> _dF;                   //!< the accumulated function values, val_function() order
   std::vector< std::vector<FFVar> > _vFJac;  //!< df/d(x,q,p) per stage time, and its index pairs
   std::vector< std::vector<int> >   _rFJ, _cFJ;
+  //! @brief The same for the terms read at tau_k^+ (BASE_DE::_mFCTp), evaluated after the stop at the start of stage
+  //! k; an entry is empty where no output reads that side of that stage time.
+  std::vector< std::vector<FFVar> > _vFCTp, _vFJacP;
+  std::vector< std::vector<int> >   _rFJp, _cFJp;
   std::vector<double> _dFGrad;               //!< the accumulated gradient, _nf x _np row-major (internal)
   std::vector< std::vector<double> > _fp;    //!< the same as [ parameter ][ function ], the shape
                                              //!< ODESLV exposes and the FF operations index
@@ -887,7 +891,10 @@ protected:
     return okT;
     }
 
-  //! @brief The gradient quadrature of the backward problem:  dqB/dp_j = (dg/dp_j) - (dF/dp_j)^T lambda.
+  //! @brief The gradient quadrature of the backward problem, integrated from T back to t0:  its integrand is
+  //! (dF/dp_j)^T lambda - w dg/dp_j, so that qB(t0) = int_t0^T ( w dg/dp_j - (dF/dp_j)^T lambda ) dt -- w the output's
+  //! weight on the quadrature, g its integrand.  The g_p term carried the wrong sign until 12 Nov 2026: an integral
+  //! whose integrand reads a parameter directly (int u dt, int u x dt) had its direct part negated (DAESLV_sides (A)).
   //! dF/dp is the same SFAD block the forward sensitivity residual uses as its inhomogeneous term; this
   //! is that block transposed, which is the whole of what ASA costs once FSA exists.
   int IDQUADB__
@@ -906,7 +913,7 @@ protected:
         for( size_t e = 0; e < _nFp; ++e ) q[ _cFp[e] ] += _dEVAL[ _offFp + e ] * lam[ _rFp[e] ];
         if( _asaQ_() < _nq )
           for( size_t e = 0; e < _nQp; ++e )
-            if( (size_t)_rQp[e] == _asaQ_() ) q[ _cQp[e] ] += _asaWq_() * _dEVAL[ _offQp + e ];
+            if( (size_t)_rQp[e] == _asaQ_() ) q[ _cQp[e] ] -= _asaWq_() * _dEVAL[ _offQp + e ];
       }
       return 0;
     }
@@ -1010,11 +1017,15 @@ protected:
   void _eval_residual
     ( double const t, double const* y, double const* yp );
 
-  //! @brief Accumulate the function terms of stage time @p k.
+  //! @brief Accumulate the function terms of stage time @p k -- those read at tau_k^-, or at tau_k^+ with @p plus.
   void _eval_fct
     ( size_t const k, double const t, double const* y, double const* q,
       std::vector< std::vector<double> > const& sfct = std::vector< std::vector<double> >(),
-      std::vector< std::vector<double> > const& sqfct = std::vector< std::vector<double> >() );
+      std::vector< std::vector<double> > const& sqfct = std::vector< std::vector<double> >(), bool const plus = false );
+  //! @brief df/d(x,q,p) of the terms of stage time @p k on side @p plus, evaluated at the state @p y there: the entries
+  //! of _vFJac[k] (_vFJacP[k]), in the order of its index pairs.
+  std::vector<double> _fct_jac
+    ( size_t const k, bool const plus, double const* y );
 
   //! @brief Build the evaluation plan for stage @p s: the residual as ONE expression in (t, y, y', p), and
   //! its two sparse Jacobian blocks by SFAD, mirroring ODESLV_BASE's _pJAC = _dag->SFAD( nx, RHS, nx, X ).
@@ -1149,7 +1160,7 @@ DAESLV_IDAS::_build_plans
   for( auto const& v : _pC  ) _vFVAR.push_back( v );
   _dFVAR.assign( _vFVAR.size(), 0. );
   _dFGrad.assign( _nf * _np, 0. );
-  _vFCT.clear();
+  _vFCT.clear();  _vFCTp.clear();  _vFJacP.clear();  _rFJp.clear();  _cFJp.clear();
   if( _nf ){
     if( _mFCT.size() == 1 ){                 // not distributed: the terms belong to the final time
       _vFCT.assign( _ns+1, std::vector<FFVar>() );
@@ -1161,24 +1172,33 @@ DAESLV_IDAS::_build_plans
       size_t k = 0;
       for( auto const& mFCTk : _mFCT ) _dag->insert( FFModel::_dag, mFCTk, _vFCT[k++] );
     }
-    // df/d(x, q, p) per stage time: the gradient of an output is the chain rule over what it reads --
+    // the terms read at tau_k^+, where a stage time has any
+    _vFCTp.assign( _vFCT.size(), std::vector<FFVar>() );
+    for( size_t k = 0; k < _mFCTp.size() && k < _vFCTp.size(); ++k ){
+      if( _mFCTp[k].empty() ) continue;
+      _vFCTp[k].assign( _nf, FFVar( 0. ) );
+      _dag->insert( FFModel::_dag, _mFCTp[k], _vFCTp[k] );
+    }
+    // df/d(x, q, p) per stage time and side: the gradient of an output is the chain rule over what it reads --
     // the states, the quadratures it was built from, and the parameters it mentions directly.
-    _vFJac.assign( _vFCT.size(), std::vector<FFVar>() );
-    _rFJ.assign( _vFCT.size(), std::vector<int>() );
-    _cFJ.assign( _vFCT.size(), std::vector<int>() );
     std::vector<FFVar> wrt;
     for( auto const& v : _pX  ) wrt.push_back( v );
     for( auto const& v : _pQv ) wrt.push_back( v );
     for( auto const& v : _pP  ) wrt.push_back( v );
-    for( size_t k = 0; k < _vFCT.size(); ++k ){
-      if( _vFCT[k].empty() || wrt.empty() ) continue;
-      auto J = _dag->SFAD( _vFCT[k].size(), _vFCT[k].data(), wrt.size(), wrt.data() );
-      size_t const n = std::get<0>(J);
-      _rFJ[k].resize(n); _cFJ[k].resize(n);
-      for( unsigned e = 0; e < n; ++e ){ _rFJ[k][e] = (int)std::get<1>(J)[e]; _cFJ[k][e] = (int)std::get<2>(J)[e]; }
-      _vFJac[k].assign( std::get<3>(J), std::get<3>(J) + n );
-      delete[] std::get<1>(J); delete[] std::get<2>(J); delete[] std::get<3>(J);
-    }
+    auto jacobians = [&]( std::vector< std::vector<FFVar> > const& F, std::vector< std::vector<FFVar> >& Jv,
+                          std::vector< std::vector<int> >& rJ, std::vector< std::vector<int> >& cJ ){
+      Jv.assign( F.size(), std::vector<FFVar>() );  rJ.assign( F.size(), std::vector<int>() );  cJ.assign( F.size(), std::vector<int>() );
+      for( size_t k = 0; k < F.size(); ++k ){
+        if( F[k].empty() || wrt.empty() ) continue;
+        auto J = _dag->SFAD( F[k].size(), F[k].data(), wrt.size(), wrt.data() );
+        size_t const n = std::get<0>(J);
+        rJ[k].resize(n); cJ[k].resize(n);
+        for( unsigned e = 0; e < n; ++e ){ rJ[k][e] = (int)std::get<1>(J)[e]; cJ[k][e] = (int)std::get<2>(J)[e]; }
+        Jv[k].assign( std::get<3>(J), std::get<3>(J) + n );
+        delete[] std::get<1>(J); delete[] std::get<2>(J); delete[] std::get<3>(J);
+      } };
+    jacobians( _vFCT,  _vFJac,  _rFJ,  _cFJ );
+    jacobians( _vFCTp, _vFJacP, _rFJp, _cFJp );
   }
 
   _pYP.clear();
@@ -1428,6 +1448,27 @@ DAESLV_IDAS::_setup_mol
   std::vector<FFVar> uc;
   if( !declare_semidiscrete( *_mol, *_molDag, semi, tdom, _molXc, _molT, &err, &uc ) )
     return refuse( "its semi-discrete system could not be declared: " + err );
+  // A FIXED declared input is a constant of the declared model, so its working slots are fixed to its values and the
+  // working model holds them as constants too (fix_input was silently lost under the method of lines until 12 Nov
+  // 2026: the slots stayed parameters, valued 0 unless given by name).  A time-invariant input's slot k is its DOF k.
+  auto layout_of = [&]( FFVar const& u ) -> t_InputLayoutRef {       // a declared input's slots in the semi-discretisation
+    for( auto const& l : _mol->inputs_layout() ) if( l.input.id() == u.id() ) return &l;
+    for( auto const& l : _mol->inputs_layout() ) if( l.input.name() == u.name() ) return &l;
+    return nullptr; };
+  for( auto const& [u, dom] : _usr._mInpUsr ){
+    std::vector<double> const* fv = fixed_input( u );
+    if( !fv ) continue;
+    t_InputLayoutRef const L = layout_of( u );
+    if( !L ) return refuse( "its fixed input " + u.name() + " has no counterpart in the semi-discretisation" );
+    if( L->time_varying )
+      return refuse( "its input " + u.name() + " is FIXED and varies in time, which the method of lines does not take yet"
+                     " -- give its values by name instead" );
+    if( L->cols.size() != fv->size() ) return refuse( "its fixed input " + u.name() + " has " + std::to_string( fv->size() )
+                                                      + " values for " + std::to_string( L->cols.size() ) + " slots" );
+    for( size_t k = 0; k < L->cols.size(); ++k )
+      if( !semi.fix_input( uc.at( L->cols[k] ), std::vector<double>{ (*fv)[k] } ) )
+        return refuse( "the slot " + std::to_string( k ) + " of its fixed input " + u.name() + " could not be fixed" );
+  }
   std::vector<double> x0( _mol->semi_discrete().n_states, 0. );
   _mol->init_seed( tdom.lo_dom, x0.data() );
   for( size_t i = 0; i < x0.size() && i < _molXc.size(); ++i ) semi.update_ref( _molXc[i], x0[i] );
@@ -1450,9 +1491,8 @@ DAESLV_IDAS::_setup_mol
   _molParam.clear();  _molGradRow.clear();
   std::vector<bool> used( _np, false );
   for( auto const& [u, dom] : _usr._mInpUsr ){
-    t_InputLayoutRef L = nullptr;
-    for( auto const& l : _mol->inputs_layout() ) if( l.input.id() == u.id() ){ L = &l; break; }
-    if( !L ) for( auto const& l : _mol->inputs_layout() ) if( l.input.name() == u.name() ){ L = &l; break; }
+    if( fixed_input( u ) ) continue;                                // a constant: no parameter, as for a pointwise model
+    t_InputLayoutRef const L = layout_of( u );
     if( !L ) return refuse( "its input " + u.name() + " has no counterpart in the semi-discretisation" );
     std::vector<DofIndex> const dofs = input_dofs( u );                 // the DECLARED input's DOFs (t included)
     auto& v = _molParam[ u.id().second ];
@@ -1498,6 +1538,9 @@ DAESLV_IDAS::_setup_mol
     }
   }
   if( _molGradRow.size() != _np ) return refuse( "it has " + std::to_string( _np ) + " working parameters for " + std::to_string( _molGradRow.size() ) + " declared input DOFs" );
+  // the declared controls' sensitivity directions, now that their working parameters are known (the working model's
+  // own setup ran with the registry swapped out: it holds none of the declared inputs)
+  if( !_resolve_sensitivity_index() ) return refuse( _extractError );
   return true;
 }
 
@@ -1555,30 +1598,35 @@ DAESLV_IDAS::setup
   return true;
 }
 
-//! Accumulate the function terms of stage time @p k.  The eval ADDS (the trailing unit scalar), because a
-//! function can take contributions at several stage times -- a distributed output has one per stage.
+//! Accumulate the function terms of stage time @p k on one side -- tau_k^- (the end of stage k-1), or tau_k^+ with
+//! @p plus (the start of stage k, after the stop).  The eval ADDS (the trailing unit scalar), because a function can
+//! take contributions at several stage times and on both sides of one -- a distributed output has one per stage.
 inline
 void
 DAESLV_IDAS::_eval_fct
 ( size_t const k, double const t, double const* y, double const* q,
-  std::vector< std::vector<double> > const& sfct, std::vector< std::vector<double> > const& sqfct )
+  std::vector< std::vector<double> > const& sfct, std::vector< std::vector<double> > const& sqfct, bool const plus )
 {
-  if( !_nf || k >= _vFCT.size() || _vFCT[k].empty() ) return;
+  auto const& F  = plus? _vFCTp: _vFCT;
+  auto const& Jv = plus? _vFJacP: _vFJac;
+  auto const& rJ = plus? _rFJp: _rFJ;
+  auto const& cJ = plus? _cFJp: _cFJ;
+  if( !_nf || k >= F.size() || F[k].empty() ) return;
   _dFVAR[0] = t;
   for( size_t i = 0; i < _nx; ++i ) _dFVAR[1+i] = y[i];
   for( size_t i = 0; i < _nq; ++i ) _dFVAR[1+_nx+i] = q? q[i]: 0.;
   for( size_t j = 0; j < _np; ++j ) _dFVAR[1+_nx+_nq+j] = _dVAR[ 1 + 2*_nx + j ];
   for( size_t j = 0; j < _nc; ++j ) _dFVAR[1+_nx+_nq+_np+j] = _dVAR[ 1 + 2*_nx + _np + j ];
   static double const one = 1.;
-  _dag->eval( _nf, _vFCT[k].data(), _dF.data(), _vFVAR.size(), _vFVAR.data(), _dFVAR.data(), &one );
+  _dag->eval( _nf, F[k].data(), _dF.data(), _vFVAR.size(), _vFVAR.data(), _dFVAR.data(), &one );
 
   // ... and the GRADIENT, by the same accumulation: df/dp_j = df/dx . s_j + df/dq . sq_j + df/dp_j
-  if( _fsa && _np && k < _vFJac.size() && !_vFJac[k].empty() ){
-    std::vector<double> dj( _vFJac[k].size(), 0. );
-    _dag->eval( _vFJac[k].size(), _vFJac[k].data(), dj.data(),
+  if( _fsa && _np && k < Jv.size() && !Jv[k].empty() ){
+    std::vector<double> dj( Jv[k].size(), 0. );
+    _dag->eval( Jv[k].size(), Jv[k].data(), dj.data(),
                 _vFVAR.size(), _vFVAR.data(), _dFVAR.data() );
     for( size_t e = 0; e < dj.size(); ++e ){
-      size_t const r = (size_t)_rFJ[k][e], c = (size_t)_cFJ[k][e];
+      size_t const r = (size_t)rJ[k][e], c = (size_t)cJ[k][e];
       if( r >= _nf ) continue;
       for( size_t j = 0; j < _np; ++j ){
         double w = 0.;
@@ -1589,6 +1637,25 @@ DAESLV_IDAS::_eval_fct
       }
     }
   }
+}
+
+//! df/d(x,q,p) of the terms of stage time @p k on side @p plus, at the state @p y: the quadratures as recorded there
+//! (_qk, continuous across a stop), the parameters and constants as in the solve.
+inline
+std::vector<double>
+DAESLV_IDAS::_fct_jac
+( size_t const k, bool const plus, double const* y )
+{
+  auto const& Jv = plus? _vFJacP: _vFJac;
+  if( k >= Jv.size() || Jv[k].empty() ) return std::vector<double>();
+  _dFVAR[0] = k < _dT.size()? _dT[k]: _dT.back();
+  for( size_t i = 0; i < _nx; ++i ) _dFVAR[1+i] = y[i];
+  for( size_t m = 0; m < _nq; ++m ) _dFVAR[1+_nx+m] = k < _qk.size() && m < _qk[k].size()? _qk[k][m]: 0.;
+  for( size_t j = 0; j < _np; ++j ) _dFVAR[1+_nx+_nq+j] = _dVAR[ 1 + 2*_nx + j ];
+  for( size_t j = 0; j < _nc; ++j ) _dFVAR[1+_nx+_nq+_np+j] = _dVAR[ 1 + 2*_nx + _np + j ];
+  std::vector<double> dj( Jv[k].size(), 0. );
+  _dag->eval( Jv[k].size(), Jv[k].data(), dj.data(), _vFVAR.size(), _vFVAR.data(), _dFVAR.data() );
+  return dj;
 }
 
 inline
@@ -1944,19 +2011,19 @@ DAESLV_IDAS::solve
       for( _asaCur = 0; _asaCur < _asaP.size() && ok; ++_asaCur ){
         _asaQ_() = (size_t)-1;  _asaHx_().assign( _nx, 0. );
         if( _asaF_() >= _nf ){ ok = false; why = "solve_asens: no such output"; continue; }
-        { bool anyQ = false, anyX = false, anyT = false;
+        // An output that reads neither a state nor a quadrature -- an input's value at a time, say -- has a zero
+        // costate: its whole gradient is the direct term df/dp (below, after the sweep), as for ODESLV.  The terms
+        // on the PLUS side of a stage time are interior, so they arrive as impulses like the other interior ones.
+        { bool anyT = false;
           size_t const kT = _vFCT.empty()? 0: _vFCT.size()-1;
           for( size_t k = 0; k < _rFJ.size(); ++k )
             for( size_t e = 0; e < _rFJ[k].size(); ++e ){
               if( (size_t)_rFJ[k][e] != _asaF_() ) continue;
               size_t const col = (size_t)_cFJ[k][e];
-              if( col >= _nx && col < _nx + _nq ){ anyQ = true; _asaQ_() = col - _nx; _asaWqCol_() = k; }
-              else if( col < _nx ){ anyX = true;  if( k == kT ) anyT = true; }
+              if( col >= _nx && col < _nx + _nq ){ _asaQ_() = col - _nx; _asaWqCol_() = k; }
+              else if( col < _nx && k == kT ) anyT = true;
             }
           _asaHasX_() = anyT;      // the TERMINAL seed; interior terms arrive as impulses in the sweep
-          (void)anyX;
-          if( !anyQ && !anyX ){ ok = false; why = "solve_asens: that output depends on neither the states"
-                                                 " at any stage time nor a quadrature"; continue; }
         }
       }
       _asaCur = 0;
@@ -2061,6 +2128,21 @@ DAESLV_IDAS::solve
               results_fsens[j].push_back( Results( ta, _nx, N_VGetArrayPointer( yS[j] ),
                                                    _nq, yQS? N_VGetArrayPointer( yQS[j] ): nullptr ) );
         }
+      }
+
+      // The terms read at tau_sg^+ (BASE_DE::_mFCTp): on the state just after the stop -- the stop system's solution
+      // where the stage restarted, the continuing state where it did not -- with the sensitivities there, which the
+      // same stop system reinitialised.  The quadratures are continuous across a stop.
+      if( ok && sg && sg < _vFCTp.size() && !_vFCTp[sg].empty() ){
+        std::vector< std::vector<double> > sp, sqp;
+        if( _fsa && yS ){
+          sp.assign( _np, std::vector<double>( _nx, 0. ) );  sqp.assign( _np, std::vector<double>( _nq, 0. ) );
+          for( size_t j = 0; j < _np; ++j ){
+            for( size_t i = 0; i < _nx; ++i ) sp[j][i] = N_VGetArrayPointer( yS[j] )[i];
+            if( yQS ) for( size_t m = 0; m < _nq; ++m ) sqp[j][m] = N_VGetArrayPointer( yQS[j] )[m];
+          }
+        }
+        _eval_fct( sg, ta, N_VGetArrayPointer( yy ), _qk.back().data(), sp, sqp, true );
       }
 
       // RESRECORD intermediate points: the solver is told to STOP at each of them, as ODESLV does with
@@ -2347,39 +2429,48 @@ DAESLV_IDAS::solve
         _lk[_ns][_asaF_()].assign( N_VGetArrayPointer( yB ), N_VGetArrayPointer( yB ) + _nx );
       for( size_t kk = _ns; kk > 0 && ok; --kk ){
         if( kk < _ns ){
-          // The impulse at this stage time, PER PROBLEM: each output's own Jacobian evaluated here
+          // The IMPULSES at this stage time, PER PROBLEM, each on ITS side of the stop -- as the forward sweep reads
+          // them.  A term read at tau^+ seeds the costate where the backward sweep arrives: on stage kk's rows, at
+          // the stop's solution.  A term read at tau^- seeds it beyond the stop's transpose (Phase 3 below): on stage
+          // kk-1's rows, at the end of that stage.  Where nothing stopped here the two sides are one point, and the
+          // impulses are added together.  Each re-seed is the extended system's, which keeps the algebraic multipliers
+          // consistent and returns the direct term -F_p^T w of an impulse on an algebraic state -- as at the final
+          // time; without it an interior value of an algebraic state lost its parameter derivative through its row.
+          bool const restarts_bwd = ( _mMASS.size() > 1 ) || !var_transition().empty();
+          bool const stopped_here = restarts_bwd && kk < _xplus.size() && !_xplus[kk].empty();
+          std::vector<double> const& xPl  = stopped_here? _xplus[kk]:  _xk[kk];
+          std::vector<double> const& xpPl = stopped_here? _xpplus[kk]: _xpk[kk];
+          // h_x of the current problem from the terms of one side, at the state y there
+          auto impulse = [&]( bool const plus, std::vector<double> const& y, std::vector<double>& hx ){
+            std::vector<double> const dj = _fct_jac( kk, plus, y.data() );
+            auto const& rJ = plus? _rFJp: _rFJ;  auto const& cJ = plus? _cFJp: _cFJ;
+            bool anyh = false;
+            for( size_t e = 0; e < dj.size(); ++e )
+              if( (size_t)rJ[kk][e] == _asaF_() && (size_t)cJ[kk][e] < _nx ){ hx[ cJ[kk][e] ] += dj[e];  anyh = anyh || dj[e] != 0.; }
+            return anyh; };
+          // ( lambda, lambda' ) from the costate v + h_x on the rows evaluated last, the direct term into qB
+          auto reseed = [&]( std::vector<double> v, std::vector<double> const& hx ){
+            for( size_t i = 0; i < _nx; ++i ) v[i] += hx[i];
+            std::vector<double> gy( _nx, 0. ), dGdp;
+            if( _asaQ_() < _nq )
+              for( size_t e = 0; e < _nQy; ++e )
+                if( (size_t)_rQy[e] == _asaQ_() ) gy[ _cQy[e] ] += _asaWq_() * _dEVAL[ _offQy + e ];
+            if( !_adjoint_seed( ctx, _dT[kk], v, gy, N_VGetArrayPointer( yB ), N_VGetArrayPointer( ypB ), why, &dGdp ) ) return false;
+            if( !dGdp.empty() && _np ) for( size_t j = 0; j < _np; ++j ) N_VGetArrayPointer( qB )[j] += dGdp[j];
+            return true; };
           bool any = false;
+          _eval_rows( _dT[kk], xPl.data(), xpPl.data() );                 // stage kk's rows, at tau^+
           for( _asaCur = 0; _asaCur < nB && ok; ++_asaCur ){
             _asaBind( _asaCur );
-            // the impulse at this stage time, from the output's own Jacobian evaluated THERE
             std::vector<double> hx( _nx, 0. );
-            if( kk < _vFJac.size() && !_vFJac[kk].empty() ){
-              _dFVAR[0] = _dT[kk];
-              for( size_t i = 0; i < _nx && kk < _xk.size(); ++i ) _dFVAR[1+i] = _xk[kk][i];
-              for( size_t m = 0; m < _nq && kk < _qk.size(); ++m ) _dFVAR[1+_nx+m] = _qk[kk][m];
-              std::vector<double> dj( _vFJac[kk].size(), 0. );
-              _dag->eval( _vFJac[kk].size(), _vFJac[kk].data(), dj.data(),
-                          _vFVAR.size(), _vFVAR.data(), _dFVAR.data() );
-              for( size_t e = 0; e < dj.size(); ++e )
-                if( (size_t)_rFJ[kk][e] == _asaF_() && (size_t)_cFJ[kk][e] < _nx ) hx[ _cFJ[kk][e] ] += dj[e];
-            }
-            bool anyB = false;
-            for( double v : hx ) if( v != 0. ){ anyB = true; break; }
-            if( anyB ){ any = true;
-              _eval_rows( _dT[kk], _xk[kk].data(), _dXP0.data() );
-              // the costate AFTER the impulse is the costate before it plus h_x; re-seed ( lambda,
-              // lambda' ) from that by the extended system, which keeps the algebraic multipliers
-              // consistent -- adding a dense-solved dlambda to lambda did not
-              std::vector<double> vk( _nx, 0. ), gyk( _nx, 0. );
-              { double const* l = N_VGetArrayPointer( yB );
-                for( size_t e = 0; e < _nJyp; ++e ) vk[ _cJyp[e] ] += _dEVAL[ _offJyp + e ] * l[ _rJyp[e] ]; }
-              for( size_t i = 0; i < _nx; ++i ) vk[i] += hx[i];
-              if( _asaQ_() < _nq )
-                for( size_t e = 0; e < _nQy; ++e )
-                  if( (size_t)_rQy[e] == _asaQ_() ) gyk[ _cQy[e] ] += _asaWq_() * _dEVAL[ _offQy + e ];
-              if( !_adjoint_seed( ctx, _dT[kk], vk, gyk, N_VGetArrayPointer( yB ), N_VGetArrayPointer( ypB ), why ) ){
-                ok = false; break; }
-            }
+            bool anyB = impulse( true, xPl, hx );
+            if( !stopped_here ) anyB = impulse( false, _xk[kk], hx ) || anyB;
+            if( !anyB ) continue;
+            any = true;
+            std::vector<double> vk( _nx, 0. );                               // the costate before the impulse, Jyp^T lambda
+            { double const* l = N_VGetArrayPointer( yB );
+              for( size_t e = 0; e < _nJyp; ++e ) vk[ _cJyp[e] ] += _dEVAL[ _offJyp + e ] * l[ _rJyp[e] ]; }
+            if( !reseed( vk, hx ) ){ ok = false; break; }
           }
           _asaCur = 0;  _asaBind( 0 );
           if( !ok ) break;
@@ -2387,8 +2478,6 @@ DAESLV_IDAS::solve
           // by that system's TRANSPOSE -- v^- from v^+ -- and the stop contributes its own -dF/dp^T mu
           // to the gradient.  Then lambda^- solves Jyp^-^T lambda^- = v^-.  ODESLV does the same through
           // _CC_D_SEN, the transpose of its divided map; here the map is a system, so it is a solve.
-          bool const restarts_bwd = ( _mMASS.size() > 1 ) || !var_transition().empty();
-          bool const stopped_here = restarts_bwd && kk < _xplus.size() && !_xplus[kk].empty();
           if( stopped_here ){
             // Phase 1, on stage kk's rows, PER PROBLEM: the costate v^+ from lambda^+, the stop
             // system's transpose to v^-, and its -dF/dp^T mu into that problem's gradient.
@@ -2413,16 +2502,12 @@ DAESLV_IDAS::solve
             // Phase 2, ONCE: switch to the left stage's rows
             if( !_build_rows( kk-1 ) ){ ok = false; why = "_build_rows for the adjoint stop"; break; }
             _eval_rows( _dT[kk], _xk[kk].data(), _xpk[kk].data() );
-            // Phase 3, on stage kk-1's rows, PER PROBLEM: lambda^- from v^-
+            // Phase 3, on stage kk-1's rows, PER PROBLEM: lambda^- from v^- and the impulses read at tau^-
             for( _asaCur = 0; _asaCur < nB && ok; ++_asaCur ){
               _asaBind( _asaCur );
-              std::vector<double> const& vminus = vminusB[_asaCur];
-              std::vector<double> gyS( _nx, 0. );
-              if( _asaQ_() < _nq )
-                for( size_t e = 0; e < _nQy; ++e )
-                  if( (size_t)_rQy[e] == _asaQ_() ) gyS[ _cQy[e] ] += _asaWq_() * _dEVAL[ _offQy + e ];
-              if( !_adjoint_seed( ctx, _dT[kk], vminus, gyS, N_VGetArrayPointer( yB ), N_VGetArrayPointer( ypB ), why ) ){
-                ok = false; break; }
+              std::vector<double> hx( _nx, 0. );
+              impulse( false, _xk[kk], hx );
+              if( !reseed( vminusB[_asaCur], hx ) ){ ok = false; break; }
               // The forward sweep's checkpoints do not span a reinitialisation.  Re-integrate THIS stage
               // forward on its own, as ODESLV does, so the backward solve across it has checkpoints.
             }
@@ -2523,44 +2608,38 @@ DAESLV_IDAS::solve
       // only the last: a distributed output contributes one value per stage time, and the one at t0
       // has no trajectory behind it at all -- its whole gradient is this term.  Reading _vFJac at the
       // final stage time alone, as this did, left d x(t0)/dk = 0 where the closed form says 2.
-      std::vector<double> dp( _np, 0. );
-      for( size_t k = 0; k < _vFJac.size(); ++k ){
-        if( _vFJac[k].empty() ) continue;
-        _dFVAR[0] = k < _dT.size()? _dT[k]: _dT.back();
-        for( size_t i = 0; i < _nx && k < _xk.size(); ++i ) _dFVAR[1+i] = _xk[k][i];
-        for( size_t m = 0; m < _nq && k < _qk.size(); ++m ) _dFVAR[1+_nx+m] = _qk[k][m];
-        std::vector<double> dj( _vFJac[k].size(), 0. );
-        _dag->eval( _vFJac[k].size(), _vFJac[k].data(), dj.data(),
-                    _vFVAR.size(), _vFVAR.data(), _dFVAR.data() );
-        for( size_t e = 0; e < dj.size(); ++e ){
-          size_t const col = (size_t)_cFJ[k][e];
-          if( (size_t)_rFJ[k][e] == _asaF_() && col >= _nx + _nq && col - _nx - _nq < _np )
-            dp[ col - _nx - _nq ] += dj[e];
+      // ... PER PROBLEM: each output's own direct term (computed once, for the problem bound last, it was added to every
+      // problem's gradient), on both sides of every stage time -- the terms read at tau^+ at the stop's solution
+      auto direct = [&](){
+        std::vector<double> dp( _np, 0. );
+        for( bool const plus : { false, true } ){
+          auto const& Jv = plus? _vFJacP: _vFJac;  auto const& rJ = plus? _rFJp: _rFJ;  auto const& cJ = plus? _cFJp: _cFJ;
+          for( size_t k = 0; k < Jv.size(); ++k ){
+            if( Jv[k].empty() || k >= _xk.size() ) continue;
+            bool const st = plus && k < _xplus.size() && !_xplus[k].empty();
+            std::vector<double> const dj = _fct_jac( k, plus, ( st? _xplus[k]: _xk[k] ).data() );
+            for( size_t e = 0; e < dj.size(); ++e ){
+              size_t const col = (size_t)cJ[k][e];
+              if( (size_t)rJ[k][e] == _asaF_() && col >= _nx + _nq && col - _nx - _nq < _np )
+                dp[ col - _nx - _nq ] += dj[e];
+            }
+          }
         }
-      }
+        return dp; };
       // Per backward problem: its t0 term, its initial-condition term, its summary row and its
       // gradient row.  Each problem's lambda and qB are its own; _asaBind selects them.
       _dFGrad.assign( _nf * _np, 0. );
       for( _asaCur = 0; _asaCur < nB; ++_asaCur ){
         _asaBind( _asaCur );
-        // An output VALUE sitting at t0 has no backward sweep behind it -- the loop runs kk = _ns..1
-        // and never makes stage time 0 an impulse point -- so lambda(t0) must carry (df/dx)(t0) before
-        // the initial-condition term below multiplies it by dx0/dp.
-        if( !_vFJac.empty() && !_vFJac[0].empty() ){
-          _dFVAR[0] = _dT[0];
-          for( size_t i = 0; i < _nx && !_xk.empty(); ++i ) _dFVAR[1+i] = _xk[0][i];
-          for( size_t m = 0; m < _nq && !_qk.empty(); ++m ) _dFVAR[1+_nx+m] = _qk[0][m];
-          std::vector<double> dj( _vFJac[0].size(), 0. );
-          _dag->eval( _vFJac[0].size(), _vFJac[0].data(), dj.data(),
-                      _vFVAR.size(), _vFVAR.data(), _dFVAR.data() );
-          std::vector<double> h0( _nx, 0. );
-          bool any0 = false;
+        // An output VALUE sitting at t0 has no backward sweep behind it -- the loop runs kk = _ns..1 and never makes
+        // stage time 0 an impulse point.  Its (df/dx)(t0) is a costate in STATE space, so it joins Jyp^T lambda(t0)
+        // in the initial-condition term below, every component of it -- an algebraic state's too, dx0/dp covering it.
+        // (Added to lambda, in EQUATION space, it was scaled by the mass matrix and an algebraic state's was lost.)
+        std::vector<double> h0( _nx, 0. );
+        if( !_vFJac.empty() && !_vFJac[0].empty() && !_xk.empty() ){
+          std::vector<double> const dj = _fct_jac( 0, false, _xk[0].data() );
           for( size_t e = 0; e < dj.size(); ++e )
-            if( (size_t)_rFJ[0][e] == _asaF_() && (size_t)_cFJ[0][e] < _nx ){
-              h0[ _cFJ[0][e] ] += dj[e];  any0 = true;
-            }
-          if( any0 )
-            for( size_t i = 0; i < _nx; ++i ) N_VGetArrayPointer( yB )[i] += h0[i];
+            if( (size_t)_rFJ[0][e] == _asaF_() && (size_t)_cFJ[0][e] < _nx ) h0[ _cFJ[0][e] ] += dj[e];
         }
 
         std::vector<double> ic( _np, 0. );   // one per PARAMETER -- sized by _nx it aliased across them
@@ -2574,6 +2653,7 @@ DAESLV_IDAS::solve
             std::vector<double> Ml( _nx, 0. );
             double const* l0 = N_VGetArrayPointer( yB );
             for( size_t e = 0; e < _nJyp; ++e ) Ml[ _cJyp[e] ] += _dEVAL[ _offJyp + e ] * l0[ _rJyp[e] ];
+            for( size_t i = 0; i < _nx; ++i ) Ml[i] += h0[i];
             for( size_t j = 0; j < _np && j < dxdp.size(); ++j ){
               double acc = 0.;
               for( size_t i = 0; i < _nx && i < dxdp[j].size(); ++i ) acc += Ml[i] * dxdp[j][i];
@@ -2582,6 +2662,7 @@ DAESLV_IDAS::solve
           } }
         // qB becomes the WHOLE gradient, not just its running part, so the recorded lambda_q at t0 IS
         // what val_function_gradient() reports rather than a piece of it
+        std::vector<double> const dp = direct();
         for( size_t j = 0; j < _np; ++j ) N_VGetArrayPointer( qB )[j] += ic[j] + dp[j];
         // A SECOND row at t0, carrying the whole gradient.  It repeats t0, so _record gives it a block
         // of its own at the head of the file -- ODESLV writes the same pair, the summary row then the

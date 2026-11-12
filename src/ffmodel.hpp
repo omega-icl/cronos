@@ -2430,7 +2430,11 @@ protected:
   //! model is its semi-discretisation).
   void _swap_declarations
     ( FFModel& other )
-    { std::swap( _usr, other._usr ); }
+    { std::swap( _usr, other._usr );
+      // ... and its CONTROL REGISTRY, keyed by the declared inputs: the working model's setup must neither read nor
+      // re-index it against declarations it does not hold (a declared control then counted 0 DOFs -- 12 Nov 2026)
+      std::swap( _decisionFlag, other._decisionFlag );  std::swap( _controls, other._controls );
+      std::swap( _nControlDof, other._nControlDof ); }
 
 public:
 
@@ -4021,7 +4025,10 @@ public:
   //! in Gateaux form: a new distributed input du carrying u's domains and collocation, one sensitivity state
   //! s_x per state x (same domains), every equation E joined by its directional derivative along (s, du),
   //! every output F by dF -- with domains, masks, options, output kind and coordinates carried over
-  //! verbatim.  Outputs are laid out as the nf originals followed by the nf derivatives, so output nf+j is dF_j.  All other inputs, constants and domain variables are held fixed.  @p sens must be freshly
+  //! verbatim -- and every TRANSITION left(tau^-) = right(tau^+) by dleft(tau^-) = dright(tau^+) at the same tau,
+  //! the sensitivities jumping by the transition's linearisation (tau is fixed: no switching-time term; the
+  //! derivative of a state is its sensitivity, so an explicit map stays explicit).
+  //! Outputs are laid out as the nf originals followed by the nf derivatives, so output nf+j is dF_j.  All other inputs, constants and domain variables are held fixed.  @p sens must be freshly
   //! constructed on the SAME user DAG as this model; it may be any FFModel-derived solver, and its own
   //! add_* overrides fire for every declaration.  Returns false, with a message in @p err, if @p u is not a
   //! declared input or a derivative could not be formed.  The new variables are returned through @p du and
@@ -4206,10 +4213,6 @@ FFModel::fdiff
 const
 {
   std::lock_guard<std::recursive_mutex> dag_lock_( dag_mutex() );   // see dag_mutex()
-  if( !_usr._mTrnUsr.empty() ){                                    // see add_transition
-    err = "fdiff: the model has transitions, which the differentiated model does not carry yet -- refused";
-    return false;
-  }
   // CONSTANT directions (vCdir, seeds seedC[k][c]): a constant needs no direction input -- it enters the
   // directional derivative with a literal seed.  The declared constants stay constants of the product.
   for( auto const& c : vCdir ){
@@ -4306,6 +4309,30 @@ const
         FFSubgraph sg = dag->subgraph( 1, &eq.var );  std::ostringstream os;  os << FFExpr::subgraph( dag, sg )[0];
         err = "fdiff: cannot differentiate equation `" + os.str() + "`: " + err;  return false; }
       sens.add_equation( deq, vDom, vLim, *eq.opt );
+    }
+  }
+
+  // ---- 5b. transitions, each joined by its nDir derivatives -- the same tau, the same sides --------------------
+  // left(tau^-) = right(tau^+) differentiates along direction k to dleft(tau^-) = dright(tau^+): the sensitivities
+  // jump by the transition's linearisation.  tau is fixed, so there is no switching-time term.  The derivative of a
+  // state is its sensitivity -- so an explicit map x+ = phi(x-, u) stays explicit, s+ = phi_x s- + phi_u du -- and a
+  // component naming its post-jump state names that state's sensitivity.  Every form is covered by the same rule: an
+  // evaluated transition's FFEvals keep their sides under the linear operator rule, a one-sided derivative dx/dt is
+  // a linear operator too, and the transition the lift of a nonlinear output declares is an ordinary one.
+  auto dstate = [&]( FFVar const& e, size_t const k, FFVar& de ) -> bool {
+    for( size_t i = 0; i < vX.size(); ++i ) if( e.id() == vX[i].id() ){ de = vS[k][i];  return true; }
+    return false; };
+  for( auto const& tr : _usr._mTrnUsr ){
+    sens._usr._mTrnUsr.push_back( tr );
+    for( size_t k = 0; k < nDir; ++k ){
+      t_Transition dtr = tr;
+      for( size_t c = 0; c < tr.left.size(); ++c ){
+        if( !dstate( tr.left[c],  k, dtr.left[c]  ) && !ddir( tr.left[c],  k, dtr.left[c]  ) ){ err = "fdiff: cannot differentiate a transition: " + err;  return false; }
+        if( !dstate( tr.right[c], k, dtr.right[c] ) && !ddir( tr.right[c], k, dtr.right[c] ) ){ err = "fdiff: cannot differentiate a transition: " + err;  return false; }
+      }
+      for( size_t c = 0; c < tr.states.size(); ++c )
+        if( !dstate( tr.states[c], k, dtr.states[c] ) ){ err = "fdiff: transition component names " + tr.states[c].name() + ", not a state";  return false; }
+      sens._usr._mTrnUsr.push_back( dtr );
     }
   }
 

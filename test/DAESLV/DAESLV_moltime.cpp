@@ -13,10 +13,11 @@
 //     T against OCFESLV (the same spatial discretisation: a source at a boundary or interface node enters through the
 //     row structure there, so no quadrature-weight closed form holds); forward = adjoint = central difference, per DOF.
 // (D) a TRANSITION on a field (MoL 6c): the zero-flux rod with a source p e^-t, u0 = 1, and u(tau+) = u(tau-)/2 at
-//     tau = 0.5, a stage boundary (FFModel requires an element boundary of t).  Applied at the field's differential nodes, both sides composed there; the
+//     tau = 0.5, an element boundary of t.  Applied at the field's differential nodes, both sides composed there; the
 //     integrator's stop machinery re-solves the algebraic nodes and carries the sensitivities across.  A uniform field
 //     is in the operator's kernel, so with J = int u dz at T: J = [1 + p(1 - e^-tau)]/2 + p(e^-tau - e^-T) and
 //     dJ/dp = (1 - e^-tau)/2 + e^-tau - e^-T, exactly on any mesh -- value, forward and adjoint against them.
+//     (D2) the same at tau = 0.3, INSIDE element 0 of t: a stop of its own, as ODESLV (refused until 12 Nov 2026).
 #include <iostream>
 #include <iomanip>
 #include <cmath>
@@ -296,10 +297,13 @@ int main()
     }
   }
 
-  // ---- (D)
-  std::cout << "(D) a transition on a field: u(tau+) = u(tau-)/2 at tau = 0.5\n";
+  // ---- (D), and (D2) off the element boundaries of t
+  for( double const TAU : { 0.5, 0.3 } ){
+  std::string const D = TAU == 0.5? "(D)": "(D2)";
+  if( TAU == 0.5 ) std::cout << "(D) a transition on a field: u(tau+) = u(tau-)/2 at tau = 0.5\n";
+  else             std::cout << "(D2) the same transition at tau = 0.3, inside element 0 of t (a stop of its own, as ODESLV)\n";
   {
-    double const P = 0.7, TAU = 0.5, eT = std::exp( -TEND ), eTau = std::exp( -TAU );   // tau on an element boundary of t (FFModel's rule)
+    double const P = 0.7, eT = std::exp( -TEND ), eTau = std::exp( -TAU );
     double const Jex = 0.5*( 1. + P*( 1. - eTau ) ) + P*( eTau - eT ), dJex = 0.5*( 1. - eTau ) + eTau - eT;
     auto rod = [&]( int mode, double& J, double& dJ, std::string& w ){
       FFGraph G;  DAESLV_IDAS S( &G );
@@ -327,16 +331,17 @@ int main()
       return true; };
     double J0 = 0., Jf = 0., Ja = 0., dF = 0., dA = 0., d0 = 0.;  std::string w;
     bool const rv = rod( 0, J0, d0, w );
-    check( "(D) a model with a transition sets up and solves" + ( rv? std::string(): " -- " + w ), rv );
+    check( D + " a model with a transition sets up and solves" + ( rv? std::string(): " -- " + w ), rv );
     bool const rf = rod( 1, Jf, dF, w );
-    check( "(D) forward sensitivities across the stop" + ( rf? std::string(): " -- " + w ), rf );
+    check( D + " forward sensitivities across the stop" + ( rf? std::string(): " -- " + w ), rf );
     bool const ra = rod( 2, Ja, dA, w );
-    check( "(D) adjoint sensitivities across the stop" + ( ra? std::string(): " -- " + w ), ra );
+    check( D + " adjoint sensitivities across the stop" + ( ra? std::string(): " -- " + w ), ra );
     if( rv && rf && ra ){
       std::cout << "    J " << J0 << " (closed form " << Jex << ")   dJ/dp: fwd " << dF << " adj " << dA << " (closed form " << dJex << ")\n";
-      check( "(D) J = closed form, to 1e-8",                          rel( J0, Jex ) <= 1e-8 );
-      check( "(D) dJ/dp = closed form, forward and adjoint, to 1e-8", rel( dF, dJex ) <= 1e-8 && rel( dA, dJex ) <= 1e-8 );
+      check( D + " J = closed form, to 1e-8",                          rel( J0, Jex ) <= 1e-8 );
+      check( D + " dJ/dp = closed form, forward and adjoint, to 1e-8", rel( dF, dJex ) <= 1e-8 && rel( dA, dJex ) <= 1e-8 );
     }
+  }
   }
   // ---- (E) NONLINEAR functions of horizon integrals (7 Nov 2026).  The zero-flux rod with u0 = 1 and the source
   //      p e^-t: a uniform field is in the operator's kernel, so J(t) = int u dz = 1 + p (1 - e^-t) exactly on any

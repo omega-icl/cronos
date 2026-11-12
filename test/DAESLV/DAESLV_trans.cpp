@@ -8,10 +8,13 @@
 //      Exact: x(t) = e^-t on [0,1), then 2e^-1 e^-(t-1) on (1,2], so x(2) = 2 e^-2.
 //   B. IMPLICIT jump on an index-1 DAE: the post-jump state is given by a row that does NOT solve for
 //      it explicitly -- x(1^+)^2 = x(1^-), i.e. the jump is the positive root.  _mIC cannot express it.
-//   C. REFUSAL: a tau that is not an element boundary must be refused at setup, not ignored.
+//   C. OFF THE GRID: a tau that is not an element boundary gets a stop of its own, as in ODESLV (refused until
+//      12 Nov 2026); x(1) = 2 e^-1 and x(2) = 2 e^-2 whatever tau in (0,1).  A tau outside the horizon stays refused.
+//   C2. the same for the transition the lift of a nonlinear output declares: [x(0.3)]^2 inside element 0.
 #include <cmath>
 #include <iomanip>
 #include <iostream>
+#include <sstream>
 #include "daeslv_idas.hpp"
 
 using namespace mc;
@@ -32,7 +35,7 @@ static void check_bool( std::string const& w, bool ok )
 
 int main()
 {
-  FFPartial OpP;
+  FFPartial OpP;  FFEval OpE;
   int const TI = FFDom::ALL - FFDom::LB;
   auto io = FFModel::EqnOptions( FFModel::EqnRole::INTERIOR, 0 );
   auto ii = FFModel::EqnOptions( FFModel::EqnRole::INITIAL,  0 );
@@ -86,19 +89,44 @@ int main()
     }
   }
 
-  // ----------------------------------------------------------------- C: refusal off a boundary
-  { std::cout << "\n--- C. a tau that is NOT an element boundary must be REFUSED\n";
+  // ----------------------------------------------------------------- C: a tau off the element boundaries
+  for( double const tau : { 0.4, 2.5 } ){
+    bool const inside = tau < 2.;
+    std::cout << "\n--- C. a tau that is NOT an element boundary (" << tau << ( inside? ", inside element 0": ", OUTSIDE the horizon" ) << ")\n";
     FFGraph G; DAESLV_IDAS M; M.set_dag( &G );
     FFVar t = G.add_var("t"), x = G.add_var("x(t)");
     M.add_domain( t, FFDom( 0., 2., 2, FFDom::LGR, 4 ) );      // boundaries at 0, 1, 2 only
     M.add_state( x, {t} ); M.set_evolution_domain( t ); M.update_ref( x, 1. );
     M.add_equation( OpP( x, t ) + x, {t}, {TI}, io );
     M.add_equation( x - 1.,          {t}, {FFDom::LB}, ii );
-    M.add_transition( 2.*x, x, t, 0.4 );                       // 0.4 is inside element 0
+    M.add_transition( 2.*x, x, t, tau );
+    M.add_output( OpE( x, t, 1. ) );  M.add_output( OpE( x, t, 2. ) );
+    M.options.SOLVE.RTOL = M.options.SOLVE.ATOL = 1e-10;
     M.options.DISPLAY_LEVEL = 0;
-    bool const ok = M.setup();
-    std::cout << "    setup=" << ok << "  (refusal is the PASS here)\n";
-    check_bool( "a tau off a boundary is refused, not ignored", !ok );
+    std::ostringstream os;  auto* old = std::cerr.rdbuf( os.rdbuf() );  bool const ok = M.setup();  std::cerr.rdbuf( old );
+    if( !inside ){ check_bool( "a tau outside the horizon is refused, not ignored", !ok );  continue; }
+    check_bool( "a tau inside an element is accepted: a stop of its own, as ODESLV", ok );
+    if( !ok ){ std::cout << "    " << M.extract_error() << "\n";  continue; }
+    check( "stages: 0, 0.4, 1, 2", (double)M.ns(), 3., 0. );
+    M.solve( {} );
+    check( "x(1) = 2 e^-1 (the jump at 0.4 applied)", M.val_function()[ M.blk_fct(0).first ], 2.*std::exp(-1.), 1e-8 );
+    check( "x(2) = 2 e^-2",                           M.val_function()[ M.blk_fct(1).first ], 2.*std::exp(-2.), 1e-8 );
+  }
+
+  // ----------------------------------------------------------------- C2: the lift's transition off the boundaries
+  { std::cout << "\n--- C2. the output [x(0.3)]^2: the lift's own transition at 0.3, inside element 0\n";
+    FFGraph G; DAESLV_IDAS M; M.set_dag( &G );
+    FFVar t = G.add_var("t"), x = G.add_var("x(t)");
+    M.add_domain( t, FFDom( 0., 2., 2, FFDom::LGR, 4 ) );
+    M.add_state( x, {t} ); M.set_evolution_domain( t ); M.update_ref( x, 1. );
+    M.add_equation( OpP( x, t ) + x, {t}, {TI}, io );
+    M.add_equation( x - 1.,          {t}, {FFDom::LB}, ii );
+    M.add_output( sqr( OpE( x, t, 0.3 ) ) );                    // a nonlinear function of an interior value: lifted
+    M.options.SOLVE.RTOL = M.options.SOLVE.ATOL = 1e-10;
+    M.options.DISPLAY_LEVEL = 0;
+    std::ostringstream os;  auto* old = std::cerr.rdbuf( os.rdbuf() );  bool const ok = M.setup();  std::cerr.rdbuf( old );
+    check_bool( "a lifted value inside an element sets up (refused until 12 Nov 2026)", ok );
+    if( ok ){ M.solve( {} );  check( "[x(0.3)]^2 = e^-0.6", M.val_function()[ M.blk_fct(0).first ], std::exp(-0.6), 1e-8 ); }
   }
 
   // ----------------------------------------------------------------- D: the LEFT LIMITS u^- and dx^-

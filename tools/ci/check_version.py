@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""check_version.py -- CRONOS's version is written in three places, and the MC++ release it is built against in
+"""check_version.py -- CRONOS's version is written in four places, and the MC++ release it is built against in
 four; each set must agree.
 
 CRONOS's own version:
     pyproject.toml                  version = "X.Y.Z"           what pip and the wheels report
     src/interface/cronos.cpp        kVersion = "X.Y.Z"          what `cronos.__version__` reports
     doc/CRONOS.dox                  PROJECT_NUMBER              what the Doxygen pages are titled with
+    src/makefile                    export version = X.Y.Z      what the makefile build prints
 
 The MC++ release the module is built against (shared types cross between the two modules, so the headers the
 wheels compile against and the pymcpp they run against must be the SAME release):
@@ -58,6 +59,7 @@ def main(argv):
         ("pyproject.toml version", grab(os.path.join(root, "pyproject.toml"), r'^version\s*=\s*"([^"]+)"')),
         ("cronos.cpp kVersion", grab(os.path.join(root, "src", "interface", "cronos.cpp"), r'kVersion\s*=\s*"([^"]+)"')),
         ("doc/CRONOS.dox PROJECT_NUMBER", grab(os.path.join(root, "doc", "CRONOS.dox"), r'^PROJECT_NUMBER\s*=\s*(\S+)')),
+        ("src/makefile version", grab(os.path.join(root, "src", "makefile"), r'^export\s+version\s*=\s*(\S+)')),
     ]
     print("CRONOS version:")
     for name, v in own:

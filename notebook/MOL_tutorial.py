@@ -26,7 +26,7 @@
 # | `DAESLV` | the same collocation | adaptive BDF steps; the time elements become **stages** |
 # 
 # The time mesh still matters to `DAESLV`: its element boundaries are where the integrator stops and
-# restarts, which is where a piecewise input changes its piece and where transitions happen.
+# restarts, which is where a piecewise input changes its piece; a transition adds a stop at its own time.
 
 # In[1]:
 

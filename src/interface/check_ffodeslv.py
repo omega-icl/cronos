@@ -4,7 +4,8 @@
 # Exercises `cronos.FFODESLV`: an `ODESLV` solve embedded in the DAG, its outputs
 # evaluated (`FFGraph.eval`) and differentiated (`FFGraph.fdiff` / `bdiff`) with
 # forward and adjoint sensitivities; the one-map and two-map forms; DOFs given as
-# lists or by a generator; the copy policies. Checked against closed forms and the
+# lists or by a generator; the copy policies; a model with a transition, numerically
+# and symbolically (`SYMDIFF`). Checked against closed forms and the
 # C++ driver `ODESLV_test1`. Run as a script, it exits with status 1 on any failure.
 
 # %%
@@ -241,7 +242,49 @@ except ValueError as e:
     check(True, "TRANSFER refused: %s" % str(e)[:50])
 
 # %% [markdown]
-# ## F. Options (class-level)
+# ## F. A transition, differentiated numerically and symbolically
+#
+# An impulsive dose: x' = -k x, x(0) = x0, x(0.4+) = x(0.4-) + d, so that
+# x(1) = (x0 exp(-0.4 k) + d) exp(-0.6 k). The numeric route takes the
+# sensitivities across the jump; the symbolic route (`SYMDIFF`) differentiates
+# the MODEL -- the product carries the transition and, per direction, its
+# derivative s(0.4+) = s(0.4-) + d_d -- and embeds the product in the DAG.
+
+# %%
+G5 = FFGraph()
+t, x, k, d, x0 = (G5.add_var(n) for n in ("t", "x(t)", "k", "d", "x0"))
+T5 = ODESLV(G5)
+T5.options.SOLVE.VERBOSE = 0
+T5.add_domain(t, FFDom(0., 1., 2, FFDom.LGR, 4))
+T5.set_evolution_domain(t)
+T5.add_state(x, [t], ref=1.)
+for v in (k, d, x0):
+    T5.add_input(v)
+T5.add_equation(OpP(x, t) + k * x, [t], [INT])
+T5.add_equation(x - x0, [t], [FFDom.LB], ii)
+T5.add_transition(x + d, x, t, .4)
+T5.add_output(OpE(x, t, 1.))
+for o in ("RTOL", "ATOL", "RTOLS", "ATOLS", "RTOLB", "ATOLB"):
+    setattr(T5.options.SOLVE, o, 1e-11)
+check(T5.setup(), "setup() with a transition  (%s)" % (T5.extract_error() or "ok"))
+V5 = [G5.add_var(n) for n in ("K", "D", "X0")]
+KV, DV, XV = 1.3, 0.7, 1.1
+y5 = OpODE({k: [V5[0]], d: [V5[1]], x0: [V5[2]]}, T5)
+Y_REF = (XV * math.exp(-.4 * KV) + DV) * math.exp(-.6 * KV)
+J_REF = [[-XV * math.exp(-KV) - .6 * DV * math.exp(-.6 * KV), math.exp(-.6 * KV), math.exp(-KV)]]
+check(close(G5.eval(y5, V5, [KV, DV, XV]), [Y_REF], 1e-8), "eval: x(1) == closed form, across the jump")
+check(close(jacobian(G5, y5, V5, [KV, DV, XV]), J_REF, 1e-7), "numeric (SYMDIFF empty): dx(1)/d(k, d, x0) == closed form")
+FFODESLV.options.SYMDIFF = V5
+try:
+    for dd in ("fdiff", "bdiff"):
+        check(close(jacobian(G5, y5, V5, [KV, DV, XV], dd), J_REF, 1e-7),
+              "symbolic (SYMDIFF = all), %s: dx(1)/d(k, d, x0) == closed form" % dd)
+except RuntimeError as e:
+    check(False, "symbolic (SYMDIFF = all): %s" % str(e)[:80])
+FFODESLV.options.SYMDIFF = []
+
+# %% [markdown]
+# ## G. Options (class-level)
 
 # %%
 print("  FFODESLV.options: GRADIENT", FFODESLV.options.GRADIENT, "| NP2NF", FFODESLV.options.NP2NF)

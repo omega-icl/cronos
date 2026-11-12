@@ -1,6 +1,6 @@
 /*!
 
-@mainpage CRONOS (version 5.0): Simulation and Sensitivity Analysis of Mathematical Models on Factorable-Function DAGs
+@mainpage CRONOS (version 5.2): Simulation and Sensitivity Analysis of Mathematical Models on Factorable-Function DAGs
 
 @author Benoit C. Chachuat <tt>(b.chachuat@imperial.ac.uk)</tt> and the OMEGA Research Group, Imperial College London
 @date 2026
@@ -126,7 +126,7 @@ mc::FFGradMOLRES); setup selects the sparse linear algebra a semi-discrete syste
 test (<tt>SOLVE.SUPPRESSALG</tt>).
 
 The time mesh of the declaration still matters: its element boundaries are where the integrator stops and restarts,
-which is where a piecewise input changes its piece and where transitions happen.
+which is where a piecewise input changes its piece; a transition adds a stop at its own time.
 
 Anything the method of lines does not take is <b>refused by name</b> at setup, rather than solved approximately;
 mc::OCFEMOL::setup_error gives the reason.

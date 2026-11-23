@@ -33,14 +33,14 @@ A Python module, `cronos`, exposes all of this on top of PyMC++, MC++'s Python l
 | Boost | | intervals (with MC++'s default interval backend) |
 | BLAS / LAPACK | | |
 | Armadillo | | dense and sparse linear algebra |
-| SuiteSparse | 7.x recommended (older found by library search) | KLU (LGPL-2.1+); UMFPACK and SPQR optional (GPL-2.0-or-later, see below) |
+| SuiteSparse | 7.x recommended (older found by library search) | KLU and BTF (LGPL-2.1+); UMFPACK and SPQR optional (GPL-2.0-or-later, see below) |
 | SuperLU | 5.2.x | OCFESLV's default sparse factorisation, through Armadillo |
 | Eigen | >= 3.3 | optional sparse QR |
 | SUNDIALS | **>= 7**, built with KLU (`-DENABLE_KLU=ON`) | CVODES for ODESLV, IDAS for DAESLV, KINSOL for the consistent-initialisation solve of both |
 | Python | 3.10+ (development headers) | for the `cronos` module |
 | pybind11 | **>= 3.0.3, not 3.1.0** (3.0.4 recommended) | Python bindings |
 | pybind11-stubgen | optional | generates the `cronos.pyi` type stub |
-| HSL MC13/MC21/MC33 | optional | as for MC++ |
+| HSL MC13/MC21/MC33 | optional (licensed) | block decompositions of `ffblock.hpp` with `CRONOS_WITH_HSL=ON`, instead of SuiteSparse BTF |
 
 Two compatibility notes from experience:
 * **pybind11 3.1.0** has a `keep_alive` regression on rejected overloads that breaks the bindings; the build refuses
@@ -90,9 +90,10 @@ Main options (all listed in `BUILD_CMAKE.md`):
 | `CRONOS_WITH_SPQR` | **OFF** | SPQR factorisation, and the W-test's null bases above the dense cap -- **GPL-2.0-or-later**: a binary linking it is subject to the GPL |
 | `CRONOS_ARMA_WRAPPER` | OFF | link Armadillo's runtime wrapper library instead of using Armadillo header-only with BLAS/LAPACK (and SuperLU) linked directly; the wrapper also pulls in whatever Armadillo was built with, e.g. ARPACK and MPI |
 | `MC_INTERVAL_LIBRARY` | BOOST | as MC++ (BOOST, PROFIL, FILIB, NONVERIFIED) |
-| `ENABLE_HSL`, `MC__USE_FADBAD` | OFF | as MC++ |
+| `CRONOS_WITH_HSL` | OFF | HSL MC13/MC21/MC33 for the block decompositions of `ffblock.hpp`, instead of SuiteSparse BTF (formerly `ENABLE_HSL`) |
+| `MC__USE_FADBAD` | OFF | as MC++ |
 | `ENABLE_PYTHON` | ON | the `cronos` module and its stub |
-| `ENABLE_EXAMPLES` | OFF | the test drivers, registered with CTest |
+| `ENABLE_EXAMPLES` | OFF | the test drivers (including `test/BLOCK`), registered with CTest |
 
 ## 3. Build and check
 

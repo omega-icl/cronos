@@ -41,8 +41,14 @@ set(CMAKE_CXX_FLAGS_RELEASE
     CACHE STRING "Release flags" FORCE)
 
 # Options
-option(ENABLE_HSL "Enable HSL libraries" OFF)
-option(ENABLE_EXAMPLES "Build the test drivers in test/ODESLV, test/DAESLV and test/OCFESLV" OFF)
+# Block decompositions (ffblock.hpp): HSL MC13/MC21/MC33 if CRONOS_WITH_HSL (licensed: not in the wheels), otherwise
+# SuiteSparse BTF (LGPL-2.1-or-later, shipped with KLU).  ENABLE_HSL is the former name of this option.
+option(CRONOS_WITH_HSL "Block decompositions with HSL MC13/MC21/MC33 (licensed) instead of SuiteSparse BTF" OFF)
+if(ENABLE_HSL AND NOT CRONOS_WITH_HSL)
+  message(WARNING "ENABLE_HSL is obsolete: use -DCRONOS_WITH_HSL=ON (taken as set for this configuration)")
+  set(CRONOS_WITH_HSL ON)
+endif()
+option(ENABLE_EXAMPLES "Build the test drivers in test/ODESLV, test/DAESLV, test/OCFESLV and test/BLOCK" OFF)
 option(ENABLE_PYTHON "Build the cronos Python extension module" ON)
 option(MC__USE_FADBAD "Use the FADBAD++ forward-AD implementation" OFF)
 
@@ -270,44 +276,25 @@ find_package(LAPACK REQUIRED)
 # Threads (MC__USE_THREAD)
 find_package(Threads REQUIRED)
 
-# HSL
-if(ENABLE_HSL)
-  message(STATUS "Enabling HSL support")
-  find_library(LIB_MC13 NAMES mc13)
-  find_library(LIB_MC21 NAMES mc21)
-  find_library(LIB_MC33 NAMES mc33)
-
+# HSL (CRONOS_WITH_HSL): MC13, MC21 and MC33, Fortran 77, for ffblock.hpp.  HSL_ROOT (cache or environment variable)
+# is searched first; a library not found is assumed to be on the linker path.
+if(CRONOS_WITH_HSL)
+  message(STATUS "HSL (CRONOS_WITH_HSL=ON): MC13/MC21/MC33 for ffblock.hpp")
+  set(HSL_ROOT
+      "$ENV{HSL_ROOT}"
+      CACHE PATH "Optional HSL installation prefix (MC13, MC21, MC33)")
   set(HSL_LIBRARIES "")
-  if(LIB_MC13)
-    message(STATUS "  Found MC13: ${LIB_MC13}")
-    list(APPEND HSL_LIBRARIES ${LIB_MC13})
-  else()
-    message(
-      STATUS
-        "  MC13 not found via find_library, assuming 'mc13' is in linker path")
-    list(APPEND HSL_LIBRARIES mc13)
-  endif()
-
-  if(LIB_MC21)
-    message(STATUS "  Found MC21: ${LIB_MC21}")
-    list(APPEND HSL_LIBRARIES ${LIB_MC21})
-  else()
-    message(
-      STATUS
-        "  MC21 not found via find_library, assuming 'mc21' is in linker path")
-    list(APPEND HSL_LIBRARIES mc21)
-  endif()
-
-  if(LIB_MC33)
-    message(STATUS "  Found MC33: ${LIB_MC33}")
-    list(APPEND HSL_LIBRARIES ${LIB_MC33})
-  else()
-    message(
-      STATUS
-        "  MC33 not found via find_library, assuming 'mc33' is in linker path")
-    list(APPEND HSL_LIBRARIES mc33)
-  endif()
-
+  foreach(_mc mc13 mc21 mc33)
+    string(TOUPPER ${_mc} _MC)
+    find_library(LIB_${_MC} NAMES ${_mc} HINTS "${HSL_ROOT}/lib" "${HSL_ROOT}/lib64")
+    if(LIB_${_MC})
+      message(STATUS "  Found ${_MC}: ${LIB_${_MC}}")
+      list(APPEND HSL_LIBRARIES ${LIB_${_MC}})
+    else()
+      message(STATUS "  ${_MC} not found via find_library, assuming '${_mc}' is in linker path")
+      list(APPEND HSL_LIBRARIES ${_mc})
+    endif()
+  endforeach()
   list(APPEND HSL_LIBRARIES gfortran)
 endif()
 
@@ -498,11 +485,16 @@ function(cronos_find_suitesparse pkg lib header)
   set(SUITESPARSE_INCLUDE_DIRS ${SUITESPARSE_INCLUDE_DIRS} ${_inc_${pkg}} PARENT_SCOPE)
 endfunction()
 
-if(CRONOS_WITH_KLU OR CRONOS_WITH_UMFPACK OR CRONOS_WITH_SPQR)
+if(CRONOS_WITH_KLU OR CRONOS_WITH_UMFPACK OR CRONOS_WITH_SPQR OR NOT CRONOS_WITH_HSL)
   message(STATUS "SuiteSparse:")
 endif()
 if(CRONOS_WITH_KLU)
   cronos_find_suitesparse(KLU klu klu.h amd colamd btf suitesparseconfig)
+endif()
+if(NOT CRONOS_WITH_HSL)
+  # BTF for the block decompositions of ffblock.hpp (btf_order, btf_maxtrans): linked explicitly, since KLU's
+  # library does not resolve btf_* for the caller
+  cronos_find_suitesparse(BTF btf btf.h suitesparseconfig)
 endif()
 if(CRONOS_WITH_UMFPACK)
   message(STATUS "  NOTE: CRONOS_WITH_UMFPACK=ON -- UMFPACK is GPL-2.0-or-later; binaries linking it are subject to the GPL")
@@ -571,8 +563,8 @@ endif()
 if(MC__USE_FADBAD)
   target_compile_definitions(cronos_headers INTERFACE MC__USE_FADBAD)
 endif()
-if(ENABLE_HSL)
-  target_compile_definitions(cronos_headers INTERFACE MC__USE_HSL)
+if(CRONOS_WITH_HSL)
+  target_compile_definitions(cronos_headers INTERFACE CRONOS__WITH_HSL)
 endif()
 if(CRONOS_WITH_KLU)
   target_compile_definitions(cronos_headers INTERFACE CRONOS__WITH_KLU)
@@ -629,7 +621,7 @@ endif()
 if(CRONOS_WITH_EIGEN)
   target_link_libraries(cronos_headers INTERFACE Eigen3::Eigen)
 endif()
-if(ENABLE_HSL)
+if(CRONOS_WITH_HSL)
   target_link_libraries(cronos_headers INTERFACE ${HSL_LIBRARIES})
 endif()
 
@@ -894,7 +886,7 @@ set(CRONOS_NOTEBOOK_INSTALL_DIR
 
 message(STATUS "--------------------------------------------------------")
 message(STATUS "Backends: KLU=${CRONOS_WITH_KLU} UMFPACK=${CRONOS_WITH_UMFPACK} SPQR=${CRONOS_WITH_SPQR} "
-               "Eigen=${CRONOS_WITH_EIGEN} SuperLU=${CRONOS_WITH_SUPERLU} HSL=${ENABLE_HSL} FADBAD=${MC__USE_FADBAD}")
+               "Eigen=${CRONOS_WITH_EIGEN} SuperLU=${CRONOS_WITH_SUPERLU} HSL=${CRONOS_WITH_HSL} FADBAD=${MC__USE_FADBAD}")
 message(
   STATUS "Installation Prefix (CMAKE_INSTALL_PREFIX): ${CMAKE_INSTALL_PREFIX}")
 message(STATUS "Headers will be installed to: ${CMAKE_INSTALL_PREFIX}/include")
@@ -921,6 +913,7 @@ set(CRONOS_HEADERS
     ffmodel.hpp
     ffocfe.hpp
     ffde.hpp
+    ffblock.hpp
     ffocfemol.hpp
     ocfebase.hpp
     ocfemol.hpp
@@ -965,8 +958,8 @@ install(
   PATTERN "*.md")
 
 # Examples: the test drivers, one executable each (target X from X.cpp, as the Make setup), registered with CTest
-# (a driver exits non-zero on failure).  Labels: the directory (ODESLV, OCFESLV) and "slow" for the drivers taking
-# 30 s or more (measured on the 3 Oct 2026 sweep) -- `ctest -LE slow` runs the quick set.
+# (a driver exits non-zero on failure).  Labels: the directory (ODESLV, OCFESLV, DAESLV, BLOCK) and "slow" for the
+# drivers taking 30 s or more (measured on the 3 Oct 2026 sweep) -- `ctest -LE slow` runs the quick set.
 set(CRONOS_SLOW_TESTS
     OCFE_PDE5 OCFE_PDE5b OCFE_PSA7 OCFE_PSA10 OCFE_MBC3 OCFE_MBC4 OCFE_MBC5 OCFE_MBC5b OCFE_MBC5c
     OCFE_MBC5fig OCFE_MBC5fig_ebal OCFE_MBC6 OCFE_MBC6fig OCFE_MBC6fig_ebal
@@ -977,8 +970,8 @@ if(ENABLE_EXAMPLES)
   enable_testing()
   # the ODESLV drivers' directory has been named both ways
   # ODESLVS has no directory of its own -- its drivers live in test/ODESLV -- so listing it here only
-  # produced an empty glob.  DAESLV is registered like the rest.
-  foreach(_dir ODESLV OCFESLV DAESLV)
+  # produced an empty glob.  DAESLV is registered like the rest; BLOCK checks ffblock.hpp (HSL or BTF).
+  foreach(_dir ODESLV OCFESLV DAESLV BLOCK)
     if(NOT IS_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/test/${_dir}")
       continue()
     endif()

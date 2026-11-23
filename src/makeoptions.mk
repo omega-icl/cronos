@@ -10,9 +10,15 @@ include $(abspath $(PATH_MC)/src/makeoptions.mk)
 PATH_CRONOS = $(abspath $(PATH_CRONOS_MK)../)
 
 PATH_SUITESPARSE = 
-LIB_SUITESPARSE = -lspqr -lcholmod -lumfpack -lsuitesparseconfig -lamd -lcolamd -lccolamd -lcamd -lmetis
+LIB_SUITESPARSE = -lspqr -lcholmod -lumfpack -lsuitesparseconfig -lamd -lcolamd -lccolamd -lcamd -lmetis -lbtf
 INC_SUITESPARSE = -I/usr/include/suitesparse
 FLAG_SUITESPARSE = -DCRONOS__WITH_KLU -DCRONOS__WITH_SPQR -DCRONOS__WITH_UMFPACK
+
+# Block decompositions (ffblock.hpp): HSL MC13/MC21/MC33 if FLAG_HSL is set, else SuiteSparse BTF
+PATH_HSL =
+LIB_HSL  = #-lmc13 -lmc21 -lmc33 -lgfortran
+INC_HSL  =
+FLAG_HSL = #-DCRONOS__WITH_HSL
 
 PATH_EIGEN = 
 LIB_EIGEN = 
@@ -47,7 +53,8 @@ FLAG_CPP  = -UNDEBUG $(DEBUG) $(OPTIM) $(CPP17) $(WARN) $(PROF)
 LINK      = $(CPP)
 FLAG_LINK = $(PROF)
 
-FLAG_CRONOS = -fPIC $(FLAG_MC) $(FLAG_SUITESPARSE) $(FLAG_EIGEN) $(FLAG_SUPERLU) $(FLAG_SUNDIALS)
-LIB_CRONOS  = $(LIB_MC) $(LIB_SUITESPARSE) $(LIB_EIGEN) $(LIB_SUPERLU) $(LIB_SUNDIALS)
-INC_CRONOS  = -I$(PATH_CRONOS)/src $(INC_MC) $(INC_SUITESPARSE) $(INC_EIGEN) $(INC_SUPERLU) $(INC_SUNDIALS)
+FLAG_CRONOS = -fPIC $(FLAG_MC) $(FLAG_SUITESPARSE) $(FLAG_EIGEN) $(FLAG_SUPERLU) $(FLAG_SUNDIALS) $(FLAG_HSL)
+LIB_CRONOS  = $(LIB_MC) $(LIB_SUITESPARSE) $(LIB_EIGEN) $(LIB_SUPERLU) $(LIB_SUNDIALS) $(LIB_HSL)
+INC_CRONOS  = -I$(PATH_CRONOS)/src $(INC_MC) $(INC_SUITESPARSE) $(INC_EIGEN) $(INC_SUPERLU) $(INC_SUNDIALS) $(INC_HSL)
+
 

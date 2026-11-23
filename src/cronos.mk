@@ -5,7 +5,7 @@ include $(srcpath)/makeoptions.mk
 
 #####
 
-incobjs = ffmodel.hpp \
+incobjs = ffmodel.hpp ffblock.hpp \
           base_sundials.hpp base_cvodes.hpp base_kinsol.hpp sunlinsol_cronos.hpp base_idas.hpp \
           base_de.hpp odeslv_base.hpp odeslv_cvodes.hpp daeslv_base.hpp daeslv_idas.hpp ffde.hpp \
           ocplan.hpp ocfebase.hpp ocfemol.hpp ffocfemol.hpp ocfeslv.hpp ffocfe.hpp

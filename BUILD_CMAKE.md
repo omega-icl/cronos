@@ -36,7 +36,7 @@ cmake --install build --prefix <prefix>
 | option | default | effect |
 |---|---|---|
 | `MC_INTERVAL_LIBRARY` | `BOOST` | interval backend, as MC++: BOOST, PROFIL (`PROFIL_HOME`), FILIB (`FILIB_HOME`), NONVERIFIED |
-| `ENABLE_HSL` | OFF | MC13/MC21/MC33 (`MC__USE_HSL`), as MC++ |
+| `CRONOS_WITH_HSL` | OFF | HSL MC13/MC21/MC33 (`CRONOS__WITH_HSL`, licensed) for the block decompositions of `ffblock.hpp`; otherwise SuiteSparse BTF. `HSL_ROOT` is searched first. Formerly `ENABLE_HSL`, still accepted with a warning |
 | `MC__USE_FADBAD` | OFF | FADBAD++ forward AD (reads `MCPP_ROOT/src/3rdparty/fadbad++`) |
 | `CRONOS_WITH_KLU` | ON | sparse KLU in CVODES (`CRONOS__WITH_KLU`): SuiteSparse KLU + SUNDIALS built with KLU |
 | `CRONOS_WITH_UMFPACK` | **OFF** | UMFPACK sparse LU in OCFESLV's setup (`CRONOS__WITH_UMFPACK`) -- **GPL-2.0-or-later**: a binary linking it is subject to the GPL; without it the setup uses a dense inverse |
@@ -46,7 +46,7 @@ cmake --install build --prefix <prefix>
 | `CRONOS_ARMA_WRAPPER` | OFF | link Armadillo's runtime wrapper library instead of using Armadillo header-only with BLAS/LAPACK (and SuperLU) linked directly; the wrapper also pulls in whatever Armadillo was built with, e.g. ARPACK and MPI |
 | `ENABLE_PYTHON` | ON | the `cronos` module |
 | `CRONOS_STUBS` | ON | generate and install `cronos.pyi` (needs `pybind11-stubgen` and `pymcpp` importable; `PYMCPP_DIR` points at the directory holding `pymcpp` if it is not on the Python path) |
-| `ENABLE_EXAMPLES` | OFF | build every driver in `test/ODESLV`, `test/DAESLV` and `test/OCFESLV`, register each with CTest (labels `ODESLV`, `DAESLV`, `OCFESLV`) |
+| `ENABLE_EXAMPLES` | OFF | build every driver in `test/ODESLV`, `test/DAESLV`, `test/OCFESLV` and `test/BLOCK`, register each with CTest (labels `ODESLV`, `DAESLV`, `OCFESLV`, `BLOCK`) |
 | `CRONOS_CXX_STANDARD` | 17 | as the Make setup; 20 accepted |
 | `CUSTOM_PYTHON_PATH` | | Python executable or virtual-environment root, as MC++ |
 

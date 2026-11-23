@@ -1,5 +1,27 @@
 # Changes
 
+## Unreleased
+
+### MC++ 5.2.0
+
+* CRONOS is built against MC++ 5.2.0 and requires `pymcpp~=5.2.0` (`MCPP_REF` in the wheel workflow, the three
+  `pymcpp` pins in `pyproject.toml`). 5.2.0 is a minor release of MC++: `FFOp` has four more virtual functions,
+  and the `cronos` module must be rebuilt against it; it refuses to import next to a `pymcpp` 5.1. No source
+  change in CRONOS: the Python checks and the DAESLV and OCFESLV drivers give the same results as against 5.1.1.
+
+### Block decompositions: ffblock.hpp, HSL optional
+
+* **New header `ffblock.hpp`** (`mc::FFBLOCK`), formerly MC++'s `mchsl.hpp` (`mc::FFHSL`), which MC++ no longer
+  ships. It computes the block lower-triangular form of a square system (`block_triangular`) and a bordered
+  lower-triangular form of a rectangular one (`bordered_triangular`), from the sparsity of an `FFGraph`.
+* **Backends:** HSL MC21/MC13 and MC33 under `CRONOS__WITH_HSL` (licensed); otherwise SuiteSparse BTF
+  (LGPL-2.1-or-later), so a build without HSL -- the Python wheels -- has them too. The MC33 call skips null rows and
+  columns, which MC33 could place among the non-null ones.
+* **Build:** the CMake option `ENABLE_HSL` becomes `CRONOS_WITH_HSL` (the old name is still accepted, with a warning)
+  and defines `CRONOS__WITH_HSL` instead of `MC__USE_HSL`; `HSL_ROOT` is searched for MC13/MC21/MC33. Without HSL,
+  SuiteSparse BTF is found and linked (`-lbtf` in `makeoptions.mk`). `ffblock.hpp` is installed, and `test/BLOCK`
+  is built and registered with CTest under `ENABLE_EXAMPLES`.
+
 ## 5.2.0 (2026-11-12)
 
 ### Results that change from 5.1.0
